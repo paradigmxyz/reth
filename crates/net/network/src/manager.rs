@@ -39,9 +39,10 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{NodeRecord, PeerId, H256};
 use reth_provider::BlockProvider;
+use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
     net::SocketAddr,
     pin::Pin,

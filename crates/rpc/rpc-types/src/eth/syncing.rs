@@ -70,14 +70,14 @@ pub struct PeerNetworkInfo {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PeerProtocolsInfo {
     /// Ethereum protocol information
-    pub eth: Option<EthProtocolInfo>,
+    pub eth: Option<PeerEthProtocolInfo>,
     /// PIP protocol information.
     pub pip: Option<PipProtocolInfo>,
 }
 
 /// Peer Ethereum protocol information
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct EthProtocolInfo {
+pub struct PeerEthProtocolInfo {
     /// Negotiated ethereum protocol version
     pub version: u32,
     /// Peer total difficulty if known
