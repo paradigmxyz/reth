@@ -10,6 +10,7 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{
     serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
     Header, H256, H64, U256, U64,
@@ -17,12 +18,11 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, TxGasAndReward,
+    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory,
     FeeHistoryCacheItem, Index, RichBlock, SyncStatus, TransactionReceipt, TransactionRequest,
-    Work
+    TxGasAndReward, Work,
 };
 use reth_transaction_pool::TransactionPool;
-use reth_network_api::NetworkInfo;
 use revm::primitives::ruint::Uint;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -295,12 +295,16 @@ where
         // check if any of rewardPercentile is greater than 100
         // pre 1559 blocks, return 0 for baseFeePerGas
         for i in 1..reward_percentiles_unwrapped.len() {
-            if reward_percentiles_unwrapped[i] <= reward_percentiles_unwrapped[i-1] {
-                return Err(EthApiError::InvalidRewardPercentile(reward_percentiles_unwrapped[i]).into())
+            if reward_percentiles_unwrapped[i] <= reward_percentiles_unwrapped[i - 1] {
+                return Err(
+                    EthApiError::InvalidRewardPercentile(reward_percentiles_unwrapped[i]).into()
+                )
             }
 
             if reward_percentiles_unwrapped[i] < 0.0 && reward_percentiles_unwrapped[i] > 100.0 {
-                return Err(EthApiError::InvalidRewardPercentile(reward_percentiles_unwrapped[i]).into())
+                return Err(
+                    EthApiError::InvalidRewardPercentile(reward_percentiles_unwrapped[i]).into()
+                )
             }
         }
 
@@ -332,9 +336,13 @@ where
             (first_non_cached_block, last_non_cached_block)
         {
             let headers: Vec<Header> =
-                self.inner.client.headers_range(start_block..=end_block+1).to_rpc_result()?;
+                self.inner.client.headers_range(start_block..=end_block + 1).to_rpc_result()?;
 
-            let transactions = self.inner.client.transactions_by_block_range(start_block..=end_block+1).to_rpc_result()?;
+            let transactions = self
+                .inner
+                .client
+                .transactions_by_block_range(start_block..=end_block + 1)
+                .to_rpc_result()?;
 
             // We should receive exactly the amount of blocks missing from the cache
             if headers.len() != (end_block - start_block + 1) as usize {
@@ -349,20 +357,24 @@ where
             for index in 0..(end_block - start_block + 1) as usize {
                 let option_header = headers.get(index);
                 let option_transaction = transactions.get(index);
-                
+
                 if let Some(header) = option_header {
                     let base_fee_per_gas: Uint<256, 4> = header.base_fee_per_gas.
                             unwrap_or_default(). // Zero for pre-EIP-1559 blocks
                             try_into().unwrap(); // u64 -> U256 won't fail
                     let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
-                    
+
                     let mut reward: Vec<Uint<256, 4>> = vec![];
 
                     if let Some(transactions) = option_transaction {
                         let mut sorter: Vec<TxGasAndReward> = vec![];
                         for transaction in transactions {
-                            // let max_priority_fee_per_gas = transaction.max_priority_fee_per_gas().unwrap_or(self.gas_price().await.unwrap().try_into().unwrap()); // todo: unwrap_or => gas_price or 1??
-                            let max_priority_fee_per_gas = transaction.max_priority_fee_per_gas().unwrap_or(1);
+                            // let max_priority_fee_per_gas =
+                            // transaction.max_priority_fee_per_gas().unwrap_or(self.gas_price().
+                            // await.unwrap().try_into().unwrap()); // todo: unwrap_or => gas_price
+                            // or 1??
+                            let max_priority_fee_per_gas =
+                                transaction.max_priority_fee_per_gas().unwrap_or(1);
                             let max_fee_per_gas = transaction.max_fee_per_gas();
                             let base_fee = header.base_fee_per_gas.unwrap_or_default();
 
@@ -371,7 +383,13 @@ where
                             }
 
                             // todo: get gas fees for tx and also gas price
-                            sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward: std::cmp::min(max_priority_fee_per_gas, max_fee_per_gas - base_fee as u128 ) })
+                            sorter.push(TxGasAndReward {
+                                gas_used: header.gas_used as u128,
+                                reward: std::cmp::min(
+                                    max_priority_fee_per_gas,
+                                    max_fee_per_gas - base_fee as u128,
+                                ),
+                            })
                         }
 
                         sorter.sort();
@@ -381,7 +399,9 @@ where
 
                         for i in &reward_percentiles_unwrapped {
                             let threshold_gas_used = (header.gas_used as f64) * i / (100 as f64);
-                            while sum_gas_used < threshold_gas_used as u128 && tx_index < transactions.len() {
+                            while sum_gas_used < threshold_gas_used as u128 &&
+                                tx_index < transactions.len()
+                            {
                                 tx_index += 1;
                                 sum_gas_used += sorter[tx_index].reward;
                             }
@@ -389,7 +409,7 @@ where
                             reward.push(Uint::from(sorter[tx_index].reward));
                         }
                     }
-    
+
                     let fee_history_cache_item = FeeHistoryCacheItem {
                         hash: None,
                         base_fee_per_gas,
@@ -397,7 +417,8 @@ where
                         reward: Some(reward), // TODO: calculate rewards per transaction
                     };
 
-                    // Insert missing cache entries in the map for further response composition from it
+                    // Insert missing cache entries in the map for further response composition from
+                    // it
                     fee_history_cache_items.insert(header.number, fee_history_cache_item.clone());
                     // And populate the cache with new entries
                     fee_history_cache.push(header.number, fee_history_cache_item);
@@ -410,17 +431,14 @@ where
         fee_history_cache_items.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
         fee_history_cache.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
 
-        let base_fee_per_gas = fee_history_cache_items
-            .values()
-            .map(|item| item.base_fee_per_gas)
-            .collect();
-        
-        let mut gas_used_ratio: Vec<f64> = fee_history_cache_items
-            .values()
-            .map(|item| item.gas_used_ratio)
-            .collect();
+        let base_fee_per_gas =
+            fee_history_cache_items.values().map(|item| item.base_fee_per_gas).collect();
 
-        let rewards: Option<Vec<Vec<Uint<256, 4>>>> = fee_history_cache_items.values().map(|item| item.reward.clone()).collect();
+        let mut gas_used_ratio: Vec<f64> =
+            fee_history_cache_items.values().map(|item| item.gas_used_ratio).collect();
+
+        let rewards: Option<Vec<Vec<Uint<256, 4>>>> =
+            fee_history_cache_items.values().map(|item| item.reward.clone()).collect();
 
         let mut rewards = rewards.unwrap();
         // gasUsedRatio doesn't has data for next block in this case the last block
@@ -525,7 +543,7 @@ mod tests {
     };
     use rand::random;
     use reth_network_api::test_utils::NoopNetwork;
-    use reth_primitives::{Block, BlockNumberOrTag, Header, H256, U256, TransactionSigned};
+    use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256};
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
@@ -574,28 +592,33 @@ mod tests {
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned {
-                        transaction: reth_primitives::Transaction::Eip1559(reth_primitives::TxEip1559 {
-                            max_priority_fee_per_gas: random_fee,
-                            max_fee_per_gas: random_fee + base_fee_per_gas as u128,
-                            ..Default::default()
-                        }),
+                        transaction: reth_primitives::Transaction::Eip1559(
+                            reth_primitives::TxEip1559 {
+                                max_priority_fee_per_gas: random_fee,
+                                max_fee_per_gas: random_fee + base_fee_per_gas as u128,
+                                ..Default::default()
+                            },
+                        ),
                         ..Default::default()
                     };
-                    
+
                     transactions.push(transaction);
                 } else {
                     let transaction = TransactionSigned {
-                        transaction: reth_primitives::Transaction::Legacy(reth_primitives::TxLegacy {
-                            ..Default::default()
-                        }),
+                        transaction: reth_primitives::Transaction::Legacy(
+                            reth_primitives::TxLegacy { ..Default::default() },
+                        ),
                         ..Default::default()
                     };
-                    
+
                     transactions.push(transaction);
                 }
             }
-            
-            mock_provider.add_block(hash, Block { header: header.clone(), body: transactions, ..Default::default() });
+
+            mock_provider.add_block(
+                hash,
+                Block { header: header.clone(), body: transactions, ..Default::default() },
+            );
             mock_provider.add_header(hash, header);
 
             oldest_block.get_or_insert(hash);
@@ -613,8 +636,9 @@ mod tests {
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 
-        let response =
-            eth_api.fee_history((newest_block + 1).into(), newest_block.into(), Some(vec![10.0])).await;
+        let response = eth_api
+            .fee_history((newest_block + 1).into(), newest_block.into(), Some(vec![10.0]))
+            .await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);

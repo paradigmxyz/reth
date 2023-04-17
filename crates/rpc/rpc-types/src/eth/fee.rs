@@ -10,7 +10,7 @@ pub struct TxGasAndReward {
     /// gas used by a block
     pub gas_used: u128,
     /// minimum between max_priority_fee_per_gas or max_fee_per_gas - base_fee_for_block
-    pub reward: u128
+    pub reward: u128,
 }
 
 /// Response type for `eth_feeHistory`
