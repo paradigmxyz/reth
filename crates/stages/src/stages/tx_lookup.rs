@@ -317,7 +317,7 @@ mod tests {
                                 .expect("no transaction entry");
                             assert_eq!(
                                 Some(tx_id),
-                                tx.get::<tables::TxHashNumber>(transaction.hash)?,
+                                tx.get::<tables::TxHashNumber>(transaction.hash())?,
                             );
                         }
                     }

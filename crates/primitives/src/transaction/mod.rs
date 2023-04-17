@@ -1,7 +1,7 @@
 use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
-use derive_more::{AsRef, Deref};
+use derive_more::{AsRef, Deref, DerefMut};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
@@ -997,12 +997,13 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
 /// Signed transaction with recovered signer.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, DerefMut, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction
     signer: Address,
     /// Signed transaction
     #[deref]
+    #[deref_mut]
     #[as_ref]
     signed_transaction: TransactionSigned,
 }
@@ -1302,7 +1303,7 @@ mod tests {
     ) {
         let expected = TransactionSigned::from_transaction_and_signature(transaction, signature);
         if let Some(hash) = hash {
-            assert_eq!(hash, expected.hash);
+            assert_eq!(hash, expected.hash.unwrap());
         }
         assert_eq!(bytes.len(), expected.length());
 
