@@ -94,7 +94,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(&self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         fdlimit::raise_fd_limit();
