@@ -92,6 +92,7 @@ impl Genesis {
 
 /// An account in the state of the genesis block.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenesisAccount {
     /// The nonce of the account at genesis.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,7 +103,7 @@ pub struct GenesisAccount {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<Bytes>,
     /// The account's storage at genesis.
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub storage: Option<HashMap<H256, H256>>,
 }
 
