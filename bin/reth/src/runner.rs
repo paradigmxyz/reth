@@ -60,6 +60,23 @@ impl CliRunner {
         tokio_runtime.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
+
+    /// Executes a regular future as a spawned blocking task until completion or until external
+    /// signal received.
+    ///
+    /// See [Runtime::spawn_blocking](tokio::runtime::Runtime::spawn_blocking) .
+    pub fn run_blocking_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
+    where
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Send + Sync + From<std::io::Error> + 'static,
+    {
+        let tokio_runtime = tokio_runtime()?;
+        let handle = tokio_runtime.handle().clone();
+        let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
+        tokio_runtime
+            .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
+        Ok(())
+    }
 }
 
 /// [CliRunner] configuration when executing commands asynchronously
