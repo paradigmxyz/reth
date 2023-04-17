@@ -270,6 +270,7 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
+        return Ok(EthApi::fee_history(self, block_count, newest_block, reward_percentiles).await?)
         let block_count = block_count.as_u64();
 
         if block_count == 0 {
