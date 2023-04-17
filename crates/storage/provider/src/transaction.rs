@@ -1058,7 +1058,7 @@ where
             ))
     }
 
-    ///  Get plainstate storages
+    /// Get plainstate storages
     #[allow(clippy::type_complexity)]
     pub fn get_plainstate_storages(
         &self,

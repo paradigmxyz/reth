@@ -215,7 +215,6 @@ impl PostState {
 
                 if their_storage.wiped {
                     our_storage.wiped = true;
-                    our_storage.storage.clear();
                 }
 
                 our_storage.storage.extend(their_storage.storage);
@@ -277,10 +276,10 @@ impl PostState {
         // Remove all changes in the returned post-state that were not reverted
         non_reverted_state
             .storage_changes
-            .retain(|block_number, _| *block_number < revert_to_block);
+            .retain(|block_number, _| *block_number > revert_to_block);
         non_reverted_state
             .account_changes
-            .retain(|block_number, _| *block_number < revert_to_block);
+            .retain(|block_number, _| *block_number > revert_to_block);
 
         non_reverted_state
     }
@@ -330,7 +329,6 @@ impl PostState {
         let storage_changes =
             self.storage_changes.entry(block_number).or_default().entry(address).or_default();
         storage_changes.wiped = true;
-        storage_changes.storage.clear();
     }
 
     /// Add changed storage values to the post-state.
