@@ -434,7 +434,7 @@ impl PoolTransaction for PooledTransaction {
 }
 
 impl FromRecoveredTransaction for PooledTransaction {
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
+    fn from_recovered_transaction(mut tx: TransactionSignedEcRecovered) -> Self {
         let (cost, effective_gas_price) = match &tx.transaction {
             Transaction::Legacy(t) => {
                 let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
@@ -453,6 +453,9 @@ impl FromRecoveredTransaction for PooledTransaction {
                 (cost, effective_gas_price)
             }
         };
+
+        // Make sure transaction hash exists.
+        tx.hash_mut();
 
         PooledTransaction { transaction: tx, cost, effective_gas_price }
     }

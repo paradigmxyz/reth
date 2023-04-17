@@ -697,7 +697,7 @@ impl TransactionSigned {
 
     /// Transaction hash. Used to identify transaction. Will panic if transaction is not preset.
     pub fn hash_ref(&self) -> &TxHash {
-        self.hash.as_ref().expect("transaction hash hasn't been calculated yet.")
+        self.hash.as_ref().expect("Transaction hash should have been called before.")
     }
 
     /// Recover signer from signature and hash.
