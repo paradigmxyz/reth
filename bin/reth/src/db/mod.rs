@@ -173,11 +173,8 @@ impl Command {
                                     }
 
                                     if args.json {
-                                        let list_result = tool.list::<tables::$table>(args.start, args.len)?;
-                                        for (k, v) in list_result {
-                                            let json = serde_json::to_string(&(format!("{:?}", k), v))?;
-                                            println!("{json}");
-                                        }
+                                        let list_result = tool.list::<tables::$table>(args.start, args.len)?.into_iter().collect::<Vec<_>>();
+                                        println!("{}", serde_json::to_string_pretty(&list_result)?);
                                         Ok(())
                                     } else {
                                         tui::DbListTUI::<_, tables::$table>::new(|start, count| {
