@@ -1255,7 +1255,7 @@ impl fmt::Debug for RpcServer {
 ///
 /// When this type is dropped or [RpcServerHandle::stop] has been called the server will be stopped.
 #[derive(Clone)]
-#[must_use = "Server stop if dropped"]
+#[must_use = "Server stops if dropped"]
 pub struct RpcServerHandle {
     /// The address of the http/ws server
     http_local_addr: Option<SocketAddr>,

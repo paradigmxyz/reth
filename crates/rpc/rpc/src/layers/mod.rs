@@ -4,7 +4,7 @@ mod auth_layer;
 mod jwt_secret;
 mod jwt_validator;
 pub use auth_layer::AuthLayer;
-pub use jwt_secret::{JwtError, JwtSecret};
+pub use jwt_secret::{Claims, JwtError, JwtSecret};
 pub use jwt_validator::JwtAuthValidator;
 
 /// General purpose trait to validate Http Authorization
