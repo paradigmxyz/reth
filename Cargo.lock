@@ -4573,6 +4573,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-revm-post-state",
  "tokio",
 ]
 
@@ -5032,12 +5033,12 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
+ "reth-revm-post-state",
  "reth-revm-primitives",
  "reth-rlp",
  "reth-trie",
  "thiserror",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -5050,6 +5051,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm-inspectors",
+ "reth-revm-post-state",
  "reth-revm-primitives",
  "reth-rlp",
  "revm",
@@ -5065,6 +5067,15 @@ dependencies = [
  "reth-rpc-types",
  "revm",
  "serde",
+]
+
+[[package]]
+name = "reth-revm-post-state"
+version = "0.1.0"
+dependencies = [
+ "reth-db",
+ "reth-primitives",
+ "tracing",
 ]
 
 [[package]]
@@ -5283,6 +5294,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-revm-post-state",
  "reth-rlp",
  "reth-trie",
  "thiserror",

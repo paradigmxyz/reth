@@ -12,14 +12,12 @@ description = "Reth storage provider."
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
+reth-revm-post-state = { path = "../../revm/revm-post-state" }
 reth-db = { path = "../db" }
 reth-trie = { path = "../../trie" }
 
 # async
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
-
-# tracing
-tracing = "0.1"
 
 # misc
 thiserror = "1.0.37"

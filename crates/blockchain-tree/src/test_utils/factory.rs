@@ -1,7 +1,8 @@
 use super::TestExecutor;
 use parking_lot::Mutex;
 use reth_primitives::ChainSpec;
-use reth_provider::{post_state::PostState, ExecutorFactory, StateProvider};
+use reth_provider::{ExecutorFactory, StateProvider};
+use reth_revm_post_state::PostState;
 use std::sync::Arc;
 
 /// Executor factory with pre-set execution results.

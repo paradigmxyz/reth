@@ -18,8 +18,8 @@ pub trait CanonStateSubscriptions: Send + Sync {
 }
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
-/// and will return all [`crate::PostState`] and [`reth_primitives::SealedBlockWithSenders`] of both
-/// reverted and commited blocks.
+/// and will return all [`reth_revm_post_state::PostState`] and
+/// [`reth_primitives::SealedBlockWithSenders`] of both reverted and commited blocks.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub enum CanonStateNotification {

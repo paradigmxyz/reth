@@ -21,6 +21,7 @@ members = [
     "crates/payload/basic",
     "crates/primitives",
     "crates/revm",
+    "crates/revm/revm-post-state",
     "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
     "crates/rlp",

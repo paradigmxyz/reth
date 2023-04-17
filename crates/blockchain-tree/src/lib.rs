@@ -10,7 +10,7 @@
 pub mod eth_dao_fork;
 
 /// Execution result types.
-pub use reth_provider::post_state;
+pub use reth_revm_post_state as post_state;
 
 pub mod blockchain_tree;
 pub use blockchain_tree::*;

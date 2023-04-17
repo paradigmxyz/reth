@@ -1,11 +1,12 @@
 use super::AccountProvider;
-use crate::{post_state::PostState, BlockHashProvider};
+use crate::BlockHashProvider;
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
     KECCAK_EMPTY, U256,
 };
+use reth_revm_post_state::PostState;
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;

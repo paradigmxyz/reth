@@ -21,6 +21,8 @@ pub use factory::Factory;
 pub use reth_revm_inspectors::*;
 /// reexport for convenience
 pub use reth_revm_primitives::*;
+// reexport for convenience
+pub use reth_revm_post_state::*;
 
 /// Re-export everything
 pub use revm;

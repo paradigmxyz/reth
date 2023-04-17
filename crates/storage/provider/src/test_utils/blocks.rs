@@ -1,11 +1,12 @@
 //! Dummy blocks and data for tests
 
-use crate::{post_state::PostState, Transaction};
+use crate::Transaction;
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
     hex_literal::hex, Account, Header, SealedBlock, SealedBlockWithSenders, Withdrawal, H160, H256,
     U256,
 };
+use reth_revm_post_state::PostState;
 use reth_rlp::Decodable;
 use std::collections::BTreeMap;
 

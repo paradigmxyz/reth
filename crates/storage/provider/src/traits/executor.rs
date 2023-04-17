@@ -1,8 +1,9 @@
 //! Executor Factory
 
-use crate::{post_state::PostState, StateProvider};
+use crate::StateProvider;
 use reth_interfaces::executor::Error;
 use reth_primitives::{Address, Block, ChainSpec, U256};
+use reth_revm_post_state::PostState;
 
 /// Executor factory that would create the EVM with particular state provider.
 ///

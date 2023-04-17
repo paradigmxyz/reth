@@ -1,11 +1,11 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::PostState;
 use reth_interfaces::{executor::Error as ExecError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
     TransitionId, TxHash,
 };
+use reth_revm_post_state::PostState;
 use std::collections::BTreeMap;
 
 /// A chain of blocks and their final state.

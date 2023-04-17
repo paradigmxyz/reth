@@ -12,9 +12,8 @@ use reth_db::{
 };
 use reth_metrics_derive::Metrics;
 use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
-use reth_provider::{
-    post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
-};
+use reth_provider::{BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction};
+use reth_revm_post_state::PostState;
 use std::time::Instant;
 use tracing::*;
 

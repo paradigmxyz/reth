@@ -589,10 +589,8 @@ mod tests {
         constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
-    use reth_provider::{
-        post_state::{Change, Storage},
-        AccountProvider, BlockHashProvider, StateProvider,
-    };
+    use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
+    use reth_revm_post_state::{Change, Storage};
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
 

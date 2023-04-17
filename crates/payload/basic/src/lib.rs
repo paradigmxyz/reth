@@ -19,14 +19,14 @@ use reth_primitives::{
     proofs, Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::{BlockProvider, PostState, StateProviderFactory};
+use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
     executor::{
         commit_state_changes, increment_account_balance, post_block_withdrawals_balance_increments,
     },
-    into_reth_log,
+    into_reth_log, PostState,
 };
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;

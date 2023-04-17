@@ -1,7 +1,4 @@
-use crate::{
-    insert_canonical_block,
-    post_state::{Change, PostState, StorageChangeset},
-};
+use crate::insert_canonical_block;
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
@@ -23,6 +20,7 @@ use reth_primitives::{
     Header, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
     TransitionId, TxNumber, H256, U256,
 };
+use reth_revm_post_state::{Change, PostState, StorageChangeset};
 use reth_trie::{StateRoot, StateRootError};
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},

@@ -9,10 +9,10 @@ use reth_primitives::{
 };
 use reth_provider::{
     chain::{ChainSplit, SplitAt},
-    post_state::PostState,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     ExecutorFactory, HeaderProvider, Transaction,
 };
+use reth_revm_post_state::PostState;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -686,9 +686,8 @@ mod tests {
     };
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
-    use reth_provider::{
-        insert_block, post_state::PostState, test_utils::blocks::BlockChainTestData,
-    };
+    use reth_provider::{insert_block, test_utils::blocks::BlockChainTestData};
+    use reth_revm_post_state::PostState;
     use std::{collections::HashSet, sync::Arc};
 
     fn setup_externals(
