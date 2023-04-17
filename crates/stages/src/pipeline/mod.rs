@@ -134,8 +134,11 @@ where
     }
 
     /// Set tip for reverse sync.
+    #[track_caller]
     pub fn set_tip(&self, tip: H256) {
-        self.tip_tx.as_ref().expect("tip sender is set").send(tip).expect("tip channel closed");
+        let _ = self.tip_tx.as_ref().expect("tip sender is set").send(tip).map_err(|_| {
+            warn!(target: "sync::pipeline", "tip channel closed");
+        });
     }
 
     /// Listen for events on the pipeline.
@@ -157,11 +160,11 @@ where
     }
 
     /// Consume the pipeline and run it. Return the pipeline and its result as a future.
+    #[track_caller]
     pub fn run_as_fut(mut self, db: Arc<DB>, tip: H256) -> PipelineFut<DB, U> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         self.register_metrics(db.clone());
-
         Box::pin(async move {
             self.set_tip(tip);
             let result = self.run_loop(db).await;

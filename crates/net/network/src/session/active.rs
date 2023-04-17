@@ -596,6 +596,7 @@ impl Future for ActiveSession {
 
             if !progress {
                 if this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
+                    let _ = this.internal_request_timeout_interval.poll_tick(cx);
                     // check for timed out requests
                     if this.check_timed_out_requests(Instant::now()) {
                         let _ = this.to_session.clone().try_send(

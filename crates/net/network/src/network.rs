@@ -11,9 +11,10 @@ use reth_interfaces::{
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
-    NetworkError, NetworkInfo, NetworkStatus, PeerKind, Peers, PeersInfo, ReputationChangeKind,
+    NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, ReputationChangeKind,
 };
 use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
+use reth_rpc_types::NetworkStatus;
 use std::{
     net::SocketAddr,
     sync::{

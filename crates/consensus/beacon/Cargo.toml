@@ -33,7 +33,7 @@ metrics = "0.20.1"
 reth-payload-builder = { path = "../../payload/builder", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 reth-stages = { path = "../../stages", features = ["test-utils"] }
-reth-executor = { path = "../../executor", features = ["test-utils"] }
+reth-blockchain-tree = { path = "../../blockchain-tree", features = ["test-utils"] }
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
