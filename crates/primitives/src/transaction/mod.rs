@@ -180,7 +180,10 @@ pub enum Transaction {
 }
 
 impl Compact for Transaction {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         match self {
             Transaction::Legacy(tx) => {
                 tx.to_compact(buf);
@@ -561,7 +564,10 @@ pub enum TransactionKind {
 }
 
 impl Compact for TransactionKind {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         match self {
             TransactionKind::Create => 0,
             TransactionKind::Call(address) => {
@@ -629,7 +635,10 @@ pub struct TransactionSigned {
 }
 
 impl Compact for TransactionSigned {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         let mut tmp = vec![];
         let sig_bit = self.signature.to_compact(&mut tmp) as u8;
         let tx_bit = self.transaction.to_compact(&mut tmp) as u8;

@@ -19,7 +19,10 @@ pub struct Signature {
 }
 
 impl Compact for Signature {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         buf.put_slice(self.r.as_le_bytes().as_ref());
         buf.put_slice(self.s.as_le_bytes().as_ref());
         self.odd_y_parity as usize
