@@ -16,7 +16,8 @@ use reth_payload_builder::{
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     constants::{RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT, U256,
+    proofs, Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    SealedBlock, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BlockProvider, PostState, StateProviderFactory};
 use reth_revm::{
@@ -99,9 +100,17 @@ where
         attributes: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
         // TODO this needs to access the _pending_ state of the parent block hash
+
+        let block_id: BlockId = if attributes.parent.is_zero() {
+            // use latest block if parent is zero: genesis block
+            BlockNumberOrTag::Latest.into()
+        } else {
+            attributes.parent.into()
+        };
+
         let parent_block = self
             .client
-            .block_by_hash(attributes.parent)?
+            .block(block_id)?
             .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
 
         // configure evm env based on parent block
@@ -111,7 +120,7 @@ where
         let config = PayloadConfig {
             initialized_block_env,
             initialized_cfg,
-            parent_block: Arc::new(parent_block),
+            parent_block: Arc::new(parent_block.seal_slow()),
             extra_data: self.config.extradata.clone(),
             attributes,
             chain_spec: Arc::clone(&self.chain_spec),
@@ -374,7 +383,7 @@ struct PayloadConfig {
     /// Configuration for the environment.
     initialized_cfg: CfgEnv,
     /// The parent block.
-    parent_block: Arc<Block>,
+    parent_block: Arc<SealedBlock>,
     /// Block extra data.
     extra_data: Bytes,
     /// Requested attributes for the payload.
@@ -526,7 +535,7 @@ fn build_payload<Pool, Client>(
         let logs_bloom = post_state.logs_bloom();
 
         let header = Header {
-            parent_hash: attributes.parent,
+            parent_hash: parent_block.hash,
             ommers_hash: EMPTY_OMMER_ROOT,
             beneficiary: initialized_block_env.coinbase,
             // TODO compute state root
