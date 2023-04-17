@@ -642,7 +642,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
-    use reth_executor::{
+    use reth_blockchain_tree::{
         blockchain_tree::{
             config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
             ShareableBlockchainTree,
