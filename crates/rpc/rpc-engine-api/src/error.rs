@@ -1,5 +1,5 @@
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
-use reth_beacon_consensus::BeaconEngineError;
+use reth_beacon_consensus::{BeaconEngineError, BeaconForkChoiceUpdateError};
 use reth_primitives::{H256, U256};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -66,6 +66,9 @@ pub enum EngineApiError {
     /// Beacon consensus engine error.
     #[error(transparent)]
     ConsensusEngine(#[from] BeaconEngineError),
+    /// An error occurred while processing the fork choice update.
+    #[error(transparent)]
+    ForkChoiceUpdate(#[from] BeaconForkChoiceUpdateError),
     /// Encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
