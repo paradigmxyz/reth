@@ -16,11 +16,11 @@ use std::collections::BTreeMap;
 /// Used inside the BlockchainTree.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
-    /// The state of accounts after execution of the blocks in this chain.
+    /// The state of accounts after execution of the blocks in this chain (tip of the chain).
     ///
     /// This state also contains the individual changes that lead to the current state.
     pub state: PostState,
-    /// The blocks in this chain.
+    /// All blocks in this chain.
     pub blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
     /// A mapping of each block number in the chain to the highest transition ID in the chain's
     /// state after execution of the block.
@@ -60,12 +60,12 @@ impl Chain {
 
     /// Return post state of the block at the `block_number` or None if block is not known
     pub fn state_at_block(&self, block_number: BlockNumber) -> Option<PostState> {
-        let mut state = self.state.clone();
         if self.tip().number == block_number {
-            return Some(state)
+            return Some(self.state.clone())
         }
 
         if let Some(&transition_id) = self.block_transitions.get(&block_number) {
+            let mut state = self.state.clone();
             state.revert_to(transition_id);
             return Some(state)
         }
@@ -73,9 +73,10 @@ impl Chain {
         None
     }
 
-    /// Destructure the chain into its inner components, the blocks and the state.
-    pub fn into_inner(self) -> (BTreeMap<BlockNumber, SealedBlockWithSenders>, PostState) {
-        (self.blocks, self.state)
+    /// Destructure the chain into its inner components, the blocks and the state at the tip of the
+    /// chain.
+    pub fn into_inner(self) -> (ChainBlocks, PostState) {
+        (ChainBlocks { blocks: self.blocks }, self.state)
     }
 
     /// Get the block at which this chain forked.
@@ -225,6 +226,44 @@ impl Chain {
                 blocks: higher_number_blocks,
             },
         }
+    }
+}
+
+/// All blocks in the chain
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChainBlocks {
+    blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
+}
+
+impl ChainBlocks {
+    /// Creates a consuming iterator over all blocks in the chain with increasing block number.
+    ///
+    /// Note: this always yields at least one block.
+    pub fn into_blocks(self) -> impl Iterator<Item = SealedBlockWithSenders> {
+        self.blocks.into_values()
+    }
+
+    /// Creates an iterator over all blocks in the chain with increasing block number.
+    pub fn iter(&self) -> impl Iterator<Item = (&BlockNumber, &SealedBlockWithSenders)> {
+        self.blocks.iter()
+    }
+
+    /// Get the tip of the chain.
+    ///
+    /// # Note
+    ///
+    /// Chains always have at least one block.
+    pub fn tip(&self) -> &SealedBlockWithSenders {
+        self.blocks.last_key_value().expect("Chain should have at least one block").1
+    }
+}
+
+impl IntoIterator for ChainBlocks {
+    type Item = (BlockNumber, SealedBlockWithSenders);
+    type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, SealedBlockWithSenders>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.blocks.into_iter()
     }
 }
 
