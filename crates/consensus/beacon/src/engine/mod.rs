@@ -259,10 +259,13 @@ where
                     let head_block_number = self
                         .get_block_number(state.head_block_hash)?
                         .expect("was canonicalized, so it exists");
+                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=head_block_number, "canonicalized new head");
+
                     let pipeline_min_progress =
                         FINISH.get_progress(&self.db.tx()?)?.unwrap_or_default();
 
                     if pipeline_min_progress < head_block_number {
+                        debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=head_block_number, "pipeline run to head required");
                         self.require_pipeline_run(PipelineTarget::Head);
                     }
 
