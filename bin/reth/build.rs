@@ -1,5 +1,3 @@
-use built as _;
-
 fn main() {
     let mut opts = built::Options::default();
     opts.set_dependencies(true);
