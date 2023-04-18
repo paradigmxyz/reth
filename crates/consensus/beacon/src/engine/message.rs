@@ -19,7 +19,7 @@ use tokio::sync::oneshot;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[derive(Debug)]
 pub struct OnForkChoiceUpdated {
-    is_valid: bool,
+    is_valid_update: bool,
     /// Returns the result of the forkchoice update.
     fut: Either<futures::future::Ready<ForkChoiceUpdateResult>, PendingPayloadId>,
 }
@@ -28,15 +28,15 @@ pub struct OnForkChoiceUpdated {
 
 impl OnForkChoiceUpdated {
     /// Returns true if this update is valid
-    pub(crate) fn is_valid(&self) -> bool {
-        self.is_valid
+    pub(crate) fn is_valid_update(&self) -> bool {
+        self.is_valid_update
     }
 
     /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update succeeded and no
     /// payload attributes were provided.
     pub(crate) fn valid(status: PayloadStatus) -> Self {
         Self {
-            is_valid: status.is_valid(),
+            is_valid_update: status.is_valid(),
             fut: Either::Left(futures::future::ready(Ok(ForkchoiceUpdated::new(status)))),
         }
     }
@@ -44,7 +44,7 @@ impl OnForkChoiceUpdated {
     /// given state is considered invalid
     pub(crate) fn invalid_state() -> Self {
         Self {
-            is_valid: false,
+            is_valid_update: false,
             fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::InvalidState))),
         }
     }
@@ -53,7 +53,8 @@ impl OnForkChoiceUpdated {
     /// payload attributes were invalid.
     pub(crate) fn invalid_payload_attributes() -> Self {
         Self {
-            is_valid: false,
+            // This is valid because this is only reachable if the state and payload is valid
+            is_valid_update: true,
             fut: Either::Left(futures::future::ready(Err(
                 ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
             ))),
@@ -66,7 +67,7 @@ impl OnForkChoiceUpdated {
         pending_payload_id: oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>,
     ) -> Self {
         Self {
-            is_valid: payload_status.is_valid(),
+            is_valid_update: payload_status.is_valid(),
             fut: Either::Right(PendingPayloadId {
                 payload_status: Some(payload_status),
                 pending_payload_id,

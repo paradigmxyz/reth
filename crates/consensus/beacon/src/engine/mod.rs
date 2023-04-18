@@ -519,7 +519,7 @@ where
                                 return Poll::Ready(Err(error))
                             }
                         };
-                        let is_valid_response = on_updated.is_valid();
+                        let is_valid_response = on_updated.is_valid_update();
                         let _ = tx.send(on_updated);
 
                         // Terminate the sync early if it's reached the maximum user
