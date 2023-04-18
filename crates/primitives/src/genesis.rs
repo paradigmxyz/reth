@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::{
     keccak256,
     proofs::{KeccakHasher, EMPTY_ROOT},
+    serde_helper::deserialize_json_u256,
     utils::serde_helpers::deserialize_stringified_u64,
     Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
@@ -27,6 +28,7 @@ pub struct Genesis {
     #[serde(deserialize_with = "deserialize_stringified_u64")]
     pub gas_limit: u64,
     /// The genesis header difficulty.
+    #[serde(deserialize_with = "deserialize_json_u256")]
     pub difficulty: U256,
     /// The genesis header mix hash.
     pub mix_hash: H256,
@@ -98,6 +100,7 @@ pub struct GenesisAccount {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<u64>,
     /// The balance of the account at genesis.
+    #[serde(deserialize_with = "deserialize_json_u256")]
     pub balance: U256,
     /// The account's bytecode at genesis.
     #[serde(skip_serializing_if = "Option::is_none")]
