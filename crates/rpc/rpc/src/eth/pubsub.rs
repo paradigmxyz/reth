@@ -221,7 +221,7 @@ where
             .map(|new_block| {
                 let new_chain = new_block.expect("new block subscription never ends; qed");
                 new_chain
-                    .commited()
+                    .committed()
                     .map(|c| {
                         c.blocks()
                             .iter()
