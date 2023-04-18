@@ -1,5 +1,4 @@
-// The file `built.rs` was placed there by cargo and `build.rs`
-mod built_info {
+pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
@@ -10,7 +9,7 @@ fn main() {
     let os = std::env::consts::OS;
     let rustc = built_info::RUSTC_VERSION;
 
-    println!("{name}/v{version}-{sha}/{os}/{rustc} \n", name, version, sha, os, rustc);
+    println!("{}/v{}/{}-{}/{}", name, version, os, sha.unwrap(), rustc);
 
     if let Err(err) = reth::cli::run() {
         eprintln!("Error: {err:?}");
