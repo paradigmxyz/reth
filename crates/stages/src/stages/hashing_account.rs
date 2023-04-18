@@ -11,7 +11,10 @@ use reth_db::{
 };
 use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
-use std::{fmt::Debug, ops::Range};
+use std::{
+    fmt::Debug,
+    ops::{Range, RangeInclusive},
+};
 use tokio::sync::mpsc;
 use tracing::*;
 
@@ -87,7 +90,7 @@ impl AccountHashingStage {
 #[derive(Clone, Debug)]
 pub struct SeedOpts {
     /// The range of blocks to be generated
-    pub blocks: Range<u64>,
+    pub blocks: RangeInclusive<u64>,
     /// The range of accounts to be generated
     pub accounts: Range<u64>,
     /// The range of transactions to be generated per block.
@@ -158,14 +161,17 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let from_block = input.stage_progress.unwrap_or_default();
-        let to_block = input.previous_stage_progress();
+        let range = input.next_block_range();
+        if range.is_empty() {
+            return Ok(ExecOutput::done(*range.end()))
+        }
+        let (from_block, to_block) = range.into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
-        if to_block - from_block > self.clean_threshold || from_block == 0 {
+        if to_block - from_block > self.clean_threshold || from_block == 1 {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
@@ -243,7 +249,9 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             self.save_checkpoint(tx, checkpoint)?;
 
             if next_address.is_some() {
-                return Ok(ExecOutput { stage_progress: to_block, done: false })
+                // from block is correct here as were are iteration over state for this
+                // particular block
+                return Ok(ExecOutput { stage_progress: from_block, done: false })
             }
         } else {
             // Aggregate all transition changesets and and make list of account that have been
@@ -270,12 +278,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // There is no threshold on account unwind, we will always take changesets and
         // apply past values to HashedAccount table.
 
-        // dont incluse `unwind_to` block
-        let from_block = input.unwind_to + 1;
-        let to_block = input.stage_progress;
+        let range = input.unwind_block_range();
 
         // Aggregate all transition changesets and and make list of account that have been changed.
-        tx.unwind_account_hashing(from_block..=to_block)?;
+        tx.unwind_account_hashing(range)?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -421,11 +427,9 @@ mod tests {
                 Ok(AccountHashingStage::seed(
                     &mut self.tx.inner(),
                     SeedOpts {
-                        blocks: 0..input.previous_stage_progress() + 1,
+                        blocks: 1..=input.previous_stage_progress(),
                         accounts: 0..2,
                         txs: 0..3,
-                        // TODO: Do we port this?
-                        //transitions: 2,
                     },
                 )
                 .unwrap())

@@ -36,11 +36,10 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let target = input.previous_stage_progress();
-        let Some(range) = input.next_block_range_with_threshold(self.commit_threshold) else { return Ok(ExecOutput::done(target))};
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
-            return Ok(ExecOutput::done(target))
+            return Ok(ExecOutput::done(*range.end()))
         }
 
         let indices = tx.get_account_transition_ids_from_changeset(range.clone())?;
@@ -48,7 +47,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", "Stage finished");
-        Ok(ExecOutput { stage_progress: *range.end(), done: *range.end() == target })
+        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 
     /// Unwind the stage.
@@ -58,10 +57,9 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
-        let from = input.unwind_to + 1;
-        let to = input.stage_progress;
+        let range = input.unwind_block_range();
 
-        tx.unwind_account_history_indices(from..=to)?;
+        tx.unwind_account_history_indices(range)?;
 
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { stage_progress: input.unwind_to })

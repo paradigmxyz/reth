@@ -22,49 +22,31 @@ impl ExecInput {
     }
 
     /// Return next block range that needs to be executed.
-    pub fn next_block_range(&self) -> Option<RangeInclusive<BlockNumber>> {
-        self.next_block_range_with_threshold(u64::MAX)
+    pub fn next_block_range(&self) -> RangeInclusive<BlockNumber> {
+        let (range, _) = self.next_block_range_with_threshold(u64::MAX);
+        range
+    }
+
+    /// Return true if this is the first block range to execute.
+    pub fn is_first_range(&self) -> bool {
+        self.stage_progress.is_none()
     }
 
     /// Return the next block range to execute.
+    /// Return pair of the block range and if this is final block range.
     pub fn next_block_range_with_threshold(
         &self,
         threshold: u64,
-    ) -> Option<RangeInclusive<BlockNumber>> {
-        // plus +1 is to skip present block.
-        let start = self.stage_progress.map(|i| i + 1).unwrap_or_default();
-        let mut end = self.previous_stage_progress();
+    ) -> (RangeInclusive<BlockNumber>, bool) {
+        // plus +1 is to skip present block and allways start from block number 1, not 0.
+        let current_block = self.stage_progress.unwrap_or_default();
+        let start = current_block + 1;
+        let target = self.previous_stage_progress();
 
-        if end < start {
-            return None
-        }
+        let end = min(target, current_block.saturating_add(threshold));
 
-        end = min(end, start + threshold);
-
-        Some(start..=end)
-    }
-
-    /// Return next execution action.
-    ///
-    /// [ExecAction::Done] is returned if there are no blocks to execute in this stage.
-    /// [ExecAction::Run] is returned if the stage should proceed with execution.
-    pub fn next_action(&self, max_threshold: Option<u64>) -> ExecAction {
-        // Extract information about the stage progress
-        let stage_progress = self.stage_progress.unwrap_or_default();
-        let previous_stage_progress = self.previous_stage_progress();
-
-        let start_block = stage_progress + 1;
-        let end_block = match max_threshold {
-            Some(threshold) => previous_stage_progress.min(stage_progress + threshold),
-            None => previous_stage_progress,
-        };
-        let capped = end_block < previous_stage_progress;
-
-        if start_block <= end_block {
-            ExecAction::Run { range: start_block..=end_block, capped }
-        } else {
-            ExecAction::Done { stage_progress, target: end_block }
-        }
+        let is_final_range = end == target;
+        (start..=end, is_final_range)
     }
 }
 
@@ -77,6 +59,24 @@ pub struct UnwindInput {
     pub unwind_to: BlockNumber,
     /// The bad block that caused the unwind, if any.
     pub bad_block: Option<BlockNumber>,
+}
+
+impl UnwindInput {
+    /// Return next block range that needs to be executed.
+    pub fn unwind_block_range(&self) -> RangeInclusive<BlockNumber> {
+        self.unwind_block_range_with_threshold(u64::MAX)
+    }
+
+    /// Return the next block range to execute.
+    pub fn unwind_block_range_with_threshold(&self, threshold: u64) -> RangeInclusive<BlockNumber> {
+        // plus +1 is to skip present block.
+        let start = self.unwind_to + 1;
+        let mut end = self.stage_progress;
+
+        end = min(end, start.saturating_add(threshold));
+
+        start..=end
+    }
 }
 
 /// The output of a stage execution.
@@ -100,26 +100,6 @@ impl ExecOutput {
 pub struct UnwindOutput {
     /// The block at which the stage has unwound to.
     pub stage_progress: BlockNumber,
-}
-
-/// Controls whether a stage should continue execution or not.
-#[derive(Debug)]
-pub enum ExecAction {
-    /// The stage should continue with execution.
-    Run {
-        /// The execution block range
-        range: RangeInclusive<BlockNumber>,
-        /// The flag indicating whether the range was capped
-        /// by some max blocks parameter
-        capped: bool,
-    },
-    /// The stage should terminate since there are no blocks to execute.
-    Done {
-        /// The current stage progress
-        stage_progress: BlockNumber,
-        /// The execution target provided in [ExecInput].
-        target: BlockNumber,
-    },
 }
 
 /// A stage is a segmented part of the syncing process of the node.
@@ -155,29 +135,3 @@ pub trait Stage<DB: Database>: Send + Sync {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 }
-
-/// Get the next execute action for the stage. Return if the stage has no
-/// blocks to process.
-macro_rules! exec_or_return {
-    ($input: expr, $log_target: literal) => {
-        match $input.next_action(None) {
-            // Next action cannot be capped without a threshold.
-            ExecAction::Run { range, capped: _capped } => range.into_inner(),
-            ExecAction::Done { stage_progress, target } => {
-                info!(target: $log_target, stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
-            }
-        }
-    };
-    ($input: expr, $threshold: expr, $log_target: literal) => {
-        match $input.next_action(Some($threshold)) {
-            ExecAction::Run { range, capped } => (range.into_inner(), capped),
-            ExecAction::Done { stage_progress, target } => {
-                info!(target: $log_target, stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
-            }
-        }
-    };
-}
-
-pub(crate) use exec_or_return;

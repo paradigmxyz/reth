@@ -1,7 +1,4 @@
-use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -56,8 +53,8 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::total_difficulty");
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        let (start_block, end_block) = range.clone().into_inner();
 
         debug!(target: "sync::stages::total_difficulty", start_block, end_block, "Commencing sync");
 
@@ -76,7 +73,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
 
         // Acquire canonical walker
-        let walker = cursor_canonical.walk_range(start_block..=end_block)?;
+        let walker = cursor_canonical.walk_range(range)?;
 
         // Walk over newly inserted headers, update & insert td
         for entry in walker {
@@ -93,9 +90,8 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             cursor_td.append(number, td.into())?;
         }
 
-        let done = !capped;
-        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, done, "Sync iteration finished");
-        Ok(ExecOutput { done, stage_progress: end_block })
+        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
     }
 
     /// Unwind the stage.

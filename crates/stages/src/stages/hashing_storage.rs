@@ -83,17 +83,17 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-
-        // read storage changeset, merge it into one changeset and calculate storage hashes.
-        let from_block = input.stage_progress.unwrap_or_default();
-        let to_block = input.previous_stage_progress();
+        let range = input.next_block_range();
+        if range.is_empty() {
+            return Ok(ExecOutput::done(*range.end()))
+        }
+        let (from_block, to_block) = range.into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset, along with their storages.
-        if to_block - from_block > self.clean_threshold || from_block == 0 {
+        if to_block - from_block > self.clean_threshold || from_block == 1 {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
@@ -179,7 +179,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             self.save_checkpoint(tx, checkpoint)?;
 
             if current_key.is_some() {
-                return Ok(ExecOutput { stage_progress, done: false })
+                // `from_block` is correct here as were are iteration over state for this
+                // particular block.
+                return Ok(ExecOutput { stage_progress: from_block, done: false })
             }
         } else {
             // Aggregate all changesets and and make list of storages that have been
@@ -202,9 +204,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let start = input.unwind_to;
+        let range = input.unwind_block_range();
 
-        tx.unwind_storage_hashing(BlockNumberAddress::range(start..=input.stage_progress))?;
+        tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -304,13 +306,13 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.stage_progress.unwrap_or_default();
-            let end = input.previous_stage_progress() + 1;
+            let stage_progress = input.stage_progress.unwrap_or_default() + 1;
+            let end = input.previous_stage_progress();
 
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
 
-            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..3);
+            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..3);
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 

@@ -1,7 +1,7 @@
 use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
 
 /// The block response
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum BlockResponse {
     /// Full block response (with transactions or ommers)
     Full(SealedBlock),

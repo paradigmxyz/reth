@@ -1,7 +1,4 @@
-use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -74,10 +71,16 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let (start_block, end_block) = exec_or_return!(input, "sync::stages::bodies");
+        let range = input.next_block_range();
+        if range.is_empty() {
+            let (from, to) = range.into_inner();
+            info!(target: "sync::stages::bodies", from, "Target block already reached");
+            return Ok(ExecOutput::done(to))
+        }
 
         // Update the header range on the downloader
-        self.downloader.set_download_range(start_block..end_block + 1)?;
+        self.downloader.set_download_range(range.clone())?;
+        let (from_block, to_block) = range.into_inner();
 
         // Cursors used to write bodies, ommers and transactions
         let mut block_meta_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
@@ -89,8 +92,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
-        let mut highest_block = input.stage_progress.unwrap_or_default();
-        debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = next_tx_num, "Commencing sync");
+        debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
@@ -98,6 +100,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
 
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
+
+        let mut highest_block = from_block;
         for response in downloaded_bodies {
             // Write block
             let block_number = response.block_number();
@@ -155,8 +159,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
-        let done = highest_block == end_block;
-        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, done, "Sync iteration finished");
+        let done = highest_block == to_block;
+        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: highest_block, done })
     }
 
@@ -419,7 +423,7 @@ mod tests {
         use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{
             collections::{HashMap, VecDeque},
-            ops::Range,
+            ops::RangeInclusive,
             pin::Pin,
             sync::Arc,
             task::{Context, Poll},
@@ -494,8 +498,8 @@ mod tests {
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
-                let end = input.previous_stage_progress() + 1;
-                let blocks = random_block_range(start..end, GENESIS_HASH, 0..2);
+                let end = input.previous_stage_progress();
+                let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
@@ -699,13 +703,16 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
+            fn set_download_range(
+                &mut self,
+                range: RangeInclusive<BlockNumber>,
+            ) -> DownloadResult<()> {
                 self.headers =
                     VecDeque::from(self.db.view(|tx| -> DownloadResult<Vec<SealedHeader>> {
                         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
                         let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-                        let walker = canonical_cursor.walk_range(range.start..range.end)?;
+                        let walker = canonical_cursor.walk_range(range)?;
 
                         let mut headers = Vec::default();
                         for entry in walker {

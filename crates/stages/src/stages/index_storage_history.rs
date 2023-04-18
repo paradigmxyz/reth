@@ -37,7 +37,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let target = input.previous_stage_progress();
-        let Some(range) = input.next_block_range_with_threshold(self.commit_threshold)  else { return Ok(ExecOutput::done(target))};
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
             return Ok(ExecOutput::done(target))
@@ -47,7 +47,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", "Stage finished");
-        Ok(ExecOutput { stage_progress: *range.end(), done: *range.end() == target })
+        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 
     /// Unwind the stage.
@@ -57,7 +57,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
-        let range = input.unwind_to + 1..=input.stage_progress;
+        let range = input.unwind_block_range();
 
         tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
 

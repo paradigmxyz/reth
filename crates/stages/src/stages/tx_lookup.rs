@@ -1,7 +1,4 @@
-use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use rayon::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -52,8 +49,11 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::transaction_lookup");
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        if range.is_empty() {
+            return Ok(ExecOutput::done(*range.end()))
+        }
+        let (start_block, end_block) = range.clone().into_inner();
 
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
@@ -106,9 +106,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
-        let done = !capped;
-        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, done, "Sync iteration finished");
-        Ok(ExecOutput { done, stage_progress: end_block })
+        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        Ok(ExecOutput { done: is_final_range, stage_progress: end_block })
     }
 
     /// Unwind the stage.
@@ -286,9 +285,9 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.stage_progress.unwrap_or_default();
-            let end = input.previous_stage_progress() + 1;
+            let end = input.previous_stage_progress();
 
-            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
+            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }

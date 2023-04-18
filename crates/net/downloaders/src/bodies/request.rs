@@ -266,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn request_submits_until_fulfilled() {
         // Generate some random blocks
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, mut bodies) = generate_bodies(0..=19);
 
         let batch_size = 2;
         let client = Arc::new(

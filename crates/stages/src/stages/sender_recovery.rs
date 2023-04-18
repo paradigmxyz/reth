@@ -1,7 +1,4 @@
-use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -53,9 +50,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::sender_recovery");
-        let done = !capped;
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        if range.is_empty() {
+            return Ok(ExecOutput::done(*range.end()))
+        }
+        let (start_block, end_block) = range.clone().into_inner();
 
         // Look up the start index for the transaction range
         let first_tx_num = tx.block_body_indices(start_block)?.first_tx_num();
@@ -66,7 +65,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // No transactions to walk over
         if first_tx_num > last_tx_num {
             info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Target transaction already reached");
-            return Ok(ExecOutput { stage_progress: end_block, done })
+            return Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
         }
 
         // Acquire the cursor for inserting elements
@@ -131,8 +130,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             }
         }
 
-        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, done, "Sync iteration finished");
-        Ok(ExecOutput { stage_progress: end_block, done })
+        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
     }
 
     /// Unwind the stage.
@@ -190,7 +189,7 @@ mod tests {
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
         let non_empty_block_number = stage_progress + 10;
-        let blocks = (stage_progress..input.previous_stage_progress() + 1)
+        let blocks = (stage_progress..=input.previous_stage_progress())
             .map(|number| {
                 random_block(number, None, Some((number == non_empty_block_number) as u8), None)
             })
@@ -305,9 +304,9 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.stage_progress.unwrap_or_default();
-            let end = input.previous_stage_progress() + 1;
+            let end = input.previous_stage_progress();
 
-            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
+            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }

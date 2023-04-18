@@ -192,24 +192,22 @@ where
     }
 
     /// Unwind the table to a provided block
-    pub(crate) fn unwind_table<T, F>(
-        &self,
-        block: BlockNumber,
-        mut selector: F,
-    ) -> Result<(), DbError>
+    ///
+    /// Note: Key is not inclusive and specified key would stay in db.
+    pub(crate) fn unwind_table<T, F>(&self, key: u64, mut selector: F) -> Result<(), DbError>
     where
         DB: Database,
         T: Table,
-        F: FnMut(T::Key) -> BlockNumber,
+        F: FnMut(T::Key) -> u64,
     {
         let mut cursor = self.cursor_write::<T>()?;
         let mut reverse_walker = cursor.walk_back(None)?;
 
-        while let Some(Ok((key, _))) = reverse_walker.next() {
-            if selector(key.clone()) <= block {
+        while let Some(Ok((entry_key, _))) = reverse_walker.next() {
+            if selector(entry_key.clone()) <= key {
                 break
             }
-            self.delete::<T>(key, None)?;
+            self.delete::<T>(entry_key, None)?;
         }
         Ok(())
     }

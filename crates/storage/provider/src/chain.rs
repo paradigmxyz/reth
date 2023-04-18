@@ -53,8 +53,11 @@ impl Chain {
         if self.tip().number == block_number {
             return Some(state)
         }
-        state.revert_to(block_number);
-        Some(state)
+        if self.blocks.get(&block_number).is_some() {
+            state.revert_to(block_number);
+            return Some(state)
+        }
+        None
     }
 
     /// Destructure the chain into its inner components, the blocks and the state.

@@ -1,7 +1,4 @@
-use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use metrics_core::Counter;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -111,15 +108,14 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         // Create state provider with cached state
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
 
         // Fetch transactions, execute them and generate results
         let mut state = PostState::default();
-        for block_number in start_block..=end_block {
+        for block_number in range.clone() {
             let (block, td) = Self::read_block_with_senders(tx, block_number)?;
 
             // Configure the executor to use the current state.
@@ -141,9 +137,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         state.write_to_db(&**tx)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
-        let done = !capped;
-        info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
-        Ok(ExecOutput { stage_progress: end_block, done })
+        info!(target: "sync::stages::execution", stage_progress = *range.end(), is_final_range, "Sync iteration finished");
+        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 }
 
