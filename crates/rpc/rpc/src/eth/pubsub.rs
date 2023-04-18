@@ -138,7 +138,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
             // send the current status immediately
             let _ = accepted_sink.send(&current_sub_res);
 
-            while let Some(_) = canon_state.next().await {
+            while (canon_state.next().await).is_some() {
                 let current_syncing = pubsub.network.is_syncing();
                 // Only send a new response if the sync status has changed
                 if current_syncing != initial_sync_status {

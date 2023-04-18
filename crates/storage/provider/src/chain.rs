@@ -235,7 +235,6 @@ pub struct ChainBlocks {
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
 }
 
-
 impl ChainBlocks {
     /// Creates a consuming iterator over all blocks in the chain with increasing block number.
     ///
