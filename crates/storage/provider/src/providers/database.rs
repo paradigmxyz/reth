@@ -1,7 +1,7 @@
 use crate::{
-    BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    PostStateDataProvider, ProviderError, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    providers::PostStateProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
+    EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError, StateProviderBox,
+    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
@@ -15,17 +15,22 @@ use reth_revm_primitives::{
     primitives::{BlockEnv, CfgEnv, SpecId},
 };
 use std::{ops::RangeBounds, sync::Arc};
-use crate::providers::PostStateProvider;
 
-use crate::traits::ReceiptProvider;
-use crate::providers::state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
-    latest::{LatestStateProvider, LatestStateProviderRef},
+use crate::{
+    providers::{
+        post_state_provider::PostStateProvider,
+        state::{
+            historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+            latest::{LatestStateProvider, LatestStateProviderRef},
+        },
+    },
+    traits::ReceiptProvider,
 };
 
 /// A common provider that fetches data from a database.
 ///
 /// This provider implements most provider or provider factory traits.
+#[derive(Debug)]
 pub struct ShareableDatabase<DB> {
     /// Database
     db: DB,
