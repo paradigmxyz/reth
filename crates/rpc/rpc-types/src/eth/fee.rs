@@ -5,12 +5,30 @@ use std::{num::NonZeroUsize, sync::Arc};
 use tokio::sync::Mutex;
 
 /// Internal struct to calculate reward percentiles
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxGasAndReward {
     /// gas used by a block
     pub gas_used: u128,
     /// minimum between max_priority_fee_per_gas or max_fee_per_gas - base_fee_for_block
     pub reward: u128,
+}
+
+impl PartialOrd for TxGasAndReward {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // compare only the reward
+        // see:
+        // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/eth/gasprice/feehistory.go#L85>
+        self.reward.partial_cmp(&other.reward)
+    }
+}
+
+impl Ord for TxGasAndReward {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // compare only the reward
+        // see:
+        // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/eth/gasprice/feehistory.go#L85>
+        self.reward.cmp(&other.reward)
+    }
 }
 
 /// Response type for `eth_feeHistory`
