@@ -6,9 +6,9 @@ use crate::{
     BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
     H160, H256, U256,
 };
-use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
 use once_cell::sync::Lazy;
+use revm_primitives::bitvec::macros::internal::funty::Fundamental;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -255,8 +255,8 @@ impl ChainSpec {
     }
 }
 
-impl From<EthersGenesis> for ChainSpec {
-    fn from(genesis: EthersGenesis) -> Self {
+impl From<Genesis> for ChainSpec {
+    fn from(genesis: Genesis) -> Self {
         let alloc = genesis
             .alloc
             .iter()
@@ -264,6 +264,7 @@ impl From<EthersGenesis> for ChainSpec {
             .collect::<HashMap<H160, GenesisAccount>>();
 
         let genesis_block = Genesis {
+            config: genesis.config.clone(),
             nonce: genesis.nonce.as_u64(),
             timestamp: genesis.timestamp.as_u64(),
             gas_limit: genesis.gas_limit.as_u64(),
@@ -330,13 +331,13 @@ impl From<EthersGenesis> for ChainSpec {
 #[serde(untagged)]
 pub enum AllGenesisFormats {
     /// The geth genesis format
-    Geth(EthersGenesis),
+    Geth(Genesis),
     /// The reth genesis format
     Reth(ChainSpec),
 }
 
-impl From<EthersGenesis> for AllGenesisFormats {
-    fn from(genesis: EthersGenesis) -> Self {
+impl From<Genesis> for AllGenesisFormats {
+    fn from(genesis: Genesis) -> Self {
         Self::Geth(genesis)
     }
 }
@@ -351,7 +352,7 @@ impl From<AllGenesisFormats> for ChainSpec {
     fn from(genesis: AllGenesisFormats) -> Self {
         match genesis {
             AllGenesisFormats::Geth(genesis) => genesis.into(),
-            AllGenesisFormats::Reth(genesis) => genesis,
+            AllGenesisFormats::Reth(chainspec) => chainspec,
         }
     }
 }
@@ -1042,7 +1043,7 @@ mod tests {
         }
         "#;
 
-        let genesis: ethers_core::utils::Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
         let chainspec = ChainSpec::from(genesis);
 
         // assert a bunch of hardforks that should be set

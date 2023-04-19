@@ -1,8 +1,9 @@
 use crate::{EthVersion, StatusBuilder};
 
-use ethers_core::utils::Genesis;
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{hex, Chain, ChainSpec, ForkId, Hardfork, Head, H256, MAINNET, U256};
+use reth_primitives::{
+    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, H256, MAINNET, U256,
+};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 

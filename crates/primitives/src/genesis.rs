@@ -7,8 +7,9 @@ use crate::{
     utils::serde_helpers::deserialize_stringified_u64,
     Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
-use ethers_core::utils::GenesisAccount as EthersGenesisAccount;
+use ethers_core::utils::{ChainConfig, GenesisAccount as EthersGenesisAccount};
 use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
+use revm_primitives::B160;
 use serde::{Deserialize, Serialize};
 use triehash::sec_trie_root;
 
@@ -16,6 +17,9 @@ use triehash::sec_trie_root;
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Genesis {
+    /// The fork configuration for this network.
+    #[serde(default)]
+    pub config: ChainConfig,
     /// The genesis header nonce.
     #[serde(deserialize_with = "deserialize_stringified_u64")]
     pub nonce: u64,
@@ -89,6 +93,28 @@ impl Genesis {
     ) -> Self {
         self.alloc.extend(accounts);
         self
+    }
+}
+
+impl From<ethers_core::utils::Genesis> for Genesis {
+    fn from(genesis: ethers_core::utils::Genesis) -> Genesis {
+        let alloc = genesis
+            .alloc
+            .iter()
+            .map(|(addr, account)| (addr.0.into(), account.clone().into()))
+            .collect::<HashMap<B160, GenesisAccount>>();
+
+        Genesis {
+            config: genesis.config.clone(),
+            nonce: genesis.nonce.as_u64(),
+            timestamp: genesis.timestamp.as_u64(),
+            gas_limit: genesis.gas_limit.as_u64(),
+            difficulty: genesis.difficulty.into(),
+            mix_hash: genesis.mix_hash.0.into(),
+            coinbase: genesis.coinbase.0.into(),
+            extra_data: genesis.extra_data.0.into(),
+            alloc,
+        }
     }
 }
 
