@@ -140,7 +140,7 @@ where
                     hash: None,
                     base_fee_per_gas,
                     gas_used_ratio,
-                    reward: Some(rewards), // TODO: calculate rewards per transaction
+                    reward: Some(rewards),
                 };
 
                 // Insert missing cache entries in the map for further response composition from
@@ -164,6 +164,8 @@ where
             cache_item.hash = Some(oldest_block_hash);
         }
 
+        // `fee_history_cache_items` now contains full requested block range (populated from both
+        // cache and database), so we can iterate over it in order and populate the response fields
         let base_fee_per_gas =
             fee_history_cache_items.values().map(|item| item.base_fee_per_gas).collect();
 
@@ -173,12 +175,10 @@ where
         let mut rewards: Vec<Vec<U256>> =
             fee_history_cache_items.values().filter_map(|item| item.reward.clone()).collect();
 
-        // gasUsedRatio doesn't has data for next block in this case the last block
+        // gasUsedRatio doesn't have data for next block in this case the last block
         gas_used_ratio.pop();
         rewards.pop();
 
-        // `fee_history_cache_items` now contains full requested block range (populated from both
-        // cache and database), so we can iterate over it in order and populate the response fields
         Ok(FeeHistory {
             base_fee_per_gas,
             gas_used_ratio,
