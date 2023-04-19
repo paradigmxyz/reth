@@ -12,7 +12,7 @@ use crate::{
         update::{Destination, PoolUpdate},
         AddedPendingTransaction, AddedTransaction, OnNewBlockOutcome,
     },
-    traits::{PoolSize, StateDiff},
+    traits::{BlockInfo, PoolSize, StateDiff},
     OnNewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
@@ -120,6 +120,15 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
+    /// Returns the currently tracked block
+    pub(crate) fn block_info(&self) -> BlockInfo {
+        BlockInfo {
+            block_hash: self.all_transactions.current_block_hash,
+            block_number: self.all_transactions.current_block_number,
+            next_base_fee: self.all_transactions.next_base_fee,
+        }
+    }
+
     /// Updates the pool based on the changed base fee.
     ///
     /// This enforces the dynamic fee requirement.
@@ -169,9 +178,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn on_new_block(&mut self, event: OnNewBlockEvent) -> OnNewBlockOutcome {
         // Remove all transaction that were included in the block
         for tx_hash in &event.mined_transactions {
-            self.remove_transaction_by_hash(tx_hash);
-            // Update removed transactions metric
-            self.metrics.removed_transactions.increment(1);
+            if self.remove_transaction_by_hash(tx_hash).is_some() {
+                // Update removed transactions metric
+                self.metrics.removed_transactions.increment(1);
+            }
         }
 
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
@@ -489,8 +499,6 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
 pub(crate) struct AllTransactions<T: PoolTransaction> {
-    /// Expected base fee for the pending block.
-    pending_basefee: u128,
     /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
@@ -505,6 +513,12 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FnvHashMap<SenderId, usize>,
+    /// The current block number the pool keeps track of.
+    current_block_number: u64,
+    /// The current block hash the pool keeps track of.
+    current_block_hash: H256,
+    /// Expected base fee for the pending block.
+    pending_basefee: u128,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
@@ -1010,12 +1024,14 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
             max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
-            pending_basefee: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: 30_000_000,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
+            current_block_number: 0,
+            current_block_hash: Default::default(),
+            pending_basefee: Default::default(),
         }
     }
 }

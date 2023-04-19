@@ -72,7 +72,8 @@ use crate::{
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{listener::PoolEventBroadcast, state::SubPool, txpool::TxPool},
     traits::{
-        NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions, TransactionOrigin,
+        BlockInfo, NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions,
+        TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     OnNewBlockEvent, PoolConfig, TransactionOrdering, TransactionValidator,
@@ -136,6 +137,11 @@ where
     /// Returns stats about the size of the pool.
     pub(crate) fn size(&self) -> PoolSize {
         self.pool.read().size()
+    }
+
+    /// Returns the currently tracked block
+    pub(crate) fn block_info(&self) -> BlockInfo {
+        self.pool.read().block_info()
     }
 
     /// Returns the internal `SenderId` for this address
