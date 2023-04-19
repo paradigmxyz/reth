@@ -1,5 +1,5 @@
 use reth_payload_builder::error::PayloadBuilderError;
-use reth_rpc_types::engine::{EngineRpcError, PayloadError};
+use reth_rpc_types::engine::{EngineRpcError, ForkchoiceUpdateError, PayloadError};
 use reth_stages::PipelineError;
 use thiserror::Error;
 
@@ -47,4 +47,15 @@ impl From<reth_interfaces::db::Error> for BeaconEngineError {
     fn from(e: reth_interfaces::db::Error) -> Self {
         Self::Common(e.into())
     }
+}
+
+/// Represents error cases for an applied forkchoice update.
+#[derive(Error, Debug, Eq, PartialEq)]
+pub enum BeaconForkChoiceUpdateError {
+    /// Thrown when a forkchoice update resulted in an error.
+    #[error("Forkchoice update error: {0}")]
+    ForkchoiceUpdateError(#[from] ForkchoiceUpdateError),
+    /// Thrown when the engine task stopped
+    #[error("beacon consensus engine task stopped")]
+    EngineUnavailable,
 }
