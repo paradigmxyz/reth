@@ -110,8 +110,7 @@ where
                         try_into().unwrap(); // u64 -> U256 won't fail
                 let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
-                // TODO: fix
-                let rewards: Vec<U256> = vec![];
+                let mut rewards: Vec<U256> = vec![];
                 let mut sorter: Vec<TxGasAndReward> = vec![];
                 for transaction in transactions.iter() {
                     let reward = transaction
@@ -131,14 +130,10 @@ where
                     while sum_gas_used < threshold_gas_used as u128 && tx_index < transactions.len()
                     {
                         tx_index += 1;
-                        sum_gas_used += sorter[tx_index].reward;
+                        sum_gas_used += sorter[tx_index].gas_used;
                     }
 
-                    // we need to make sure to push zeros for empty blocks
-                    // match sorter.get(tx_index) {
-                    //     Some(reward) => rewards.push(U256::from(reward)),
-                    //     None => rewards.push(U256::ZERO),
-                    // }
+                    rewards.push(U256::from(sorter[tx_index].reward));
                 }
 
                 let fee_history_cache_item = FeeHistoryCacheItem {
