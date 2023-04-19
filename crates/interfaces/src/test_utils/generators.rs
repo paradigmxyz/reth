@@ -181,10 +181,9 @@ where
 
     let valid_addresses = state.keys().copied().collect();
 
-    let num_transitions: usize = blocks.into_iter().map(|block| block.body.len()).sum();
-    let mut transitions = Vec::with_capacity(num_transitions);
+    let mut transitions = Vec::new();
 
-    (0..num_transitions).for_each(|i| {
+    blocks.into_iter().for_each(|block| {
         let mut transition = Vec::new();
         let (from, to, mut transfer, new_entries) =
             random_account_change(&valid_addresses, n_changes.clone(), key_range.clone());

@@ -195,7 +195,7 @@ mod tests {
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 
-    //stage_test_suite_ext!(MerkleTestRunner, merkle);
+    stage_test_suite_ext!(MerkleTestRunner, merkle);
 
     /// Execute from genesis so as to merkelize whole state
     #[tokio::test]
@@ -319,7 +319,7 @@ mod tests {
                 0..256,
             );
             // add block changeset from block 1.
-            self.tx.insert_transitions(transitions, Some(1))?;
+            self.tx.insert_transitions(transitions, Some(start))?;
             self.tx.insert_accounts_and_storages(final_state)?;
 
             // Calculate state root
@@ -412,10 +412,10 @@ mod tests {
                         tx.cursor_dup_write::<tables::AccountChangeSet>().unwrap();
                     let mut rev_changeset_walker = changeset_cursor.walk_back(None).unwrap();
 
-                    while let Some((transition_id, account_before_tx)) =
+                    while let Some((block_number, account_before_tx)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
-                        if transition_id < target_block {
+                        if block_number < target_block {
                             break
                         }
 
