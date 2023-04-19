@@ -1,6 +1,4 @@
 //! Database debugging tool
-use std::sync::Arc;
-
 use crate::{
     dirs::{DbPath, MaybePlatformPath},
     utils::DbTool,
@@ -12,6 +10,7 @@ use human_bytes::human_bytes;
 use reth_db::{database::Database, tables};
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::chainspec::genesis_value_parser;
+use std::sync::Arc;
 use tracing::error;
 
 /// DB List TUI
@@ -85,7 +84,7 @@ pub struct ListArgs {
 
 impl Command {
     /// Execute `db` command
-    pub async fn execute(&self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         // add network name to db directory
         let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 

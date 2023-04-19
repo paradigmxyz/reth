@@ -61,12 +61,15 @@ impl PayloadBuilderHandle {
 
     /// Sends a message to the service to start building a new payload for the given payload.
     ///
-    /// This is the same as [PayloadBuilderHandle::new_payload] but does not wait for the result.
-    pub fn send_new_payload(&self, attr: PayloadBuilderAttributes) -> PayloadId {
-        let id = attr.payload_id();
-        let (tx, _) = oneshot::channel();
+    /// This is the same as [PayloadBuilderHandle::new_payload] but does not wait for the result and
+    /// returns the receiver instead
+    pub fn send_new_payload(
+        &self,
+        attr: PayloadBuilderAttributes,
+    ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>> {
+        let (tx, rx) = oneshot::channel();
         let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
-        id
+        rx
     }
 
     /// Starts building a new payload for the given payload attributes.
@@ -78,9 +81,7 @@ impl PayloadBuilderHandle {
         &self,
         attr: PayloadBuilderAttributes,
     ) -> Result<PayloadId, PayloadBuilderError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
-        rx.await?
+        self.send_new_payload(attr).await?
     }
 }
 

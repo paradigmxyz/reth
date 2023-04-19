@@ -23,14 +23,3 @@ pub mod stage;
 pub mod test_eth_chain;
 pub mod test_vectors;
 pub mod utils;
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, clap::ValueEnum)]
-enum StageEnum {
-    Headers,
-    Bodies,
-    Senders,
-    Execution,
-    Hashing,
-    Merkle,
-    TxLookup,
-}
