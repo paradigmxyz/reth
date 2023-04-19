@@ -2,9 +2,9 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::{get_secret_key, NetworkArgs},
+    args::{get_secret_key, NetworkArgs, StageEnum},
     dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath, SecretKeyPath},
-    prometheus_exporter, StageEnum,
+    prometheus_exporter,
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
