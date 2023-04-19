@@ -123,8 +123,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Returns the currently tracked block
     pub(crate) fn block_info(&self) -> BlockInfo {
         BlockInfo {
-            block_hash: self.all_transactions.current_block_hash,
-            block_number: self.all_transactions.current_block_number,
+            last_seen_block_hash: self.all_transactions.last_seen_block_hash,
+            last_seen_block_number: self.all_transactions.last_seen_block_number,
             next_base_fee: self.all_transactions.next_base_fee,
         }
     }
@@ -514,9 +514,9 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FnvHashMap<SenderId, usize>,
     /// The current block number the pool keeps track of.
-    current_block_number: u64,
+    last_seen_block_number: u64,
     /// The current block hash the pool keeps track of.
-    current_block_hash: H256,
+    last_seen_block_hash: H256,
     /// Expected base fee for the pending block.
     pending_basefee: u128,
 }
@@ -1029,8 +1029,8 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
-            current_block_number: 0,
-            current_block_hash: Default::default(),
+            last_seen_block_number: 0,
+            last_seen_block_hash: Default::default(),
             pending_basefee: Default::default(),
         }
     }
