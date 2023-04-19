@@ -53,7 +53,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         if range.is_empty() {
             return Ok(ExecOutput::done(*range.end()))
         }
-        let (start_block, end_block) = range.clone().into_inner();
+        let (start_block, end_block) = range.into_inner();
 
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 

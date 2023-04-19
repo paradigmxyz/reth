@@ -286,7 +286,7 @@ where
         }
 
         // Check if the provided range is the subset of the existing range.
-        let is_current_range_subset = self.download_range.contains(&range.start()) &&
+        let is_current_range_subset = self.download_range.contains(range.start()) &&
             *range.end() == *self.download_range.end();
         if is_current_range_subset {
             tracing::trace!(target: "downloaders::bodies", ?range, "Download range already in progress");
@@ -307,7 +307,7 @@ where
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
         self.clear();
-        self.download_range = range.clone();
+        self.download_range = range;
         Ok(())
     }
 }
@@ -608,7 +608,7 @@ mod tests {
 
     // Check that bodies are returned in correct order
     // after resetting the download range multiple times.
-    //#[tokio::test]
+    #[tokio::test]
     async fn streams_bodies_in_order_after_range_reset() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
