@@ -3,14 +3,13 @@ use crate::{
     forkid::ForkFilterKey,
     header::Head,
     proofs::genesis_state_root,
-    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
-    H160, H256, U256,
+    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header, H256, U256,
 };
 use hex_literal::hex;
 use once_cell::sync::Lazy;
-use revm_primitives::bitvec::macros::internal::funty::Fundamental;
+
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
@@ -257,24 +256,6 @@ impl ChainSpec {
 
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
-        let alloc = genesis
-            .alloc
-            .iter()
-            .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-            .collect::<HashMap<H160, GenesisAccount>>();
-
-        let genesis_block = Genesis {
-            config: genesis.config.clone(),
-            nonce: genesis.nonce.as_u64(),
-            timestamp: genesis.timestamp.as_u64(),
-            gas_limit: genesis.gas_limit.as_u64(),
-            difficulty: genesis.difficulty.into(),
-            mix_hash: genesis.mix_hash.0.into(),
-            coinbase: genesis.coinbase.0.into(),
-            extra_data: genesis.extra_data.0.into(),
-            alloc,
-        };
-
         // Block-based hardforks
         let hardfork_opts = vec![
             (Hardfork::Homestead, genesis.config.homestead_block),
@@ -317,12 +298,7 @@ impl From<Genesis> for ChainSpec {
 
         hardforks.extend(time_hardforks);
 
-        Self {
-            chain: genesis.config.chain_id.into(),
-            genesis: genesis_block,
-            genesis_hash: None,
-            hardforks,
-        }
+        Self { chain: genesis.config.chain_id.into(), genesis, genesis_hash: None, hardforks }
     }
 }
 
