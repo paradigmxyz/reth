@@ -120,12 +120,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Returns the currently tracked block
+    /// Returns the currently tracked block values
     pub(crate) fn block_info(&self) -> BlockInfo {
         BlockInfo {
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
-            next_base_fee: self.all_transactions.next_base_fee,
+            pending_base_fee: self.all_transactions.pending_basefee,
         }
     }
 
