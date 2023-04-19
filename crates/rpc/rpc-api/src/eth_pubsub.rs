@@ -6,7 +6,7 @@ use reth_rpc_types::pubsub::{Params, SubscriptionKind};
 pub trait EthPubSubApi {
     /// Create an ethereum subscription for the given params
     #[subscription(
-        name = "eth_subscribe",
+        name = "eth_subscribe" => "eth_subscription",
         unsubscribe = "eth_unsubscribe",
         item = reth_rpc_types::pubsub::SubscriptionResult
     )]

@@ -1,4 +1,17 @@
 //! Database debugging tool
+use crate::{
+    dirs::{DbPath, MaybePlatformPath, PlatformPath},
+    utils::DbTool,
+};
+use clap::Parser;
+use reth_db::{
+    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+};
+use reth_primitives::ChainSpec;
+use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
+use std::sync::Arc;
+use tracing::info;
+
 mod hashing_storage;
 use hashing_storage::dump_hashing_storage_stage;
 
@@ -11,17 +24,6 @@ use execution::dump_execution_stage;
 mod merkle;
 use merkle::dump_merkle_stage;
 
-use crate::{
-    dirs::{DbPath, PlatformPath},
-    utils::DbTool,
-};
-use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
-};
-use reth_staged_sync::utils::init::init_db;
-use tracing::info;
-
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
@@ -33,7 +35,24 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
+
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser
+    )]
+    chain: Arc<ChainSpec>,
 
     #[clap(subcommand)]
     command: Stages,
@@ -78,12 +97,15 @@ pub struct StageCommand {
 
 impl Command {
     /// Execute `dump-stage` command
-    pub async fn execute(&self) -> eyre::Result<()> {
-        std::fs::create_dir_all(&self.db)?;
+    pub async fn execute(self) -> eyre::Result<()> {
+        // add network name to db directory
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+
+        std::fs::create_dir_all(&db_path)?;
 
         // TODO: Auto-impl for Database trait
         let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            self.db.as_ref(),
+            db_path.as_ref(),
             reth_db::mdbx::EnvKind::RW,
         )?;
 
@@ -108,8 +130,8 @@ impl Command {
     }
 }
 
-/// Sets up the database and initial state on `BlockTransitionIndex`. Also returns the tip block
-/// number.
+/// Sets up the database and initial state on [`tables::BlockBodyIndices`]. Also returns the tip
+/// block number.
 pub(crate) fn setup<DB: Database>(
     from: u64,
     to: u64,
@@ -123,17 +145,15 @@ pub(crate) fn setup<DB: Database>(
     let output_db = init_db(output_db)?;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::BlockTransitionIndex, _>(
+        tx.import_table_with_range::<tables::BlockBodyIndices, _>(
             &db_tool.db.tx()?,
             Some(from - 1),
             to + 1,
         )
     })??;
 
-    let (tip_block_number, _) = db_tool
-        .db
-        .view(|tx| tx.cursor_read::<tables::BlockTransitionIndex>()?.last())??
-        .expect("some");
+    let (tip_block_number, _) =
+        db_tool.db.view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??.expect("some");
 
     Ok((output_db, tip_block_number))
 }

@@ -7,7 +7,8 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{
-    Account, Address, Bytecode, Receipt, StorageEntry, TransitionId, H256, U256,
+    bloom::logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, Bloom, Bytecode, Log,
+    Receipt, StorageEntry, TransitionId, H256, U256,
 };
 use std::collections::BTreeMap;
 
@@ -168,7 +169,7 @@ impl Change {
 /// Since most [PostState]s in reth are for multiple blocks it is better to pre-allocate capacity
 /// for receipts and changes, which [PostState::new] does, and thus it (or
 /// [PostState::with_tx_capacity]) should be preferred to using the [Default] implementation.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The ID of the current transition.
     current_transition_id: TransitionId,
@@ -204,7 +205,7 @@ const PREALLOC_CHANGES_SIZE: usize = 256 * BEST_GUESS_CHANGES_PER_TX;
 impl PostState {
     /// Create an empty [PostState].
     pub fn new() -> Self {
-        Self { changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE), ..Default::default() }
+        Self::default()
     }
 
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
@@ -262,9 +263,24 @@ impl PostState {
         &self.receipts
     }
 
+    /// Returns an iterator over all logs in this [PostState].
+    pub fn logs(&self) -> impl Iterator<Item = &Log> + '_ {
+        self.receipts().iter().flat_map(|r| r.logs.iter())
+    }
+
+    /// Returns the logs bloom for all recorded logs.
+    pub fn logs_bloom(&self) -> Bloom {
+        logs_bloom(self.logs())
+    }
+
+    /// Returns the receipt root for all recorded receipts.
+    pub fn receipts_root(&self) -> H256 {
+        calculate_receipt_root_ref(self.receipts().iter().map(Into::into))
+    }
+
     /// Get the number of transitions causing this [PostState]
-    pub fn transitions_count(&self) -> usize {
-        self.current_transition_id as usize
+    pub fn transitions_count(&self) -> TransitionId {
+        self.current_transition_id
     }
 
     /// Extend this [PostState] with the changes in another [PostState].
@@ -291,10 +307,10 @@ impl PostState {
     /// The reverted changes are removed from this post-state, and their effects are reverted.
     ///
     /// The reverted changes are returned.
-    pub fn revert_to(&mut self, transition_id: usize) -> Vec<Change> {
+    pub fn revert_to(&mut self, transition_id: TransitionId) -> Vec<Change> {
         let mut changes_to_revert = Vec::new();
         self.changes.retain(|change| {
-            if change.transition_id() >= transition_id as u64 {
+            if change.transition_id() >= transition_id {
                 changes_to_revert.push(change.clone());
                 false
             } else {
@@ -322,7 +338,7 @@ impl PostState {
     /// 1. This post-state has the changes reverted
     /// 2. The returned post-state does *not* have the changes reverted, but only contains the
     /// descriptions of the changes that were reverted in the first post-state.
-    pub fn split_at(&mut self, transition_id: usize) -> Self {
+    pub fn split_at(&mut self, transition_id: TransitionId) -> Self {
         // Clone ourselves
         let mut non_reverted_state = self.clone();
 
@@ -592,6 +608,19 @@ impl PostState {
         }
 
         Ok(())
+    }
+}
+
+impl Default for PostState {
+    fn default() -> Self {
+        Self {
+            current_transition_id: 0,
+            accounts: Default::default(),
+            storage: Default::default(),
+            changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE),
+            bytecode: Default::default(),
+            receipts: vec![],
+        }
     }
 }
 
@@ -913,7 +942,7 @@ mod tests {
         assert_eq!(state.transitions_count(), 2);
         assert_eq!(state.accounts().len(), 2);
 
-        let reverted_changes = state.revert_to(revert_to as usize);
+        let reverted_changes = state.revert_to(revert_to);
         assert_eq!(state.accounts().len(), 1);
         assert_eq!(state.transitions_count(), 1);
         assert_eq!(reverted_changes.len(), 1);

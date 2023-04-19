@@ -17,7 +17,11 @@ use reth_primitives::{
     TxLegacy, H256, U128, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
-use reth_revm::database::{State, SubState};
+use reth_revm::{
+    database::{State, SubState},
+    env::tx_env_with_recovered,
+    tracing::{TracingInspector, TracingInspectorConfig},
+};
 use reth_rpc_types::{
     state::StateOverride, CallRequest, Index, Log, Transaction, TransactionInfo,
     TransactionReceipt, TransactionRequest, TypedTransactionRequest,
@@ -37,7 +41,7 @@ pub trait EthTransactions: Send + Sync {
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
 
     /// Executes the closure with the state that corresponds to the given [BlockId].
-    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         F: FnOnce(StateProviderBox<'_>) -> EthResult<T>;
 
@@ -46,6 +50,12 @@ pub trait EthTransactions: Send + Sync {
     /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
     /// for.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
+
+    /// Get all transactions in the block with the given hash.
+    ///
+    /// Returns `None` if block does not exist.
+    async fn transactions_by_block(&self, block: H256)
+        -> EthResult<Option<Vec<TransactionSigned>>>;
 
     /// Returns the transaction by hash.
     ///
@@ -105,6 +115,29 @@ pub trait EthTransactions: Send + Sync {
     ) -> EthResult<(ResultAndState, Env)>
     where
         I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send;
+
+    /// Executes the transaction at the given [BlockId] with a tracer configured by the config.
+    /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
+    /// configured [Env] was inspected.
+    fn trace_at<F, R>(
+        &self,
+        env: Env,
+        config: TracingInspectorConfig,
+        at: BlockId,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>;
+
+    /// Retrieves the transaction if it exists and returns its trace
+    async fn trace_transaction<F, R>(
+        &self,
+        hash: H256,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send;
 }
 
 #[async_trait]
@@ -143,6 +176,13 @@ where
                 Ok((cfg, env, block_hash.into()))
             }
         }
+    }
+
+    async fn transactions_by_block(
+        &self,
+        block: H256,
+    ) -> EthResult<Option<Vec<TransactionSigned>>> {
+        Ok(self.cache().get_block_transactions(block).await?)
     }
 
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
@@ -339,6 +379,49 @@ where
         I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send,
     {
         self.with_call_at(request, at, state_overrides, |db, env| inspect(db, env, inspector)).await
+    }
+
+    fn trace_at<F, R>(
+        &self,
+        env: Env,
+        config: TracingInspectorConfig,
+        at: BlockId,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
+    {
+        self.with_state_at(at, |state| {
+            let db = SubState::new(State::new(state));
+
+            let mut inspector = TracingInspector::new(config);
+            let (res, _) = inspect(db, env, &mut inspector)?;
+
+            f(inspector, res)
+        })
+    }
+
+    async fn trace_transaction<F, R>(
+        &self,
+        hash: H256,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
+    {
+        let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+
+        let (cfg, block, at) = self.evm_env_at(at).await?;
+        let (tx, tx_info) = transaction.split();
+        let tx = tx_env_with_recovered(&tx);
+        let env = Env { cfg, block, tx };
+
+        // execute the trace
+        self.trace_at(env, config, at, move |insp, res| f(tx_info, insp, res)).map(Some)
     }
 }
 

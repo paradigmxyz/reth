@@ -10,6 +10,7 @@
 pub mod args;
 pub mod chain;
 pub mod cli;
+pub mod config;
 pub mod db;
 pub mod dirs;
 pub mod drop_stage;
@@ -31,4 +32,5 @@ enum StageEnum {
     Execution,
     Hashing,
     Merkle,
+    TxLookup,
 }

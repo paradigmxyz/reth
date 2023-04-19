@@ -1,15 +1,18 @@
 use crate::{mode::MiningMode, Storage};
-use futures_util::{future::BoxFuture, FutureExt};
+use futures_util::{future::BoxFuture, FutureExt, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_executor::executor::Executor;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
-    EMPTY_OMMER_ROOT, U256,
+    SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::StateProviderFactory;
-use reth_revm::database::{State, SubState};
+use reth_provider::{CanonStateNotificationSender, Chain, StateProviderFactory};
+use reth_revm::{
+    database::{State, SubState},
+    executor::Executor,
+};
+use reth_stages::{stages::FINISH, PipelineEvent};
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -20,7 +23,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
-use tracing::{trace, warn};
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::{debug, trace, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
 pub struct MiningTask<Client, Pool: TransactionPool> {
@@ -31,7 +35,7 @@ pub struct MiningTask<Client, Pool: TransactionPool> {
     /// The active miner
     miner: MiningMode,
     /// Single active future that inserts a new block into `storage`
-    insert_task: Option<BoxFuture<'static, ()>>,
+    insert_task: Option<BoxFuture<'static, Option<UnboundedReceiverStream<PipelineEvent>>>>,
     /// Shared storage to insert new blocks
     storage: Storage,
     /// Pool where transactions are stored
@@ -40,6 +44,10 @@ pub struct MiningTask<Client, Pool: TransactionPool> {
     queued: VecDeque<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>,
     /// TODO: ideally this would just be a sender of hashes
     to_engine: UnboundedSender<BeaconEngineMessage>,
+    /// Used to notify consumers of new blocks
+    canon_state_notification: CanonStateNotificationSender,
+    /// The pipeline events to listen on
+    pipe_line_events: Option<UnboundedReceiverStream<PipelineEvent>>,
 }
 
 // === impl MiningTask ===
@@ -50,6 +58,7 @@ impl<Client, Pool: TransactionPool> MiningTask<Client, Pool> {
         chain_spec: Arc<ChainSpec>,
         miner: MiningMode,
         to_engine: UnboundedSender<BeaconEngineMessage>,
+        canon_state_notification: CanonStateNotificationSender,
         storage: Storage,
         client: Client,
         pool: Pool,
@@ -62,8 +71,15 @@ impl<Client, Pool: TransactionPool> MiningTask<Client, Pool> {
             storage,
             pool,
             to_engine,
+            canon_state_notification,
             queued: Default::default(),
+            pipe_line_events: None,
         }
+    }
+
+    /// Sets the pipeline events to listen on.
+    pub fn set_pipeline_events(&mut self, events: UnboundedReceiverStream<PipelineEvent>) {
+        self.pipe_line_events = Some(events);
     }
 }
 
@@ -99,6 +115,11 @@ where
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
                 let pool = this.pool.clone();
+                let mut events = this.pipe_line_events.take();
+                let canon_state_notification = this.canon_state_notification.clone();
+
+                // Create the mining future that creates a block, notifies the engine that drives
+                // the pipeline
                 this.insert_task = Some(Box::pin(async move {
                     let mut storage = storage.write().await;
                     let mut header = Header {
@@ -110,7 +131,7 @@ where
                         receipts_root: Default::default(),
                         withdrawals_root: None,
                         logs_bloom: Default::default(),
-                        difficulty: Default::default(),
+                        difficulty: U256::from(1),
                         number: storage.best_block + 1,
                         gas_limit: 30_000_000,
                         gas_used: 0,
@@ -144,30 +165,35 @@ where
 
                     trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-                    match executor.execute_transactions(&block, U256::ZERO, None) {
-                        Ok((res, gas_used)) => {
+                    let senders = block
+                        .body
+                        .iter()
+                        .map(|tx| tx.recover_signer())
+                        .collect::<Option<Vec<_>>>()?;
+
+                    match executor.execute_transactions(&block, U256::ZERO, Some(senders.clone())) {
+                        Ok((post_state, gas_used)) => {
                             let Block { mut header, body, .. } = block;
 
                             // clear all transactions from pool
-                            // TODO this should happen automatically via events
                             pool.remove_transactions(body.iter().map(|tx| tx.hash));
 
-                            header.receipts_root = if res.receipts().is_empty() {
+                            header.receipts_root = if post_state.receipts().is_empty() {
                                 EMPTY_RECEIPTS
                             } else {
-                                let receipts_with_bloom = res
+                                let receipts_with_bloom = post_state
                                     .receipts()
                                     .iter()
                                     .map(|r| r.clone().into())
                                     .collect::<Vec<ReceiptWithBloom>>();
                                 proofs::calculate_receipt_root(receipts_with_bloom.iter())
                             };
-
+                            let transactions = body.clone();
                             let body =
                                 BlockBody { transactions: body, ommers: vec![], withdrawals: None };
                             header.gas_used = gas_used;
 
-                            storage.insert_new_block(header, body);
+                            storage.insert_new_block(header.clone(), body);
 
                             let new_hash = storage.best_hash;
                             let state = ForkchoiceState {
@@ -175,25 +201,68 @@ where
                                 finalized_block_hash: new_hash,
                                 safe_block_hash: new_hash,
                             };
+                            drop(storage);
 
-                            trace!(target: "consensus::auto", ?state, "sending fork choice update");
+                            // send the new update to the engine, this will trigger the pipeline to
+                            // download the block, execute it and store it in the database.
                             let (tx, _rx) = oneshot::channel();
                             let _ = to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
                                 state,
                                 payload_attrs: None,
                                 tx,
                             });
+                            debug!(target: "consensus::auto", ?state, "sent fork choice update");
+
+                            // wait for the pipeline to finish
+                            if let Some(events) = events.as_mut() {
+                                debug!(target: "consensus::auto", "waiting for finish stage event...");
+                                // wait for the finish stage to
+                                loop {
+                                    if let Some(PipelineEvent::Running { stage_id, .. }) =
+                                        events.next().await
+                                    {
+                                        if stage_id == FINISH {
+                                            debug!(target: "consensus::auto", "received finish stage event");
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+
+                            // seal the block
+                            let block = Block {
+                                header,
+                                body: transactions,
+                                ommers: vec![],
+                                withdrawals: None,
+                            };
+                            let sealed_block = block.seal_slow();
+                            let sealed_block_with_senders =
+                                SealedBlockWithSenders::new(sealed_block, senders)
+                                    .expect("senders are valid");
+                            debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
+
+                            let chain =
+                                Arc::new(Chain::new(vec![(sealed_block_with_senders, post_state)]));
+
+                            // send block notification
+                            let _ = canon_state_notification
+                                .send(reth_provider::CanonStateNotification::Commit { new: chain });
                         }
                         Err(err) => {
                             warn!(target: "consensus::auto", ?err, "failed to execute block")
                         }
                     }
+
+                    events
                 }));
             }
 
             if let Some(mut fut) = this.insert_task.take() {
                 match fut.poll_unpin(cx) {
-                    Poll::Ready(_) => {}
+                    Poll::Ready(events) => {
+                        this.pipe_line_events = events;
+                    }
                     Poll::Pending => {
                         this.insert_task = Some(fut);
                         break

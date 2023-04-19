@@ -9,7 +9,7 @@ use reth_primitives::{
     Receipt, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256,
     KECCAK_EMPTY, U256,
 };
-use revm_primitives::{BlockEnv, CfgEnv};
+use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
 
 /// Supports various api interfaces for testing purposes.
@@ -49,6 +49,10 @@ impl BlockProvider for NoopProvider {
 }
 
 impl TransactionsProvider for NoopProvider {
+    fn transaction_id(&self, _tx_hash: TxHash) -> Result<Option<TxNumber>> {
+        Ok(None)
+    }
+
     fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
         Ok(None)
     }

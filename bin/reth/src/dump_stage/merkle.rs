@@ -28,10 +28,14 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
     })??;
 
     let tx = db_tool.db.tx()?;
-    let from_transition_rev =
-        tx.get::<tables::BlockTransitionIndex>(from)?.expect("there should be at least one.");
-    let to_transition_rev =
-        tx.get::<tables::BlockTransitionIndex>(to)?.expect("there should be at least one.");
+    let from_transition_rev = tx
+        .get::<tables::BlockBodyIndices>(from)?
+        .expect("there should be at least one.")
+        .transition_at_block();
+    let to_transition_rev = tx
+        .get::<tables::BlockBodyIndices>(to)?
+        .expect("there should be at least one.")
+        .transition_after_block();
 
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::AccountChangeSet, _>(
@@ -73,7 +77,7 @@ async fn unwind_and_copy<DB: Database>(
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage =
-        ExecutionStage::new(reth_executor::Factory::new(Arc::new(MAINNET.clone())), u64::MAX);
+        ExecutionStage::new(reth_revm::Factory::new(Arc::new(MAINNET.clone())), u64::MAX);
 
     exec_stage
         .unwind(

@@ -1,6 +1,6 @@
 //! Database debugging tool
 use crate::{
-    dirs::{DbPath, PlatformPath},
+    dirs::{DbPath, MaybePlatformPath},
     utils::DbTool,
 };
 use clap::{Parser, Subcommand};
@@ -8,6 +8,9 @@ use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use reth_db::{database::Database, tables};
+use reth_primitives::ChainSpec;
+use reth_staged_sync::utils::chainspec::genesis_value_parser;
+use std::sync::Arc;
 use tracing::error;
 
 /// DB List TUI
@@ -24,7 +27,24 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(global = true, long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
+
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser
+    )]
+    chain: Arc<ChainSpec>,
 
     #[clap(subcommand)]
     command: Subcommands,
@@ -64,12 +84,15 @@ pub struct ListArgs {
 
 impl Command {
     /// Execute `db` command
-    pub async fn execute(&self) -> eyre::Result<()> {
-        std::fs::create_dir_all(&self.db)?;
+    pub async fn execute(self) -> eyre::Result<()> {
+        // add network name to db directory
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+
+        std::fs::create_dir_all(&db_path)?;
 
         // TODO: Auto-impl for Database trait
         let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            self.db.as_ref(),
+            db_path.as_ref(),
             reth_db::mdbx::EnvKind::RW,
         )?;
 
@@ -164,7 +187,7 @@ impl Command {
                     HeaderTD,
                     HeaderNumbers,
                     Headers,
-                    BlockBodies,
+                    BlockBodyIndices,
                     BlockOmmers,
                     BlockWithdrawals,
                     TransactionBlock,
@@ -174,8 +197,6 @@ impl Command {
                     PlainStorageState,
                     PlainAccountState,
                     Bytecodes,
-                    BlockTransitionIndex,
-                    TxTransitionIndex,
                     AccountHistory,
                     StorageHistory,
                     AccountChangeSet,
@@ -190,7 +211,7 @@ impl Command {
                 ]);
             }
             Subcommands::Drop => {
-                tool.drop(&self.db)?;
+                tool.drop(self.db.unwrap_or_chain_default(self.chain.chain))?;
             }
         }
 

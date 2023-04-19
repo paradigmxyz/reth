@@ -4,7 +4,8 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_network::{config::rng_secret_key, NetworkConfigBuilder, PeersConfig};
+use reth_network::{NetworkConfigBuilder, PeersConfig};
+use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -25,15 +26,17 @@ impl Config {
         &self,
         nat_resolution_method: reth_net_nat::NatResolver,
         peers_file: Option<PathBuf>,
+        secret_key: SecretKey,
     ) -> NetworkConfigBuilder {
         let peer_config = self
             .peers
             .clone()
             .with_basic_nodes_from_file(peers_file)
             .unwrap_or_else(|_| self.peers.clone());
+
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(rng_secret_key()).peer_config(peer_config).discovery(discv4)
+        NetworkConfigBuilder::new(secret_key).peer_config(peer_config).discovery(discv4)
     }
 }
 

@@ -185,9 +185,6 @@ where
     ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
 
-        // TODO(mattsse): this is where additional validate checks would go, like banned senders
-        // etc...
-
         let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
 
         (hash, outcome)

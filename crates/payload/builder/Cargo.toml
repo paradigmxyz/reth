@@ -1,0 +1,35 @@
+[package]
+name = "reth-payload-builder"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "reth payload builder"
+
+[dependencies]
+## reth
+reth-primitives = { path = "../../primitives" }
+reth-rpc-types = { path = "../../rpc/rpc-types" }
+reth-rlp = { path = "../../rlp" }
+reth-interfaces = { path = "../../interfaces" }
+reth-consensus-common = { path = "../../consensus/common" }
+reth-revm-primitives = { path = "../../revm/revm-primitives" }
+
+## ethereum
+revm-primitives = "1.1"
+
+## async
+tokio = { version = "1", features = ["sync"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+futures-core = "0.3"
+
+## misc
+thiserror = "1.0"
+sha2 = { version = "0.10", default-features = false }
+tracing = "0.1.37"
+
+
+[features]
+test-utils = []

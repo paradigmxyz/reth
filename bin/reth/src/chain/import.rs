@@ -1,5 +1,5 @@
 use crate::{
-    dirs::{ConfigPath, DbPath, PlatformPath},
+    dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath},
     node::events::{handle_events, NodeEvent},
 };
 use clap::{crate_version, Parser};
@@ -14,7 +14,7 @@ use reth_downloaders::{
 use reth_interfaces::{
     consensus::Consensus, p2p::headers::client::NoopStatusUpdater, sync::SyncStateUpdater,
 };
-use reth_primitives::{ChainSpec, H256};
+use reth_primitives::{Chain, ChainSpec, H256};
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -35,7 +35,7 @@ use tracing::{debug, info};
 pub struct ImportCommand {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: PlatformPath<ConfigPath>,
+    config: MaybePlatformPath<ConfigPath>,
 
     /// The path to the database folder.
     ///
@@ -45,7 +45,7 @@ pub struct ImportCommand {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
 
     /// The chain this node is running.
     ///
@@ -77,11 +77,14 @@ impl ImportCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
-        let config: Config = self.load_config()?;
-        info!(target: "reth::cli", path = %self.db, "Configuration loaded");
+        let config: Config = self.load_config_with_chain(self.chain.chain)?;
+        info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
 
-        info!(target: "reth::cli", path = %self.db, "Opening database");
-        let db = Arc::new(init_db(&self.db)?);
+        // add network name to db directory
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+
+        info!(target: "reth::cli", path = ?db_path, "Opening database");
+        let db = Arc::new(init_db(db_path)?);
         info!(target: "reth::cli", "Database opened");
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
@@ -138,7 +141,7 @@ impl ImportCommand {
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
-        let factory = reth_executor::Factory::new(self.chain.clone());
+        let factory = reth_revm::Factory::new(self.chain.clone());
 
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
@@ -169,8 +172,12 @@ impl ImportCommand {
         Ok((pipeline, events))
     }
 
-    fn load_config(&self) -> eyre::Result<Config> {
-        confy::load_path::<Config>(&self.config).wrap_err("Could not load config")
+    /// Loads the reth config based on the intended chain
+    fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
+        // add network name to config directory
+        let config_path = self.config.unwrap_or_chain_default(chain);
+        confy::load_path::<Config>(config_path.clone())
+            .wrap_err_with(|| format!("Could not load config file {}", config_path))
     }
 }
 

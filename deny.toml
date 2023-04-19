@@ -4,6 +4,7 @@
 [advisories]
 vulnerability = "deny"
 unmaintained = "warn"
+unsound = "warn"
 yanked = "warn"
 notice = "warn"
 
@@ -32,19 +33,26 @@ skip-tree = []
 
 [licenses]
 unlicensed = "deny"
+confidence-threshold = 0.9
+# copyleft = "deny"
+
 # List of explicitly allowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.7 short identifier (+ optional exception)].
 allow = [
     "MIT",
+    "MIT-0",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
     "Unicode-DFS-2016",
-    "OpenSSL",
-    "Unlicense"
+    "Unlicense",
+    # https://github.com/briansmith/ring/issues/902
+    "LicenseRef-ring",
+    # https://github.com/briansmith/webpki/issues/148
+    "LicenseRef-webpki",
 ]
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
@@ -57,30 +65,17 @@ exceptions = [
     { allow = ["CC0-1.0"], name = "secp256k1-sys" },
     { allow = ["CC0-1.0"], name = "tiny-keccak" },
     { allow = ["CC0-1.0"], name = "more-asserts" },
-    # MIT with no attribution https://choosealicense.com/licenses/mit-0/
-    { allow = ["MIT-0"], name = "dunce" },
-
-    # TODO: ethers transitive deps
-    { allow = ["GPL-3.0"], name = "fastrlp" },
-    { allow = ["GPL-3.0"], name = "fastrlp-derive" },
 ]
-#copyleft = "deny"
 
-# See note in unicode-ident's readme!
-[[licenses.clarify]]
-name = "unicode-ident"
-version = "*"
-expression = "(MIT OR Apache-2.0) AND Unicode-DFS-2016"
-license-files = [
-    { path = "LICENSE-UNICODE", hash = 0x3fb01745 }
-]
 [[licenses.clarify]]
 name = "ring"
-version = "*"
-expression = "OpenSSL"
-license-files = [
-    { path = "LICENSE", hash = 0xbd0eed23 }
-]
+expression = "LicenseRef-ring"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[[licenses.clarify]]
+name = "webpki"
+expression = "LicenseRef-webpki"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 
 # This section is considered when running `cargo deny check sources`.
 # More documentation about the 'sources' section can be found here:

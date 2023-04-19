@@ -68,11 +68,9 @@ impl_iai!(
     HeaderTD,
     HeaderNumbers,
     Headers,
-    BlockBodies,
+    BlockBodyIndices,
     BlockOmmers,
     TxHashNumber,
-    BlockTransitionIndex,
-    TxTransitionIndex,
     Transactions,
     PlainStorageState,
     PlainAccountState

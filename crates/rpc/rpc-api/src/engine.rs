@@ -1,8 +1,8 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::{BlockHash, H64, U64};
+use reth_primitives::{BlockHash, U64};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceState, ForkchoiceUpdated,
-    PayloadAttributes, PayloadStatus, TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBodies, ExecutionPayloadEnvelope, ForkchoiceState,
+    ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
 };
 
 #[cfg_attr(not(feature = "client"), rpc(server))]
@@ -37,13 +37,23 @@ pub trait EngineApi {
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
     ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
     /// Caution: This should not return the `withdrawals` field
+    ///
+    /// Note:
+    /// > Client software MAY stop the corresponding build process after serving this call.
     #[method(name = "engine_getPayloadV1")]
-    async fn get_payload_v1(&self, payload_id: H64) -> Result<ExecutionPayload>;
+    async fn get_payload_v1(&self, payload_id: PayloadId) -> Result<ExecutionPayload>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_getpayloadv2>
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call. Note:
+    /// > Client software MAY stop the corresponding build process after serving this call.
     #[method(name = "engine_getPayloadV2")]
-    async fn get_payload_v2(&self, payload_id: H64) -> Result<ExecutionPayload>;
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> Result<ExecutionPayloadEnvelope>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "engine_getPayloadBodiesByHashV1")]

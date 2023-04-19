@@ -6,7 +6,7 @@ use reth_db::{
         tx::Tx,
         Env, EnvKind, WriteMap, RW,
     },
-    models::{AccountBeforeTx, StoredBlockBody},
+    models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -230,25 +230,25 @@ impl TestTransaction {
         I: Iterator<Item = &'a SealedBlock>,
     {
         self.commit(|tx| {
-            let mut current_tx_id = tx_offset.unwrap_or_default();
+            let mut next_tx_num = tx_offset.unwrap_or_default();
 
             blocks.into_iter().try_for_each(|block| {
                 Self::insert_header(tx, &block.header)?;
                 // Insert into body tables.
-                tx.put::<tables::BlockBodies>(
+                tx.put::<tables::BlockBodyIndices>(
                     block.number,
-                    StoredBlockBody {
-                        start_tx_id: current_tx_id,
+                    StoredBlockBodyIndices {
+                        first_tx_num: next_tx_num,
+                        first_transition_id: next_tx_num,
                         tx_count: block.body.len() as u64,
+                        has_block_change: false,
                     },
                 )?;
                 block.body.iter().try_for_each(|body_tx| {
-                    tx.put::<tables::TxTransitionIndex>(current_tx_id, current_tx_id)?;
-                    tx.put::<tables::Transactions>(current_tx_id, body_tx.clone())?;
-                    current_tx_id += 1;
+                    tx.put::<tables::Transactions>(next_tx_num, body_tx.clone())?;
+                    next_tx_num += 1;
                     Ok(())
-                })?;
-                tx.put::<tables::BlockTransitionIndex>(block.number, current_tx_id)
+                })
             })
         })
     }

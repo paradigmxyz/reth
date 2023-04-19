@@ -1,0 +1,39 @@
+[package]
+name = "reth-blockchain-tree"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine",
+]
+
+[dependencies]
+# reth 
+reth-primitives = { path = "../primitives" }
+reth-interfaces = { path = "../interfaces" }
+reth-db = { path = "../storage/db" }
+reth-provider = { path = "../storage/provider" }
+
+# common
+parking_lot = { version = "0.12"}
+
+# mics
+aquamarine = "0.3.0"
+
+
+[dev-dependencies]
+reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
+reth-primitives = { path = "../primitives", features = ["test-utils"] }
+reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
+parking_lot = "0.12"
+assert_matches = "1.5"
+tokio = { version = "1", features = ["macros", "sync"] }
+
+[features]
+test-utils = []

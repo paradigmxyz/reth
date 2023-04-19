@@ -1,7 +1,7 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{collections::HashMap, fmt, sync::Arc};
@@ -313,6 +313,11 @@ pub trait PoolTransaction:
 
     /// Returns the transaction type
     fn tx_type(&self) -> u8;
+
+    /// Returns true if the transaction is an EIP-1559 transaction.
+    fn is_eip1559(&self) -> bool {
+        self.tx_type() == EIP1559_TX_TYPE_ID
+    }
 
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize;

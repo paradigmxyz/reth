@@ -1,10 +1,33 @@
 //! Ethereum protocol-related constants
 
-use crate::H256;
+use crate::{H256, U256};
 use hex_literal::hex;
+use std::time::Duration;
+
+/// The client version: `reth/v{major}.{minor}.{patch}`
+pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
 
 /// The first four bytes of the call data for a function call specifies the function to be called.
 pub const SELECTOR_LEN: usize = 4;
+
+/// The duration of a slot in seconds.
+///
+/// This is the time period of 12 seconds in which a randomly chosen validator has time to propose a
+/// block.
+pub const SLOT_DURATION: Duration = Duration::from_secs(12);
+
+/// An EPOCH is a series of 32 slots (~6.4min).
+pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * 32);
+
+/// The minimal value the basefee can decrease to.
+///
+/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%.
+/// Once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less
+/// than 1.
+pub const MIN_PROTOCOL_BASE_FEE: u128 = 7;
+
+/// Same as [MIN_PROTOCOL_BASE_FEE] but as a U256.
+pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
 
 /// Initial base fee as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_INITIAL_BASE_FEE: u64 = 1_000_000_000;
@@ -56,3 +79,13 @@ pub const EMPTY_TRANSACTIONS: H256 = EMPTY_SET_HASH;
 
 /// Withdrawals root of empty withdrawals set.
 pub const EMPTY_WITHDRAWALS: H256 = EMPTY_SET_HASH;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn min_protocol_sanity() {
+        assert_eq!(MIN_PROTOCOL_BASE_FEE_U256.to::<u128>(), MIN_PROTOCOL_BASE_FEE);
+    }
+}

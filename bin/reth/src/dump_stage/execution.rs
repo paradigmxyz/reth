@@ -52,7 +52,7 @@ fn import_tables_with_range<DB: Database>(
         tx.import_table_with_range::<tables::Headers, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::BlockBodies, _>(&db_tool.db.tx()?, Some(from), to)
+        tx.import_table_with_range::<tables::BlockBodyIndices, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockOmmers, _>(&db_tool.db.tx()?, Some(from), to)
@@ -60,15 +60,15 @@ fn import_tables_with_range<DB: Database>(
 
     // Find range of transactions that need to be copied over
     let (from_tx, to_tx) = db_tool.db.view(|read_tx| {
-        let mut read_cursor = read_tx.cursor_read::<tables::BlockBodies>()?;
+        let mut read_cursor = read_tx.cursor_read::<tables::BlockBodyIndices>()?;
         let (_, from_block) =
             read_cursor.seek(from)?.ok_or(eyre::eyre!("BlockBody {from} does not exist."))?;
         let (_, to_block) =
             read_cursor.seek(to)?.ok_or(eyre::eyre!("BlockBody {to} does not exist."))?;
 
         Ok::<(u64, u64), eyre::ErrReport>((
-            from_block.start_tx_id,
-            to_block.start_tx_id + to_block.tx_count,
+            from_block.first_tx_num,
+            to_block.first_tx_num + to_block.tx_count,
         ))
     })??;
 
@@ -99,7 +99,7 @@ async fn unwind_and_copy<DB: Database>(
     let mut unwind_tx = Transaction::new(db_tool.db)?;
 
     let mut exec_stage =
-        ExecutionStage::new_with_factory(reth_executor::Factory::new(Arc::new(MAINNET.clone())));
+        ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
 
     exec_stage
         .unwind(
@@ -129,7 +129,7 @@ async fn dry_run(
 
     let mut tx = Transaction::new(&output_db)?;
     let mut exec_stage =
-        ExecutionStage::new_with_factory(reth_executor::Factory::new(Arc::new(MAINNET.clone())));
+        ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
 
     exec_stage
         .execute(

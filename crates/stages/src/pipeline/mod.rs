@@ -134,8 +134,11 @@ where
     }
 
     /// Set tip for reverse sync.
+    #[track_caller]
     pub fn set_tip(&self, tip: H256) {
-        self.tip_tx.as_ref().expect("tip sender is set").send(tip).expect("tip channel closed");
+        let _ = self.tip_tx.as_ref().expect("tip sender is set").send(tip).map_err(|_| {
+            warn!(target: "sync::pipeline", "tip channel closed");
+        });
     }
 
     /// Listen for events on the pipeline.
@@ -157,11 +160,11 @@ where
     }
 
     /// Consume the pipeline and run it. Return the pipeline and its result as a future.
+    #[track_caller]
     pub fn run_as_fut(mut self, db: Arc<DB>, tip: H256) -> PipelineFut<DB, U> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         self.register_metrics(db.clone());
-
         Box::pin(async move {
             self.set_tip(tip);
             let result = self.run_loop(db).await;
@@ -212,8 +215,11 @@ where
 
             // Update sync state
             if let Some(ref updater) = self.sync_state_updater {
-                let state = self.progress.current_sync_state(stage_id.is_downloading_stage());
-                updater.update_sync_state(state);
+                if stage_id.is_finish() {
+                    updater.update_sync_state(SyncState::Idle);
+                } else {
+                    updater.update_sync_state(SyncState::Syncing);
+                }
             }
 
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
@@ -221,6 +227,8 @@ where
                 .execute_stage_to_completion(db.as_ref(), previous_stage, stage_index)
                 .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
+
+            trace!(target: "sync::pipeline", stage = %stage_id, ?next, "Completed stage");
 
             match next {
                 ControlFlow::NoProgress { stage_progress } => {
@@ -232,7 +240,7 @@ where
                 ControlFlow::Unwind { target, bad_block } => {
                     // reset the sync state
                     if let Some(ref updater) = self.sync_state_updater {
-                        updater.update_sync_state(SyncState::Downloading { target_block: target });
+                        updater.update_sync_state(SyncState::Syncing);
                     }
                     self.unwind(db.as_ref(), target, bad_block).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
@@ -428,20 +436,6 @@ mod tests {
         progress.update(1);
         assert_eq!(progress.minimum_progress, Some(1));
         assert_eq!(progress.maximum_progress, Some(20));
-    }
-
-    #[test]
-    fn sync_states() {
-        let mut progress = PipelineProgress::default();
-
-        // no progress, so we're idle
-        assert_eq!(progress.current_sync_state(false), SyncState::Idle);
-        assert_eq!(progress.current_sync_state(true), SyncState::Idle);
-
-        // progress and downloading/executing
-        progress.update(1);
-        assert_eq!(progress.current_sync_state(true), SyncState::Downloading { target_block: 1 });
-        assert_eq!(progress.current_sync_state(false), SyncState::Executing { target_block: 1 });
     }
 
     #[test]
@@ -730,15 +724,15 @@ mod tests {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
         let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
             .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
-                StageError::DatabaseIntegrity(ProviderError::BlockBody { number: 5 }),
+                StageError::DatabaseIntegrity(ProviderError::BlockBodyIndices { number: 5 }),
             )))
             .build();
         let result = pipeline.run(db).await;
         assert_matches!(
             result,
-            Err(PipelineError::Stage(StageError::DatabaseIntegrity(ProviderError::BlockBody {
-                number: 5
-            })))
+            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
+                ProviderError::BlockBodyIndices { number: 5 }
+            )))
         );
     }
 }

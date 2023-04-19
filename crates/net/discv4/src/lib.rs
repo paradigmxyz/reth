@@ -1408,12 +1408,14 @@ impl Discv4Service {
 
             // trigger self lookup
             if self.config.enable_lookup && self.lookup_interval.poll_tick(cx).is_ready() {
+                let _ = self.lookup_interval.poll_tick(cx);
                 let target = self.lookup_rotator.next(&self.local_node_record.id);
                 self.lookup_with(target, None);
             }
 
             // re-ping some peers
             if self.ping_interval.poll_tick(cx).is_ready() {
+                let _ = self.ping_interval.poll_tick(cx);
                 self.re_ping_oldest();
             }
 

@@ -45,18 +45,24 @@ pub trait TransactionValidator: Send + Sync {
     /// This will be used by the transaction-pool to check whether the transaction should be
     /// inserted into the pool or discarded right away.
     ///
-    ///
-    /// Implementers of this trait must ensure that the transaction is correct, i.e. that it
-    /// complies with at least all static constraints, which includes checking for:
+    /// Implementers of this trait must ensure that the transaction is well-formed, i.e. that it
+    /// complies at least all static constraints, which includes checking for:
     ///
     ///    * chain id
     ///    * gas limit
     ///    * max cost
     ///    * nonce >= next nonce of the sender
+    ///    * ...
     ///
-    /// The transaction pool makes no assumptions about the validity of the transaction at the time
-    /// of this call before it inserts it. However, the validity of this transaction is still
-    /// subject to future changes enforced by the pool, for example nonce changes.
+    /// See [InvalidTransactionError](InvalidTransactionError) for common errors variants.
+    ///
+    /// The transaction pool makes no additional assumptions about the validity of the transaction
+    /// at the time of this call before it inserts it into the pool. However, the validity of
+    /// this transaction is still subject to future (dynamic) changes enforced by the pool, for
+    /// example nonce or balance changes. Hence, any validation checks must be applied in this
+    /// function.
+    ///
+    /// See [EthTransactionValidator] for a reference implementation.
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
@@ -96,9 +102,9 @@ pub struct EthTransactionValidator<Client, T> {
     /// Fork indicator whether we are using EIP-1559 type transactions.
     eip1559: bool,
     /// The current max gas limit
-    current_max_gas_limit: u64,
-    /// Current base fee.
-    base_fee: Option<u128>,
+    block_gas_limit: u64,
+    /// Minimum priority fee to enforce for acceptance into the pool.
+    minimum_priority_fee: Option<u128>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
 }
@@ -116,8 +122,8 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
             shanghai: true,
             eip2718: true,
             eip1559: true,
-            current_max_gas_limit: 30_000_000,
-            base_fee: None,
+            block_gas_limit: 30_000_000,
+            minimum_priority_fee: None,
             _marker: Default::default(),
         }
     }
@@ -191,11 +197,11 @@ where
         }
 
         // Checks for gas limit
-        if transaction.gas_limit() > self.current_max_gas_limit {
+        if transaction.gas_limit() > self.block_gas_limit {
             let gas_limit = transaction.gas_limit();
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.current_max_gas_limit),
+                InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.block_gas_limit),
             )
         }
 
@@ -207,11 +213,15 @@ where
             )
         }
 
-        // Drop non-local transactions under our own minimal accepted gas price or tip
-        if !origin.is_local() && transaction.max_fee_per_gas() < self.base_fee {
+        // Drop non-local transactions with a fee lower than the configured fee for acceptance into
+        // the pool.
+        if !origin.is_local() &&
+            transaction.is_eip1559() &&
+            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::MaxFeeLessThenBaseFee.into(),
+                InvalidPoolTransactionError::Underpriced,
             )
         }
 
@@ -253,11 +263,11 @@ where
 
         // Checks for max cost
         if transaction.cost() > account.balance {
-            let max_fee = transaction.max_fee_per_gas().unwrap_or_default();
+            let cost = transaction.cost();
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::InsufficientFunds {
-                    max_fee,
+                    cost,
                     available_funds: account.balance,
                 }
                 .into(),

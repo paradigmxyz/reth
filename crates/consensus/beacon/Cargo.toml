@@ -7,7 +7,7 @@ repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [dependencies]
-# reth 
+# reth
 reth-consensus-common = { path = "../common" }
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
@@ -15,6 +15,8 @@ reth-stages = { path = "../../stages" }
 reth-db = { path = "../../storage/db" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-tasks = { path = "../../tasks" }
+reth-payload-builder = { path = "../../payload/builder" }
+reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }
@@ -24,12 +26,14 @@ futures = "0.3"
 # misc
 tracing = "0.1"
 thiserror = "1.0"
+metrics = "0.20.1"
 
 [dev-dependencies]
 # reth
+reth-payload-builder = { path = "../../payload/builder", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 reth-stages = { path = "../../stages", features = ["test-utils"] }
-reth-executor = { path = "../../executor", features = ["test-utils"] }
+reth-blockchain-tree = { path = "../../blockchain-tree", features = ["test-utils"] }
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }

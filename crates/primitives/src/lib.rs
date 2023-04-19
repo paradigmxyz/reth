@@ -31,6 +31,7 @@ mod peer;
 mod receipt;
 mod storage;
 mod transaction;
+pub mod trie;
 mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
@@ -40,7 +41,7 @@ pub use account::{Account, Bytecode};
 pub use bits::H512;
 pub use block::{
     Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
-    SealedBlock, SealedBlockWithSenders,
+    ForkBlock, SealedBlock, SealedBlockWithSenders,
 };
 pub use bloom::Bloom;
 pub use chain::{
@@ -63,10 +64,10 @@ pub use net::{
     SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
-pub use receipt::{Receipt, ReceiptWithBloom};
+pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
-pub use storage::{StorageEntry, StorageTrieEntry};
+pub use storage::StorageEntry;
 pub use transaction::{
     util::secp256k1::sign_message, AccessList, AccessListItem, AccessListWithGasUsed,
     FromRecoveredTransaction, IntoRecoveredTransaction, InvalidTransactionError, Signature,
@@ -86,6 +87,8 @@ pub type Address = H160;
 pub type TxHash = H256;
 /// The sequence number of all existing transactions.
 pub type TxNumber = u64;
+/// The index of transaction in a block.
+pub type TxIndex = u64;
 /// Chain identifier type (introduced in EIP-155).
 pub type ChainId = u64;
 /// An account storage key.
@@ -94,13 +97,17 @@ pub type StorageKey = H256;
 pub type StorageValue = U256;
 /// The ID of block/transaction transition (represents state transition)
 pub type TransitionId = u64;
+/// Solidity contract functions are addressed using the first four byte of the Keccak-256 hash of
+/// their signature
+pub type Selector = [u8; 4];
 
 pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, H128, H64, U64},
     utils as rpc_utils,
 };
-pub use revm_primitives::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
+pub use revm_primitives::{B160 as H160, B256 as H256, U256};
+pub use ruint::{aliases::U128, UintTryTo};
 
 #[doc(hidden)]
 mod __reexport {

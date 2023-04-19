@@ -10,7 +10,7 @@ use reth_primitives::{
     Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TxHash, TxNumber, H256, U256,
 };
-use revm_primitives::{BlockEnv, CfgEnv};
+use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::RangeBounds,
@@ -139,11 +139,12 @@ impl HeaderProvider for MockEthProvider {
 }
 
 impl TransactionsProvider for MockEthProvider {
-    fn transaction_by_id(
-        &self,
-        _id: reth_primitives::TxNumber,
-    ) -> Result<Option<TransactionSigned>> {
-        unimplemented!()
+    fn transaction_id(&self, _tx_hash: TxHash) -> Result<Option<TxNumber>> {
+        todo!()
+    }
+
+    fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
+        Ok(None)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {

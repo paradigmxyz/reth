@@ -1,4 +1,5 @@
 //! reth data directories.
+use reth_primitives::Chain;
 use reth_staged_sync::utils::parse_path;
 use std::{
     env::VarError,
@@ -6,6 +7,19 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
+
+/// Constructs a string to be used as a path for configuration and db paths.
+pub fn config_path_prefix(chain: Chain) -> String {
+    if chain == Chain::mainnet() {
+        "mainnet".to_string()
+    } else if chain == Chain::goerli() {
+        "goerli".to_string()
+    } else if chain == Chain::sepolia() {
+        "sepolia".to_string()
+    } else {
+        chain.id().to_string()
+    }
+}
 
 /// Returns the path to the reth data directory.
 ///
@@ -54,6 +68,13 @@ pub fn jwt_secret_dir() -> Option<PathBuf> {
 /// Refer to [dirs_next::data_dir]
 pub fn net_dir() -> Option<PathBuf> {
     data_dir().map(|root| root.join("net"))
+}
+
+/// Returns the path to the reth secret key directory.
+///
+/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+pub fn p2p_secret_key_dir() -> Option<PathBuf> {
+    data_dir().map(|root| root.join("p2p"))
 }
 
 /// Returns the path to the reth database.
@@ -121,6 +142,19 @@ impl XdgPath for LogsDir {
     }
 }
 
+/// Returns the path to the default reth secret key directory.
+///
+/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+#[derive(Default, Debug, Clone)]
+#[non_exhaustive]
+pub struct SecretKeyPath;
+
+impl XdgPath for SecretKeyPath {
+    fn resolve() -> Option<PathBuf> {
+        p2p_secret_key_dir().map(|p| p.join("secret"))
+    }
+}
+
 /// A small helper trait for unit structs that represent a standard path following the XDG
 /// path specification.
 pub trait XdgPath {
@@ -147,12 +181,18 @@ pub trait XdgPath {
 ///
 /// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct PlatformPath<D>(PathBuf, std::marker::PhantomData<D>);
 
 impl<D> Display for PlatformPath<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.display())
+    }
+}
+
+impl<D> Clone for PlatformPath<D> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), std::marker::PhantomData)
     }
 }
 
@@ -182,5 +222,145 @@ impl<D> AsRef<Path> for PlatformPath<D> {
 impl<D> From<PlatformPath<D>> for PathBuf {
     fn from(value: PlatformPath<D>) -> Self {
         value.0
+    }
+}
+
+impl<D> PlatformPath<D> {
+    /// Returns the path joined with another path
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> PathBuf {
+        self.0.join(path)
+    }
+}
+
+impl<D> PlatformPath<D> {
+    /// Converts the path to a `ChainPath` with the given `Chain`.
+    ///
+    /// If the inner path type refers to a file, the chain will be inserted between the parent
+    /// directory and the file name. If the inner path type refers to a directory, the chain will be
+    /// inserted between the parent directory and the directory name.
+    pub fn with_chain(&self, chain: Chain) -> ChainPath<D> {
+        // extract the parent directory
+        let parent = self.0.parent().expect("Could not get parent of path");
+        let final_component = self.0.file_name().expect("Could not get file name of path");
+
+        // put the chain part in the middle
+        let chain_name = config_path_prefix(chain);
+        let path = parent.join(chain_name).join(final_component);
+
+        let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
+        ChainPath::new(platform_path, chain)
+    }
+}
+
+/// An Optional wrapper type around [PlatformPath].
+///
+/// This is useful for when a path is optional, such as the `--db-path` flag.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaybePlatformPath<D>(Option<PlatformPath<D>>);
+
+// === impl MaybePlatformPath ===
+
+impl<D: XdgPath> MaybePlatformPath<D> {
+    /// Returns the path if it is set, otherwise returns the default path for the given chain.
+    pub fn unwrap_or_chain_default(&self, chain: Chain) -> PlatformPath<D> {
+        self.0.clone().unwrap_or_else(|| PlatformPath::default().with_chain(chain).0)
+    }
+}
+
+impl<D: XdgPath> Display for MaybePlatformPath<D> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(path) = &self.0 {
+            path.fmt(f)
+        } else {
+            // NOTE: this is a workaround for making it work with clap's `default_value_t` which
+            // computes the default value via `Default -> Display -> FromStr`
+            write!(f, "default")
+        }
+    }
+}
+
+impl<D> Default for MaybePlatformPath<D> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<D> FromStr for MaybePlatformPath<D> {
+    type Err = shellexpand::LookupError<VarError>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let p = match s {
+            "default" => {
+                // NOTE: this is a workaround for making it work with clap's `default_value_t` which
+                // computes the default value via `Default -> Display -> FromStr`
+                None
+            }
+            _ => Some(PlatformPath::from_str(s)?),
+        };
+        Ok(Self(p))
+    }
+}
+
+/// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
+/// different networks.
+///
+/// If the chain is either mainnet, goerli, or sepolia, then the path will be:
+///  * mainnet: `<DIR>/mainnet`
+///  * goerli: `<DIR>/goerli`
+///  * sepolia: `<DIR>/sepolia`
+/// Otherwise, the path will be dependent on the chain ID:
+///  * `<DIR>/<CHAIN_ID>`
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChainPath<D>(PlatformPath<D>, Chain);
+
+impl<D> ChainPath<D> {
+    /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
+    pub fn new(path: PlatformPath<D>, chain: Chain) -> Self {
+        Self(path, chain)
+    }
+}
+
+impl<D> AsRef<Path> for ChainPath<D> {
+    fn as_ref(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
+
+impl<D> Display for ChainPath<D> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<D> From<ChainPath<D>> for PathBuf {
+    fn from(value: ChainPath<D>) -> Self {
+        value.0.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_maybe_db_platform_path() {
+        let path = MaybePlatformPath::<DbPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        assert!(path.as_ref().ends_with("reth/mainnet/db"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DbPath>::from_str("my/path/to/db").unwrap();
+        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        assert!(path.as_ref().ends_with("my/path/to/db"), "{:?}", path);
+    }
+
+    #[test]
+    fn test_maybe_config_platform_path() {
+        let path = MaybePlatformPath::<ConfigPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        assert!(path.as_ref().ends_with("reth/mainnet/reth.toml"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DbPath>::from_str("my/path/to/reth.toml").unwrap();
+        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        assert!(path.as_ref().ends_with("my/path/to/reth.toml"), "{:?}", path);
     }
 }

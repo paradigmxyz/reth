@@ -282,7 +282,7 @@ async fn test_connect_to_trusted_peer() {
     handle.add_trusted_peer(node.id, node.tcp_addr());
 
     let h = handle.clone();
-    h.update_sync_state(SyncState::Downloading { target_block: 100 });
+    h.update_sync_state(SyncState::Syncing);
 
     task::spawn(async move {
         loop {

@@ -282,7 +282,7 @@ where
 
     /// Handler for: `eth_hashrate`
     async fn hashrate(&self) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(U256::ZERO)
     }
 
     /// Handler for: `eth_getWork`
@@ -292,7 +292,7 @@ where
 
     /// Handler for: `eth_submitHashrate`
     async fn submit_hashrate(&self, _hashrate: U256, _id: H256) -> Result<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(false)
     }
 
     /// Handler for: `eth_submitWork`
@@ -332,19 +332,21 @@ where
     /// Handler for: `eth_getProof`
     async fn get_proof(
         &self,
-        address: Address,
-        keys: Vec<JsonStorageKey>,
-        block_number: Option<BlockId>,
+        _address: Address,
+        _keys: Vec<JsonStorageKey>,
+        _block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
-        let res = EthApi::get_proof(self, address, keys, block_number);
+        // TODO: uncomment when implemented
+        // trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
+        // let res = EthApi::get_proof(self, address, keys, block_number);
 
-        Ok(res.map_err(|e| match e {
-            EthApiError::InvalidBlockRange => {
-                internal_rpc_err("eth_getProof is unimplemented for historical blocks")
-            }
-            _ => e.into(),
-        })?)
+        // Ok(res.map_err(|e| match e {
+        //     EthApiError::InvalidBlockRange => {
+        //         internal_rpc_err("eth_getProof is unimplemented for historical blocks")
+        //     }
+        //     _ => e.into(),
+        // })?)
+        Err(internal_rpc_err("unimplemented"))
     }
 }
 

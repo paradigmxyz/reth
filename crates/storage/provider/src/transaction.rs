@@ -1,7 +1,6 @@
 use crate::{
     insert_canonical_block,
     post_state::{Change, PostState, StorageChangeset},
-    trie::{DBTrieLoader, TrieError},
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -11,7 +10,7 @@ use reth_db::{
     models::{
         sharded_key,
         storage_sharded_key::{self, StorageShardedKey},
-        AccountBeforeTx, ShardedKey, StoredBlockBody, TransitionIdAddress,
+        AccountBeforeTx, ShardedKey, StoredBlockBodyIndices, TransitionIdAddress,
     },
     table::Table,
     tables,
@@ -24,6 +23,7 @@ use reth_primitives::{
     Header, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
     TransitionId, TxNumber, H256, U256,
 };
+use reth_trie::{StateRoot, StateRootError};
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
@@ -140,17 +140,22 @@ where
     }
 
     /// Query the block body by number.
-    pub fn get_block_body(&self, number: BlockNumber) -> Result<StoredBlockBody, TransactionError> {
-        let body =
-            self.get::<tables::BlockBodies>(number)?.ok_or(ProviderError::BlockBody { number })?;
+    pub fn get_block_meta(
+        &self,
+        number: BlockNumber,
+    ) -> Result<StoredBlockBodyIndices, TransactionError> {
+        let body = self
+            .get::<tables::BlockBodyIndices>(number)?
+            .ok_or(ProviderError::BlockBodyIndices { number })?;
         Ok(body)
     }
 
     /// Query the last transition of the block by [BlockNumber] key
     pub fn get_block_transition(&self, key: BlockNumber) -> Result<TransitionId, TransactionError> {
         let last_transition_id = self
-            .get::<tables::BlockTransitionIndex>(key)?
-            .ok_or(ProviderError::BlockTransition { block_number: key })?;
+            .get::<tables::BlockBodyIndices>(key)?
+            .ok_or(ProviderError::BlockTransition { block_number: key })?
+            .transition_after_block();
         Ok(last_transition_id)
     }
 
@@ -165,11 +170,8 @@ where
         }
 
         let prev_number = block - 1;
-        let prev_body = self.get_block_body(prev_number)?;
-        let last_transition = self
-            .get::<tables::BlockTransitionIndex>(prev_number)?
-            .ok_or(ProviderError::BlockTransition { block_number: prev_number })?;
-        Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
+        let prev_body = self.get_block_meta(prev_number)?;
+        Ok((prev_body.first_tx_num + prev_body.tx_count, prev_body.transition_after_block()))
     }
 
     /// Query the block header by number
@@ -539,9 +541,8 @@ where
             self.insert_block(block)?;
         }
         self.insert_hashes(
-            fork_block_number,
             first_transition_id,
-            first_transition_id + num_transitions as u64,
+            first_transition_id + num_transitions,
             new_tip_number,
             new_tip_hash,
             expected_state_root,
@@ -567,9 +568,11 @@ where
         // Header, Body, SenderRecovery, TD, TxLookup stages
         let (block, senders) = block.into_components();
 
-        let (from, to) =
+        let block_meta =
             insert_canonical_block(self.deref_mut(), block, Some(senders), false).unwrap();
 
+        let from = block_meta.transition_at_block();
+        let to = block_meta.transition_after_block();
         // account history stage
         {
             let indices = self.get_account_transition_ids_from_changeset(from, to)?;
@@ -594,7 +597,6 @@ where
     /// The resulting state root is compared with `expected_state_root`.
     pub fn insert_hashes(
         &mut self,
-        fork_block_number: BlockNumber,
         from_transition_id: TransitionId,
         to_transition_id: TransitionId,
         current_block_number: BlockNumber,
@@ -619,14 +621,14 @@ where
 
         // merkle tree
         {
-            let current_root = self.get_header(fork_block_number)?.state_root;
-            let mut loader = DBTrieLoader::new(self.deref_mut());
-            let root = loader
-                .update_root(current_root, from_transition_id..to_transition_id)
-                .and_then(|e| e.root())?;
-            if root != expected_state_root {
+            let state_root = StateRoot::incremental_root(
+                self.deref_mut(),
+                from_transition_id..to_transition_id,
+                None,
+            )?;
+            if state_root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
-                    got: root,
+                    got: state_root,
                     expected: expected_state_root,
                     block_number: current_block_number,
                     block_hash: current_block_hash,
@@ -664,16 +666,16 @@ where
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
-        // Get the transaction ID ranges for the blocks
-        let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
+        // Raad range of block bodies to get all transactions id's of this range.
+        let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
+
         if block_bodies.is_empty() {
             return Ok(Vec::new())
         }
 
         // Compute the first and last tx ID in the range
-        let first_transaction =
-            block_bodies.first().expect("If we have headers").1.first_tx_index();
-        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_index();
+        let first_transaction = block_bodies.first().expect("If we have headers").1.first_tx_num();
+        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_num();
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
@@ -694,10 +696,6 @@ where
                     tx_hash_cursor.delete_current()?;
                 }
             }
-            // Remove TxTransitionId
-            self.get_or_take::<tables::TxTransitionIndex, TAKE>(
-                first_transaction..=last_transaction,
-            )?;
 
             // Remove TransactionBlock index if there are transaction present
             if !transactions.is_empty() {
@@ -712,7 +710,7 @@ where
         let mut transactions = transactions.into_iter();
         for (block_number, block_body) in block_bodies {
             let mut one_block_tx = Vec::with_capacity(block_body.tx_count as usize);
-            for _ in block_body.tx_id_range() {
+            for _ in block_body.tx_num_range() {
                 let tx = transactions.next();
                 let sender = senders.next();
 
@@ -835,8 +833,8 @@ where
     /// Traverse over changesets and plain state and recreate the [`PostState`]s for the given range
     /// of blocks.
     ///
-    /// 1. Iterate over the [BlockTransitionIndex][tables::BlockTransitionIndex] table to get all
-    /// the transitions
+    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
+    /// the transition indices.
     /// 2. Iterate over the [StorageChangeSet][tables::StorageChangeSet] table
     /// and the [AccountChangeSet][tables::AccountChangeSet] tables in reverse order to reconstruct
     /// the changesets.
@@ -859,29 +857,35 @@ where
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<PostState>, TransactionError> {
+        // We are not removing block meta as it is used to get block transitions.
         let block_transition =
-            self.get_or_take::<tables::BlockTransitionIndex, TAKE>(range.clone())?;
+            self.get_or_take::<tables::BlockBodyIndices, false>(range.clone())?;
 
         if block_transition.is_empty() {
             return Ok(Vec::new())
         }
-        // get block transitions
-        let first_block_number =
-            block_transition.first().expect("Check for empty is already done").0;
 
         // get block transition of parent block.
-        let from = self.get_block_transition(first_block_number.saturating_sub(1))?;
-        let to = block_transition.last().expect("Check for empty is already done").1;
+        let from = block_transition
+            .first()
+            .expect("Check for empty is already done")
+            .1
+            .transition_at_block();
+        let to = block_transition
+            .last()
+            .expect("Check for empty is already done")
+            .1
+            .transition_after_block();
 
         // NOTE: Just get block bodies dont remove them
         // it is connection point for bodies getter and execution result getter.
-        let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
+        let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
 
         // get transaction receipts
         let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").1.first_tx_index();
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
         let to_transaction_num =
-            block_bodies.last().expect("already checked if there are blocks").1.last_tx_index();
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
         let receipts =
             self.get_or_take::<tables::Receipts, TAKE>(from_transaction_num..=to_transaction_num)?;
 
@@ -1031,7 +1035,7 @@ where
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies.into_iter() {
             let mut block_post_state = PostState::new();
-            for tx_num in block_body.tx_id_range() {
+            for tx_num in block_body.tx_num_range() {
                 if let Some(changes) = all_changesets.remove(&next_transition_id) {
                     for mut change in changes.into_iter() {
                         change
@@ -1048,10 +1052,10 @@ where
                 next_transition_id += 1;
             }
 
-            let Some((_,block_transition)) = block_transition_iter.next() else { break};
+            let Some((_,block_meta)) = block_transition_iter.next() else { break};
             // if block transition points to 1+next transition id it means that there is block
             // changeset.
-            if block_transition == next_transition_id + 1 {
+            if block_meta.has_block_change() {
                 if let Some(changes) = all_changesets.remove(&next_transition_id) {
                     for mut change in changes.into_iter() {
                         change
@@ -1105,15 +1109,7 @@ where
             self.unwind_storage_history_indices(transition_storage_range)?;
 
             // merkle tree
-            let new_state_root;
-            {
-                let (tip_number, _) =
-                    self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
-                let current_root = self.get_header(tip_number)?.state_root;
-                let mut loader = DBTrieLoader::new(self.deref());
-                new_state_root =
-                    loader.update_root(current_root, transition_range).and_then(|e| e.root())?;
-            }
+            let new_state_root = StateRoot::incremental_root(self.deref(), transition_range, None)?;
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
@@ -1139,7 +1135,7 @@ where
         // that is why it is deleted afterwards.
         if TAKE {
             // rm block bodies
-            self.get_or_take::<tables::BlockBodies, TAKE>(range)?;
+            self.get_or_take::<tables::BlockBodyIndices, TAKE>(range)?;
 
             // Update pipeline progress
             if let Some(fork_number) = unwind_to {
@@ -1531,14 +1527,14 @@ fn unwind_storage_history_shards<DB: Database>(
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionError {
     /// The transaction encountered a database error.
-    #[error("Database error: {0}")]
+    #[error(transparent)]
     Database(#[from] DbError),
     /// The transaction encountered a database integrity error.
-    #[error("A database integrity error occurred: {0}")]
+    #[error(transparent)]
     DatabaseIntegrity(#[from] ProviderError),
-    /// The transaction encountered merkle trie error.
-    #[error("Merkle trie calculation error: {0}")]
-    MerkleTrie(#[from] TrieError),
+    /// The trie error.
+    #[error(transparent)]
+    TrieError(#[from] StateRootError),
     /// Root mismatch
     #[error("Merkle trie root mismatch on block: #{block_number:?} {block_hash:?}. got: {got:?} expected:{expected:?}")]
     StateTrieRootMismatch {
@@ -1559,8 +1555,8 @@ mod test {
         insert_canonical_block, test_utils::blocks::*, ShareableDatabase, Transaction,
         TransactionsProvider,
     };
-    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, TransitionId, MAINNET};
+    use reth_db::mdbx::test_utils::create_test_rw_db;
+    use reth_primitives::{ChainSpecBuilder, TransitionId, MAINNET};
     use std::{ops::DerefMut, sync::Arc};
 
     #[test]
@@ -1581,14 +1577,11 @@ mod test {
         let (block2, exec_res2) = data.blocks[1].clone();
 
         insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
-
-        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
         exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
         tx.insert_block(block1.clone()).unwrap();
         tx.insert_hashes(
-            genesis.number,
             0,
             exec_res1.transitions_count() as TransitionId,
             block1.number,
@@ -1609,7 +1602,6 @@ mod test {
         exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
         tx.insert_block(block1.clone()).unwrap();
         tx.insert_hashes(
-            genesis.number,
             0,
             exec_res1.transitions_count() as TransitionId,
             block1.number,
@@ -1624,7 +1616,6 @@ mod test {
             .unwrap();
         tx.insert_block(block2.clone()).unwrap();
         tx.insert_hashes(
-            block1.number,
             exec_res1.transitions_count() as TransitionId,
             (exec_res1.transitions_count() + exec_res2.transitions_count()) as TransitionId,
             2,
@@ -1692,8 +1683,6 @@ mod test {
         let (block2, exec_res2) = data.blocks[1].clone();
 
         insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
-
-        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
         tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();

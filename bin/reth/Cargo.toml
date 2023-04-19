@@ -12,6 +12,7 @@ reth-primitives = { path = "../../crates/primitives", features = ["arbitrary"] }
 reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
+reth-revm = { path = "../../crates/revm" }
 reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
 reth-staged-sync = { path = "../../crates/staged-sync" }
 reth-stages = { path = "../../crates/stages"}
@@ -19,7 +20,7 @@ reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] 
 reth-transaction-pool = { path = "../../crates/transaction-pool" }
 reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
 reth-auto-seal-consensus = { path = "../../crates/consensus/auto-seal" }
-reth-executor = { path = "../../crates/executor" }
+reth-blockchain-tree = { path = "../../crates/blockchain-tree" }
 reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
@@ -30,7 +31,16 @@ reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-ut
 reth-tracing = { path = "../../crates/tracing" }
 reth-tasks = { path = "../../crates/tasks" }
 reth-net-nat = { path = "../../crates/net/nat" }
+reth-payload-builder = { path = "../../crates/payload/builder" }
+reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
+
+# crypto
+secp256k1 = { version = "0.26.0", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # tracing
 tracing = "0.1"
@@ -42,6 +52,7 @@ serde_json = "1.0"
 shellexpand = "3.0.0"
 dirs-next = "2.0.0"
 confy = "0.5"
+toml = {version = "0.7", features = ["display"]}
 
 # metrics
 metrics = "0.20.1"
@@ -58,15 +69,18 @@ tui = "0.19.0"
 human_bytes = "0.4.1"
 
 # async
-tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
+tokio = { version = "1.21", features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures = "0.3.25"
+pin-project = "1.0"
 
 # http/rpc
 hyper = "0.14.25"
-jsonrpsee = { version = "0.16", features = ["server"] }
 
 # misc
 eyre = "0.6.8"
 clap = { version = "4", features = ["derive", "cargo"] }
+num_cpus = "1.13.0"
 tempfile = { version = "3.3.0" }
 backon = "0.4"
+hex = "0.4"
+thiserror = "1.0"

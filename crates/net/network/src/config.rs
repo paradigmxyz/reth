@@ -8,25 +8,20 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
+use reth_dns_discovery::DnsDiscoveryConfig;
+use reth_ecies::util::pk2id;
+use reth_eth_wire::{HelloMessage, Status};
 use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use secp256k1::{SecretKey, SECP256K1};
+use secp256k1::SECP256K1;
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
-
-/// reexports for convenience
-#[doc(hidden)]
-mod __reexport {
-    pub use secp256k1::SecretKey;
-}
-pub use __reexport::*;
-use reth_dns_discovery::DnsDiscoveryConfig;
-use reth_ecies::util::pk2id;
-use reth_eth_wire::{HelloMessage, Status};
+// re-export for convenience
+pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
@@ -241,9 +236,21 @@ impl NetworkConfigBuilder {
         self.listener_addr(addr).discovery_addr(addr)
     }
 
-    /// Sets the socket address the network will listen on
+    /// Sets the socket address the network will listen on.
+    ///
+    /// By default, this is [Ipv4Addr::UNSPECIFIED] on [DEFAULT_DISCOVERY_PORT]
     pub fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = Some(listener_addr);
+        self
+    }
+
+    /// Sets the port of the address the network will listen on.
+    ///
+    /// By default, this is [DEFAULT_DISCOVERY_PORT]
+    pub fn listener_port(mut self, port: u16) -> Self {
+        self.listener_addr
+            .get_or_insert(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT).into())
+            .set_port(port);
         self
     }
 
@@ -259,21 +266,9 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Disables Discv4 discovery.
-    pub fn no_discv4_discovery(mut self) -> Self {
-        self.discovery_v4_builder = None;
-        self
-    }
-
     /// Sets the dns discovery config to use.
     pub fn dns_discovery(mut self, config: DnsDiscoveryConfig) -> Self {
         self.dns_discovery_config = Some(config);
-        self
-    }
-
-    /// Disables DNS discovery
-    pub fn no_dns_discovery(mut self) -> Self {
-        self.dns_discovery_config = None;
         self
     }
 
@@ -289,10 +284,42 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Disables all discovery.
+    pub fn disable_discovery(self) -> Self {
+        self.disable_discv4_discovery().disable_dns_discovery()
+    }
+
+    /// Disables all discovery if the given condition is true.
+    pub fn disable_discovery_if(self, disable: bool) -> Self {
+        if disable {
+            self.disable_discovery()
+        } else {
+            self
+        }
+    }
+
     /// Disable the Discv4 discovery.
     pub fn disable_discv4_discovery(mut self) -> Self {
         self.discovery_v4_builder = None;
         self
+    }
+
+    /// Disable the DNS discovery if the given condition is true.
+    pub fn disable_dns_discovery_if(self, disable: bool) -> Self {
+        if disable {
+            self.disable_dns_discovery()
+        } else {
+            self
+        }
+    }
+
+    /// Disable the Discv4 discovery if the given condition is true.
+    pub fn disable_discv4_discovery_if(self, disable: bool) -> Self {
+        if disable {
+            self.disable_discv4_discovery()
+        } else {
+            self
+        }
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]

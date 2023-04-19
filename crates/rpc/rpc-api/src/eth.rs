@@ -209,6 +209,10 @@ pub trait EthApi {
     async fn get_work(&self) -> Result<Work>;
 
     /// Used for submitting mining hashrate.
+    ///
+    /// Can be used for remote miners to submit their hash rate.
+    /// It accepts the miner hash rate and an identifier which must be unique between nodes.
+    /// Returns `true` if the block was successfully submitted, `false` otherwise.
     #[method(name = "eth_submitHashrate")]
     async fn submit_hashrate(&self, hashrate: U256, id: H256) -> Result<bool>;
 

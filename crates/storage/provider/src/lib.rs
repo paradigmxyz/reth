@@ -12,9 +12,10 @@
 mod traits;
 pub use traits::{
     AccountProvider, BlockExecutor, BlockHashProvider, BlockIdProvider, BlockProvider,
-    BlockchainTreePendingStateProvider, EvmEnvProvider, ExecutorFactory, HeaderProvider,
-    PostStateDataProvider, ReceiptProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockchainTreePendingStateProvider, CanonStateNotification, CanonStateNotificationSender,
+    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, ExecutorFactory,
+    HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
@@ -23,9 +24,6 @@ pub use providers::{
     HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
     LatestStateProviderRef, ShareableDatabase,
 };
-
-/// Helper type for loading Merkle Patricia Trees from the database
-pub mod trie;
 
 /// Execution result
 pub mod post_state;
@@ -45,3 +43,6 @@ pub mod test_utils;
 
 /// Re-export provider error.
 pub use reth_interfaces::provider::ProviderError;
+
+pub mod chain;
+pub use chain::Chain;
