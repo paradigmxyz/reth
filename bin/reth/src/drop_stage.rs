@@ -1,8 +1,8 @@
 //! Database debugging tool
 use crate::{
+    args::StageEnum,
     dirs::{DbPath, MaybePlatformPath},
     utils::DbTool,
-    StageEnum,
 };
 use clap::Parser;
 use reth_db::{
