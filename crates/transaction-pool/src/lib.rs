@@ -83,8 +83,9 @@ pub use crate::{
     config::PoolConfig,
     ordering::{CostOrdering, TransactionOrdering},
     traits::{
-        BestTransactions, OnNewBlockEvent, PoolTransaction, PooledTransaction, PropagateKind,
-        PropagatedTransactions, TransactionOrigin, TransactionPool,
+        BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount, PoolTransaction,
+        PooledTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin,
+        TransactionPool,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
@@ -94,7 +95,7 @@ pub use crate::{
 use crate::{
     error::{PoolError, PoolResult},
     pool::PoolInner,
-    traits::{BlockInfo, NewTransactionEvent, PoolSize},
+    traits::{NewTransactionEvent, PoolSize},
 };
 use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
@@ -160,6 +161,17 @@ where
     /// Get the config the pool was configured with.
     pub fn config(&self) -> &PoolConfig {
         self.inner().config()
+    }
+
+    /// Inserts revalidated transactions back into the pool.
+    ///
+    /// This is used after a chain reorg,revert occurred
+    pub fn reinject_validated(
+        &self,
+        transactions: impl IntoIterator<Item = TransactionValidationOutcome<V::Transaction>>,
+    ) {
+        // can't keep track of the origin of the transaction, so we assume it's external
+        let _ = self.pool.add_transactions(TransactionOrigin::External, transactions);
     }
 
     /// Returns future that validates all transaction in the given iterator.
@@ -234,8 +246,8 @@ where
         self.pool.block_info()
     }
 
-    fn on_new_block(&self, event: OnNewBlockEvent) {
-        self.pool.on_new_block(event);
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        self.pool.on_canonical_state_change(update);
     }
 
     async fn add_transaction(

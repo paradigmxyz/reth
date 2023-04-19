@@ -10,11 +10,11 @@ use crate::{
         pending::PendingPool,
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate},
-        AddedPendingTransaction, AddedTransaction, OnNewBlockOutcome,
+        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
-    traits::{BlockInfo, PoolSize, StateDiff},
-    OnNewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
-    ValidPoolTransaction, U256,
+    traits::{BlockInfo, PoolSize},
+    CanonicalStateUpdate, ChangedAccount, PoolConfig, PoolResult, PoolTransaction,
+    TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{constants::MIN_PROTOCOL_BASE_FEE, TxHash, H256};
@@ -175,7 +175,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This removes all mined transactions, updates according to the new base fee and rechecks
     /// sender allowance.
-    pub(crate) fn on_new_block(&mut self, event: OnNewBlockEvent) -> OnNewBlockOutcome {
+    pub(crate) fn on_canonical_state_change(
+        &mut self,
+        event: CanonicalStateUpdate,
+    ) -> OnNewCanonicalStateOutcome {
         // Remove all transaction that were included in the block
         for tx_hash in &event.mined_transactions {
             if self.remove_transaction_by_hash(tx_hash).is_some() {
@@ -186,12 +189,12 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
         let updates =
-            self.all_transactions.update(event.pending_block_base_fee, &event.state_changes);
+            self.all_transactions.update(event.pending_block_base_fee, &event.changed_accounts);
 
         // Process the sub-pool updates
         let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
-        OnNewBlockOutcome {
+        OnNewCanonicalStateOutcome {
             block_hash: event.hash,
             mined: event.mined_transactions,
             promoted,
@@ -586,7 +589,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn update(
         &mut self,
         pending_block_base_fee: u128,
-        _state_diffs: &StateDiff,
+        _changed_accounts: &[ChangedAccount],
     ) -> Vec<PoolUpdate> {
         // update new basefee
         self.pending_basefee = pending_block_base_fee;
