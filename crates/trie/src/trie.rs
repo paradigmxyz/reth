@@ -190,18 +190,20 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
                         }
                     }
                     BranchNodeUpdate::Storage(hashed_address, nibbles, node) => {
-                        let key: StoredNibblesSubKey = nibbles.hex_data.into();
-                        if let Some(entry) =
-                            storage_cursor.seek_by_key_subkey(hashed_address, key.clone())?
-                        {
-                            // "seek exact"
-                            if entry.nibbles == key {
-                                storage_cursor.delete_current()?;
+                        if !nibbles.is_empty() {
+                            let key: StoredNibblesSubKey = nibbles.hex_data.into();
+                            if let Some(entry) =
+                                storage_cursor.seek_by_key_subkey(hashed_address, key.clone())?
+                            {
+                                // "seek exact"
+                                if entry.nibbles == key {
+                                    storage_cursor.delete_current()?;
+                                }
                             }
-                        }
 
-                        storage_cursor
-                            .upsert(hashed_address, StorageTrieEntry { nibbles: key, node })?;
+                            storage_cursor
+                                .upsert(hashed_address, StorageTrieEntry { nibbles: key, node })?;
+                        }
                     }
                 }
             }
