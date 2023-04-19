@@ -237,7 +237,7 @@ impl TransactionOrigin {
 /// Event fired upon external changes to update the pool:
 ///  - New block commits
 ///  - Reorgs
-pub enum PoolUpdateEvent {}
+pub(crate) enum PoolUpdateEvent {}
 
 /// Event fired when a new block was mined
 #[derive(Debug, Clone)]
@@ -502,5 +502,5 @@ pub struct BlockInfo {
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
     /// currently tracking.
-    pub next_base_fee: u128,
+    pub pending_base_fee: u128,
 }

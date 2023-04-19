@@ -25,24 +25,36 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
         let pool_info = pool.block_info();
 
         match event {
-            CanonStateNotification::Reorg { old, new } => {
-            }
+            CanonStateNotification::Reorg { old, new } => {}
             CanonStateNotification::Revert { old } => {
-                // this similar to the inverse of a commit where we need to insert the transactions back into the pool and update the pool's state accordingly
-                let (blocks, state) = old.into_inner();
-                let tip = blocks.tip();
-                // base fee for the next block
-                let next_base_fee = calculate_next_block_base_fee(tip.gas_used, tip.gas_limit, tip.base_fee_per_gas.unwrap_or_default());
+                // this similar to the inverse of a commit where we need to insert the transactions
+                // back into the pool and update the pool's state accordingly
+
+                // let (blocks, state) = old.inner();
+                // let first_block = blocks.first();
+                // // base fee for the next block
+                // let next_base_fee = calculate_next_block_base_fee(
+                //     first_block.gas_used,
+                //     first_block.gas_limit,
+                //     first_block.base_fee_per_gas.unwrap_or_default(),
+                // );
             }
             CanonStateNotification::Commit { new } => {
-                let (blocks, state) = new.into_inner();
-                let tip = blocks.tip();
+                let (blocks, state) = new.inner();
+                let first_block = blocks.tip();
 
                 // base fee for the next block
-                let next_base_fee = calculate_next_block_base_fee(tip.gas_used, tip.gas_limit, tip.base_fee_per_gas.unwrap_or_default());
+                let next_base_fee = calculate_next_block_base_fee(
+                    first_block.gas_used,
+                    first_block.gas_limit,
+                    first_block.base_fee_per_gas.unwrap_or_default(),
+                );
 
-                // check the range of the Commit
-                if tip.parent_hash == pool_info.last_seen_block_hash {
+                let mut x = None;
+                x.get_or_insert_with()
+
+                // check if the range of the commit is canonical
+                if first_block.parent_hash == pool_info.last_seen_block_hash {
                     // Canonical update
                 } else {
                     // range update, need to enforce conditions manually
