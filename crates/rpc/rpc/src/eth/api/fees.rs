@@ -151,12 +151,18 @@ where
             }
         }
 
-        // TODO: remove unwraps
-        let oldest_block_hash = self.inner.client.block_hash(start_block)?.unwrap();
+        // get the first block in the range from the db
+        let oldest_block_hash =
+            self.inner.client.block_hash(start_block)?.ok_or(EthApiError::UnknownBlockNumber)?;
 
-        // TODO: remove unwraps
-        fee_history_cache_items.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
-        fee_history_cache.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
+        // Set the hash in cache items if the block is present in the cache
+        if let Some(cache_item) = fee_history_cache_items.get_mut(&start_block) {
+            cache_item.hash = Some(oldest_block_hash);
+        }
+
+        if let Some(cache_item) = fee_history_cache.get_mut(&start_block) {
+            cache_item.hash = Some(oldest_block_hash);
+        }
 
         let base_fee_per_gas =
             fee_history_cache_items.values().map(|item| item.base_fee_per_gas).collect();
