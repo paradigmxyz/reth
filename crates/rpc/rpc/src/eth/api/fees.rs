@@ -176,7 +176,6 @@ where
         Ok(FeeHistory {
             base_fee_per_gas,
             gas_used_ratio,
-            // oldest_block: U256::from_be_bytes(oldest_block_hash.0),
             oldest_block: U256::from(start_block),
             reward: Some(rewards),
         })
