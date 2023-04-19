@@ -495,9 +495,9 @@ pub struct PoolSize {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockInfo {
     /// Hash for the currently tracked block.
-    pub block_hash: H256,
+    pub last_seen_block_hash: H256,
     /// Current the currently tracked block.
-    pub block_number: u64,
+    pub last_seen_block_number: u64,
     /// Currently enforced base fee: the threshold for the basefee sub-pool.
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
