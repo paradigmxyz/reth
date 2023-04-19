@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations for fee history.
 
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::error::{EthApiError, EthResult, InvalidTransactionError},
     EthApi,
 };
 use reth_network_api::NetworkInfo;
@@ -110,10 +110,11 @@ where
                         try_into().unwrap(); // u64 -> U256 won't fail
                 let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
-                let mut rewards: Vec<U256> = vec![];
+                // TODO: fix
+                let rewards: Vec<U256> = vec![];
                 let mut sorter: Vec<TxGasAndReward> = vec![];
                 for transaction in transactions.iter() {
-                    let reward = transaction.effective_gas_price(header.base_fee_per_gas);
+                    let reward = transaction.effective_gas_price(header.base_fee_per_gas).ok_or(InvalidTransactionError::FeeCapTooLow)?;
 
                     sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward })
                 }

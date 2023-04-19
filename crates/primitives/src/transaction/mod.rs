@@ -283,21 +283,21 @@ impl Transaction {
     /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
     /// transactions is returned.
     ///
-    /// If the `max_fee_per_gas` is less than the base fee, an error is returned.
+    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
     pub fn effective_gas_price(
         &self,
         base_fee: Option<u64>,
-    ) -> Result<u128, InvalidTransactionError> {
+    ) -> Option<u128> {
         if let Some(base_fee) = base_fee {
             let max_fee_per_gas = self.max_fee_per_gas();
             if max_fee_per_gas < base_fee as u128 {
-                Err(InvalidTransactionError::MaxFeeLessThenBaseFee)
+                None
             } else {
                 let effective_max_fee = max_fee_per_gas - base_fee as u128;
-                Ok(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
+                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
             }
         } else {
-            Ok(self.priority_fee_or_price())
+            Some(self.priority_fee_or_price())
         }
     }
 
