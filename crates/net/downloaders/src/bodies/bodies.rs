@@ -84,8 +84,9 @@ where
             Some(num) => num + 1,
             None => *self.download_range.start(),
         };
-
-        let limit = self.download_range.end().saturating_sub(start_at).min(self.request_limit);
+        // as the range is inclusive, we need to add 1 to the end.
+        let items_left = self.download_range.end() + 1 - start_at;
+        let limit = items_left.min(self.request_limit);
         self.query_headers(start_at..=*self.download_range.end(), limit)
     }
 
@@ -149,7 +150,6 @@ where
             // Increment current block number
             current_block_num += 1;
         }
-
         Ok(Some(headers).filter(|h| !h.is_empty()))
     }
 

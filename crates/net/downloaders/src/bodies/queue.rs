@@ -71,7 +71,6 @@ where
                 None => last.number,
             })
             .or(self.last_requested_block_number);
-
         // Create request and push into the queue.
         self.inner.push(
             BodiesRequestFuture::new(client, consensus, priority, self.metrics.clone())
