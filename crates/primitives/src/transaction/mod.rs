@@ -284,10 +284,7 @@ impl Transaction {
     /// transactions is returned.
     ///
     /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
-    pub fn effective_gas_price(
-        &self,
-        base_fee: Option<u64>,
-    ) -> Option<u128> {
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> Option<u128> {
         if let Some(base_fee) = base_fee {
             let max_fee_per_gas = self.max_fee_per_gas();
             if max_fee_per_gas < base_fee as u128 {

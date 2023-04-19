@@ -5,7 +5,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, Header, Transaction, U256, U64};
+use reth_primitives::{BlockId, Header, U256, U64};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
@@ -114,7 +114,9 @@ where
                 let rewards: Vec<U256> = vec![];
                 let mut sorter: Vec<TxGasAndReward> = vec![];
                 for transaction in transactions.iter() {
-                    let reward = transaction.effective_gas_price(header.base_fee_per_gas).ok_or(InvalidTransactionError::FeeCapTooLow)?;
+                    let reward = transaction
+                        .effective_gas_price(header.base_fee_per_gas)
+                        .ok_or(InvalidTransactionError::FeeCapTooLow)?;
 
                     sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward })
                 }

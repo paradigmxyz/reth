@@ -5,7 +5,7 @@ use super::EthApiSpec;
 use crate::{
     eth::{
         api::{EthApi, EthTransactions},
-        error::{ensure_success, EthApiError},
+        error::ensure_success,
     },
     result::{internal_rpc_err, ToRpcResult},
 };
