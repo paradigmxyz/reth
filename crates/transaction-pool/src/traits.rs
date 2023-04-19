@@ -24,8 +24,13 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
 
-    /// Returns stats about the pool.
-    fn status(&self) -> PoolSize;
+    /// Returns stats about the pool and all sub-pools.
+    fn pool_size(&self) -> PoolSize;
+
+    /// Returns the block the pool is currently tracking.
+    ///
+    /// This tracks the block that the pool has last seen.
+    fn block_info(&self) -> BlockInfo;
 
     /// Event listener for when a new block was mined.
     ///
@@ -108,7 +113,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Removes all transactions corresponding to the given hashes.
     ///
-    /// Also removes all dependent transactions.
+    /// Also removes all _dependent_ transactions.
     ///
     /// Consumer: Block production
     fn remove_transactions(
@@ -228,6 +233,11 @@ impl TransactionOrigin {
         matches!(self, TransactionOrigin::Local)
     }
 }
+
+/// Event fired upon external changes to update the pool:
+///  - New block commits
+///  - Reorgs
+pub enum PoolUpdateEvent {}
 
 /// Event fired when a new block was mined
 #[derive(Debug, Clone)]
@@ -479,4 +489,18 @@ pub struct PoolSize {
     pub queued: usize,
     /// Reported size of transactions in the _queued_ sub-pool.
     pub queued_size: usize,
+}
+
+/// Represents the current status of the pool.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct BlockInfo {
+    /// Hash for the currently tracked block.
+    pub block_hash: H256,
+    /// Current the currently tracked block.
+    pub block_number: u64,
+    /// Currently enforced base fee: the threshold for the basefee sub-pool.
+    ///
+    /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
+    /// currently tracking.
+    pub next_base_fee: u128,
 }

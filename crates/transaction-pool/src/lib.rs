@@ -94,7 +94,7 @@ pub use crate::{
 use crate::{
     error::{PoolError, PoolResult},
     pool::PoolInner,
-    traits::{NewTransactionEvent, PoolSize},
+    traits::{BlockInfo, NewTransactionEvent, PoolSize},
 };
 use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
@@ -104,7 +104,7 @@ use tokio::sync::mpsc::Receiver;
 mod config;
 pub mod error;
 mod identifier;
-pub mod manage;
+pub mod maintain;
 pub mod metrics;
 mod ordering;
 pub mod pool;
@@ -226,8 +226,12 @@ where
 {
     type Transaction = T::Transaction;
 
-    fn status(&self) -> PoolSize {
+    fn pool_size(&self) -> PoolSize {
         self.pool.size()
+    }
+
+    fn block_info(&self) -> BlockInfo {
+        self.pool.block_info()
     }
 
     fn on_new_block(&self, event: OnNewBlockEvent) {
