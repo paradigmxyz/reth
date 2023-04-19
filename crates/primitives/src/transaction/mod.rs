@@ -290,10 +290,10 @@ impl Transaction {
     ) -> Result<u128, InvalidTransactionError> {
         if let Some(base_fee) = base_fee {
             let max_fee_per_gas = self.max_fee_per_gas();
-            if max_fee_per_gas < base_fee {
+            if max_fee_per_gas < base_fee as u128 {
                 Err(InvalidTransactionError::MaxFeeLessThenBaseFee)
             } else {
-                let effective_max_fee = max_fee_per_gas - base_fee;
+                let effective_max_fee = max_fee_per_gas - base_fee as u128;
                 Ok(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
             }
         } else {
