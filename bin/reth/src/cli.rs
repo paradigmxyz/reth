@@ -2,7 +2,7 @@
 use crate::{
     chain, config, db,
     dirs::{LogsDir, PlatformPath},
-    drop_stage, dump_stage, node, p2p,
+    drop_stage, dump_stage, merkle_debug, node, p2p,
     runner::CliRunner,
     stage, test_eth_chain, test_vectors,
 };
@@ -42,6 +42,7 @@ pub fn run() -> eyre::Result<()> {
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::MerkleDebug(command) => runner.run_until_ctrl_c(command.execute()),
     }
 }
 
@@ -86,6 +87,9 @@ pub enum Commands {
     /// Write config to stdout
     #[command(name = "config")]
     Config(config::Command),
+    /// Debug state root calculation
+    #[command(name = "merkle-debug")]
+    MerkleDebug(merkle_debug::Command),
 }
 
 #[derive(Debug, Parser)]

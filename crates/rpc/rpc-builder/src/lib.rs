@@ -108,7 +108,7 @@ use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{
-    eth::cache::EthStateCache, AdminApi, DebugApi, EthApi, EthFilter, EthPubSub,
+    eth::cache::EthStateCache, AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
     EthSubscriptionIdProvider, NetApi, TraceApi, TracingCallGuard, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
@@ -643,10 +643,9 @@ where
 
         module.merge(engine_api.into_rpc()).expect("No conflicting methods");
 
-        // also merge all `eth_` handlers
-        module.merge(eth_handlers.api.into_rpc()).expect("No conflicting methods");
-        module.merge(eth_handlers.filter.into_rpc()).expect("No conflicting methods");
-        module.merge(eth_handlers.pubsub.into_rpc()).expect("No conflicting methods");
+        // also merge a subset of `eth_` handlers
+        let engine_eth = EngineEthApi::new(eth_handlers.api.clone(), eth_handlers.filter);
+        module.merge(engine_eth.into_rpc()).expect("No conflicting methods");
 
         AuthRpcModule { inner: module }
     }

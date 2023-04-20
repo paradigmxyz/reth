@@ -25,9 +25,15 @@ pub use servers::*;
 /// Aggregates all server traits.
 pub mod servers {
     pub use crate::{
-        admin::AdminApiServer, debug::DebugApiServer, engine::EngineApiServer, eth::EthApiServer,
-        eth_filter::EthFilterApiServer, eth_pubsub::EthPubSubApiServer, net::NetApiServer,
-        trace::TraceApiServer, web3::Web3ApiServer,
+        admin::AdminApiServer,
+        debug::DebugApiServer,
+        engine::{EngineApiServer, EngineEthApiServer},
+        eth::EthApiServer,
+        eth_filter::EthFilterApiServer,
+        eth_pubsub::EthPubSubApiServer,
+        net::NetApiServer,
+        trace::TraceApiServer,
+        web3::Web3ApiServer,
     };
 }
 
@@ -39,7 +45,12 @@ pub use clients::*;
 #[cfg(feature = "client")]
 pub mod clients {
     pub use crate::{
-        admin::AdminApiClient, debug::DebugApiClient, engine::EngineApiClient, eth::EthApiClient,
-        net::NetApiClient, trace::TraceApiClient, web3::Web3ApiClient,
+        admin::AdminApiClient,
+        debug::DebugApiClient,
+        engine::{EngineApiClient, EngineEthApiClient},
+        eth::EthApiClient,
+        net::NetApiClient,
+        trace::TraceApiClient,
+        web3::Web3ApiClient,
     };
 }
