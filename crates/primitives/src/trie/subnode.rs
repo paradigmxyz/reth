@@ -1,7 +1,8 @@
 use super::BranchNodeCompact;
 use reth_codecs::{main_codec, Compact};
 
-/// TODO:
+/// Walker sub node for storing intermediate state root calculation state in the database.
+/// See [crate::MerkleCheckpoint].
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StoredSubNode {
