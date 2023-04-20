@@ -126,7 +126,7 @@ impl TrieUpdates {
                     TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
                 },
                 TrieKey::StorageNode(hashed_address, nibbles) => {
-                    if !nibbles.is_empty() {
+                    if !nibbles.inner.is_empty() {
                         // Delete the old entry if it exists.
                         if storage_trie_cursor
                             .seek_by_key_subkey(hashed_address, nibbles.clone())?
