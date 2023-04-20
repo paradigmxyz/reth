@@ -81,7 +81,7 @@ impl Command {
         let mut merkle_stage = MerkleStage::default_execution();
 
         for block in execution_progress + 1..=self.to {
-            tracing::trace!(block, "Executing block");
+            tracing::trace!(target: "reth::cli", block, "Executing block");
             let progress = if (!should_reset_stages || block > execution_progress + 1) && block > 0
             {
                 Some(block - 1)
@@ -138,7 +138,7 @@ impl Command {
                 .await;
 
             if incremental_result.is_err() {
-                tracing::warn!(block, "Incremental calculation failed, retrying from scratch");
+                tracing::warn!(target: "reth::cli", block, "Incremental calculation failed, retrying from scratch");
                 let incremental_account_trie = tx
                     .cursor_read::<tables::AccountsTrie>()?
                     .walk_range(..)?
@@ -168,7 +168,7 @@ impl Command {
                     .walk_range(..)?
                     .collect::<Result<Vec<_>, _>>()?;
 
-                tracing::info!(block, "Comparing incremental trie vs clean trie");
+                tracing::info!(target: "reth::cli", block, "Comparing incremental trie vs clean trie");
 
                 // Account trie
                 let mut incremental_account_mismatched = Vec::new();
@@ -194,13 +194,13 @@ impl Command {
                             }
                         }
                         (Some(incremental), None) => {
-                            tracing::warn!(next = ?incremental, "Incremental account trie has more entries");
+                            tracing::warn!(target: "reth::cli", next = ?incremental, "Incremental account trie has more entries");
                         }
                         (None, Some(clean)) => {
-                            tracing::warn!(next = ?clean, "Clean account trie has more entries");
+                            tracing::warn!(target: "reth::cli", next = ?clean, "Clean account trie has more entries");
                         }
                         (None, None) => {
-                            tracing::info!("Exhausted all account trie entries");
+                            tracing::info!(target: "reth::cli", "Exhausted all account trie entries");
                         }
                     }
                 }
@@ -224,12 +224,14 @@ impl Command {
                             }
                         }
                         (Some(incremental), None) => {
-                            tracing::warn!(next = ?incremental, "Incremental storage trie has more entries");
+                            tracing::warn!(target: "reth::cli", next = ?incremental, "Incremental storage trie has more entries");
                         }
                         (None, Some(clean)) => {
-                            tracing::warn!(next = ?clean, "Clean storage trie has more entries")
+                            tracing::warn!(target: "reth::cli", next = ?clean, "Clean storage trie has more entries")
                         }
-                        (None, None) => tracing::info!("Exhausted all storage trie entries."),
+                        (None, None) => {
+                            tracing::info!(target: "reth::cli", "Exhausted all storage trie entries.")
+                        }
                     }
                 }
 
