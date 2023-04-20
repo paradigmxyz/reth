@@ -337,7 +337,9 @@ where
         //    updated successfully. The build process is specified in the Payload
         //    building section.
         let attributes = PayloadBuilderAttributes::new(header.parent_hash, attrs);
-        // TODO(mattsse) this needs to be handled asynchronously
+
+        // send the payload to the builder and return the receiver for the pending payload id,
+        // initiating payload job is handled asynchronously
         let pending_payload_id = self.payload_builder.send_new_payload(attributes);
 
         // Client software MUST respond to this method call in the following way:
