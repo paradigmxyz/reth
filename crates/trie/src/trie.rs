@@ -41,7 +41,7 @@ impl<'a, TX> StateRoot<'a, TX> {
             changed_account_prefixes: PrefixSet::default(),
             changed_storage_prefixes: HashMap::default(),
             previous_state: None,
-            threshold: 10_000,
+            threshold: 100_000,
         }
     }
 
