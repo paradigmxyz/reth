@@ -28,6 +28,8 @@ pub enum CanonStateNotification {
     /// Chain reorgs and both old and new chain are returned.
     Reorg { old: Arc<Chain>, new: Arc<Chain> },
     /// Chain got reverted without reorg and only old chain is returned.
+    ///
+    /// This reverts the chain's tip to the first block of the chain.
     Revert { old: Arc<Chain> },
     /// Chain got extended without reorg and only new chain is returned.
     Commit { new: Arc<Chain> },
