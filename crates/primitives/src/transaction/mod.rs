@@ -664,7 +664,7 @@ impl Decodable for TransactionKind {
     }
 }
 
-/// Signed transaction.
+/// Signed transaction without its Hash. Used type for inserting into the DB.
 #[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSignedNoHash {
@@ -683,6 +683,11 @@ impl TransactionSignedNoHash {
         let mut buf = Vec::new();
         self.transaction.encode_with_signature(&self.signature, &mut buf, false);
         keccak256(&buf)
+    }
+
+    /// Converts into a transaction type with its hash: [`TransactionSigned`].
+    pub fn with_hash(self) -> TransactionSigned {
+        self.into()
     }
 }
 
