@@ -111,7 +111,7 @@ impl PostState {
         Self { receipts: Vec::with_capacity(txs), ..Default::default() }
     }
 
-    /// Get the latest state of accounts.
+    /// Get the latest state of all changed accounts.
     pub fn accounts(&self) -> &BTreeMap<Address, Option<Account>> {
         &self.accounts
     }

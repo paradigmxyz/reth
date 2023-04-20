@@ -11,7 +11,8 @@ use jsonrpsee::{
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{
-    eth::cache::EthStateCache, AuthLayer, Claims, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
+    eth::cache::EthStateCache, AuthLayer, Claims, EngineEthApi, EthApi, EthFilter,
+    JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -75,8 +76,8 @@ where
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
     module.merge(engine_api.into_rpc()).expect("No conflicting methods");
-    module.merge(eth_api.into_rpc()).expect("No conflicting methods");
-    module.merge(eth_filter.into_rpc()).expect("No conflicting methods");
+    let engine_eth = EngineEthApi::new(eth_api, eth_filter);
+    module.merge(engine_eth.into_rpc()).expect("No conflicting methods");
 
     // Create auth middleware.
     let middleware =
