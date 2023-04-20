@@ -177,8 +177,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             if checkpoint.address.is_none() ||
                 // Checkpoint is no longer valid if the range of transitions changed. 
                 // An already hashed account may have been changed with the new range, and therefore should be hashed again. 
-                checkpoint.to != from_block ||
-                checkpoint.from != to_block
+                checkpoint.from != from_block ||
+                checkpoint.to != to_block
             {
                 // clear table, load all accounts and hash it
                 tx.clear::<tables::HashedAccount>()?;
@@ -444,7 +444,6 @@ mod tests {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
                     let end_block = output.stage_progress;
                     if start_block > end_block {
-                        println!("ok");
                         return Ok(())
                     }
                 }

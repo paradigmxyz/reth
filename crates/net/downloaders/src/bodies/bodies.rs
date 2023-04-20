@@ -85,7 +85,7 @@ where
             None => *self.download_range.start(),
         };
         // as the range is inclusive, we need to add 1 to the end.
-        let items_left = self.download_range.end() + 1 - start_at;
+        let items_left = (self.download_range.end() + 1).saturating_sub(start_at);
         let limit = items_left.min(self.request_limit);
         self.query_headers(start_at..=*self.download_range.end(), limit)
     }
@@ -619,7 +619,7 @@ mod tests {
         let stream_batch_size = 20;
         let request_limit = 10;
         let client = Arc::new(
-            TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(false),
+            TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_stream_batch_size(stream_batch_size)

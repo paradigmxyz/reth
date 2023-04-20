@@ -501,16 +501,16 @@ where
         let first_number = blocks.first().unwrap().number;
 
         let last = blocks.last().unwrap();
-        let last_number = last.number;
-        let last_hash = last.hash();
-        let last_state_root = last.state_root;
+        let last_block_number = last.number;
+        let last_block_hash = last.hash();
+        let expected_state_root = last.state_root;
 
         // Insert the blocks
         for block in blocks {
             self.insert_block(block)?;
         }
 
-        self.insert_hashes(first_number..=last_number, last_hash, last_state_root)?;
+        self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(new_tip_number)?;
@@ -1456,7 +1456,6 @@ mod test {
         let get_state = get[0].1.clone();
         assert_eq!(get_block, block1.clone());
         assert_eq!(get_state, exec_res1.clone());
-        //assert_eq!(get, vec![(block1.clone(), exec_res1.clone())]);
 
         // take one block
         let take = tx.take_block_and_execution_range(&chain_spec, 1..=1).unwrap();

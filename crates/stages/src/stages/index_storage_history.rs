@@ -126,21 +126,13 @@ mod tests {
             // we just need first and last
             tx.put::<tables::BlockBodyIndices>(
                 0,
-                StoredBlockBodyIndices {
-                    //first_transition_id: 0,
-                    tx_count: 3,
-                    ..Default::default()
-                },
+                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
             )
             .unwrap();
 
             tx.put::<tables::BlockBodyIndices>(
                 5,
-                StoredBlockBodyIndices {
-                    //first_transition_id: 3,
-                    tx_count: 5,
-                    ..Default::default()
-                },
+                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
             )
             .unwrap();
 

@@ -62,7 +62,7 @@ pub fn calculate_withdrawals_root<'a>(
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root<'a>(receipts: impl Iterator<Item = &'a ReceiptWithBloom>) -> H256 {
     ordered_trie_root::<KeccakHasher, _>(receipts.into_iter().map(|receipt| {
-        let mut receipt_rlp = Vec::with_capacity(receipt.length());
+        let mut receipt_rlp = Vec::new();
         receipt.encode_inner(&mut receipt_rlp, false);
         receipt_rlp
     }))
