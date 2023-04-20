@@ -484,7 +484,7 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let (start, count) = (1, 10);
-            let blocks = random_block_range(start..start + count, H256::default(), 0..2);
+            let blocks = random_block_range(start..=start + count - 1, H256::default(), 0..2);
             handle.client.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
             let expected =
@@ -499,7 +499,7 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let (start, count) = (1, 100);
-            let blocks = random_block_range(start..start + count, H256::default(), 0..2);
+            let blocks = random_block_range(start..=start + count - 1, H256::default(), 0..2);
 
             // Insert only blocks in ranges 1-25 and 50-75
             let first_missing_range = 26..=50;

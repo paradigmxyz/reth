@@ -33,6 +33,7 @@ parking_lot = { version = "0.12", optional = true }
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { path = "../../primitives", features = ["arbitrary", "test-utils"] }
+reth-rlp = { path = "../../rlp" }
 parking_lot = "0.12"
 
 [features]

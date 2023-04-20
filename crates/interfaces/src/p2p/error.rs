@@ -2,7 +2,7 @@ use super::headers::client::HeadersRequest;
 use crate::{consensus, db};
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, H256};
-use std::ops::Range;
+use std::ops::RangeInclusive;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
@@ -200,7 +200,7 @@ pub enum DownloadError {
     #[error("Requested body range is invalid: {range:?}.")]
     InvalidBodyRange {
         /// Invalid block number range.
-        range: Range<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     },
     /* ==================== COMMON ERRORS ==================== */
     /// Timed out while waiting for request id response.

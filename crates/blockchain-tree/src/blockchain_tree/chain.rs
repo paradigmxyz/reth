@@ -108,14 +108,10 @@ impl AppendableChain {
             .get(&parent_number)
             .ok_or(ExecError::BlockNumberNotFoundInChain { block_number: parent_number })?;
 
-        let revert_to_transition_id = self
-            .block_transitions()
-            .get(&parent.number)
-            .expect("Should have the transition ID for the parent block");
-        let mut state = self.chain.state().clone();
+        let mut state = self.state.clone();
 
         // Revert state to the state after execution of the parent block
-        state.revert_to(*revert_to_transition_id);
+        state.revert_to(parent.number);
 
         // Revert changesets to get the state of the parent that we need to apply the change.
         let post_state_data = PostStateDataRef {
@@ -133,13 +129,8 @@ impl AppendableChain {
         )?;
         state.extend(block_state);
 
-        let chain = Self {
-            chain: Chain {
-                block_transitions: BTreeMap::from([(block.number, state.transitions_count())]),
-                state,
-                blocks: BTreeMap::from([(block.number, block)]),
-            },
-        };
+        let chain =
+            Self { chain: Chain { state, blocks: BTreeMap::from([(block.number, block)]) } };
 
         // If all is okay, return new chain back. Present chain is not modified.
         Ok(chain)
@@ -209,8 +200,6 @@ impl AppendableChain {
             externals,
         )?;
         self.state.extend(block_state);
-        let transition_count = self.state.transitions_count();
-        self.block_transitions.insert(block.number, transition_count);
         self.blocks.insert(block.number, block);
         Ok(())
     }

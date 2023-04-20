@@ -4,7 +4,7 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use reth_primitives::TransitionId;
+use reth_primitives::BlockNumber;
 
 /// Number of indices in one shard.
 pub const NUM_OF_INDICES_IN_SHARD: usize = 100;
@@ -12,21 +12,21 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 100;
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data
 /// into different shards. Example:
 ///
-/// `Address | 200` -> data is from transition 0 to 200.
+/// `Address | 200` -> data is from block 0 to 200.
 ///
-/// `Address | 300` -> data is from transaction 201 to 300.
+/// `Address | 300` -> data is from block 201 to 300.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ShardedKey<T> {
     /// The key for this type.
     pub key: T,
-    /// Highest transition id to which `value` is related to.
-    pub highest_transition_id: TransitionId,
+    /// Highest block number to which `value` is related to.
+    pub highest_block_number: BlockNumber,
 }
 
 impl<T> ShardedKey<T> {
     /// Creates a new `ShardedKey<T>`.
-    pub fn new(key: T, highest_transition_id: TransitionId) -> Self {
-        ShardedKey { key, highest_transition_id }
+    pub fn new(key: T, highest_block_number: BlockNumber) -> Self {
+        ShardedKey { key, highest_block_number }
     }
 }
 
@@ -39,7 +39,7 @@ where
 
     fn encode(self) -> Self::Encoded {
         let mut buf: Vec<u8> = Encode::encode(self.key).into();
-        buf.extend_from_slice(&self.highest_transition_id.to_be_bytes());
+        buf.extend_from_slice(&self.highest_block_number.to_be_bytes());
         buf
     }
 }

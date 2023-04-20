@@ -661,11 +661,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let mut tx = Transaction::new(&self.externals.db)?;
 
+        let tip = tx.tip_number()?;
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
             .take_block_and_execution_range(
                 self.externals.chain_spec.as_ref(),
-                (revert_until + 1)..,
+                (revert_until + 1)..=tip,
             )
             .map_err(|e| ExecError::CanonicalRevert { inner: e.to_string() })?;
 
@@ -716,7 +717,7 @@ mod tests {
         genesis.header.header.state_root = EMPTY_ROOT;
         let tx_mut = db.tx_mut().unwrap();
 
-        insert_block(&tx_mut, genesis, None, false, Some((0, 0))).unwrap();
+        insert_block(&tx_mut, genesis, None).unwrap();
 
         // insert first 10 blocks
         for i in 0..10 {
@@ -786,11 +787,9 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_path() {
-        let data = BlockChainTestData::default();
-        let (mut block1, exec1) = data.blocks[0].clone();
-        block1.number = 11;
-        let (mut block2, exec2) = data.blocks[1].clone();
-        block2.number = 12;
+        let data = BlockChainTestData::default_with_numbers(11, 12);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
 
         // test pops execution results from vector, so order is from last to first.
         let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
