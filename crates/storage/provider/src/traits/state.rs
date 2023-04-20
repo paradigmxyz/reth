@@ -99,7 +99,7 @@ pub trait StateProviderFactory: Send + Sync {
                 todo!()
             }
             BlockNumberOrTag::Earliest => self.history_by_block_number(0),
-            BlockNumberOrTag::Pending => self.pending2(),
+            BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
         }
     }
@@ -111,13 +111,13 @@ pub trait StateProviderFactory: Send + Sync {
     fn history_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
 
     /// Storage provider for pending state.
-    fn pending2(&self) -> Result<StateProviderBox<'_>> {
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
-    fn pending(
+    fn pending_with_provider(
         &self,
         post_state_data: Box<dyn PostStateDataProvider>,
     ) -> Result<StateProviderBox<'_>>;

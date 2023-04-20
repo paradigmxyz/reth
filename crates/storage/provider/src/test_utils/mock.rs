@@ -350,7 +350,7 @@ impl StateProviderFactory for MockEthProvider {
         todo!()
     }
 
-    fn pending<'a>(
+    fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
@@ -374,7 +374,7 @@ impl StateProviderFactory for Arc<MockEthProvider> {
         todo!()
     }
 
-    fn pending<'a>(
+    fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {

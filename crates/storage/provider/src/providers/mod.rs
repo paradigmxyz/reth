@@ -5,31 +5,30 @@ pub use state::{
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 mod post_state_provider;
+pub use post_state_provider::PostStateProvider;
 use crate::{
-    BlockHashProvider, BlockIdProvider, BlockProvider,
-    BlockchainTreePendingStateProvider, CanonStateNotifications, CanonStateSubscriptions,
-    EvmEnvProvider, HeaderProvider, PostStateDataProvider, ReceiptProvider,
-    StateProviderBox, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    BlockHashProvider, BlockIdProvider,
+    BlockProvider, BlockchainTreePendingStateProvider, CanonStateNotifications,
+    CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider,
+    ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
+    WithdrawalsProvider,
 };
 pub use database::*;
-use reth_db::{database::Database};
+use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
     Result,
 };
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumHash, BlockNumber, ChainInfo,
-    Header, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
-    TxHash, TxNumber, Withdrawal, H256, U256,
+    Block, BlockHash, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256,
+    U256,
 };
-use reth_revm_primitives::{
-    primitives::{BlockEnv, CfgEnv},
-};
+use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
 };
-use crate::providers::post_state_provider::PostStateProvider;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -44,9 +43,17 @@ pub struct BlockchainProvider<DB, Tree> {
     tree: Tree,
 }
 
+impl<DB, Tree> BlockchainProvider<DB, Tree> {
+    /// Create new  provider instance that wraps the database and the blockchain tree.
+    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Self {
+        Self { database, tree }
+    }
+}
+
 impl<DB, Tree> HeaderProvider for BlockchainProvider<DB, Tree>
-    where DB: Database,
-          Tree: Send + Sync
+where
+    DB: Database,
+    Tree: Send + Sync,
 {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
         self.database.header(block_hash)
@@ -70,8 +77,9 @@ impl<DB, Tree> HeaderProvider for BlockchainProvider<DB, Tree>
 }
 
 impl<DB, Tree> BlockHashProvider for BlockchainProvider<DB, Tree>
-    where DB: Database,
-          Tree: Send + Sync
+where
+    DB: Database,
+    Tree: Send + Sync,
 {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         self.database.block_hash(number)
@@ -83,8 +91,9 @@ impl<DB, Tree> BlockHashProvider for BlockchainProvider<DB, Tree>
 }
 
 impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
-    where DB: Database,
-          Tree: Send + Sync
+where
+    DB: Database,
+    Tree: Send + Sync,
 {
     fn chain_info(&self) -> Result<ChainInfo> {
         self.database.chain_info()
@@ -96,8 +105,10 @@ impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
 }
 
 impl<DB, Tree> BlockProvider for BlockchainProvider<DB, Tree>
-    where DB: Database,
-          Tree: Send + Sync{
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         self.database.block(id)
     }
@@ -108,8 +119,10 @@ impl<DB, Tree> BlockProvider for BlockchainProvider<DB, Tree>
 }
 
 impl<DB, Tree> TransactionsProvider for BlockchainProvider<DB, Tree>
-    where DB: Database,
-          Tree: Send + Sync{
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
         self.database.transaction_id(tx_hash)
     }
@@ -146,8 +159,9 @@ impl<DB, Tree> TransactionsProvider for BlockchainProvider<DB, Tree>
 }
 
 impl<DB, Tree> ReceiptProvider for BlockchainProvider<DB, Tree>
-where DB: Database,
-Tree: Send + Sync
+where
+    DB: Database,
+    Tree: Send + Sync,
 {
     fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>> {
         self.database.receipt(id)
@@ -163,8 +177,9 @@ Tree: Send + Sync
 }
 
 impl<DB, Tree> WithdrawalsProvider for BlockchainProvider<DB, Tree>
-    where DB: Database,
-          Tree: Send + Sync
+where
+    DB: Database,
+    Tree: Send + Sync,
 {
     fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
         self.database.withdrawals_by_block(id, timestamp)
@@ -176,9 +191,10 @@ impl<DB, Tree> WithdrawalsProvider for BlockchainProvider<DB, Tree>
 }
 
 impl<DB, Tree> EvmEnvProvider for BlockchainProvider<DB, Tree>
-
-    where DB: Database,
-          Tree: Send + Sync{
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
         self.database.fill_env_at(cfg, block_env, at)
     }
@@ -228,22 +244,21 @@ where
     }
 
     /// Storage provider for pending state.
-    fn pending2(&self) -> Result<StateProviderBox<'_>> {
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
         if let Some(block) = self.tree.pending_block() {
             let pending = self.tree.pending_state_provider(block.hash)?;
-            return self.pending(pending)
+            return self.pending_with_provider(pending)
         }
         self.latest()
     }
 
-    fn pending(
+    fn pending_with_provider(
         &self,
         post_state_data: Box<dyn PostStateDataProvider>,
     ) -> Result<StateProviderBox<'_>> {
         let canonical_fork = post_state_data.canonical_fork();
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let post_state_provider =
-            PostStateProvider { state_provider, post_state_data_provider: post_state_data };
+        let post_state_provider = PostStateProvider::new(state_provider, post_state_data);
         Ok(Box::new(post_state_provider))
     }
 }
