@@ -1,3 +1,4 @@
+use bytes::Buf;
 use derive_more::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref, From, Not};
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
@@ -67,14 +68,15 @@ impl Compact for TrieMask {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        buf.put_slice(self.to_be_bytes().as_slice());
+        buf.put_u16(self.0);
         2
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
     where
         Self: Sized,
     {
-        (Self(u16::from_be_bytes(buf[..2].try_into().unwrap())), &buf[2..])
+        let mask = buf.get_u16();
+        (Self(mask), &buf)
     }
 }
