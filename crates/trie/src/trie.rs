@@ -27,15 +27,17 @@ pub enum StateRootProgress {
     Progress(IntermediateStateRootState, TrieUpdates),
 }
 
-/// TODO:
+/// The intermediate state of the state root computation.
 #[derive(Debug)]
 pub struct IntermediateStateRootState {
     /// Previously constructed hash builder.
     pub hash_builder: HashBuilder,
     /// Previously recorded walker stack.
     pub walker_stack: Vec<CursorSubNode>,
-    /// TODO:
+    /// The last hashed account key processed.
     pub last_account_key: H256,
+    /// The last walker key processed.
+    pub last_walker_key: Nibbles,
 }
 
 /// StateRoot is used to compute the root node of a state trie.
@@ -203,48 +205,51 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
         let mut trie_cursor =
             AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
-        let (mut walker, mut hash_builder, mut last_account_key) = match self.previous_state {
-            Some(state) => (
-                TrieWalker::from_stack(
-                    &mut trie_cursor,
-                    state.walker_stack,
-                    self.changed_account_prefixes,
+        let (mut walker, mut hash_builder, mut last_account_key, mut last_walker_key) =
+            match self.previous_state {
+                Some(state) => (
+                    TrieWalker::from_stack(
+                        &mut trie_cursor,
+                        state.walker_stack,
+                        self.changed_account_prefixes,
+                    ),
+                    state.hash_builder,
+                    Some(state.last_account_key),
+                    Some(state.last_walker_key),
                 ),
-                state.hash_builder,
-                Some(state.last_account_key),
-            ),
-            None => (
-                TrieWalker::new(&mut trie_cursor, self.changed_account_prefixes),
-                HashBuilder::default(),
-                None,
-            ),
-        };
+                None => (
+                    TrieWalker::new(&mut trie_cursor, self.changed_account_prefixes),
+                    HashBuilder::default(),
+                    None,
+                    None,
+                ),
+            };
 
         walker.set_updates(retain_updates);
         hash_builder.set_updates(retain_updates);
 
-        while let Some(key) = walker.key() {
-            if walker.can_skip_current_node {
-                let value = walker.hash().unwrap();
-                let is_in_db_trie = walker.children_are_in_trie();
-                hash_builder.add_branch(key.clone(), value, is_in_db_trie);
-            }
-
-            let seek_key = match walker.next_unprocessed_key() {
-                Some(key) => key,
-                None => break, // no more keys
-            };
-
-            let next_key = walker.advance()?;
-
+        while let Some(key) = last_walker_key.take().or_else(|| walker.key()) {
             // Take the last account key to make sure we take it into consideration only once.
-            let mut next_account_entry = match last_account_key.take() {
+            let (next_key, mut next_account_entry) = match last_account_key.take() {
                 // Seek the last processed entry and take the next after.
-                Some(key) => {
-                    hashed_account_cursor.seek(key)?;
-                    hashed_account_cursor.next()?
+                Some(account_key) => {
+                    hashed_account_cursor.seek(account_key)?;
+                    (walker.key(), hashed_account_cursor.next()?)
                 }
-                None => hashed_account_cursor.seek(seek_key)?,
+                None => {
+                    if walker.can_skip_current_node {
+                        let value = walker.hash().unwrap();
+                        let is_in_db_trie = walker.children_are_in_trie();
+                        hash_builder.add_branch(key.clone(), value, is_in_db_trie);
+                    }
+
+                    let seek_key = match walker.next_unprocessed_key() {
+                        Some(key) => key,
+                        None => break, // no more keys
+                    };
+
+                    (walker.advance()?, hashed_account_cursor.seek(seek_key)?)
+                }
             };
 
             while let Some((hashed_address, account)) = next_account_entry {
@@ -296,6 +301,7 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                     let state = IntermediateStateRootState {
                         hash_builder,
                         walker_stack,
+                        last_walker_key: key,
                         last_account_key: hashed_address,
                     };
 
@@ -657,18 +663,6 @@ mod tests {
     fn arbitrary_state_root() {
         proptest!(
             ProptestConfig::with_cases(10), | (state: State) | {
-                // set the bytecodehash for the accounts so that storage root is computed
-                // this is needed because proptest will generate accs with empty bytecodehash
-                // but non-empty storage, which is obviously invalid
-                let state = state
-                    .into_iter()
-                    .map(|(addr, (mut acc, storage))| {
-                        if !storage.is_empty() {
-                            acc.bytecode_hash = Some(H256::random());
-                        }
-                        (addr, (acc, storage))
-                    })
-                    .collect::<BTreeMap<_, _>>();
                 test_state_root_with_state(state);
             }
         );
@@ -677,23 +671,9 @@ mod tests {
     #[test]
     fn arbitrary_state_root_with_progress() {
         proptest!(
-            // TODO: 10
-            ProptestConfig::with_cases(1), | (state: State) | {
+            ProptestConfig::with_cases(10), | (state: State) | {
                 let db = create_test_rw_db();
                 let mut tx = Transaction::new(db.as_ref()).unwrap();
-
-                // set the bytecodehash for the accounts so that storage root is computed
-                // this is needed because proptest will generate accs with empty bytecodehash
-                // but non-empty storage, which is obviously invalid
-                let state = state
-                    .into_iter()
-                    .map(|(addr, (mut acc, storage))| {
-                        if !storage.is_empty() {
-                            acc.bytecode_hash = Some(H256::random());
-                        }
-                        (addr, (acc, storage))
-                    })
-                    .collect::<BTreeMap<_, _>>();
 
                 for (address, (account, storage)) in &state {
                     insert_account(&mut *tx, *address, *account, storage)
@@ -710,12 +690,8 @@ mod tests {
                         .with_threshold(threshold)
                         .with_intermediate_state(intermediate_state.take());
                     match calculator.root_with_progress().unwrap() {
-                        StateRootProgress::Progress(state, _updates) => {
-                            intermediate_state = Some(state);
-                        }
-                        StateRootProgress::Complete(root, _updates) => {
-                            got = Some(root);
-                        }
+                        StateRootProgress::Progress(state, _updates) => intermediate_state = Some(state),
+                        StateRootProgress::Complete(root, _updates) => got = Some(root),
                     };
                 }
                 assert_eq!(expected, got.unwrap());
