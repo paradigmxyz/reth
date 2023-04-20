@@ -5,7 +5,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, Header, U256, U64};
+use reth_primitives::{BlockId, U256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
@@ -21,12 +21,10 @@ where
     /// provided.
     pub(crate) async fn fee_history(
         &self,
-        block_count: U64,
+        block_count: u64,
         newest_block: BlockId,
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
-        let block_count = block_count.as_u64();
-
         if block_count == 0 {
             return Ok(FeeHistory::default())
         }
@@ -89,10 +87,11 @@ where
         {
             let header_range = start_block..=end_block;
 
-            let headers: Vec<Header> = self.inner.client.headers_range(header_range.clone())?;
-            let transactions = self.inner.client.transactions_by_block_range(header_range)?;
+            let headers = self.inner.client.headers_range(header_range.clone())?;
+            let transactions_by_block =
+                self.inner.client.transactions_by_block_range(header_range)?;
 
-            let header_tx = headers.iter().zip(&transactions);
+            let header_tx = headers.iter().zip(&transactions_by_block);
 
             // We should receive exactly the amount of blocks missing from the cache
             if headers.len() != (end_block - start_block + 1) as usize {
@@ -100,7 +99,7 @@ where
             }
 
             // We should receive exactly the amount of blocks missing from the cache
-            if transactions.len() != (end_block - start_block + 1) as usize {
+            if transactions_by_block.len() != (end_block - start_block + 1) as usize {
                 return Err(EthApiError::InvalidBlockRange)
             }
 
@@ -110,8 +109,7 @@ where
                         try_into().unwrap(); // u64 -> U256 won't fail
                 let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
-                let mut rewards: Vec<U256> = vec![];
-                let mut sorter: Vec<TxGasAndReward> = vec![];
+                let mut sorter = Vec::with_capacity(transactions.len());
                 for transaction in transactions.iter() {
                     let reward = transaction
                         .effective_gas_price(header.base_fee_per_gas)
@@ -122,6 +120,7 @@ where
 
                 sorter.sort();
 
+                let mut rewards = Vec::with_capacity(reward_percentiles.len());
                 let mut sum_gas_used = sorter[0].gas_used;
                 let mut tx_index = 0;
 
@@ -172,7 +171,7 @@ where
         let mut gas_used_ratio: Vec<f64> =
             fee_history_cache_items.values().map(|item| item.gas_used_ratio).collect();
 
-        let mut rewards: Vec<Vec<U256>> =
+        let mut rewards: Vec<Vec<_>> =
             fee_history_cache_items.values().filter_map(|item| item.reward.clone()).collect();
 
         // gasUsedRatio doesn't have data for next block in this case the last block

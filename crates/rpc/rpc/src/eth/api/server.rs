@@ -267,7 +267,8 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-        return Ok(EthApi::fee_history(self, block_count, newest_block, reward_percentiles).await?)
+        return Ok(EthApi::fee_history(self, block_count.as_u64(), newest_block, reward_percentiles)
+            .await?)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
@@ -471,7 +472,7 @@ mod tests {
 
         // newest_block is finalized
         let fee_history =
-            eth_api.fee_history(block_count.into(), (newest_block - 1).into(), None).await.unwrap();
+            eth_api.fee_history(block_count, (newest_block - 1).into(), None).await.unwrap();
 
         assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
         assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
@@ -479,7 +480,7 @@ mod tests {
 
         // newest_block is pending
         let fee_history =
-            eth_api.fee_history(block_count.into(), (newest_block - 1).into(), None).await.unwrap();
+            eth_api.fee_history(block_count, (newest_block - 1).into(), None).await.unwrap();
 
         assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
         assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
