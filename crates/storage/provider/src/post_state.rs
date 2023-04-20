@@ -936,4 +936,150 @@ mod tests {
             "The latest state of the storage is incorrect"
         );
     }
+
+    /// Tests that the oldest value for changesets is kept when extending a post state from another
+    /// post state.
+    ///
+    /// In other words, this tests the same cases as `account_changesets_keep_old_values` and
+    /// `storage_changesets_keep_old_values`, but in the case where accounts/slots are changed in
+    /// different post states that are then merged.
+    #[test]
+    fn extending_preserves_changesets() {
+        let mut a = PostState::new();
+        let mut b = PostState::new();
+        let block = 1;
+        let address = Address::repeat_byte(0);
+
+        // The first state (a) represents a transaction that creates an account with some storage
+        // slots
+        //
+        // Expected changeset state:
+        // - Account: None
+        // - Storage: Slot 0: 0
+        a.create_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+        );
+        a.change_storage(
+            block,
+            address,
+            BTreeMap::from([(U256::from(0), (U256::from(0), U256::from(1)))]),
+        );
+        assert_eq!(
+            a.account_changes(),
+            &BTreeMap::from([(block, BTreeMap::from([(address, None)]))]),
+            "The changeset for the account is incorrect in state A"
+        );
+        assert_eq!(
+            a.storage_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
+                        wiped: false,
+                    }
+                )])
+            )]),
+            "The changeset for the storage is incorrect in state A"
+        );
+
+        // The second state (b) represents a transaction that changes some slots and account info
+        // for the same account
+        //
+        // Expected changeset state is the same, i.e.:
+        // - Account: None
+        // - Storage: Slot 0: 0
+        b.change_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+            Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
+        );
+        b.change_storage(
+            block,
+            address,
+            BTreeMap::from([(U256::from(0), (U256::from(1), U256::from(2)))]),
+        );
+        assert_eq!(
+            b.account_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Some(Account { nonce: 1, balance: U256::from(1), bytecode_hash: None })
+                )])
+            )]),
+            "The changeset for the account is incorrect in state B"
+        );
+        assert_eq!(
+            b.storage_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([(U256::from(0), U256::from(1)),]),
+                        wiped: false,
+                    }
+                )])
+            )]),
+            "The changeset for the storage is incorrect in state B"
+        );
+
+        // Now we merge the states
+        a.extend(b);
+
+        // The expected state is:
+        //
+        // Changesets:
+        // - Account: None
+        // - Storage: Slot 0: 0
+        //
+        // Accounts:
+        // - Nonce 1, balance 10, bytecode hash None
+        //
+        // Storage:
+        // - Slot 0: 2
+        assert_eq!(
+            a.account_changes(),
+            &BTreeMap::from([(block, BTreeMap::from([(address, None)]))]),
+            "The changeset for the account is incorrect in the merged state"
+        );
+        assert_eq!(
+            a.storage_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
+                        wiped: false,
+                    }
+                )])
+            )]),
+            "The changeset for the storage is incorrect in the merged state"
+        );
+        assert_eq!(
+            a.accounts(),
+            &BTreeMap::from([(
+                address,
+                Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None })
+            )]),
+            "The state of accounts in the merged state is incorrect"
+        );
+        assert_eq!(
+            a.storage(),
+            &BTreeMap::from([(
+                address,
+                Storage {
+                    storage: BTreeMap::from([(U256::from(0), U256::from(2)),]),
+                    wiped: false
+                }
+            )]),
+            "The latest state of the storage is incorrect in the merged state"
+        );
+    }
 }
