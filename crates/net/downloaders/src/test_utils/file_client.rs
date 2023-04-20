@@ -272,7 +272,7 @@ mod tests {
     async fn streams_bodies_from_buffer() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(&db, &headers);
 
@@ -286,7 +286,7 @@ mod tests {
             Arc::new(TestConsensus::default()),
             db,
         );
-        downloader.set_download_range(0..20).expect("failed to set download range");
+        downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,
@@ -330,7 +330,7 @@ mod tests {
     async fn test_download_headers_from_file() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (file, headers, mut bodies) = generate_bodies_file(0..20).await;
+        let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
@@ -355,7 +355,7 @@ mod tests {
     async fn test_download_bodies_from_file() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (file, headers, mut bodies) = generate_bodies_file(0..20).await;
+        let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
@@ -368,7 +368,7 @@ mod tests {
             Arc::new(TestConsensus::default()),
             db,
         );
-        downloader.set_download_range(0..20).expect("failed to set download range");
+        downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,

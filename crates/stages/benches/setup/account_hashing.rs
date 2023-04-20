@@ -53,12 +53,7 @@ fn find_stage_range(db: &Path) -> StageRange {
 }
 
 fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
-    let opts = SeedOpts {
-        blocks: 0..num_blocks + 1,
-        accounts: 0..100_000,
-        txs: 100..150,
-        transitions: 10_000 + 1,
-    };
+    let opts = SeedOpts { blocks: 0..=num_blocks, accounts: 0..100_000, txs: 100..150 };
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("account-hashing-bench");
 

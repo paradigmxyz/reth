@@ -415,32 +415,30 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
     }
 
-    fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
+    fn history_by_block_number(
+        &self,
+        mut block_number: BlockNumber,
+    ) -> Result<StateProviderBox<'_>> {
         let tx = self.db.tx()?;
 
-        // get transition id
-        let transition = tx
-            .get::<tables::BlockBodyIndices>(block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number })?
-            .transition_after_block();
+        // +1 as the changeset that we want is the one that was applied after this block.
+        block_number += 1;
 
-        Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
+        Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<StateProviderBox<'_>> {
         let tx = self.db.tx()?;
         // get block number
-        let block_number = tx
+        let mut block_number = tx
             .get::<tables::HeaderNumbers>(block_hash)?
             .ok_or(ProviderError::BlockHash { block_hash })?;
 
-        // get transition id
-        let transition = tx
-            .get::<tables::BlockBodyIndices>(block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number })?
-            .transition_after_block();
+        // +1 as the changeset that we want is the one that was applied after this block.
+        // as the  changeset contains old values.
+        block_number += 1;
 
-        Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
+        Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
     }
 
     fn pending(
