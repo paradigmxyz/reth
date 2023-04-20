@@ -1,5 +1,5 @@
 use derive_more::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref, From, Not};
-use reth_codecs::Compact;
+use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
 /// A struct representing a mask of 16 bits, used for Ethereum trie operations.
@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
     BitOrAssign,
     Not,
 )]
+#[derive_arbitrary(compact)]
 pub struct TrieMask(u16);
 
 impl TrieMask {

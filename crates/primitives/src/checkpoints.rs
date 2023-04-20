@@ -1,18 +1,22 @@
-use crate::{Address, H256};
+use crate::{
+    trie::{HashBuilderState, StoredSubNode},
+    Address, H256,
+};
 use reth_codecs::{main_codec, Compact};
 
-/// Saves the progress of MerkleStage
+/// Saves the progress of Merkle stage.
 #[main_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq)]
-pub struct ProofCheckpoint {
-    /// The next hashed account to insert into the trie.
-    pub hashed_address: Option<H256>,
-    /// The next storage entry to insert into the trie.
-    pub storage_key: Option<H256>,
-    /// Current intermediate root for `AccountsTrie`.
-    pub account_root: Option<H256>,
-    /// Current intermediate storage root from an account.
-    pub storage_root: Option<H256>,
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct MerkleCheckpoint {
+    // TODO: target block?
+    /// The last hashed account key processed.
+    pub last_account_key: H256,
+    /// The last walker key processed.
+    pub last_walker_key: Vec<u8>,
+    /// Previously recorded walker stack.
+    pub walker_stack: Vec<StoredSubNode>,
+    /// The hash builder state.
+    pub state: HashBuilderState,
 }
 
 /// Saves the progress of AccountHashing

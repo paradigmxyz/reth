@@ -1,6 +1,6 @@
 use super::TrieMask;
 use crate::H256;
-use reth_codecs::Compact;
+use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
 /// A struct representing a branch node in an Ethereum trie.
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// The masks in a BranchNode are used to efficiently represent and manage information about the
 /// presence and types of its children. They are bitmasks, where each bit corresponds to a nibble
 /// (half-byte, or 4 bits) value from 0 to 15.
+#[derive_arbitrary(compact)]
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct BranchNodeCompact {
     /// The bitmask indicating the presence of children at the respective nibble positions in the

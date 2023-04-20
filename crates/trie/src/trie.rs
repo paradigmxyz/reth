@@ -1,9 +1,10 @@
 use crate::{
     account::EthAccount,
-    cursor::{AccountTrieCursor, CursorSubNode, StorageTrieCursor},
+    cursor::{AccountTrieCursor, StorageTrieCursor},
     hash_builder::HashBuilder,
     nibbles::Nibbles,
     prefix_set::{PrefixSet, PrefixSetLoader},
+    progress::{IntermediateStateRootState, StateRootProgress},
     updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
     StateRootError, StorageRootError,
@@ -16,29 +17,6 @@ use reth_db::{
 use reth_primitives::{keccak256, proofs::EMPTY_ROOT, Address, StorageEntry, TransitionId, H256};
 use reth_rlp::Encodable;
 use std::{collections::HashMap, ops::Range};
-
-/// The progress of the state root computation.
-#[derive(Debug)]
-pub enum StateRootProgress {
-    /// The complete state root computation with updates and computed root.
-    Complete(H256, TrieUpdates),
-    /// The intermediate progress of state root computation.
-    /// Contains the walker stack, the hash builder and the trie updates.
-    Progress(IntermediateStateRootState, TrieUpdates),
-}
-
-/// The intermediate state of the state root computation.
-#[derive(Debug)]
-pub struct IntermediateStateRootState {
-    /// Previously constructed hash builder.
-    pub hash_builder: HashBuilder,
-    /// Previously recorded walker stack.
-    pub walker_stack: Vec<CursorSubNode>,
-    /// The last hashed account key processed.
-    pub last_account_key: H256,
-    /// The last walker key processed.
-    pub last_walker_key: Nibbles,
-}
 
 /// StateRoot is used to compute the root node of a state trie.
 pub struct StateRoot<'a, TX> {

@@ -5,13 +5,10 @@ use crate::{
 use reth_primitives::{
     keccak256,
     proofs::EMPTY_ROOT,
-    trie::{BranchNodeCompact, TrieMask},
+    trie::{BranchNodeCompact, HashBuilderState, HashBuilderValue, TrieMask},
     H256,
 };
 use std::{collections::BTreeMap, fmt::Debug, sync::mpsc};
-
-mod value;
-use value::HashBuilderValue;
 
 /// A type alias for a sender of branch nodes.
 /// Branch nodes are sent by the Hash Builder to be stored in the database.
@@ -53,6 +50,35 @@ pub struct HashBuilder {
     stored_in_database: bool,
 
     updated_branch_nodes: Option<BTreeMap<Nibbles, BranchNodeCompact>>,
+}
+
+impl From<HashBuilderState> for HashBuilder {
+    fn from(state: HashBuilderState) -> Self {
+        Self {
+            key: Nibbles::from(state.key),
+            stack: state.stack,
+            value: state.value,
+            groups: state.groups,
+            tree_masks: state.tree_masks,
+            hash_masks: state.hash_masks,
+            stored_in_database: state.stored_in_database,
+            updated_branch_nodes: None,
+        }
+    }
+}
+
+impl From<HashBuilder> for HashBuilderState {
+    fn from(state: HashBuilder) -> Self {
+        Self {
+            key: state.key.hex_data,
+            stack: state.stack,
+            value: state.value,
+            groups: state.groups,
+            tree_masks: state.tree_masks,
+            hash_masks: state.hash_masks,
+            stored_in_database: state.stored_in_database,
+        }
+    }
 }
 
 impl HashBuilder {
