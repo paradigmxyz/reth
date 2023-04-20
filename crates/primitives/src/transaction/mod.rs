@@ -1,7 +1,7 @@
 use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
-use derive_more::{AsRef, Deref, DerefMut};
+use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
@@ -755,13 +755,12 @@ impl TransactionSigned {
         &self.signature
     }
 
-    /// Transaction hash. Used to identify transaction. Calculates it if it's not present, but does
-    /// not store it.
+    /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
         self.hash
     }
 
-    /// Transaction hash. Used to identify transaction. Will panic if transaction is not preset.
+    /// Reference to transaction hash. Used to identify transaction.
     pub fn hash_ref(&self) -> &TxHash {
         &self.hash
     }
@@ -1037,13 +1036,12 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 }
 
 /// Signed transaction with recovered signer.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, DerefMut, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction
     signer: Address,
     /// Signed transaction
     #[deref]
-    #[deref_mut]
     #[as_ref]
     signed_transaction: TransactionSigned,
 }
