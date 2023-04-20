@@ -687,7 +687,7 @@ impl TransactionSigned {
 
     /// Transaction hash. Used to identify transaction. Calculates it if it's not present and stores
     /// it for future use.
-    pub fn hash_mut(&mut self) -> TxHash {
+    pub fn hash_or_recalculate(&mut self) -> TxHash {
         if let Some(hash) = self.hash {
             return hash
         }

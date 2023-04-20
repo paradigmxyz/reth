@@ -409,7 +409,7 @@ where
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             for mut tx in transactions {
-                let tx_hash = tx.hash_mut();
+                let tx_hash = tx.hash_or_recalculate();
 
                 // recover transaction
                 let tx = if let Some(tx) = tx.into_ecrecovered() {

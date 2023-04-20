@@ -455,7 +455,7 @@ impl FromRecoveredTransaction for PooledTransaction {
         };
 
         // Make sure transaction hash exists.
-        tx.hash_mut();
+        tx.hash_or_recalculate();
 
         PooledTransaction { transaction: tx, cost, effective_gas_price }
     }

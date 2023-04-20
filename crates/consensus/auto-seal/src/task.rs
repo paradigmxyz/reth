@@ -149,7 +149,7 @@ where
                         .into_iter()
                         .map(|tx| {
                             let mut tx = tx.to_recovered_transaction().into_signed();
-                            tx.hash_mut();
+                            tx.hash_or_recalculate();
                             tx
                         })
                         .collect::<Vec<_>>();

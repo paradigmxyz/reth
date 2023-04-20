@@ -231,7 +231,7 @@ where
                 let mut db = SubState::new(State::new(state));
 
                 for (idx, mut tx) in transactions.into_iter().enumerate() {
-                    let hash = tx.hash_mut();
+                    let hash = tx.hash_or_recalculate();
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx_info = TransactionInfo {
                         hash: Some(hash),
