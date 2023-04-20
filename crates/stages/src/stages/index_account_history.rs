@@ -36,24 +36,18 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
-        // read account changeset, merge it into one changeset and calculate account hashes.
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        // NOTE: can probably done more probabilistic take of bundles with transition but it is
-        // guess game for later. Transitions better reflect amount of work.
-        let to_block =
-            std::cmp::min(stage_progress + self.commit_threshold, previous_stage_progress);
-        let to_transition = tx.get_block_transition(to_block)?;
+        if range.is_empty() {
+            return Ok(ExecOutput::done(*range.end()))
+        }
 
-        let indices =
-            tx.get_account_transition_ids_from_changeset(from_transition, to_transition)?;
+        let indices = tx.get_account_transition_ids_from_changeset(range.clone())?;
         // Insert changeset to history index
         tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", "Stage finished");
-        Ok(ExecOutput { stage_progress: to_block, done: to_block == previous_stage_progress })
+        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 
     /// Unwind the stage.
@@ -63,10 +57,9 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+        let range = input.unwind_block_range();
 
-        tx.unwind_account_history_indices(from_transition_rev..to_transition_rev)?;
+        tx.unwind_account_history_indices(range)?;
 
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -86,7 +79,7 @@ mod tests {
         },
         tables,
         transaction::DbTxMut,
-        TransitionList,
+        BlockNumberList,
     };
     use reth_primitives::{hex_literal::hex, H160};
 
@@ -98,15 +91,15 @@ mod tests {
 
     /// Shard for account
     fn shard(shard_index: u64) -> ShardedKey<H160> {
-        ShardedKey { key: ADDRESS, highest_transition_id: shard_index }
+        ShardedKey { key: ADDRESS, highest_block_number: shard_index }
     }
 
-    fn list(list: &[usize]) -> TransitionList {
-        TransitionList::new(list).unwrap()
+    fn list(list: &[usize]) -> BlockNumberList {
+        BlockNumberList::new(list).unwrap()
     }
 
     fn cast(
-        table: Vec<(ShardedKey<H160>, TransitionList)>,
+        table: Vec<(ShardedKey<H160>, BlockNumberList)>,
     ) -> BTreeMap<ShardedKey<H160>, Vec<usize>> {
         table
             .into_iter()
@@ -123,27 +116,19 @@ mod tests {
             // we just need first and last
             tx.put::<tables::BlockBodyIndices>(
                 0,
-                StoredBlockBodyIndices {
-                    first_transition_id: 0,
-                    tx_count: 3,
-                    ..Default::default()
-                },
+                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
             )
             .unwrap();
 
             tx.put::<tables::BlockBodyIndices>(
                 5,
-                StoredBlockBodyIndices {
-                    first_transition_id: 3,
-                    tx_count: 5,
-                    ..Default::default()
-                },
+                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
             )
             .unwrap();
 
             // setup changeset that are going to be applied to history index
             tx.put::<tables::AccountChangeSet>(4, acc()).unwrap();
-            tx.put::<tables::AccountChangeSet>(6, acc()).unwrap();
+            tx.put::<tables::AccountChangeSet>(5, acc()).unwrap();
             Ok(())
         })
         .unwrap()
@@ -181,7 +166,7 @@ mod tests {
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![4, 6]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![4, 5])]));
 
         // unwind
         unwind(&tx, 5, 0).await;
@@ -209,7 +194,7 @@ mod tests {
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 6]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5]),]));
 
         // unwind
         unwind(&tx, 5, 0).await;
@@ -240,7 +225,7 @@ mod tests {
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
         assert_eq!(
             table,
-            BTreeMap::from([(shard(3), full_list.clone()), (shard(u64::MAX), vec![4, 6])])
+            BTreeMap::from([(shard(3), full_list.clone()), (shard(u64::MAX), vec![4, 5])])
         );
 
         // unwind
@@ -270,7 +255,7 @@ mod tests {
 
         // verify
         close_full_list.push(4);
-        close_full_list.push(6);
+        close_full_list.push(5);
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list.clone()),]));
 
@@ -308,7 +293,7 @@ mod tests {
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
         assert_eq!(
             table,
-            BTreeMap::from([(shard(4), close_full_list.clone()), (shard(u64::MAX), vec![6])])
+            BTreeMap::from([(shard(4), close_full_list.clone()), (shard(u64::MAX), vec![5])])
         );
 
         // unwind
@@ -345,7 +330,7 @@ mod tests {
             BTreeMap::from([
                 (shard(1), full_list.clone()),
                 (shard(2), full_list.clone()),
-                (shard(u64::MAX), vec![2, 3, 4, 6])
+                (shard(u64::MAX), vec![2, 3, 4, 5])
             ])
         );
 

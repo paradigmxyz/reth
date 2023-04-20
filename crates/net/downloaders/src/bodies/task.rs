@@ -9,7 +9,7 @@ use reth_primitives::BlockNumber;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     future::Future,
-    ops::Range,
+    ops::RangeInclusive,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -22,7 +22,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 pub struct TaskDownloader {
     #[pin]
     from_downloader: UnboundedReceiverStream<BodyDownloaderResult>,
-    to_downloader: UnboundedSender<Range<BlockNumber>>,
+    to_downloader: UnboundedSender<RangeInclusive<BlockNumber>>,
 }
 
 // === impl TaskDownloader ===
@@ -83,7 +83,7 @@ impl TaskDownloader {
 }
 
 impl BodyDownloader for TaskDownloader {
-    fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
+    fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         let _ = self.to_downloader.send(range);
         Ok(())
     }
@@ -99,7 +99,7 @@ impl Stream for TaskDownloader {
 
 /// A [BodyDownloader] that runs on its own task
 struct SpawnedDownloader<T> {
-    updates: UnboundedReceiverStream<Range<BlockNumber>>,
+    updates: UnboundedReceiverStream<RangeInclusive<BlockNumber>>,
     bodies_tx: UnboundedSender<BodyDownloaderResult>,
     downloader: T,
 }
@@ -162,7 +162,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(&db, &headers);
 
@@ -176,7 +176,7 @@ mod tests {
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(0..20).expect("failed to set download range");
+        downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,
@@ -197,7 +197,7 @@ mod tests {
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(0..0).expect("failed to set download range");
+        downloader.set_download_range(1..=0).expect("failed to set download range");
         assert_matches!(downloader.next().await, Some(Err(DownloadError::InvalidBodyRange { .. })));
     }
 }

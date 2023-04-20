@@ -239,9 +239,7 @@ impl TestTransaction {
                     block.number,
                     StoredBlockBodyIndices {
                         first_tx_num: next_tx_num,
-                        first_transition_id: next_tx_num,
                         tx_count: block.body.len() as u64,
-                        has_block_change: false,
                     },
                 )?;
                 block.body.iter().try_for_each(|body_tx| {

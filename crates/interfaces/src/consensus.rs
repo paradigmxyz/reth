@@ -41,13 +41,6 @@ pub trait Consensus: Debug + Send + Sync {
     ///
     /// **This should not be called for the genesis block**.
     fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError>;
-
-    /// After the Merge (aka Paris) block rewards became obsolete.
-    ///
-    /// This flag is needed as reth's changeset is indexed on transaction level granularity.
-    ///
-    /// More info [here](https://github.com/paradigmxyz/reth/issues/237)
-    fn has_block_reward(&self, total_difficulty: U256, difficulty: U256) -> bool;
 }
 
 /// Consensus Errors
