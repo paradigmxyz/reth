@@ -19,6 +19,20 @@ use reth_provider::insert_canonical_block;
 use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
+use crate::version;
+
+const VERSION: &str = version::PKG_VERSION;
+const PKG_NAME: &str = version::PKG_NAME;
+const SHA: Option<&str> = version::GIT_COMMIT_HASH_SHORT;
+const OS: &str = std::env::consts::OS;
+const RUSTC: &str = version::RUSTC_VERSION;
+
+/// The version message for the current program, like
+/// `reth/v0.1.0/linux-df71e85/rustc 1.68.2 (9eb3afe9e 2023-03-27)`
+pub fn version_message() -> String {
+    format!("{}/v{}/{}-{}/rustc {}", PKG_NAME, VERSION, OS, SHA.unwrap(), RUSTC)
+}
+
 /// Get a single header from network
 pub async fn get_single_header<Client>(
     client: Client,
