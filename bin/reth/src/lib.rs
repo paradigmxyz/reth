@@ -25,14 +25,3 @@ pub mod test_vectors;
 pub mod utils;
 pub mod version;
 use built as _;
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, clap::ValueEnum)]
-enum StageEnum {
-    Headers,
-    Bodies,
-    Senders,
-    Execution,
-    Hashing,
-    Merkle,
-    TxLookup,
-}
