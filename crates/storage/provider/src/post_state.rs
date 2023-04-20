@@ -195,7 +195,6 @@ impl PostState {
         for (block_number, account_changes) in std::mem::take(&mut other.account_changes) {
             let block = self.account_changes.entry(block_number).or_default();
             for (address, account) in account_changes {
-                // TODO: Note about why we skip accounts we already have
                 if block.contains_key(&address) {
                     continue
                 }
@@ -216,8 +215,9 @@ impl PostState {
                 if their_storage.wiped {
                     our_storage.wiped = true;
                 }
-
-                our_storage.storage.extend(their_storage.storage);
+                for (slot, value) in their_storage.storage {
+                    our_storage.storage.entry(slot).or_insert(value);
+                }
             }
         }
         self.receipts.extend(other.receipts);
@@ -349,13 +349,11 @@ impl PostState {
             .or_default()
             .storage
             .extend(changeset.iter().map(|(slot, (_, new))| (*slot, *new)));
-        self.storage_changes
-            .entry(block_number)
-            .or_default()
-            .entry(address)
-            .or_default()
-            .storage
-            .extend(changeset.iter().map(|(slot, (old, _))| (*slot, *old)));
+        let storage_changes =
+            self.storage_changes.entry(block_number).or_default().entry(address).or_default();
+        for (slot, (old, _)) in changeset.into_iter() {
+            storage_changes.storage.entry(slot).or_insert(old);
+        }
     }
 
     /// Add new bytecode to the post-state.
@@ -791,6 +789,151 @@ mod tests {
         assert_eq!(
             state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
             1
+        );
+    }
+
+    /// Checks that if an account is touched multiple times in the same block,
+    /// then the old value from the first change is kept and not overwritten.
+    ///
+    /// This is important because post states from different transactions in the same block may see
+    /// different states of the same account as the old value, but the changeset should reflect the
+    /// state of the account before the block.
+    #[test]
+    fn account_changesets_keep_old_values() {
+        let mut state = PostState::new();
+        let block = 1;
+        let address = Address::repeat_byte(0);
+
+        // A transaction in block 1 creates the account
+        state.create_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+        );
+
+        // A transaction in block 1 then changes the same account
+        state.change_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+            Account { nonce: 1, balance: U256::from(2), bytecode_hash: None },
+        );
+
+        // The value in the changeset for the account should be `None` since this was an account
+        // creation
+        assert_eq!(
+            state.account_changes(),
+            &BTreeMap::from([(block, BTreeMap::from([(address, None)]))]),
+            "The changeset for the account is incorrect"
+        );
+
+        // The latest state of the account should be: nonce = 1, balance = 2, bytecode hash = None
+        assert_eq!(
+            state.accounts.get(&address).unwrap(),
+            &Some(Account { nonce: 1, balance: U256::from(2), bytecode_hash: None }),
+            "The latest state of the account is incorrect"
+        );
+
+        // Another transaction in block 1 then changes the account yet again
+        state.change_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(2), bytecode_hash: None },
+            Account { nonce: 2, balance: U256::from(1), bytecode_hash: None },
+        );
+
+        // The value in the changeset for the account should still be `None`
+        assert_eq!(
+            state.account_changes(),
+            &BTreeMap::from([(block, BTreeMap::from([(address, None)]))]),
+            "The changeset for the account is incorrect"
+        );
+
+        // The latest state of the account should be: nonce = 2, balance = 1, bytecode hash = None
+        assert_eq!(
+            state.accounts.get(&address).unwrap(),
+            &Some(Account { nonce: 2, balance: U256::from(1), bytecode_hash: None }),
+            "The latest state of the account is incorrect"
+        );
+    }
+
+    /// Checks that if a storage slot is touched multiple times in the same block,
+    /// then the old value from the first change is kept and not overwritten.
+    ///
+    /// This is important because post states from different transactions in the same block may see
+    /// different states of the same account as the old value, but the changeset should reflect the
+    /// state of the account before the block.
+    #[test]
+    fn storage_changesets_keep_old_values() {
+        let mut state = PostState::new();
+        let block = 1;
+        let address = Address::repeat_byte(0);
+
+        // A transaction in block 1 changes:
+        //
+        // Slot 0: 0 -> 1
+        // Slot 1: 3 -> 4
+        state.change_storage(
+            block,
+            address,
+            BTreeMap::from([
+                (U256::from(0), (U256::from(0), U256::from(1))),
+                (U256::from(1), (U256::from(3), U256::from(4))),
+            ]),
+        );
+
+        // A transaction in block 1 changes:
+        //
+        // Slot 0: 1 -> 2
+        // Slot 1: 4 -> 5
+        state.change_storage(
+            block,
+            address,
+            BTreeMap::from([
+                (U256::from(0), (U256::from(1), U256::from(2))),
+                (U256::from(1), (U256::from(4), U256::from(5))),
+            ]),
+        );
+
+        // The storage changeset for the account in block 1 should now be:
+        //
+        // Slot 0: 0 (the value before the first tx in the block)
+        // Slot 1: 3
+        assert_eq!(
+            state.storage_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([
+                            (U256::from(0), U256::from(0)),
+                            (U256::from(1), U256::from(3))
+                        ]),
+                        wiped: false,
+                    }
+                )])
+            )]),
+            "The changeset for the storage is incorrect"
+        );
+
+        // The latest state of the storage should be:
+        //
+        // Slot 0: 2
+        // Slot 1: 5
+        assert_eq!(
+            state.storage(),
+            &BTreeMap::from([(
+                address,
+                Storage {
+                    storage: BTreeMap::from([
+                        (U256::from(0), U256::from(2)),
+                        (U256::from(1), U256::from(5))
+                    ]),
+                    wiped: false
+                }
+            )]),
+            "The latest state of the storage is incorrect"
         );
     }
 }
