@@ -18,3 +18,7 @@ pub use secret_key::{get_secret_key, SecretKeyError};
 /// MinerArgs struct for configuring the miner
 mod payload_build_args;
 pub use payload_build_args::PayloadBuilderArgs;
+
+/// Stage related arguments
+mod stage_args;
+pub use stage_args::StageEnum;

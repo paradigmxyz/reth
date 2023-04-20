@@ -16,7 +16,8 @@ use reth_payload_builder::{
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     constants::{RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT, U256,
+    proofs, Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    SealedBlock, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BlockProvider, PostState, StateProviderFactory};
 use reth_revm::{
@@ -99,9 +100,17 @@ where
         attributes: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
         // TODO this needs to access the _pending_ state of the parent block hash
+
+        let block_id: BlockId = if attributes.parent.is_zero() {
+            // use latest block if parent is zero: genesis block
+            BlockNumberOrTag::Latest.into()
+        } else {
+            attributes.parent.into()
+        };
+
         let parent_block = self
             .client
-            .block_by_hash(attributes.parent)?
+            .block(block_id)?
             .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
 
         // configure evm env based on parent block
@@ -111,7 +120,7 @@ where
         let config = PayloadConfig {
             initialized_block_env,
             initialized_cfg,
-            parent_block: Arc::new(parent_block),
+            parent_block: Arc::new(parent_block.seal_slow()),
             extra_data: self.config.extradata.clone(),
             attributes,
             chain_spec: Arc::clone(&self.chain_spec),
@@ -374,7 +383,7 @@ struct PayloadConfig {
     /// Configuration for the environment.
     initialized_cfg: CfgEnv,
     /// The parent block.
-    parent_block: Arc<Block>,
+    parent_block: Arc<SealedBlock>,
     /// Block extra data.
     extra_data: Bytes,
     /// Requested attributes for the payload.
@@ -468,9 +477,13 @@ fn build_payload<Pool, Client>(
             // TODO skip invalid transactions
             let ResultAndState { result, state } =
                 evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+            let gas_used = result.gas_used();
 
             // commit changes
             commit_state_changes(&mut db, &mut post_state, state, true);
+
+            // add gas used by the transaction to cumulative gas used, before creating the receipt
+            cumulative_gas_used += gas_used;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
@@ -480,16 +493,11 @@ fn build_payload<Pool, Client>(
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
             });
 
-            let gas_used = result.gas_used();
-
             // update add to total fees
             let miner_fee = tx
                 .effective_tip_per_gas(base_fee)
                 .expect("fee is always valid; execution succeeded");
             total_fees += U256::from(miner_fee) * U256::from(gas_used);
-
-            // append gas used
-            cumulative_gas_used += gas_used;
 
             // append transaction to the list of executed transactions
             executed_txs.push(tx.into_signed());
@@ -502,6 +510,7 @@ fn build_payload<Pool, Client>(
         }
 
         let mut withdrawals_root = None;
+        let mut withdrawals = None;
 
         // get balance changes from withdrawals
         if initialized_cfg.spec_id >= SpecId::SHANGHAI {
@@ -517,6 +526,9 @@ fn build_payload<Pool, Client>(
             // calculate withdrawals root
             withdrawals_root =
                 Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()));
+
+            // set withdrawals
+            withdrawals = Some(attributes.withdrawals);
         }
 
         // create the block header
@@ -526,7 +538,7 @@ fn build_payload<Pool, Client>(
         let logs_bloom = post_state.logs_bloom();
 
         let header = Header {
-            parent_hash: attributes.parent,
+            parent_hash: parent_block.hash,
             ommers_hash: EMPTY_OMMER_ROOT,
             beneficiary: initialized_block_env.coinbase,
             // TODO compute state root
@@ -547,12 +559,7 @@ fn build_payload<Pool, Client>(
         };
 
         // seal the block
-        let block = Block {
-            header,
-            body: executed_txs,
-            ommers: vec![],
-            withdrawals: Some(attributes.withdrawals),
-        };
+        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
 
         let sealed_block = block.seal_slow();
         Ok(BuildOutcome::Better(BuiltPayload::new(attributes.id, sealed_block, total_fees)))

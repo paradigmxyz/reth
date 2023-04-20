@@ -8,25 +8,20 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
+use reth_dns_discovery::DnsDiscoveryConfig;
+use reth_ecies::util::pk2id;
+use reth_eth_wire::{HelloMessage, Status};
 use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use secp256k1::{SecretKey, SECP256K1};
+use secp256k1::SECP256K1;
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
-
-/// reexports for convenience
-#[doc(hidden)]
-mod __reexport {
-    pub use secp256k1::SecretKey;
-}
-pub use __reexport::*;
-use reth_dns_discovery::DnsDiscoveryConfig;
-use reth_ecies::util::pk2id;
-use reth_eth_wire::{HelloMessage, Status};
+// re-export for convenience
+pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {

@@ -1,5 +1,5 @@
 [package]
-name = "reth-executor"
+name = "reth-blockchain-tree"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -16,28 +16,14 @@ normal = [
 # reth 
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
-reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
 # common
-thiserror = "1.0.37"
-auto_impl = "1.0"
-tracing = "0.1.37"
-tokio = { version = "1.21.2", features = ["sync"] }
 parking_lot = { version = "0.12"}
 
 # mics
 aquamarine = "0.3.0"
-
-triehash = "0.8"
-# See to replace hashers to simplify libraries
-plain_hasher = "0.2"
-hash-db = "0.15"
-# todo replace with faster rlp impl
-rlp = { version = "0.5", default-features = false }
-# replace with tiny-keccak (it is faster hasher)
-sha3 = { version = "0.10", default-features = false }
 
 
 [dev-dependencies]
@@ -47,6 +33,7 @@ reth-primitives = { path = "../primitives", features = ["test-utils"] }
 reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
 parking_lot = "0.12"
 assert_matches = "1.5"
+tokio = { version = "1", features = ["macros", "sync"] }
 
 [features]
 test-utils = []
