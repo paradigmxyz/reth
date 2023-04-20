@@ -10,7 +10,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{rpc_utils::keccak256, BlockNumber, TransactionSigned, TxNumber, H256};
+use reth_primitives::{rpc_utils::keccak256, BlockNumber, TransactionSignedNoHash, TxNumber, H256};
 use reth_provider::Transaction;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -85,13 +85,14 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             let chunk: Vec<_> = chunk.collect();
 
             // closure that will calculate the TxHash
-            let calculate_hash = |entry: Result<(TxNumber, TransactionSigned), reth_db::Error>,
-                                  rlp_buf: &mut Vec<u8>|
-             -> Result<(H256, u64), Box<StageError>> {
-                let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
-                transaction.encode_enveloped(rlp_buf);
-                Ok((H256(keccak256(rlp_buf)), tx_id))
-            };
+            let calculate_hash =
+                |entry: Result<(TxNumber, TransactionSignedNoHash), reth_db::Error>,
+                 rlp_buf: &mut Vec<u8>|
+                 -> Result<(H256, u64), Box<StageError>> {
+                    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
+                    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+                    Ok((H256(keccak256(rlp_buf)), tx_id))
+                };
 
             // Spawn the task onto the global rayon pool
             // This task will send the results through the channel after it has calculated the hash.

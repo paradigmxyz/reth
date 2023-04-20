@@ -35,7 +35,7 @@ use crate::{
 use reth_primitives::{
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSigned, TransitionId, TxHash, TxNumber, H256,
+    TransactionSignedNoHash, TransitionId, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -170,7 +170,7 @@ table!(
 
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
-    (  Transactions ) TxNumber | TransactionSigned
+    (  Transactions ) TxNumber | TransactionSignedNoHash
 );
 
 table!(

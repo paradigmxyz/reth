@@ -20,8 +20,8 @@ use reth_db::{
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork,
-    Header, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
-    TransitionId, TxNumber, H256, U256,
+    Header, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSigned,
+    TransactionSignedEcRecovered, TransitionId, TxNumber, H256, U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{
@@ -683,8 +683,12 @@ where
         }
 
         // Get transactions and senders
-        let transactions =
-            self.get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?;
+        let transactions = self
+            .get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?
+            .into_iter()
+            .map(|(id, tx)| (id, tx.into()))
+            .collect::<Vec<(u64, TransactionSigned)>>();
+
         let senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 

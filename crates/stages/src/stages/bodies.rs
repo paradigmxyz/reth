@@ -123,7 +123,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     // Write transactions
                     for transaction in block.body {
                         // Append the transaction
-                        tx_cursor.append(next_tx_num, transaction)?;
+                        tx_cursor.append(next_tx_num, transaction.into())?;
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
                     }

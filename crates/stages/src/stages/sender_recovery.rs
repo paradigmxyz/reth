@@ -10,7 +10,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable, RawValue,
 };
-use reth_primitives::{TransactionSigned, TxNumber, H160};
+use reth_primitives::{keccak256, TransactionSignedNoHash, TxNumber, H160};
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -101,16 +101,20 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
             // closure that would recover signer. Used as utility to wrap result
             let recover = |entry: Result<
-                (RawKey<TxNumber>, RawValue<TransactionSigned>),
+                (RawKey<TxNumber>, RawValue<TransactionSignedNoHash>),
                 reth_db::Error,
-            >|
+            >,
+                           rlp_buf: &mut Vec<u8>|
              -> Result<(u64, H160), Box<StageError>> {
                 let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
                 let tx_id = tx_id.key().expect("key to be formated");
-                let transaction = transaction.value().expect("value to be formated");
-                let sender = transaction.recover_signer().ok_or(StageError::from(
-                    SenderRecoveryStageError::SenderRecovery { tx: tx_id },
-                ))?;
+
+                let tx = transaction.value().expect("value to be formated");
+                tx.transaction.encode_without_signature(rlp_buf);
+
+                let sender = tx.signature.recover_signer(keccak256(rlp_buf)).ok_or(
+                    StageError::from(SenderRecoveryStageError::SenderRecovery { tx: tx_id }),
+                )?;
 
                 Ok((tx_id, sender))
             };
@@ -118,8 +122,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             // Spawn the sender recovery task onto the global rayon pool
             // This task will send the results through the channel after it recovered the senders.
             rayon::spawn(move || {
+                let mut rlp_buf = Vec::with_capacity(128);
                 for entry in chunk {
-                    let _ = tx.send(recover(entry));
+                    rlp_buf.truncate(0);
+                    let _ = tx.send(recover(entry, &mut rlp_buf));
                 }
             });
         }

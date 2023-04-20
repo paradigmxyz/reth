@@ -147,11 +147,7 @@ where
 
                     let transactions = transactions
                         .into_iter()
-                        .map(|tx| {
-                            let mut tx = tx.to_recovered_transaction().into_signed();
-                            tx.hash_or_recalculate();
-                            tx
-                        })
+                        .map(|tx| tx.to_recovered_transaction().into_signed())
                         .collect::<Vec<_>>();
 
                     header.transactions_root = if transactions.is_empty() {

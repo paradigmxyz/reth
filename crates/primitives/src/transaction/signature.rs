@@ -114,7 +114,7 @@ impl Signature {
     }
 
     /// Recover signature from hash.
-    pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
+    pub fn recover_signer(&self, hash: H256) -> Option<Address> {
         let mut sig: [u8; 65] = [0; 65];
 
         sig[0..32].copy_from_slice(&self.r.to_be_bytes::<32>());

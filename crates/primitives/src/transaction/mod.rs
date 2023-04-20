@@ -179,6 +179,50 @@ pub enum Transaction {
     Eip1559(TxEip1559),
 }
 
+impl Transaction {
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
+        Encodable::encode(self, out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+                // do nothing w/ with_header
+                let payload_length =
+                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode_with_eip155_chain_id(out, *chain_id);
+            }
+            _ => {
+                let payload_length = self.fields_len() + signature.payload_len();
+                if with_header {
+                    Header {
+                        list: false,
+                        payload_length: 1 + length_of_length(payload_length) + payload_length,
+                    }
+                    .encode(out);
+                }
+                out.put_u8(self.tx_type() as u8);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode(out);
+            }
+        }
+    }
+}
+
 impl Compact for Transaction {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -621,11 +665,9 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction.
-#[add_arbitrary_tests(rlp, compact)]
+#[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
-pub struct TransactionSigned {
-    /// Transaction hash
-    pub hash: Option<TxHash>,
+pub struct TransactionSignedNoHash {
     /// The transaction signature values
     pub signature: Signature,
     /// Raw transaction info
@@ -634,7 +676,17 @@ pub struct TransactionSigned {
     pub transaction: Transaction,
 }
 
-impl Compact for TransactionSigned {
+impl TransactionSignedNoHash {
+    /// Calculates the transaction hash. If used more than once, it's better to convert it to
+    /// [`TransactionSigned`] first.
+    pub fn hash(&self) -> H256 {
+        let mut buf = Vec::new();
+        self.transaction.encode_with_signature(&self.signature, &mut buf, false);
+        keccak256(&buf)
+    }
+}
+
+impl Compact for TransactionSignedNoHash {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -659,9 +711,36 @@ impl Compact for TransactionSigned {
         let (signature, buf) = Signature::from_compact(buf, prefix & 1);
         let (transaction, buf) = Transaction::from_compact(buf, prefix >> 1);
 
-        (TransactionSigned { signature, transaction, hash: None }, buf)
+        (TransactionSignedNoHash { signature, transaction }, buf)
     }
 }
+
+impl From<TransactionSignedNoHash> for TransactionSigned {
+    fn from(tx: TransactionSignedNoHash) -> Self {
+        TransactionSigned::from_transaction_and_signature(tx.transaction, tx.signature)
+    }
+}
+
+impl From<TransactionSigned> for TransactionSignedNoHash {
+    fn from(tx: TransactionSigned) -> Self {
+        TransactionSignedNoHash { signature: tx.signature, transaction: tx.transaction }
+    }
+}
+
+/// Signed transaction.
+#[add_arbitrary_tests(rlp)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
+pub struct TransactionSigned {
+    /// Transaction hash
+    pub hash: TxHash,
+    /// The transaction signature values
+    pub signature: Signature,
+    /// Raw transaction info
+    #[deref]
+    #[as_ref]
+    pub transaction: Transaction,
+}
+
 impl AsRef<Self> for TransactionSigned {
     fn as_ref(&self) -> &Self {
         self
@@ -679,25 +758,12 @@ impl TransactionSigned {
     /// Transaction hash. Used to identify transaction. Calculates it if it's not present, but does
     /// not store it.
     pub fn hash(&self) -> TxHash {
-        if let Some(hash) = self.hash {
-            return hash
-        }
-        self.recalculate_hash()
-    }
-
-    /// Transaction hash. Used to identify transaction. Calculates it if it's not present and stores
-    /// it for future use.
-    pub fn hash_or_recalculate(&mut self) -> TxHash {
-        if let Some(hash) = self.hash {
-            return hash
-        }
-        self.hash = Some(self.recalculate_hash());
-        self.hash.expect("qed")
+        self.hash
     }
 
     /// Transaction hash. Used to identify transaction. Will panic if transaction is not preset.
     pub fn hash_ref(&self) -> &TxHash {
-        self.hash.as_ref().expect("Transaction hash should have been called before.")
+        &self.hash
     }
 
     /// Recover signer from signature and hash.
@@ -744,32 +810,7 @@ impl TransactionSigned {
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2718 does not require rlp header
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
-        match self.transaction {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                // do nothing w/ with_header
-                let payload_length = self.transaction.fields_len() +
-                    self.signature.payload_len_with_eip155_chain_id(chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                self.signature.encode_with_eip155_chain_id(out, chain_id);
-            }
-            _ => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.transaction.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                self.signature.encode(out);
-            }
-        }
+        self.transaction.encode_with_signature(&self.signature, out, with_header);
     }
 
     /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
@@ -803,7 +844,7 @@ impl TransactionSigned {
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = Some(initial_tx.recalculate_hash());
+        initial_tx.hash = initial_tx.recalculate_hash();
         initial_tx
     }
 
@@ -831,7 +872,7 @@ impl TransactionSigned {
         }
 
         let tx_length = header.payload_length + header.length();
-        let hash = Some(keccak256(&original_encoding[..tx_length]));
+        let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
         Ok(signed)
     }
@@ -884,7 +925,7 @@ impl TransactionSigned {
 
         let signature = Signature::decode(data)?;
 
-        let hash = Some(keccak256(&original_encoding[..tx_length]));
+        let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
         Ok(signed)
     }
@@ -966,7 +1007,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                 }
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };
-                tx.hash = Some(tx.recalculate_hash());
+                tx.hash = tx.recalculate_hash();
                 tx
             })
             .boxed()
@@ -989,14 +1030,13 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
             signature: Signature::arbitrary(u)?,
             transaction,
         };
-        tx.hash = Some(tx.recalculate_hash());
+        tx.hash = tx.recalculate_hash();
 
         Ok(tx)
     }
 }
 
 /// Signed transaction with recovered signer.
-#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, DerefMut, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction
