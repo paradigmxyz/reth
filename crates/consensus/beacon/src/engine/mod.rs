@@ -368,10 +368,7 @@ where
     ///
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
-    fn on_new_payload(
-        &mut self,
-        payload: ExecutionPayload,
-    ) -> Result<PayloadStatus, reth_interfaces::Error> {
+    fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
         let block_number = payload.block_number.as_u64();
         let block_hash = payload.block_hash;
         trace!(target: "consensus::engine", ?block_hash, block_number, "Received new payload");
@@ -379,7 +376,7 @@ where
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
-                return Ok(error.into())
+                return error.into()
             }
         };
 
@@ -413,7 +410,7 @@ where
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
         trace!(target: "consensus::engine", ?block_hash, block_number, ?status, "Returning payload status");
-        Ok(status)
+        status
     }
 
     /// Returns the next pipeline state depending on the current value of the next action.
@@ -538,14 +535,8 @@ where
                     }
                     BeaconEngineMessage::NewPayload { payload, tx } => {
                         this.metrics.new_payload_messages.increment(1);
-                        let response = match this.on_new_payload(payload) {
-                            Ok(response) => response,
-                            Err(error) => {
-                                error!(target: "consensus::engine", ?error, "Error getting new payload response");
-                                return Poll::Ready(Err(error.into()))
-                            }
-                        };
-                        let _ = tx.send(Ok(response));
+                        let status = this.on_new_payload(payload);
+                        let _ = tx.send(Ok(status));
                     }
                 }
             }
