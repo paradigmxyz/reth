@@ -1,7 +1,7 @@
 use super::TrieMask;
 use crate::H256;
 use bytes::Buf;
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 /// A struct representing a branch node in an Ethereum trie.
