@@ -110,8 +110,9 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                 pool.on_canonical_state_change(update);
 
                 // all transactions that were mined in the old chain but not in the new chain need
-                // to be re-injected Note: we no longer know if the tx was local or
-                // external
+                // to be re-injected
+                //
+                // Note: we no longer know if the tx was local or external
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
                 // TODO: metrics
             }
@@ -119,14 +120,43 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                 // this similar to the inverse of a commit where we need to insert the transactions
                 // back into the pool and update the pool's state accordingly
 
-                let (blocks, _state) = old.inner();
+                let (blocks, state) = old.inner();
                 let first_block = blocks.first();
                 if first_block.hash == pool_info.last_seen_block_hash {
                     // nothing to update
                     continue
                 }
 
-                // TODO is this reachable?
+                // base fee for the next block: `first_block+1`
+                let pending_block_base_fee = calculate_next_block_base_fee(
+                    first_block.gas_used,
+                    first_block.gas_limit,
+                    first_block.base_fee_per_gas.unwrap_or_default(),
+                ) as u128;
+                let changed_accounts = changed_accounts_iter(state).collect();
+                let update = CanonicalStateUpdate {
+                    hash: first_block.hash,
+                    number: first_block.number,
+                    pending_block_base_fee,
+                    changed_accounts,
+                    // no tx to prune in the reverted chain
+                    mined_transactions: vec![],
+                };
+                pool.on_canonical_state_change(update);
+
+                let pruned_old_transactions = blocks
+                    .transactions()
+                    .filter_map(|tx| tx.clone().into_ecrecovered())
+                    .map(|tx| {
+                        <V as TransactionValidator>::Transaction::from_recovered_transaction(tx)
+                    })
+                    .collect();
+
+                // all transactions that were mined in the old chain need to be re-injected
+                //
+                // Note: we no longer know if the tx was local or external
+                let _ = pool.add_external_transactions(pruned_old_transactions).await;
+                // TODO: metrics
             }
             CanonStateNotification::Commit { new } => {
                 // TODO skip large commits?
