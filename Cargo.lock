@@ -5364,6 +5364,7 @@ dependencies = [
  "paste",
  "rand 0.8.5",
  "reth-consensus-common",
+ "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",

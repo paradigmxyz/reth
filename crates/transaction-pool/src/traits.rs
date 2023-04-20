@@ -49,6 +49,17 @@ pub trait TransactionPool: Send + Sync + Clone {
         self.add_transaction(TransactionOrigin::External, transaction).await
     }
 
+    /// Imports all _external_ transactions
+    ///
+    ///
+    /// Consumer: Utility
+    async fn add_external_transactions(
+        &self,
+        transactions: Vec<Self::Transaction>,
+    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+        self.add_transactions(TransactionOrigin::External, transactions).await
+    }
+
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
@@ -267,6 +278,15 @@ pub struct ChangedAccount {
     pub nonce: u64,
     /// Account balance.
     pub balance: U256,
+}
+
+// === impl ChangedAccount ===
+
+impl ChangedAccount {
+    /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
+    pub(crate) fn empty(address: Address) -> Self {
+        Self { address, nonce: 0, balance: U256::ZERO }
+    }
 }
 
 /// An `Iterator` that only returns transactions that are ready to be executed.
