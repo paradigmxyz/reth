@@ -24,7 +24,7 @@ mod web3;
 pub use admin::AdminApi;
 pub use call_guard::TracingCallGuard;
 pub use debug::DebugApi;
-pub use engine::EngineApi;
+pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
 pub use layers::{AuthLayer, AuthValidator, Claims, JwtAuthValidator, JwtError, JwtSecret};
 pub use net::NetApi;
