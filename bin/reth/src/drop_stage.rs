@@ -98,6 +98,7 @@ impl Command {
                     tx.clear::<tables::StoragesTrie>()?;
                     tx.put::<tables::SyncStage>(MERKLE_EXECUTION.0.to_string(), 0)?;
                     tx.put::<tables::SyncStage>(MERKLE_UNWIND.0.to_string(), 0)?;
+                    tx.delete::<tables::SyncStageProgress>(MERKLE_EXECUTION.0.into(), None)?;
                     Ok::<_, eyre::Error>(())
                 })??;
             }

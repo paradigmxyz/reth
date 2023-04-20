@@ -195,14 +195,25 @@ impl Default for HashBuilderValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
-    fn test_merkle_checkpoint() {
+    fn hash_builder_state_regression() {
         let mut state = HashBuilderState::default();
         state.stack.push(vec![]);
         let mut buf = vec![];
         let len = state.clone().to_compact(&mut buf);
         let (decoded, _) = HashBuilderState::from_compact(&buf, len);
         assert_eq!(state, decoded);
+    }
+
+    proptest! {
+        #[test]
+        fn hash_builder_state_roundtrip(state: HashBuilderState) {
+            let mut buf = vec![];
+            let len = state.clone().to_compact(&mut buf);
+            let (decoded, _) = HashBuilderState::from_compact(&buf, len);
+            assert_eq!(state, decoded);
+        }
     }
 }
