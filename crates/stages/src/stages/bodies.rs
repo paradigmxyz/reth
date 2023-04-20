@@ -540,7 +540,7 @@ mod tests {
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx();
-                            tx.put::<tables::Transactions>(tx_num, transaction)
+                            tx.put::<tables::Transactions>(tx_num, transaction.into())
                         })?;
 
                         if body.tx_count != 0 {

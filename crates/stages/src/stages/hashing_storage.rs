@@ -329,7 +329,7 @@ mod tests {
                 self.tx.commit(|tx| {
                     progress.body.iter().try_for_each(|transaction| {
                         tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
-                        tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
+                        tx.put::<tables::Transactions>(next_tx_num, transaction.clone().into())?;
 
                         let (addr, _) = accounts
                             .get_mut(rand::random::<usize>() % n_accounts as usize)

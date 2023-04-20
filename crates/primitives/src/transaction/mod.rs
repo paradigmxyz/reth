@@ -1343,7 +1343,7 @@ mod tests {
     ) {
         let expected = TransactionSigned::from_transaction_and_signature(transaction, signature);
         if let Some(hash) = hash {
-            assert_eq!(hash, expected.hash.unwrap());
+            assert_eq!(hash, expected.hash);
         }
         assert_eq!(bytes.len(), expected.length());
 

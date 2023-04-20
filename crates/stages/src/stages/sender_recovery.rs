@@ -172,7 +172,7 @@ impl From<SenderRecoveryStageError> for StageError {
 mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
-    use reth_primitives::{BlockNumber, SealedBlock, H256};
+    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, H256};
 
     use super::*;
     use crate::test_utils::{
@@ -337,9 +337,10 @@ mod tests {
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
-                            let transaction = tx
+                            let transaction: TransactionSigned = tx
                                 .get::<tables::Transactions>(tx_id)?
-                                .expect("no transaction entry");
+                                .expect("no transaction entry")
+                                .into();
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");
                             assert_eq!(Some(signer), tx.get::<tables::TxSenders>(tx_id)?);
