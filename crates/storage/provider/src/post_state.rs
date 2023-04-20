@@ -12,7 +12,7 @@ use reth_primitives::{
 };
 use std::collections::BTreeMap;
 
-/// Storage for an account with the old and new values for each slot.
+/// Storage for an account with the old and new values for each slot: (slot -> (old, new)).
 pub type StorageChangeset = BTreeMap<U256, (U256, U256)>;
 
 /// A mapping of `block -> address -> account` that represents what accounts were changed, and what

@@ -123,19 +123,13 @@ fn block2(number: BlockNumber, parent_hash: H256) -> (SealedBlockWithSenders, Po
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root =
-        H256(hex!("474d43027ff7aaa2659c582c91c33536c80c5cbc56a114d1f53835f8cae52125"));
+        H256(hex!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8"));
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
     block.header = header.seal_slow();
 
     let mut post_state = PostState::default();
-    // Transaction changes
-    post_state.change_account(
-        number,
-        H160([0x61; 20]),
-        Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
-        Account { nonce: 2, balance: U256::from(15), bytecode_hash: None },
-    );
+    // block changes
     post_state.change_account(
         number,
         H160([0x60; 20]),
