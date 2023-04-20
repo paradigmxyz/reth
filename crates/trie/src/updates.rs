@@ -126,19 +126,21 @@ impl TrieUpdates {
                     TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
                 },
                 TrieKey::StorageNode(hashed_address, nibbles) => {
-                    // Delete the old entry if it exists.
-                    if storage_trie_cursor
-                        .seek_by_key_subkey(hashed_address, nibbles.clone())?
-                        .filter(|e| e.nibbles == nibbles)
-                        .is_some()
-                    {
-                        storage_trie_cursor.delete_current()?;
-                    }
+                    if !nibbles.is_empty() {
+                        // Delete the old entry if it exists.
+                        if storage_trie_cursor
+                            .seek_by_key_subkey(hashed_address, nibbles.clone())?
+                            .filter(|e| e.nibbles == nibbles)
+                            .is_some()
+                        {
+                            storage_trie_cursor.delete_current()?;
+                        }
 
-                    // The operation is an update, insert new entry.
-                    if let TrieOp::Update(node) = operation {
-                        storage_trie_cursor
-                            .upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
+                        // The operation is an update, insert new entry.
+                        if let TrieOp::Update(node) = operation {
+                            storage_trie_cursor
+                                .upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
+                        }
                     }
                 }
             };

@@ -2,9 +2,9 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::{get_secret_key, NetworkArgs},
+    args::{get_secret_key, NetworkArgs, StageEnum},
     dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath, SecretKeyPath},
-    prometheus_exporter, StageEnum,
+    prometheus_exporter,
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
@@ -94,7 +94,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(&self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         fdlimit::raise_fd_limit();
