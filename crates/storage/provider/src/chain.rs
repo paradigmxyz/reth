@@ -4,7 +4,11 @@ use crate::PostState;
 use reth_interfaces::{executor::Error as ExecError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
+<<<<<<< HEAD
     TransactionSigned, TxHash,
+=======
+    TransactionSigned, TransitionId, TxHash,
+>>>>>>> 61a86e66 (feat: impl reorg handlers)
 };
 use std::{borrow::Cow, collections::BTreeMap};
 

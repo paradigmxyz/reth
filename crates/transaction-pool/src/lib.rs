@@ -163,17 +163,6 @@ where
         self.inner().config()
     }
 
-    /// Inserts revalidated transactions back into the pool.
-    ///
-    /// This is used after a chain reorg,revert occurred
-    pub fn reinject_validated(
-        &self,
-        transactions: impl IntoIterator<Item = TransactionValidationOutcome<V::Transaction>>,
-    ) {
-        // can't keep track of the origin of the transaction, so we assume it's external
-        let _ = self.pool.add_transactions(TransactionOrigin::External, transactions);
-    }
-
     /// Returns future that validates all transaction in the given iterator.
     async fn validate_all(
         &self,
