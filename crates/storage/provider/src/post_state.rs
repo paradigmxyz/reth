@@ -391,28 +391,26 @@ impl PostState {
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
         for (block_number, storage_changes) in self.storage_changes.into_iter() {
-            for (address, storage) in storage_changes.into_iter() {
+            for (address, mut storage) in storage_changes.into_iter() {
                 let storage_id = BlockNumberAddress((block_number, address));
 
                 if storage.wiped {
-                    // If the storage was wiped during the block, then all storage slots changed
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
-                        storage_changeset_cursor.append_dup(storage_id, entry)?;
+                        storage.storage.insert(entry.key.into(), entry.value);
 
                         while let Some(entry) = storages_cursor.next_dup_val()? {
-                            storage_changeset_cursor.append_dup(storage_id, entry)?;
+                            storage.storage.insert(entry.key.into(), entry.value);
                         }
                     }
-                } else {
-                    // Otherwise only some of them changed
-                    for (slot, old_value) in storage.storage {
-                        tracing::trace!(target: "provider::post_state", ?storage_id, ?slot, ?old_value, "Storage changed");
-                        storage_changeset_cursor.append_dup(
-                            storage_id,
-                            StorageEntry { key: H256(slot.to_be_bytes()), value: old_value },
-                        )?;
-                    }
+                }
+
+                for (slot, old_value) in storage.storage {
+                    tracing::trace!(target: "provider::post_state", ?storage_id, ?slot, ?old_value, "Storage changed");
+                    storage_changeset_cursor.append_dup(
+                        storage_id,
+                        StorageEntry { key: H256(slot.to_be_bytes()), value: old_value },
+                    )?;
                 }
             }
         }
