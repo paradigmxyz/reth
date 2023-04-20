@@ -120,7 +120,7 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
         tid_range: Range<TransitionId>,
     ) -> Result<(H256, TrieUpdates), StateRootError> {
         tracing::debug!(target: "loader", "incremental state root");
-        Self::incremental_root_calculator(tx, tid_range.clone())?.root_with_updates()
+        Self::incremental_root_calculator(tx, tid_range)?.root_with_updates()
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
@@ -134,7 +134,7 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
         tid_range: Range<TransitionId>,
     ) -> Result<StateRootProgress, StateRootError> {
         tracing::debug!(target: "loader", "incremental state root with progress");
-        Self::incremental_root_calculator(tx, tid_range.clone())?.root_with_progress()
+        Self::incremental_root_calculator(tx, tid_range)?.root_with_progress()
     }
 
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
