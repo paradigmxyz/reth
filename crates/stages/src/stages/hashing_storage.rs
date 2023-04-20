@@ -219,6 +219,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
+    use assert_matches::assert_matches;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         mdbx::{tx::Tx, WriteMap, RW},
@@ -272,6 +273,100 @@ mod tests {
             }
             panic!("Failed execution");
         }
+    }
+
+    #[tokio::test]
+    async fn execute_clean_account_hashing_with_commit_threshold() {
+        let (previous_stage, stage_progress) = (500, 100);
+        // Set up the runner
+        let mut runner = StorageHashingTestRunner::default();
+        runner.set_clean_threshold(1);
+        runner.set_commit_threshold(500);
+
+        let mut input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        // first run, hash first half of storages.
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == false && stage_progress == 100);
+        assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 500);
+        let (progress_address, progress_key) = runner
+            .tx
+            .query(|tx| {
+                let (address, entry) = tx
+                    .cursor_read::<tables::PlainStorageState>()?
+                    .walk(None)?
+                    .skip(500)
+                    .next()
+                    .unwrap()
+                    .unwrap();
+                Ok((address, entry.key))
+            })
+            .unwrap();
+
+        let stage_progress = runner.stage().get_checkpoint(&runner.tx.inner()).unwrap();
+        let progress_key = stage_progress.storage.map(|_| progress_key);
+        assert_eq!(
+            stage_progress,
+            StorageHashingCheckpoint {
+                address: Some(progress_address),
+                storage: progress_key,
+                from: 101,
+                to: 500
+            }
+        );
+
+        // second run with commit threshold of 2 to check if subkey is set.
+        runner.set_commit_threshold(2);
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == false && stage_progress == 100);
+        assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 502);
+        let (progress_address, progress_key) = runner
+            .tx
+            .query(|tx| {
+                let (address, entry) = tx
+                    .cursor_read::<tables::PlainStorageState>()?
+                    .walk(None)?
+                    .skip(502)
+                    .next()
+                    .unwrap()
+                    .unwrap();
+                Ok((address, entry.key))
+            })
+            .unwrap();
+
+        let stage_progress = runner.stage().get_checkpoint(&runner.tx.inner()).unwrap();
+        let progress_key = stage_progress.storage.map(|_| progress_key);
+        assert_eq!(
+            stage_progress,
+            StorageHashingCheckpoint {
+                address: Some(progress_address),
+                storage: progress_key,
+                from: 101,
+                to: 500
+            }
+        );
+
+        // third last run, hash rest of storages.
+        runner.set_commit_threshold(1000);
+        input.stage_progress = Some(result.unwrap().stage_progress);
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == true && stage_progress == 500);
+        assert_eq!(
+            runner.tx.table::<tables::HashedStorage>().unwrap().len(),
+            runner.tx.table::<tables::PlainStorageState>().unwrap().len()
+        );
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
     }
 
     struct StorageHashingTestRunner {

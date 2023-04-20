@@ -12,6 +12,7 @@ use reth_db::{
 use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
 use std::{
+    cmp::max,
     fmt::Debug,
     ops::{Range, RangeInclusive},
 };
@@ -197,7 +198,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 for chunk in &accounts_cursor
                     .walk(start_address.clone())?
                     .take(self.commit_threshold as usize)
-                    .chunks(self.commit_threshold as usize / rayon::current_num_threads())
+                    .chunks(
+                        max(self.commit_threshold as usize, rayon::current_num_threads()) /
+                            rayon::current_num_threads(),
+                    )
                 {
                     // An _unordered_ channel to receive results from a rayon job
                     let (tx, rx) = mpsc::unbounded_channel();
@@ -291,8 +295,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
-        PREV_STAGE_ID,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{Account, U256};
@@ -318,6 +322,59 @@ mod tests {
         let result = rx.await.unwrap();
 
         assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done && stage_progress == previous_stage);
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    #[tokio::test]
+    async fn execute_clean_account_hashing_with_commit_threshold() {
+        let (previous_stage, stage_progress) = (20, 10);
+        // Set up the runner
+        let mut runner = AccountHashingTestRunner::default();
+        runner.set_clean_threshold(1);
+        runner.set_commit_threshold(5);
+
+        let mut input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        // first run, hash first five account.
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == false && stage_progress == 10);
+        assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 5);
+        let fifth_address = runner
+            .tx
+            .query(|tx| {
+                let (address, _) = tx
+                    .cursor_read::<tables::PlainAccountState>()?
+                    .walk(None)?
+                    .skip(5)
+                    .next()
+                    .unwrap()
+                    .unwrap();
+                Ok(address)
+            })
+            .unwrap();
+
+        let stage_progress = runner.stage().get_checkpoint(&runner.tx.inner()).unwrap();
+        assert_eq!(
+            stage_progress,
+            AccountHashingCheckpoint { address: Some(fifth_address), from: 11, to: 20 }
+        );
+
+        // second run, hash next five account.
+        input.stage_progress = Some(result.unwrap().stage_progress);
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == true && stage_progress == 20);
+        assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 10);
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -428,7 +485,7 @@ mod tests {
                     &mut self.tx.inner(),
                     SeedOpts {
                         blocks: 1..=input.previous_stage_progress(),
-                        accounts: 0..2,
+                        accounts: 0..10,
                         txs: 0..3,
                     },
                 )
