@@ -181,7 +181,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             if current_key.is_some() {
                 // `from_block` is correct here as were are iteration over state for this
                 // particular block.
-                return Ok(ExecOutput { stage_progress: from_block, done: false })
+                return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
             }
         } else {
             // Aggregate all changesets and and make list of storages that have been

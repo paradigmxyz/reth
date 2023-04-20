@@ -15,6 +15,11 @@ pub struct ExecInput {
 }
 
 impl ExecInput {
+    /// Return the progress of the stage or default.
+    pub fn stage_progress(&self) -> BlockNumber {
+        self.stage_progress.unwrap_or_default()
+    }
+
     /// Return the progress of the previous stage or default.
     pub fn previous_stage_progress(&self) -> BlockNumber {
         self.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default()
