@@ -386,7 +386,6 @@ where
                     self.network.send_transactions_hashes(peer_id, msg);
                 }
             }
-            // TODO Add remaining events
             _ => {}
         }
     }
