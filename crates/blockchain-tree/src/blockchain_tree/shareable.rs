@@ -1,4 +1,5 @@
 //! Wrapper around BlockchainTree that allows for it to be shared.
+use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -16,7 +17,6 @@ use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
 };
-use super::BlockchainTree;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
 #[derive(Clone)]

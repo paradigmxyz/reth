@@ -5,15 +5,14 @@ pub use state::{
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 mod post_state_provider;
-pub use post_state_provider::PostStateProvider;
 use crate::{
-    BlockHashProvider, BlockIdProvider,
-    BlockProvider, BlockchainTreePendingStateProvider, CanonStateNotifications,
-    CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider,
-    ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
-    WithdrawalsProvider,
+    BlockHashProvider, BlockIdProvider, BlockProvider, BlockchainTreePendingStateProvider,
+    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
+    PostStateDataProvider, ReceiptProvider, StateProviderBox, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
 };
 pub use database::*;
+pub use post_state_provider::PostStateProvider;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},

@@ -90,5 +90,5 @@ pub enum ProviderError {
     CacheServiceUnavailable,
     /// Thrown when we failed to lookup a block for the pending state
     #[error("Unknown block hash: {0:}")]
-    UnknownBlockHash(H256)
+    UnknownBlockHash(H256),
 }

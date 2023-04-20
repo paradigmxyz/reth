@@ -4,7 +4,7 @@ use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256, U256
 
 /// A state provider that either resolves to data in a wrapped [`crate::PostState`], or an
 /// underlying state provider.
-pub(crate) struct PostStateProvider<SP: StateProvider, PSDP: PostStateDataProvider> {
+pub struct PostStateProvider<SP: StateProvider, PSDP: PostStateDataProvider> {
     /// The inner state provider.
     pub(crate) state_provider: SP,
     /// Post state data,
@@ -13,7 +13,7 @@ pub(crate) struct PostStateProvider<SP: StateProvider, PSDP: PostStateDataProvid
 
 impl<SP: StateProvider, PSDP: PostStateDataProvider> PostStateProvider<SP, PSDP> {
     /// Create new post-state provider
-    pub(crate) fn new(state_provider: SP, post_state_data_provider: PSDP) -> Self {
+    pub fn new(state_provider: SP, post_state_data_provider: PSDP) -> Self {
         Self { state_provider, post_state_data_provider }
     }
 }
