@@ -6,24 +6,30 @@ pub use state::{
 };
 mod post_state_provider;
 use crate::{
-    providers::PostStateProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    BlockchainTreePendingStateProvider, EvmEnvProvider, HeaderProvider, PostStateDataProvider,
-    ProviderError, ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
-    WithdrawalsProvider,
+    BlockHashProvider, BlockIdProvider, BlockProvider,
+    BlockchainTreePendingStateProvider, CanonStateNotifications, CanonStateSubscriptions,
+    EvmEnvProvider, HeaderProvider, PostStateDataProvider, ReceiptProvider,
+    StateProviderBox, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 pub use database::*;
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
-use reth_interfaces::Result;
+use reth_db::{database::Database};
+use reth_interfaces::{
+    blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
+    Result,
+};
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
-    TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    Block, BlockHash, BlockId, BlockNumHash, BlockNumber, ChainInfo,
+    Header, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
+    TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
-    config::revm_spec,
-    env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
-    primitives::{BlockEnv, CfgEnv, SpecId},
+    primitives::{BlockEnv, CfgEnv},
 };
-use std::{ops::RangeBounds, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    ops::RangeBounds,
+};
+use crate::providers::post_state_provider::PostStateProvider;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -38,7 +44,10 @@ pub struct BlockchainProvider<DB, Tree> {
     tree: Tree,
 }
 
-impl<DB: Database, Tree> HeaderProvider for BlockchainProvider<DB, Tree> {
+impl<DB, Tree> HeaderProvider for BlockchainProvider<DB, Tree>
+    where DB: Database,
+          Tree: Send + Sync
+{
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
         self.database.header(block_hash)
     }
@@ -60,7 +69,10 @@ impl<DB: Database, Tree> HeaderProvider for BlockchainProvider<DB, Tree> {
     }
 }
 
-impl<DB: Database, Tree> BlockHashProvider for BlockchainProvider<DB, Tree> {
+impl<DB, Tree> BlockHashProvider for BlockchainProvider<DB, Tree>
+    where DB: Database,
+          Tree: Send + Sync
+{
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         self.database.block_hash(number)
     }
@@ -70,7 +82,10 @@ impl<DB: Database, Tree> BlockHashProvider for BlockchainProvider<DB, Tree> {
     }
 }
 
-impl<DB: Database, Tree> BlockIdProvider for BlockchainProvider<DB, Tree> {
+impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
+    where DB: Database,
+          Tree: Send + Sync
+{
     fn chain_info(&self) -> Result<ChainInfo> {
         self.database.chain_info()
     }
@@ -80,7 +95,9 @@ impl<DB: Database, Tree> BlockIdProvider for BlockchainProvider<DB, Tree> {
     }
 }
 
-impl<DB: Database, Tree> BlockProvider for BlockchainProvider<DB, Tree> {
+impl<DB, Tree> BlockProvider for BlockchainProvider<DB, Tree>
+    where DB: Database,
+          Tree: Send + Sync{
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         self.database.block(id)
     }
@@ -90,7 +107,9 @@ impl<DB: Database, Tree> BlockProvider for BlockchainProvider<DB, Tree> {
     }
 }
 
-impl<DB: Database, Tree> TransactionsProvider for BlockchainProvider<DB, Tree> {
+impl<DB, Tree> TransactionsProvider for BlockchainProvider<DB, Tree>
+    where DB: Database,
+          Tree: Send + Sync{
     fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
         self.database.transaction_id(tx_hash)
     }
@@ -126,7 +145,10 @@ impl<DB: Database, Tree> TransactionsProvider for BlockchainProvider<DB, Tree> {
     }
 }
 
-impl<DB: Database, Tree> ReceiptProvider for BlockchainProvider<DB, Tree> {
+impl<DB, Tree> ReceiptProvider for BlockchainProvider<DB, Tree>
+where DB: Database,
+Tree: Send + Sync
+{
     fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>> {
         self.database.receipt(id)
     }
@@ -140,7 +162,10 @@ impl<DB: Database, Tree> ReceiptProvider for BlockchainProvider<DB, Tree> {
     }
 }
 
-impl<DB: Database, Tree> WithdrawalsProvider for BlockchainProvider<DB, Tree> {
+impl<DB, Tree> WithdrawalsProvider for BlockchainProvider<DB, Tree>
+    where DB: Database,
+          Tree: Send + Sync
+{
     fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
         self.database.withdrawals_by_block(id, timestamp)
     }
@@ -150,7 +175,10 @@ impl<DB: Database, Tree> WithdrawalsProvider for BlockchainProvider<DB, Tree> {
     }
 }
 
-impl<DB: Database, Tree> EvmEnvProvider for BlockchainProvider<DB, Tree> {
+impl<DB, Tree> EvmEnvProvider for BlockchainProvider<DB, Tree>
+
+    where DB: Database,
+          Tree: Send + Sync{
     fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
         self.database.fill_env_at(cfg, block_env, at)
     }
@@ -184,7 +212,7 @@ impl<DB: Database, Tree> EvmEnvProvider for BlockchainProvider<DB, Tree> {
 impl<DB, Tree> StateProviderFactory for BlockchainProvider<DB, Tree>
 where
     DB: Database,
-    Tree: BlockchainTreePendingStateProvider,
+    Tree: BlockchainTreePendingStateProvider + BlockchainTreeViewer,
 {
     /// Storage provider for latest block
     fn latest(&self) -> Result<StateProviderBox<'_>> {
@@ -201,13 +229,100 @@ where
 
     /// Storage provider for pending state.
     fn pending2(&self) -> Result<StateProviderBox<'_>> {
-        todo!()
+        if let Some(block) = self.tree.pending_block() {
+            let pending = self.tree.pending_state_provider(block.hash)?;
+            return self.pending(pending)
+        }
+        self.latest()
     }
 
     fn pending(
         &self,
         post_state_data: Box<dyn PostStateDataProvider>,
     ) -> Result<StateProviderBox<'_>> {
-        todo!()
+        let canonical_fork = post_state_data.canonical_fork();
+        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
+        let post_state_provider =
+            PostStateProvider { state_provider, post_state_data_provider: post_state_data };
+        Ok(Box::new(post_state_provider))
+    }
+}
+
+impl<DB, Tree> BlockchainTreeEngine for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: BlockchainTreeEngine,
+{
+    fn insert_block_with_senders(&self, block: SealedBlockWithSenders) -> Result<BlockStatus> {
+        self.tree.insert_block_with_senders(block)
+    }
+
+    fn finalize_block(&self, finalized_block: BlockNumber) {
+        self.tree.finalize_block(finalized_block)
+    }
+
+    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<()> {
+        self.tree.restore_canonical_hashes(last_finalized_block)
+    }
+
+    fn make_canonical(&self, block_hash: &BlockHash) -> Result<()> {
+        self.tree.make_canonical(block_hash)
+    }
+
+    fn unwind(&self, unwind_to: BlockNumber) -> Result<()> {
+        self.tree.unwind(unwind_to)
+    }
+}
+
+impl<DB, Tree> BlockchainTreeViewer for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: BlockchainTreeViewer,
+{
+    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
+        self.tree.blocks()
+    }
+
+    fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
+        self.tree.block_by_hash(block_hash)
+    }
+
+    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
+        self.tree.canonical_blocks()
+    }
+
+    fn canonical_tip(&self) -> BlockNumHash {
+        self.tree.canonical_tip()
+    }
+
+    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
+        self.tree.pending_blocks()
+    }
+
+    fn pending_block(&self) -> Option<BlockNumHash> {
+        self.tree.pending_block()
+    }
+}
+
+impl<DB, Tree> BlockchainTreePendingStateProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: BlockchainTreePendingStateProvider,
+{
+    fn pending_state_provider(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<Box<dyn PostStateDataProvider>> {
+        self.tree.pending_state_provider(block_hash)
+    }
+}
+
+impl<DB, Tree> CanonStateSubscriptions for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: CanonStateSubscriptions,
+{
+    fn subscribe_canon_state(&self) -> CanonStateNotifications {
+        self.tree.subscribe_canon_state()
     }
 }

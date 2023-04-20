@@ -15,13 +15,11 @@ use reth_revm_primitives::{
     primitives::{BlockEnv, CfgEnv, SpecId},
 };
 use std::{ops::RangeBounds, sync::Arc};
-
 use crate::{
     providers::{
-        post_state_provider::PostStateProvider,
         state::{
-            historical::{HistoricalStateProvider, HistoricalStateProviderRef},
-            latest::{LatestStateProvider, LatestStateProviderRef},
+            historical::{HistoricalStateProvider},
+            latest::{LatestStateProvider},
         },
     },
     traits::ReceiptProvider,
@@ -459,12 +457,11 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::ShareableDatabase;
     use crate::{BlockIdProvider, StateProviderFactory};
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_primitives::{ChainSpecBuilder, H256};
+    use std::sync::Arc;
 
     #[test]
     fn common_history_provider() {
