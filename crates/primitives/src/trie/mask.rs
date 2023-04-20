@@ -77,6 +77,6 @@ impl Compact for TrieMask {
         Self: Sized,
     {
         let mask = buf.get_u16();
-        (Self(mask), &buf)
+        (Self(mask), buf)
     }
 }
