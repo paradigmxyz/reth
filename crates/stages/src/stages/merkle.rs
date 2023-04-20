@@ -217,10 +217,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             root
         };
 
-        self.validate_state_root(trie_root, block_root, previous_stage_progress)?;
-
         // Reset the checkpoint
         self.save_execution_checkpoint(tx, None)?;
+
+        self.validate_state_root(trie_root, block_root, previous_stage_progress)?;
 
         info!(target: "sync::stages::merkle::exec", "Stage finished");
         Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
