@@ -33,8 +33,8 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         let mut this = Self {
             cursor,
             changes,
-            can_skip_current_node: false,
             stack: vec![CursorSubNode::default()],
+            can_skip_current_node: false,
             trie_updates: None,
             __phantom: PhantomData::default(),
         };
@@ -49,17 +49,37 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         this
     }
 
+    /// Constructs a new TrieWalker from existing stack and a cursor.
+    pub fn from_stack(cursor: &'a mut C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
+        let mut this = Self {
+            cursor,
+            changes,
+            stack,
+            can_skip_current_node: false,
+            trie_updates: None,
+            __phantom: PhantomData::default(),
+        };
+        this.update_skip_node();
+        this
+    }
+
     /// Sets the flag whether the trie updates should be stored.
-    pub fn with_updates(mut self, should_store_updates: bool) -> Self {
-        if should_store_updates {
-            self.trie_updates = Some(TrieUpdates::default());
-        }
+    pub fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.set_updates(retain_updates);
         self
     }
 
-    /// Consumes the walker and returns the trie updates.
-    pub fn finish(mut self) -> TrieUpdates {
-        self.trie_updates.take().unwrap_or_default()
+    /// Sets the flag whether the trie updates should be stored.
+    pub fn set_updates(&mut self, retain_updates: bool) {
+        if retain_updates {
+            self.trie_updates = Some(TrieUpdates::default());
+        }
+    }
+
+    /// Split the walker into stack and trie updates.
+    pub fn split(mut self) -> (Vec<CursorSubNode>, TrieUpdates) {
+        let trie_updates = self.trie_updates.take();
+        (self.stack, trie_updates.unwrap_or_default())
     }
 
     /// Prints the current stack of trie nodes.
@@ -69,6 +89,11 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             println!("{node:?}");
         }
         println!("====================== END STACK ======================\n");
+    }
+
+    /// The current length of the trie updates.
+    pub fn updates_len(&self) -> usize {
+        self.trie_updates.as_ref().map(|u| u.len()).unwrap_or(0)
     }
 
     /// Advances the walker to the next trie node and updates the skip node flag.

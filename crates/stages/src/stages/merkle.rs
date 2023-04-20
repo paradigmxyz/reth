@@ -131,7 +131,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
             let (root, updates) = StateRoot::new(tx.deref_mut())
-                .root_with_updates()
+                .root_with_progress()
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
             (root, Some(updates))
         } else {

@@ -1111,6 +1111,7 @@ where
             // merkle tree
             let (new_state_root, trie_updates) =
                 StateRoot::incremental_root_with_updates(self.deref(), transition_range)?;
+
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {

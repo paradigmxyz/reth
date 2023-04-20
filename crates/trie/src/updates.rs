@@ -1,3 +1,4 @@
+use crate::Nibbles;
 use derive_more::Deref;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -10,6 +11,7 @@ use reth_primitives::{
 };
 use std::collections::BTreeMap;
 
+/// The key of a trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TrieKey {
     /// A node in the account trie.
@@ -23,16 +25,20 @@ pub enum TrieKey {
 /// The operation to perform on the trie.
 #[derive(Debug, Clone)]
 pub enum TrieOp {
+    /// Delete the node entry.
     Delete,
+    /// Update the node entry with the provided value.
     Update(BranchNodeCompact),
 }
 
 impl TrieOp {
-    fn is_update(&self) -> bool {
+    /// Returns `true` if the operation is an update.
+    pub fn is_update(&self) -> bool {
         matches!(self, TrieOp::Update(..))
     }
 }
 
+/// The aggregation of trie updates.
 #[derive(Debug, Default, Clone, Deref)]
 pub struct TrieUpdates {
     trie_operations: BTreeMap<TrieKey, TrieOp>,
@@ -45,6 +51,11 @@ impl<const N: usize> From<[(TrieKey, TrieOp); N]> for TrieUpdates {
 }
 
 impl TrieUpdates {
+    /// Schedule a delete operation on a trie key.
+    ///
+    /// # Panics
+    ///
+    /// If the key already exists and the operation is an update.
     pub fn schedule_delete(&mut self, key: TrieKey) {
         let existing = self.trie_operations.insert(key, TrieOp::Delete);
         if let Some(op) = existing {
@@ -52,21 +63,35 @@ impl TrieUpdates {
         }
     }
 
-    pub fn schedule_update(&mut self, key: TrieKey, node: BranchNodeCompact) {
-        let existing = self.trie_operations.insert(key, TrieOp::Update(node));
-        if let Some(op) = existing {
-            assert!(!op.is_update(), "Duplicate node update");
-        }
-    }
-
+    /// Append the updates to the current updates.
     pub fn append(&mut self, other: &mut Self) {
         self.trie_operations.append(&mut other.trie_operations);
     }
 
+    /// Extend the updates with trie updates.
     pub fn extend(&mut self, updates: impl Iterator<Item = (TrieKey, TrieOp)>) {
         self.trie_operations.extend(updates);
     }
 
+    /// Extend the updates with account trie updates.
+    pub fn extend_with_account_updates(&mut self, updates: BTreeMap<Nibbles, BranchNodeCompact>) {
+        self.extend(updates.into_iter().map(|(nibbles, node)| {
+            (TrieKey::AccountNode(nibbles.hex_data.into()), TrieOp::Update(node))
+        }));
+    }
+
+    /// Extend the updates with storage trie updates.
+    pub fn extend_with_storage_updates(
+        &mut self,
+        hashed_address: H256,
+        updates: BTreeMap<Nibbles, BranchNodeCompact>,
+    ) {
+        self.extend(updates.into_iter().map(|(nibbles, node)| {
+            (TrieKey::StorageNode(hashed_address, nibbles.hex_data.into()), TrieOp::Update(node))
+        }));
+    }
+
+    /// Flush updates all aggregated updates to the database.
     pub fn flush<'a, 'tx, TX>(self, tx: &'a TX) -> Result<(), reth_db::Error>
     where
         TX: DbTx<'tx> + DbTxMut<'tx>,
