@@ -99,7 +99,7 @@ impl HashBuilder {
         }
     }
 
-    /// Splits the [HashBuilder] into a [HashBuilder] and a [HashBuilderUpdates].
+    /// Splits the [HashBuilder] into a [HashBuilder] and hash builder updates.
     pub fn split(mut self) -> (Self, BTreeMap<Nibbles, BranchNodeCompact>) {
         let updates = self.updated_branch_nodes.take();
         (self, updates.unwrap_or_default())
