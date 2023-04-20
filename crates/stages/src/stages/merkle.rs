@@ -101,14 +101,6 @@ impl MerkleStage {
         }
 
         let (checkpoint, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
-
-        debug!(
-            target: "sync::stages::merkle::exec",
-            last_account_key = ?checkpoint.last_account_key,
-            last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
-            "Continuing inner merkle checkpoint"
-        );
-
         Ok(Some(checkpoint))
     }
 
@@ -178,9 +170,26 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             block_root
         } else if to_transition - from_transition > threshold || stage_progress == 0 {
             // if there are more blocks than threshold it is faster to rebuild the trie
-            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
-            tx.clear::<tables::AccountsTrie>()?;
-            tx.clear::<tables::StoragesTrie>()?;
+            if let Some(checkpoint) = &checkpoint {
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?stage_progress,
+                    target = ?previous_stage_progress,
+                    last_account_key = ?checkpoint.last_account_key,
+                    last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
+                    "Continuing inner merkle checkpoint"
+                );
+            } else {
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?stage_progress,
+                    target = ?previous_stage_progress,
+                    "Rebuilding trie"
+                );
+                tx.clear::<tables::AccountsTrie>()?;
+                tx.clear::<tables::StoragesTrie>()?;
+            }
+
             let progress = StateRoot::new(tx.deref_mut())
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
@@ -209,6 +218,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         };
 
         self.validate_state_root(trie_root, block_root, previous_stage_progress)?;
+
+        // Reset the checkpoint
+        self.save_execution_checkpoint(tx, None)?;
 
         info!(target: "sync::stages::merkle::exec", "Stage finished");
         Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
