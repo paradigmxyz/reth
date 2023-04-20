@@ -454,6 +454,7 @@ where
 
     fn report_bad_message(&self, peer_id: PeerId) {
         trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
+        self.metrics.reported_bad_transactions.increment(1);
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
     }
 
@@ -463,7 +464,6 @@ where
     }
 
     /// Penalize the peers that sent the bad transaction
-    #[allow(unused)]
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
@@ -534,7 +534,6 @@ where
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
-                        this.metrics.reported_bad_transactions.increment(1);
                         continue
                     }
                     this.on_good_import(*err.hash());
