@@ -16,7 +16,8 @@ use std::collections::BTreeMap;
 /// Used inside the BlockchainTree.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
-    /// The state of accounts after execution of the blocks in this chain (tip of the chain).
+    /// The state of all accounts after execution of the _all_ blocks in this chain's range from
+    /// [Chain::first] to [Chain::tip], inclusive.
     ///
     /// This state also contains the individual changes that lead to the current state.
     pub state: PostState,
