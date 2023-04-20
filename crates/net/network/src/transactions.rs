@@ -12,8 +12,8 @@ use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
-use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
-use reth_network_api::{Peers, ReputationChangeKind};
+use reth_interfaces::p2p::error::RequestResult;
+use reth_network_api::{NetworkInfo, Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
 };
@@ -112,6 +112,8 @@ pub struct TransactionsManager<Pool> {
     transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
+    /// Represents if the node has synced with the network at least once.
+    has_synced: bool,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -142,6 +144,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             pending_transactions: ReceiverStream::new(pending),
             transaction_events: UnboundedReceiverStream::new(from_network),
             metrics: Default::default(),
+            has_synced: false,
         }
     }
 }
@@ -156,6 +159,15 @@ where
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
+    }
+
+    /// Returns true if the node has synced with the network at least once.
+    fn has_synced(&mut self) -> bool {
+        if self.has_synced {
+            return true
+        }
+        self.has_synced = self.network.is_syncing();
+        self.has_synced
     }
 
     /// Request handler for an incoming request for transactions
@@ -194,6 +206,8 @@ where
     /// and won't need to request it.
     fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
         // Nothing to propagate while syncing
+        // we use `is_syncing` here because we want to propagate transactions only when we're
+        // definitely not syncing
         if self.network.is_syncing() {
             return
         }
@@ -279,7 +293,7 @@ where
         msg: NewPooledTransactionHashes,
     ) {
         // If the node is currently syncing, ignore transactions
-        if self.network.is_syncing() {
+        if !self.has_synced() {
             return
         }
 
@@ -399,7 +413,7 @@ where
         source: TransactionSource,
     ) {
         // If the node is currently syncing, ignore transactions
-        if self.network.is_syncing() {
+        if !self.has_synced() {
             return
         }
 
