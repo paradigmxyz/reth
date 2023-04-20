@@ -81,7 +81,7 @@ impl Command {
         let mut merkle_stage = MerkleStage::default_execution();
 
         for block in execution_progress + 1..=self.to {
-            println!("Executing block #{block}");
+            tracing::trace!(block, "Executing block");
             let progress = if (!should_reset_stages || block > execution_progress + 1) && block > 0
             {
                 Some(block - 1)
@@ -138,9 +138,7 @@ impl Command {
                 .await;
 
             if incremental_result.is_err() {
-                println!(
-                    "Incremental calculation for block #{block} failed, retrying from scratch"
-                );
+                tracing::warn!(block, "Incremental calculation failed, retrying from scratch");
                 let incremental_account_trie = tx
                     .cursor_read::<tables::AccountsTrie>()?
                     .walk_range(..)?
@@ -170,7 +168,7 @@ impl Command {
                     .walk_range(..)?
                     .collect::<Result<Vec<_>, _>>()?;
 
-                println!("Comparing incremental trie vs clean trie");
+                tracing::info!(block, "Comparing incremental trie vs clean trie");
 
                 // Account trie
                 let mut incremental_account_mismatched = Vec::new();
@@ -196,18 +194,13 @@ impl Command {
                             }
                         }
                         (Some(incremental), None) => {
-                            println!("WARNING: Incremental account trie has more entries. Next {incremental:?}");
-                            break
+                            tracing::warn!(next = ?incremental, "Incremental account trie has more entries");
                         }
                         (None, Some(clean)) => {
-                            println!(
-                                "WARNING: Clean account trie has more entries. Next: {clean:?}"
-                            );
-                            break
+                            tracing::warn!(next = ?clean, "Clean account trie has more entries");
                         }
                         (None, None) => {
-                            println!("Exhausted all trie entries.");
-                            break
+                            tracing::info!("Exhausted all account trie entries");
                         }
                     }
                 }
@@ -231,17 +224,12 @@ impl Command {
                             }
                         }
                         (Some(incremental), None) => {
-                            println!("WARNING: Incremental state trie has more entries. Next {incremental:?}");
-                            break
+                            tracing::warn!(next = ?incremental, "Incremental storage trie has more entries");
                         }
                         (None, Some(clean)) => {
-                            println!("WARNING: Clean state trie has more entries. Next: {clean:?}");
-                            break
+                            tracing::warn!(next = ?clean, "Clean storage trie has more entries")
                         }
-                        (None, None) => {
-                            println!("Exhausted all trie entries.");
-                            break
-                        }
+                        (None, None) => tracing::info!("Exhausted all storage trie entries."),
                     }
                 }
 
