@@ -320,7 +320,7 @@ impl Consensus for TestConsensus {
 
     fn validate_header(
         &self,
-        header: &SealedHeader,
+        header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
