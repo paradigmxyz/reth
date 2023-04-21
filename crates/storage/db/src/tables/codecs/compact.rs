@@ -45,8 +45,7 @@ impl_compression_for_compact!(
     StoredBlockBodyIndices,
     StoredBlockOmmers,
     StoredBlockWithdrawals,
-    Bytecode,
-    ProofCheckpoint
+    Bytecode
 );
 impl_compression_for_compact!(AccountBeforeTx, TransactionSignedNoHash);
 impl_compression_for_compact!(CompactU256);

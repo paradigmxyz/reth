@@ -4,34 +4,19 @@ use crate::{
     hash_builder::HashBuilder,
     nibbles::Nibbles,
     prefix_set::{PrefixSet, PrefixSetLoader},
+    progress::{IntermediateStateRootState, StateRootProgress},
+    updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
     StateRootError, StorageRootError,
 };
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbDupCursorRO},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTx,
 };
-use reth_primitives::{
-    keccak256,
-    proofs::EMPTY_ROOT,
-    trie::{BranchNodeCompact, StorageTrieEntry, StoredNibblesSubKey},
-    Address, BlockNumber, StorageEntry, H256,
-};
+use reth_primitives::{keccak256, proofs::EMPTY_ROOT, Address, BlockNumber, StorageEntry, H256};
 use reth_rlp::Encodable;
-use std::{collections::HashMap, ops::RangeInclusive, sync::mpsc};
-
-/// The branch node update sender
-pub type BranchNodeUpdateSender = mpsc::Sender<BranchNodeUpdate>;
-
-/// The branch node message to update the database.
-#[derive(Debug, Clone)]
-pub enum BranchNodeUpdate {
-    /// The account trie branch node.
-    Account(Nibbles, BranchNodeCompact),
-    /// The storage trie branch node with the hashed key of the account.
-    Storage(H256, Nibbles, BranchNodeCompact),
-}
+use std::{collections::HashMap, ops::RangeInclusive};
 
 /// StateRoot is used to compute the root node of a state trie.
 pub struct StateRoot<'a, TX> {
@@ -42,6 +27,10 @@ pub struct StateRoot<'a, TX> {
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
     pub changed_storage_prefixes: HashMap<H256, PrefixSet>,
+    /// Previous intermediate state.
+    previous_state: Option<IntermediateStateRootState>,
+    /// The number of updates after which the intermediate progress should be returned.
+    threshold: u64,
 }
 
 impl<'a, TX> StateRoot<'a, TX> {
@@ -51,6 +40,8 @@ impl<'a, TX> StateRoot<'a, TX> {
             tx,
             changed_account_prefixes: PrefixSet::default(),
             changed_storage_prefixes: HashMap::default(),
+            previous_state: None,
+            threshold: 100_000,
         }
     }
 
@@ -65,30 +56,100 @@ impl<'a, TX> StateRoot<'a, TX> {
         self.changed_storage_prefixes = prefixes;
         self
     }
+
+    /// Set the threshold.
+    pub fn with_threshold(mut self, threshold: u64) -> Self {
+        self.threshold = threshold;
+        self
+    }
+
+    /// Set the threshold to maximum value so that itermediate progress is not returned.
+    pub fn with_no_threshold(mut self) -> Self {
+        self.threshold = u64::MAX;
+        self
+    }
+
+    /// Set the previously recorded intermediate state.
+    pub fn with_intermediate_state(mut self, state: Option<IntermediateStateRootState>) -> Self {
+        self.previous_state = state;
+        self
+    }
 }
 
-impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
-    /// Given a transition id range, identifies all the accounts and storage keys that
-    /// have changed. Calculates the new state root using existing unchanged intermediate nodes and
-    /// updating the nodes that are present in the prefix set.
+impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
+    /// Given a block number range, identifies all the accounts and storage keys that
+    /// have changed.
     ///
     /// # Returns
     ///
-    /// The updated state root hash.
+    /// An instance of state root calculator with account and storage prefixes loaded.
+    pub fn incremental_root_calculator(
+        tx: &'a TX,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Self, StateRootError> {
+        let (account_prefixes, storage_prefixes) = PrefixSetLoader::new(tx).load(range)?;
+        Ok(Self::new(tx)
+            .with_changed_account_prefixes(account_prefixes)
+            .with_changed_storage_prefixes(storage_prefixes))
+    }
+
+    /// Computes the state root of the trie with the changed account and storage prefixes and
+    /// existing trie nodes.
+    ///
+    /// # Returns
+    ///
+    /// The updated state root.
     pub fn incremental_root(
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
-        branch_node_sender: Option<BranchNodeUpdateSender>,
     ) -> Result<H256, StateRootError> {
         tracing::debug!(target: "loader", "incremental state root");
-        let (account_prefixes, storage_prefixes) = PrefixSetLoader::new(tx).load(range)?;
-        let this = Self::new(tx)
-            .with_changed_account_prefixes(account_prefixes)
-            .with_changed_storage_prefixes(storage_prefixes);
+        Self::incremental_root_calculator(tx, range)?.root()
+    }
 
-        let root = this.root(branch_node_sender)?;
+    /// Computes the state root of the trie with the changed account and storage prefixes and
+    /// existing trie nodes collecting updates in the process.
+    ///
+    /// Ignores the threshold.
+    ///
+    /// # Returns
+    ///
+    /// The updated state root and the trie updates.
+    pub fn incremental_root_with_updates(
+        tx: &'a TX,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<(H256, TrieUpdates), StateRootError> {
+        tracing::debug!(target: "loader", "incremental state root");
+        Self::incremental_root_calculator(tx, range)?.root_with_updates()
+    }
 
-        Ok(root)
+    /// Computes the state root of the trie with the changed account and storage prefixes and
+    /// existing trie nodes collecting updates in the process.
+    ///
+    /// # Returns
+    ///
+    /// The intermediate progress of state root computation.
+    pub fn incremental_root_with_progress(
+        tx: &'a TX,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<StateRootProgress, StateRootError> {
+        tracing::debug!(target: "loader", "incremental state root with progress");
+        Self::incremental_root_calculator(tx, range)?.root_with_progress()
+    }
+
+    /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
+    /// nodes into the hash builder. Collects the updates in the process.
+    ///
+    /// Ignores the threshold.
+    ///
+    /// # Returns
+    ///
+    /// The intermediate progress of state root computation and the trie updates.
+    pub fn root_with_updates(self) -> Result<(H256, TrieUpdates), StateRootError> {
+        match self.with_no_threshold().calculate(true)? {
+            StateRootProgress::Complete(root, updates) => Ok((root, updates)),
+            StateRootProgress::Progress(..) => unreachable!(), // unreachable threshold
+        }
     }
 
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
@@ -97,43 +158,78 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
     /// # Returns
     ///
     /// The state root hash.
-    pub fn root(
-        &self,
-        branch_node_sender: Option<BranchNodeUpdateSender>,
-    ) -> Result<H256, StateRootError> {
-        tracing::debug!(target: "loader", "calculating state root");
+    pub fn root(self) -> Result<H256, StateRootError> {
+        match self.calculate(false)? {
+            StateRootProgress::Complete(root, _) => Ok(root),
+            StateRootProgress::Progress(..) => unreachable!(), // update retenion is disabled
+        }
+    }
 
-        let (sender, maybe_receiver) = match branch_node_sender {
-            Some(sender) => (sender, None),
-            None => {
-                let (sender, recv) = mpsc::channel();
-                (sender, Some(recv))
-            }
-        };
+    /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
+    /// nodes into the hash builder. Collects the updates in the process.
+    ///
+    /// # Returns
+    ///
+    /// The intermediate progress of state root computation.
+    pub fn root_with_progress(self) -> Result<StateRootProgress, StateRootError> {
+        self.calculate(true)
+    }
+
+    fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
+        tracing::debug!(target: "loader", "calculating state root");
+        let mut trie_updates = TrieUpdates::default();
 
         let mut hashed_account_cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
         let mut trie_cursor =
-            AccountTrieCursor::new(self.tx.cursor_write::<tables::AccountsTrie>()?);
-        let mut walker = TrieWalker::new(&mut trie_cursor, self.changed_account_prefixes.clone());
+            AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
-        let (account_branch_node_tx, account_branch_node_rx) = mpsc::channel();
-        let mut hash_builder =
-            HashBuilder::default().with_branch_node_sender(account_branch_node_tx);
-
-        while let Some(key) = walker.key() {
-            if walker.can_skip_current_node {
-                let value = walker.hash().unwrap();
-                let is_in_db_trie = walker.children_are_in_trie();
-                hash_builder.add_branch(key, value, is_in_db_trie);
-            }
-
-            let seek_key = match walker.next_unprocessed_key() {
-                Some(key) => key,
-                None => break, // no more keys
+        let (mut walker, mut hash_builder, mut last_account_key, mut last_walker_key) =
+            match self.previous_state {
+                Some(state) => (
+                    TrieWalker::from_stack(
+                        &mut trie_cursor,
+                        state.walker_stack,
+                        self.changed_account_prefixes,
+                    ),
+                    state.hash_builder,
+                    Some(state.last_account_key),
+                    Some(state.last_walker_key),
+                ),
+                None => (
+                    TrieWalker::new(&mut trie_cursor, self.changed_account_prefixes),
+                    HashBuilder::default(),
+                    None,
+                    None,
+                ),
             };
 
-            let next_key = walker.advance()?;
-            let mut next_account_entry = hashed_account_cursor.seek(seek_key)?;
+        walker.set_updates(retain_updates);
+        hash_builder.set_updates(retain_updates);
+
+        while let Some(key) = last_walker_key.take().or_else(|| walker.key()) {
+            // Take the last account key to make sure we take it into consideration only once.
+            let (next_key, mut next_account_entry) = match last_account_key.take() {
+                // Seek the last processed entry and take the next after.
+                Some(account_key) => {
+                    hashed_account_cursor.seek(account_key)?;
+                    (walker.key(), hashed_account_cursor.next()?)
+                }
+                None => {
+                    if walker.can_skip_current_node {
+                        let value = walker.hash().unwrap();
+                        let is_in_db_trie = walker.children_are_in_trie();
+                        hash_builder.add_branch(key.clone(), value, is_in_db_trie);
+                    }
+
+                    let seek_key = match walker.next_unprocessed_key() {
+                        Some(key) => key,
+                        None => break, // no more keys
+                    };
+
+                    (walker.advance()?, hashed_account_cursor.seek(seek_key)?)
+                }
+            };
+
             while let Some((hashed_address, account)) = next_account_entry {
                 let account_nibbles = Nibbles::unpack(hashed_address);
 
@@ -151,14 +247,21 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
                 // progress.
                 // TODO: We can consider introducing the TrieProgress::Progress/Complete
                 // abstraction inside StorageRoot, but let's give it a try as-is for now.
-                let storage_root = StorageRoot::new_hashed(self.tx, hashed_address)
+                let storage_root_calculator = StorageRoot::new_hashed(self.tx, hashed_address)
                     .with_changed_prefixes(
                         self.changed_storage_prefixes
                             .get(&hashed_address)
                             .cloned()
                             .unwrap_or_default(),
-                    )
-                    .root(Some(sender.clone()))?;
+                    );
+
+                let storage_root = if retain_updates {
+                    let (root, mut updates) = storage_root_calculator.root_with_updates()?;
+                    trie_updates.append(&mut updates);
+                    root
+                } else {
+                    storage_root_calculator.root()?
+                };
 
                 let account = EthAccount::from(account).with_storage_root(storage_root);
                 let mut account_rlp = Vec::with_capacity(account.length());
@@ -166,50 +269,40 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
 
                 hash_builder.add_leaf(account_nibbles, &account_rlp);
 
+                // Decide if we need to return intermediate progress.
+                let total_updates_len =
+                    trie_updates.len() + walker.updates_len() + hash_builder.updates_len();
+                if retain_updates && total_updates_len as u64 >= self.threshold {
+                    let (walker_stack, mut walker_updates) = walker.split();
+                    let (hash_builder, hash_builder_updates) = hash_builder.split();
+
+                    let state = IntermediateStateRootState {
+                        hash_builder,
+                        walker_stack,
+                        last_walker_key: key,
+                        last_account_key: hashed_address,
+                    };
+
+                    trie_updates.append(&mut walker_updates);
+                    trie_updates.extend_with_account_updates(hash_builder_updates);
+
+                    return Ok(StateRootProgress::Progress(state, trie_updates))
+                }
+
+                // Move the next account entry
                 next_account_entry = hashed_account_cursor.next()?;
             }
         }
 
         let root = hash_builder.root();
-        drop(hash_builder);
 
-        for (nibbles, branch_node) in account_branch_node_rx.iter() {
-            let _ = sender.send(BranchNodeUpdate::Account(nibbles, branch_node));
-        }
-        drop(sender);
+        let (_, mut walker_updates) = walker.split();
+        let (_, hash_builder_updates) = hash_builder.split();
 
-        if let Some(receiver) = maybe_receiver {
-            let mut account_cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
-            let mut storage_cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        trie_updates.append(&mut walker_updates);
+        trie_updates.extend_with_account_updates(hash_builder_updates);
 
-            for update in receiver.iter() {
-                match update {
-                    BranchNodeUpdate::Account(nibbles, branch_node) => {
-                        if !nibbles.is_empty() {
-                            account_cursor.upsert(nibbles.hex_data.into(), branch_node)?;
-                        }
-                    }
-                    BranchNodeUpdate::Storage(hashed_address, nibbles, node) => {
-                        if !nibbles.is_empty() {
-                            let key: StoredNibblesSubKey = nibbles.hex_data.into();
-                            if let Some(entry) =
-                                storage_cursor.seek_by_key_subkey(hashed_address, key.clone())?
-                            {
-                                // "seek exact"
-                                if entry.nibbles == key {
-                                    storage_cursor.delete_current()?;
-                                }
-                            }
-
-                            storage_cursor
-                                .upsert(hashed_address, StorageTrieEntry { nibbles: key, node })?;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(root)
+        Ok(StateRootProgress::Complete(root, trie_updates))
     }
 }
 
@@ -241,34 +334,48 @@ impl<'a, TX> StorageRoot<'a, TX> {
     }
 }
 
-impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StorageRoot<'a, TX> {
+impl<'a, 'tx, TX: DbTx<'tx>> StorageRoot<'a, TX> {
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
-    pub fn root(
-        &self,
-        branch_node_update_sender: Option<BranchNodeUpdateSender>,
-    ) -> Result<H256, StorageRootError> {
+    ///
+    /// # Returns
+    ///
+    /// The storage root and storage trie updates for a given address.
+    pub fn root_with_updates(&self) -> Result<(H256, TrieUpdates), StorageRootError> {
+        self.calculate(true)
+    }
+
+    /// Walks the hashed storage table entries for a given address and calculates the storage root.
+    ///
+    /// # Returns
+    ///
+    /// The storage root.
+    pub fn root(&self) -> Result<H256, StorageRootError> {
+        let (root, _) = self.calculate(false)?;
+        Ok(root)
+    }
+
+    fn calculate(&self, retain_updates: bool) -> Result<(H256, TrieUpdates), StorageRootError> {
         tracing::debug!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
 
         let mut hashed_storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         let mut trie_cursor = StorageTrieCursor::new(
-            self.tx.cursor_dup_write::<tables::StoragesTrie>()?,
+            self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
             self.hashed_address,
         );
 
         // do not add a branch node on empty storage
         if hashed_storage_cursor.seek_exact(self.hashed_address)?.is_none() {
-            if trie_cursor.cursor.seek_exact(self.hashed_address)?.is_some() {
-                trie_cursor.cursor.delete_current_duplicates()?;
-            }
-            return Ok(EMPTY_ROOT)
+            return Ok((
+                EMPTY_ROOT,
+                TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
+            ))
         }
 
-        let mut walker = TrieWalker::new(&mut trie_cursor, self.changed_prefixes.clone());
+        let mut walker = TrieWalker::new(&mut trie_cursor, self.changed_prefixes.clone())
+            .with_updates(retain_updates);
 
-        let (storage_branch_node_tx, storage_branch_node_rx) = mpsc::channel();
-        let mut hash_builder =
-            HashBuilder::default().with_branch_node_sender(storage_branch_node_tx);
+        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
         while let Some(key) = walker.key() {
             if walker.can_skip_current_node {
@@ -297,20 +404,16 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StorageRoot<'a, TX> {
         }
 
         let root = hash_builder.root();
-        drop(hash_builder);
 
-        if let Some(sender) = branch_node_update_sender {
-            for (nibbles, branch_node) in storage_branch_node_rx.iter() {
-                let _ = sender.send(BranchNodeUpdate::Storage(
-                    self.hashed_address,
-                    nibbles,
-                    branch_node,
-                ));
-            }
-        }
+        let (_, hash_builder_updates) = hash_builder.split();
+        let (_, mut walker_updates) = walker.split();
+
+        let mut trie_updates = TrieUpdates::default();
+        trie_updates.append(&mut walker_updates);
+        trie_updates.extend_with_storage_updates(self.hashed_address, hash_builder_updates);
 
         tracing::debug!(target: "trie::storage_root", ?root, hashed_address = ?self.hashed_address, "calculated storage root");
-        Ok(root)
+        Ok((root, trie_updates))
     }
 }
 
@@ -328,8 +431,11 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, proofs::KeccakHasher, trie::TrieMask, Account, Address, H256,
-        U256,
+        hex_literal::hex,
+        keccak256,
+        proofs::KeccakHasher,
+        trie::{BranchNodeCompact, TrieMask},
+        Account, Address, H256, U256,
     };
     use reth_provider::Transaction;
     use std::{
@@ -376,9 +482,8 @@ mod tests {
         }
 
         // Generate the intermediate nodes on the receiving end of the channel
-        let (branch_node_tx, branch_node_rx) = mpsc::channel();
-        let _ =
-            StorageRoot::new_hashed(tx.deref(), hashed_address).root(Some(branch_node_tx)).unwrap();
+        let (_, trie_updates) =
+            StorageRoot::new_hashed(tx.deref(), hashed_address).root_with_updates().unwrap();
 
         // 1. Some state transition happens, update the hashed storage to the new value
         let modified_key = H256::from_str(modified).unwrap();
@@ -393,31 +498,17 @@ mod tests {
 
         // 2. Calculate full merkle root
         let loader = StorageRoot::new_hashed(tx.deref(), hashed_address);
-        let modified_root = loader.root(None).unwrap();
+        let modified_root = loader.root().unwrap();
 
         // Update the intermediate roots table so that we can run the incremental verification
-        let mut trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
-        let updates = branch_node_rx.iter().collect::<Vec<_>>();
-        for update in updates {
-            match update {
-                BranchNodeUpdate::Storage(_, nibbles, node) => {
-                    trie_cursor
-                        .upsert(
-                            hashed_address,
-                            StorageTrieEntry { nibbles: nibbles.hex_data.into(), node },
-                        )
-                        .unwrap();
-                }
-                _ => unreachable!(),
-            }
-        }
+        trie_updates.flush(tx.deref()).unwrap();
 
         // 3. Calculate the incremental root
         let mut storage_changes = PrefixSet::default();
         storage_changes.insert(Nibbles::unpack(modified_key));
         let loader = StorageRoot::new_hashed(tx.deref_mut(), hashed_address)
             .with_changed_prefixes(storage_changes);
-        let incremental_root = loader.root(None).unwrap();
+        let incremental_root = loader.root().unwrap();
 
         assert_eq!(modified_root, incremental_root);
     }
@@ -441,26 +532,23 @@ mod tests {
     #[test]
     fn arbitrary_storage_root() {
         proptest!(ProptestConfig::with_cases(10), |(item: (Address, std::collections::BTreeMap<H256, U256>))| {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                let (address, storage) = item;
+            let (address, storage) = item;
 
-                let hashed_address = keccak256(address);
-                let db = create_test_rw_db();
-                let mut tx = Transaction::new(db.as_ref()).unwrap();
-                for (key, value) in &storage {
-                    tx.put::<tables::HashedStorage>(
-                        hashed_address,
-                        StorageEntry { key: keccak256(key), value: *value },
-                    )
-                    .unwrap();
-                }
-                tx.commit().unwrap();
+            let hashed_address = keccak256(address);
+            let db = create_test_rw_db();
+            let mut tx = Transaction::new(db.as_ref()).unwrap();
+            for (key, value) in &storage {
+                tx.put::<tables::HashedStorage>(
+                    hashed_address,
+                    StorageEntry { key: keccak256(key), value: *value },
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
 
-                let got = StorageRoot::new(tx.deref_mut(), address).root(None).unwrap();
-                let expected = storage_root(storage.into_iter());
-                assert_eq!(expected, got);
-            });
-
+            let got = StorageRoot::new(tx.deref_mut(), address).root().unwrap();
+            let expected = storage_root(storage.into_iter());
+            assert_eq!(expected, got);
         });
     }
 
@@ -516,7 +604,7 @@ mod tests {
         insert_account(&mut *tx, address, account, &Default::default());
         tx.commit().unwrap();
 
-        let got = StorageRoot::new(tx.deref_mut(), address).root(None).unwrap();
+        let got = StorageRoot::new(tx.deref_mut(), address).root().unwrap();
         assert_eq!(got, EMPTY_ROOT);
     }
 
@@ -542,7 +630,7 @@ mod tests {
         insert_account(&mut *tx, address, account, &storage);
         tx.commit().unwrap();
 
-        let got = StorageRoot::new(tx.deref_mut(), address).root(None).unwrap();
+        let got = StorageRoot::new(tx.deref_mut(), address).root().unwrap();
 
         assert_eq!(storage_root(storage.into_iter()), got);
     }
@@ -553,19 +641,38 @@ mod tests {
     fn arbitrary_state_root() {
         proptest!(
             ProptestConfig::with_cases(10), | (state: State) | {
-                // set the bytecodehash for the accounts so that storage root is computed
-                // this is needed because proptest will generate accs with empty bytecodehash
-                // but non-empty storage, which is obviously invalid
-                let state = state
-                    .into_iter()
-                    .map(|(addr, (mut acc, storage))| {
-                        if !storage.is_empty() {
-                            acc.bytecode_hash = Some(H256::random());
-                        }
-                        (addr, (acc, storage))
-                    })
-                    .collect::<BTreeMap<_, _>>();
                 test_state_root_with_state(state);
+            }
+        );
+    }
+
+    #[test]
+    fn arbitrary_state_root_with_progress() {
+        proptest!(
+            ProptestConfig::with_cases(10), | (state: State) | {
+                let db = create_test_rw_db();
+                let mut tx = Transaction::new(db.as_ref()).unwrap();
+
+                for (address, (account, storage)) in &state {
+                    insert_account(&mut *tx, *address, *account, storage)
+                }
+                tx.commit().unwrap();
+                let expected = state_root(state.into_iter());
+
+                let threshold = 10;
+                let mut got = None;
+
+                let mut intermediate_state = None;
+                while got.is_none() {
+                    let calculator = StateRoot::new(tx.deref_mut())
+                        .with_threshold(threshold)
+                        .with_intermediate_state(intermediate_state.take());
+                    match calculator.root_with_progress().unwrap() {
+                        StateRootProgress::Progress(state, _updates) => intermediate_state = Some(state),
+                        StateRootProgress::Complete(root, _updates) => got = Some(root),
+                    };
+                }
+                assert_eq!(expected, got.unwrap());
             }
         );
     }
@@ -580,7 +687,7 @@ mod tests {
         tx.commit().unwrap();
         let expected = state_root(state.into_iter());
 
-        let got = StateRoot::new(tx.deref_mut()).root(None).unwrap();
+        let got = StateRoot::new(tx.deref_mut()).root().unwrap();
         assert_eq!(expected, got);
     }
 
@@ -620,7 +727,7 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        let account3_storage_root = StorageRoot::new(tx.deref_mut(), address3).root(None).unwrap();
+        let account3_storage_root = StorageRoot::new(tx.deref_mut(), address3).root().unwrap();
         let expected_root = storage_root_prehashed(storage.into_iter());
         assert_eq!(expected_root, account3_storage_root);
     }
@@ -685,7 +792,7 @@ mod tests {
             }
             hashed_storage_cursor.upsert(key3, StorageEntry { key: hashed_slot, value }).unwrap();
         }
-        let account3_storage_root = StorageRoot::new(tx.deref_mut(), address3).root(None).unwrap();
+        let account3_storage_root = StorageRoot::new(tx.deref_mut(), address3).root().unwrap();
         hash_builder.add_leaf(
             Nibbles::unpack(key3),
             &encode_account(account3, Some(account3_storage_root)),
@@ -734,36 +841,29 @@ mod tests {
         assert_eq!(hash_builder.root(), computed_expected_root);
 
         // Check state root calculation from scratch
-        let (branch_node_tx, branch_node_rx) = mpsc::channel();
-        let loader = StateRoot::new(tx.deref());
-        assert_eq!(loader.root(Some(branch_node_tx)).unwrap(), computed_expected_root);
+        let (root, trie_updates) = StateRoot::new(tx.deref()).root_with_updates().unwrap();
+        assert_eq!(root, computed_expected_root);
 
         // Check account trie
-        drop(loader);
-        let updates = branch_node_rx.iter().collect::<Vec<_>>();
-
-        let account_updates = updates
+        let account_updates = trie_updates
             .iter()
-            .filter_map(|u| {
-                if let BranchNodeUpdate::Account(nibbles, node) = u {
-                    Some((nibbles, node))
-                } else {
-                    None
-                }
+            .filter_map(|(k, v)| match (k, v) {
+                (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
+                _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(account_updates.len(), 2);
 
-        let (nibbles1a, node1a) = account_updates.last().unwrap();
-        assert_eq!(**nibbles1a, Nibbles::from(&[0xB]));
+        let (nibbles1a, node1a) = account_updates.first().unwrap();
+        assert_eq!(nibbles1a.inner[..], [0xB]);
         assert_eq!(node1a.state_mask, TrieMask::new(0b1011));
         assert_eq!(node1a.tree_mask, TrieMask::new(0b0001));
         assert_eq!(node1a.hash_mask, TrieMask::new(0b1001));
         assert_eq!(node1a.root_hash, None);
         assert_eq!(node1a.hashes.len(), 2);
 
-        let (nibbles2a, node2a) = account_updates.first().unwrap();
-        assert_eq!(**nibbles2a, Nibbles::from(&[0xB, 0x0]));
+        let (nibbles2a, node2a) = account_updates.last().unwrap();
+        assert_eq!(nibbles2a.inner[..], [0xB, 0x0]);
         assert_eq!(node2a.state_mask, TrieMask::new(0b10001));
         assert_eq!(node2a.tree_mask, TrieMask::new(0b00000));
         assert_eq!(node2a.hash_mask, TrieMask::new(0b10000));
@@ -771,20 +871,17 @@ mod tests {
         assert_eq!(node2a.hashes.len(), 1);
 
         // Check storage trie
-        let storage_updates = updates
+        let storage_updates = trie_updates
             .iter()
-            .filter_map(|u| {
-                if let BranchNodeUpdate::Storage(_, nibbles, node) = u {
-                    Some((nibbles, node))
-                } else {
-                    None
-                }
+            .filter_map(|entry| match entry {
+                (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
+                _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(storage_updates.len(), 1);
 
         let (nibbles3, node3) = storage_updates.first().unwrap();
-        assert!(nibbles3.is_empty());
+        assert!(nibbles3.inner.is_empty());
         assert_eq!(node3.state_mask, TrieMask::new(0b1010));
         assert_eq!(node3.tree_mask, TrieMask::new(0b0000));
         assert_eq!(node3.hash_mask, TrieMask::new(0b0010));
@@ -808,27 +905,23 @@ mod tests {
             H256::from_str("8e263cd4eefb0c3cbbb14e5541a66a755cad25bcfab1e10dd9d706263e811b28")
                 .unwrap();
 
-        let (branch_node_tx, branch_node_rx) = mpsc::channel();
-        let loader = StateRoot::new(tx.deref()).with_changed_account_prefixes(prefix_set);
-        assert_eq!(loader.root(Some(branch_node_tx)).unwrap(), expected_state_root);
+        let (root, trie_updates) = StateRoot::new(tx.deref())
+            .with_changed_account_prefixes(prefix_set)
+            .root_with_updates()
+            .unwrap();
+        assert_eq!(root, expected_state_root);
 
-        drop(loader);
-        let updates = branch_node_rx.iter().collect::<Vec<_>>();
-
-        let account_updates = updates
+        let account_updates = trie_updates
             .iter()
-            .filter_map(|u| {
-                if let BranchNodeUpdate::Account(nibbles, node) = u {
-                    Some((nibbles, node))
-                } else {
-                    None
-                }
+            .filter_map(|entry| match entry {
+                (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
+                _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(account_updates.len(), 2);
 
-        let (nibbles1b, node1b) = account_updates.last().unwrap();
-        assert_eq!(**nibbles1b, Nibbles::from(&[0xB]));
+        let (nibbles1b, node1b) = account_updates.first().unwrap();
+        assert_eq!(nibbles1b.inner[..], [0xB]);
         assert_eq!(node1b.state_mask, TrieMask::new(0b1011));
         assert_eq!(node1b.tree_mask, TrieMask::new(0b0001));
         assert_eq!(node1b.hash_mask, TrieMask::new(0b1011));
@@ -837,8 +930,8 @@ mod tests {
         assert_eq!(node1a.hashes[0], node1b.hashes[0]);
         assert_eq!(node1a.hashes[1], node1b.hashes[2]);
 
-        let (nibbles2b, node2b) = account_updates.first().unwrap();
-        assert_eq!(**nibbles2b, Nibbles::from(&[0xB, 0x0]));
+        let (nibbles2b, node2b) = account_updates.last().unwrap();
+        assert_eq!(nibbles2b.inner[..], [0xB, 0x0]);
         assert_eq!(node2a, node2b);
         tx.commit().unwrap();
 
@@ -861,29 +954,25 @@ mod tests {
                 (key6, encode_account(account6, None)),
             ]);
 
-            let (branch_node_tx, branch_node_rx) = mpsc::channel();
-            let loader =
-                StateRoot::new(tx.deref_mut()).with_changed_account_prefixes(account_prefix_set);
-            assert_eq!(loader.root(Some(branch_node_tx)).unwrap(), computed_expected_root);
-            drop(loader);
+            let (root, trie_updates) = StateRoot::new(tx.deref())
+                .with_changed_account_prefixes(account_prefix_set)
+                .root_with_updates()
+                .unwrap();
+            assert_eq!(root, computed_expected_root);
+            assert_eq!(trie_updates.len(), 7);
+            assert_eq!(trie_updates.iter().filter(|(_, op)| op.is_update()).count(), 2);
 
-            let updates = branch_node_rx.iter().collect::<Vec<_>>();
-            assert_eq!(updates.len(), 2);
-
-            let account_updates = updates
+            let account_updates = trie_updates
                 .iter()
-                .filter_map(|u| {
-                    if let BranchNodeUpdate::Account(nibbles, node) = u {
-                        Some((nibbles, node))
-                    } else {
-                        None
-                    }
+                .filter_map(|entry| match entry {
+                    (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
+                    _ => None,
                 })
                 .collect::<Vec<_>>();
             assert_eq!(account_updates.len(), 1);
 
             let (nibbles1c, node1c) = account_updates.first().unwrap();
-            assert_eq!(**nibbles1c, Nibbles::from(&[0xB]));
+            assert_eq!(nibbles1c.inner[..], [0xB]);
 
             assert_eq!(node1c.state_mask, TrieMask::new(0b1011));
             assert_eq!(node1c.tree_mask, TrieMask::new(0b0000));
@@ -920,29 +1009,25 @@ mod tests {
                 (key6, encode_account(account6, None)),
             ]);
 
-            let (branch_node_tx, branch_node_rx) = mpsc::channel();
-            let loader =
-                StateRoot::new(tx.deref_mut()).with_changed_account_prefixes(account_prefix_set);
-            assert_eq!(loader.root(Some(branch_node_tx)).unwrap(), computed_expected_root);
-            drop(loader);
+            let (root, trie_updates) = StateRoot::new(tx.deref_mut())
+                .with_changed_account_prefixes(account_prefix_set)
+                .root_with_updates()
+                .unwrap();
+            assert_eq!(root, computed_expected_root);
+            assert_eq!(trie_updates.len(), 6);
+            assert_eq!(trie_updates.iter().filter(|(_, op)| op.is_update()).count(), 1); // no storage root update
 
-            let updates = branch_node_rx.iter().collect::<Vec<_>>();
-            assert_eq!(updates.len(), 1); // no storage root update
-
-            let account_updates = updates
+            let account_updates = trie_updates
                 .iter()
-                .filter_map(|u| {
-                    if let BranchNodeUpdate::Account(nibbles, node) = u {
-                        Some((nibbles, node))
-                    } else {
-                        None
-                    }
+                .filter_map(|entry| match entry {
+                    (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
+                    _ => None,
                 })
                 .collect::<Vec<_>>();
             assert_eq!(account_updates.len(), 1);
 
             let (nibbles1d, node1d) = account_updates.first().unwrap();
-            assert_eq!(**nibbles1d, Nibbles::from(&[0xB]));
+            assert_eq!(nibbles1d.inner[..], [0xB]);
 
             assert_eq!(node1d.state_mask, TrieMask::new(0b1011));
             assert_eq!(node1d.tree_mask, TrieMask::new(0b0000));
@@ -963,23 +1048,17 @@ mod tests {
 
         let expected = extension_node_trie(&mut tx);
 
-        let (sender, recv) = mpsc::channel();
-        let loader = StateRoot::new(tx.deref_mut());
-        let got = loader.root(Some(sender)).unwrap();
+        let (got, updates) = StateRoot::new(tx.deref_mut()).root_with_updates().unwrap();
         assert_eq!(expected, got);
 
         // Check account trie
-        drop(loader);
-        let updates = recv.iter().collect::<Vec<_>>();
-
         let account_updates = updates
-            .into_iter()
-            .filter_map(|u| {
-                if let BranchNodeUpdate::Account(nibbles, node) = u {
-                    Some((nibbles, node))
-                } else {
-                    None
+            .iter()
+            .filter_map(|entry| match entry {
+                (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => {
+                    Some((nibbles.inner[..].into(), node.clone()))
                 }
+                _ => None,
             })
             .collect::<BTreeMap<_, _>>();
 
@@ -994,11 +1073,9 @@ mod tests {
 
         let expected = extension_node_trie(&mut tx);
 
-        let loader = StateRoot::new(tx.deref_mut());
-        let got = loader.root(None).unwrap();
+        let (got, updates) = StateRoot::new(tx.deref_mut()).root_with_updates().unwrap();
         assert_eq!(expected, got);
-
-        drop(loader);
+        updates.flush(tx.deref_mut()).unwrap();
 
         // read the account updates from the db
         let mut accounts_trie = tx.cursor_read::<tables::AccountsTrie>().unwrap();
@@ -1006,7 +1083,7 @@ mod tests {
         let mut account_updates = BTreeMap::new();
         for item in walker {
             let (key, node) = item.unwrap();
-            account_updates.insert(Nibbles::from(key.inner.0.as_ref()), node);
+            account_updates.insert(key.inner[..].into(), node);
         }
 
         assert_trie_updates(&account_updates);
@@ -1024,37 +1101,26 @@ mod tests {
 
                 let mut state = BTreeMap::default();
                 for accounts in account_changes {
-                    let mut account_trie = tx.cursor_write::<tables::AccountsTrie>().unwrap();
-
                     let should_generate_changeset = !state.is_empty();
                     let mut changes = PrefixSet::default();
                     for (hashed_address, balance) in accounts.clone() {
-                        hashed_account_cursor.upsert(hashed_address, Account { balance, ..Default::default() }).unwrap();
+                        hashed_account_cursor.upsert(hashed_address, Account { balance,..Default::default() }).unwrap();
                         if should_generate_changeset {
                             changes.insert(Nibbles::unpack(hashed_address));
                         }
                     }
 
-                    let (branch_node_rx, branch_node_tx) = mpsc::channel();
-                    let account_storage_root = StateRoot::new(tx.deref_mut()).with_changed_account_prefixes(changes).root(Some(branch_node_rx)).unwrap();
+                    let (state_root, trie_updates) = StateRoot::new(tx.deref_mut())
+                        .with_changed_account_prefixes(changes)
+                        .root_with_updates()
+                        .unwrap();
 
                     state.append(&mut accounts.clone());
                     let expected_root = state_root_prehashed(
-                        state.clone().into_iter().map(|(key, balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty()))),
+                        state.clone().into_iter().map(|(key, balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
                     );
-                    assert_eq!(expected_root, account_storage_root);
-
-                    let updates = branch_node_tx.iter().collect::<Vec<_>>();
-                    for update in updates {
-                        match update {
-                            BranchNodeUpdate::Account(nibbles, node) => {
-                                if !nibbles.is_empty() {
-                                    account_trie.upsert(nibbles.hex_data.into(), node).unwrap();
-                                }
-                            }
-                            BranchNodeUpdate::Storage(..) => unreachable!(),
-                        };
-                    }
+                    assert_eq!(expected_root, state_root);
+                    trie_updates.flush(tx.deref_mut()).unwrap();
                 }
             });
         }
@@ -1069,23 +1135,18 @@ mod tests {
         let (expected_root, expected_updates) =
             extension_node_storage_trie(&mut tx, hashed_address);
 
-        let (sender, recv) = mpsc::channel();
-        let loader = StorageRoot::new_hashed(tx.deref_mut(), hashed_address);
-        let got = loader.root(Some(sender)).unwrap();
+        let (got, updates) =
+            StorageRoot::new_hashed(tx.deref_mut(), hashed_address).root_with_updates().unwrap();
         assert_eq!(expected_root, got);
 
         // Check account trie
-        drop(loader);
-        let updates = recv.iter().collect::<Vec<_>>();
-
         let storage_updates = updates
-            .into_iter()
-            .filter_map(|u| {
-                if let BranchNodeUpdate::Storage(_, nibbles, node) = u {
-                    Some((nibbles, node))
-                } else {
-                    None
+            .iter()
+            .filter_map(|entry| match entry {
+                (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => {
+                    Some((nibbles.inner[..].into(), node.clone()))
                 }
+                _ => None,
             })
             .collect::<BTreeMap<_, _>>();
         assert_eq!(expected_updates, storage_updates);
@@ -1101,8 +1162,7 @@ mod tests {
 
         let mut hashed_storage = tx.cursor_write::<tables::HashedStorage>().unwrap();
 
-        let (sender, receiver) = mpsc::channel();
-        let mut hb = HashBuilder::new(Some(sender));
+        let mut hb = HashBuilder::default().with_updates(true);
 
         for key in [
             hex!("30af561000000000000000000000000000000000000000000000000000000000"),
@@ -1115,12 +1175,9 @@ mod tests {
             hashed_storage.upsert(hashed_address, StorageEntry { key: H256(key), value }).unwrap();
             hb.add_leaf(Nibbles::unpack(key), &reth_rlp::encode_fixed_size(&value));
         }
+
         let root = hb.root();
-
-        drop(hb);
-        let updates = receiver.iter().collect::<Vec<_>>();
-        let updates = updates.iter().cloned().collect();
-
+        let (_, updates) = hb.split();
         (root, updates)
     }
 
@@ -1134,7 +1191,7 @@ mod tests {
         let val = encode_account(a, None);
 
         let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>().unwrap();
-        let mut hb = HashBuilder::new(None);
+        let mut hb = HashBuilder::default();
 
         for key in [
             hex!("30af561000000000000000000000000000000000000000000000000000000000"),
@@ -1154,11 +1211,11 @@ mod tests {
     fn assert_trie_updates(account_updates: &BTreeMap<Nibbles, BranchNodeCompact>) {
         assert_eq!(account_updates.len(), 2);
 
-        let node = account_updates.get(&Nibbles::from(vec![0x3])).unwrap();
+        let node = account_updates.get(&vec![0x3].into()).unwrap();
         let expected = BranchNodeCompact::new(0b0011, 0b0001, 0b0000, vec![], None);
         assert_eq!(node, &expected);
 
-        let node = account_updates.get(&Nibbles::from(vec![0x3, 0x0, 0xA, 0xF])).unwrap();
+        let node = account_updates.get(&vec![0x3, 0x0, 0xA, 0xF].into()).unwrap();
         assert_eq!(node.state_mask, TrieMask::new(0b101100000));
         assert_eq!(node.tree_mask, TrieMask::new(0b000000000));
         assert_eq!(node.hash_mask, TrieMask::new(0b001000000));

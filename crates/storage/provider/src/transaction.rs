@@ -581,7 +581,8 @@ where
 
         // merkle tree
         {
-            let state_root = StateRoot::incremental_root(self.deref_mut(), range.clone(), None)?;
+            let (state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(self.deref_mut(), range.clone())?;
             if state_root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: state_root,
@@ -590,6 +591,7 @@ where
                     block_hash: end_block_hash,
                 })
             }
+            trie_updates.flush(self.deref_mut())?;
         }
         Ok(())
     }
@@ -983,7 +985,8 @@ where
             self.unwind_storage_history_indices(storage_range)?;
 
             // merkle tree
-            let new_state_root = StateRoot::incremental_root(self.deref(), range.clone(), None)?;
+            let (new_state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(self.deref(), range.clone())?;
 
             let parent_number = range.start().saturating_sub(1);
             let parent_state_root = self.get_header(parent_number)?.state_root;
@@ -999,6 +1002,7 @@ where
                     block_hash: parent_hash,
                 })
             }
+            trie_updates.flush(self.deref())?;
         }
         // get blocks
         let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;

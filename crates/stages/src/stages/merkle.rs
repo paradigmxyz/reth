@@ -1,9 +1,14 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use reth_db::{database::Database, tables, transaction::DbTxMut};
+use reth_codecs::Compact;
+use reth_db::{
+    database::Database,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_interfaces::consensus;
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{hex, BlockNumber, MerkleCheckpoint, H256};
 use reth_provider::Transaction;
-use reth_trie::StateRoot;
+use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::{fmt::Debug, ops::DerefMut};
 use tracing::*;
 
@@ -82,6 +87,42 @@ impl MerkleStage {
             })
         }
     }
+
+    /// Gets the hashing progress
+    pub fn get_execution_checkpoint<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+    ) -> Result<Option<MerkleCheckpoint>, StageError> {
+        let buf =
+            tx.get::<tables::SyncStageProgress>(MERKLE_EXECUTION.0.into())?.unwrap_or_default();
+
+        if buf.is_empty() {
+            return Ok(None)
+        }
+
+        let (checkpoint, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
+        Ok(Some(checkpoint))
+    }
+
+    /// Saves the hashing progress
+    pub fn save_execution_checkpoint<DB: Database>(
+        &mut self,
+        tx: &Transaction<'_, DB>,
+        checkpoint: Option<MerkleCheckpoint>,
+    ) -> Result<(), StageError> {
+        let mut buf = vec![];
+        if let Some(checkpoint) = checkpoint {
+            debug!(
+                target: "sync::stages::merkle::exec",
+                last_account_key = ?checkpoint.last_account_key,
+                last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
+                "Saving inner merkle checkpoint"
+            );
+            checkpoint.to_compact(&mut buf);
+        }
+        tx.put::<tables::SyncStageProgress>(MERKLE_EXECUTION.0.into(), buf)?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -121,20 +162,57 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let block_root = tx.get_header(current_blook)?.state_root;
 
+        let checkpoint = self.get_execution_checkpoint(tx)?;
+
         let trie_root = if range.is_empty() {
             block_root
         } else if to_block - from_block > threshold || from_block == 1 {
             // if there are more blocks than threshold it is faster to rebuild the trie
-            debug!(target: "sync::stages::merkle::exec", current = ?current_blook, target = ?to_block, "Rebuilding trie");
-            tx.clear::<tables::AccountsTrie>()?;
-            tx.clear::<tables::StoragesTrie>()?;
-            StateRoot::new(tx.deref_mut()).root(None).map_err(|e| StageError::Fatal(Box::new(e)))?
+            if let Some(checkpoint) = &checkpoint {
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?current_blook,
+                    target = ?to_block,
+                    last_account_key = ?checkpoint.last_account_key,
+                    last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
+                    "Continuing inner merkle checkpoint"
+                );
+            } else {
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?current_blook,
+                    target = ?to_block,
+                    "Rebuilding trie"
+                );
+                tx.clear::<tables::AccountsTrie>()?;
+                tx.clear::<tables::StoragesTrie>()?;
+            }
+
+            let progress = StateRoot::new(tx.deref_mut())
+                .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
+                .root_with_progress()
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            match progress {
+                StateRootProgress::Progress(state, updates) => {
+                    updates.flush(tx.deref_mut())?;
+                    self.save_execution_checkpoint(tx, Some(state.into()))?;
+                    return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
+                }
+                StateRootProgress::Complete(root, updates) => {
+                    updates.flush(tx.deref_mut())?;
+                    root
+                }
+            }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_blook, target =
-                ?to_block, "Updating trie"); // Iterate over
-            StateRoot::incremental_root(tx.deref_mut(), range, None)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?
+            debug!(target: "sync::stages::merkle::exec", current = ?current_blook, target = ?to_block, "Updating trie");
+            let (root, updates) = StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            updates.flush(tx.deref_mut())?;
+            root
         };
+
+        // Reset the checkpoint
+        self.save_execution_checkpoint(tx, None)?;
 
         self.validate_state_root(trie_root, block_root, to_block)?;
 
@@ -162,10 +240,16 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         // Unwind trie only if there are transitions
         if !range.is_empty() {
-            let block_root = StateRoot::incremental_root(tx.deref_mut(), range, None)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let (block_root, updates) =
+                StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
+                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+            // Validate the calulated state root
             let target_root = tx.get_header(input.unwind_to)?.state_root;
             self.validate_state_root(block_root, target_root, input.unwind_to)?;
+
+            // Validation passed, apply unwind changes to the database.
+            updates.flush(tx.deref_mut())?;
         } else {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }

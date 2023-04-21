@@ -1,8 +1,6 @@
 use super::TrieCursor;
-use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
-    tables, Error,
-};
+use crate::updates::TrieKey;
+use reth_db::{cursor::DbCursorRO, tables, Error};
 use reth_primitives::trie::{BranchNodeCompact, StoredNibbles};
 
 /// A cursor over the account trie.
@@ -17,7 +15,7 @@ impl<C> AccountTrieCursor<C> {
 
 impl<'a, C> TrieCursor<StoredNibbles> for AccountTrieCursor<C>
 where
-    C: DbCursorRO<'a, tables::AccountsTrie> + DbCursorRW<'a, tables::AccountsTrie>,
+    C: DbCursorRO<'a, tables::AccountsTrie>,
 {
     fn seek_exact(
         &mut self,
@@ -30,12 +28,8 @@ where
         Ok(self.0.seek(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
     }
 
-    fn upsert(&mut self, key: StoredNibbles, value: BranchNodeCompact) -> Result<(), Error> {
-        self.0.upsert(key, value)
-    }
-
-    fn delete_current(&mut self) -> Result<(), Error> {
-        self.0.delete_current()
+    fn current(&mut self) -> Result<Option<TrieKey>, Error> {
+        Ok(self.0.current()?.map(|(k, _)| TrieKey::AccountNode(k)))
     }
 }
 
