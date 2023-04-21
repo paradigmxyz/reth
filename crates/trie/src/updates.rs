@@ -9,7 +9,7 @@ use reth_primitives::{
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     H256,
 };
-use std::collections::HashMap;
+use std::collections::{hash_map::IntoIter, HashMap};
 
 /// The key of a trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -50,12 +50,16 @@ impl<const N: usize> From<[(TrieKey, TrieOp); N]> for TrieUpdates {
     }
 }
 
-impl TrieUpdates {
-    /// Convert the updates into an iterator.
-    pub fn into_iter(self) -> impl Iterator<Item = (TrieKey, TrieOp)> {
+impl IntoIterator for TrieUpdates {
+    type Item = (TrieKey, TrieOp);
+    type IntoIter = IntoIter<TrieKey, TrieOp>;
+
+    fn into_iter(self) -> Self::IntoIter {
         self.trie_operations.into_iter()
     }
+}
 
+impl TrieUpdates {
     /// Schedule a delete operation on a trie key.
     ///
     /// # Panics
