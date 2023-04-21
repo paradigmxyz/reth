@@ -60,7 +60,6 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
         // Acquire cursor over total difficulty and headers tables
         let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
-        let mut cursor_canonical = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;
 
         // Get latest total difficulty
@@ -72,24 +71,16 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let mut td: U256 = last_entry.1.into();
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
 
-        // Acquire canonical walker
-        let walker = cursor_canonical.walk_range(range)?;
-
         // Walk over newly inserted headers, update & insert td
-        for entry in walker {
-            let (number, hash) = entry?;
-            let (_, header) =
-                cursor_headers.seek_exact(number)?.ok_or(ProviderError::Header { number })?;
-            let header = header.seal(hash);
+        for entry in cursor_headers.walk_range(range)? {
+            let (block_number, header) = entry?;
             td += header.difficulty;
 
             self.consensus
                 .validate_header(&header, td)
                 .map_err(|error| StageError::Validation { block: header.number, error })?;
-
-            cursor_td.append(number, td.into())?;
+            cursor_td.append(block_number, td.into())?;
         }
-
         info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
     }
