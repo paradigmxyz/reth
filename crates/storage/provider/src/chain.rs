@@ -254,6 +254,7 @@ impl<'a> IntoIterator for ChainBlocks<'a> {
     type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, SealedBlockWithSenders>;
 
     fn into_iter(self) -> Self::IntoIter {
+        #[allow(clippy::unnecessary_to_owned)]
         self.blocks.into_owned().into_iter()
     }
 }
