@@ -1,20 +1,14 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
 };
 use reth_interfaces::{consensus::Consensus, provider::ProviderError};
 use reth_primitives::U256;
 use reth_provider::Transaction;
-use std::{
-    cmp::{max, min},
-    sync::Arc,
-};
-use tokio::sync::{mpsc, oneshot};
+use std::sync::Arc;
 use tracing::*;
 
 /// The [`StageId`] of the total difficulty stage.
@@ -46,12 +40,6 @@ impl TotalDifficultyStage {
     }
 }
 
-/// The number of blocks to process in a single step
-const STEP_BY: usize = 10_000;
-
-/// Minimum number of blocks to process in a single task.
-const MIN_TASK_CHUNK: usize = 100;
-
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Return the id of the stage
@@ -72,111 +60,27 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
         // Acquire cursor over total difficulty and headers tables
         let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
-        let mut cursor_headers = tx.cursor_read::<RawTable<tables::Headers>>()?;
+        let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;
 
         // Get latest total difficulty
         let last_header_number = input.stage_progress.unwrap_or_default();
         let last_entry = cursor_td
             .seek_exact(last_header_number)?
             .ok_or(ProviderError::TotalDifficulty { number: last_header_number })?;
-        let td: U256 = last_entry.1.into();
 
+        let mut td: U256 = last_entry.1.into();
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
 
-        // Walk over the range and do it in STEP_BY chunks, as all headers will be read in same
-        // time.
-        let end_range = *range.end();
-        for start_range in range.step_by(STEP_BY) {
-            // do STEP_BY blocks in parallel if possible.
-            let mut channels: Vec<mpsc::UnboundedReceiver<_>> = Vec::new();
+        // Walk over newly inserted headers, update & insert td
+        for entry in cursor_headers.walk_range(range)? {
+            let (block_number, header) = entry?;
+            td += header.difficulty;
 
-            // result notification that would return TD of the block.
-            let (first_sender, receiver) = oneshot::channel();
-            // send first TD, this will start first task.
-            let _ = first_sender.send(Some(td));
-            // wrap oneshot inside Option, so it can be used to send TD to next task.
-            let mut td_receiver = Some(receiver);
-
-            // set range of headers we want to iterate over.
-            let step_end_range = min(end_range, start_range + STEP_BY as u64);
-            let items_num = step_end_range - start_range;
-            let raw_range = RawKey::new(start_range)..=RawKey::new(step_end_range);
-            let walker = cursor_headers.walk_range(raw_range)?;
-
-            // create N chunks of headers but only if the chunk has at least 10 items;
-            for parallel_chunk in &walker
-                .into_iter()
-                .chunks(max(MIN_TASK_CHUNK, items_num as usize / rayon::current_num_threads()))
-            {
-                // An _unordered_ channel to receive results from a rayon job
-                let (send_all_td, receive_all_td) = mpsc::unbounded_channel();
-                channels.push(receive_all_td);
-
-                let parallel_chunk = parallel_chunk.collect::<Result<Vec<_>, _>>()?;
-
-                // oneshot to notify next task that it can start to work and to send the td.
-                let (notify_next_chunk, next_receiver) = oneshot::channel();
-
-                // switch receiver and put curent receiver to this task.
-                let this_td_receiver = td_receiver.take().unwrap();
-                td_receiver = Some(next_receiver);
-
-                let consensus = self.consensus.clone();
-                tokio::spawn(async move {
-                    // wait for the td, to start the task.
-                    let Some(mut td) = this_td_receiver.await.unwrap() else {
-                        // if `None` it means there is a problem so we need to cancel all
-                        // pending tasks by sending `None`.
-                        let _ = notify_next_chunk.send(None);
-                        return;
-                    };
-                    // wrapping to Option as oneshot consumes itself when it is sent.
-                    let mut notify_next_chunk = Some(notify_next_chunk);
-                    // Spawn the task onto the global rayon pool
-                    rayon::spawn(move || {
-                        let mut send_notification = true;
-                        for (number, header) in parallel_chunk.into_iter() {
-                            let header = header.value().unwrap();
-                            td += header.difficulty;
-
-                            let ret = consensus.validate_header(&header, td).map_err(|error| {
-                                StageError::Validation { block: header.number, error }
-                            });
-                            // return error if there is one.
-                            if let Err(err) = ret {
-                                let _ = send_all_td.send(Err(err));
-                                let _ = notify_next_chunk.take().unwrap().send(None);
-                                return
-                            }
-                            // send TD to the channel so that it can be appended to the db table.
-                            let _ = send_all_td.send(Ok((number.key().unwrap(), td)));
-
-                            // if diffuculty is zero it means that we switched to paris
-                            // so we should notify others to start processing next chunk
-                            if send_notification && header.difficulty == U256::ZERO {
-                                send_notification = false;
-                                let _ = notify_next_chunk.take().unwrap().send(Some(td));
-                            }
-                        }
-                        // if calculation still didn't hit paris we need to send last TD
-                        // to the next task.
-                        if send_notification {
-                            let _ = notify_next_chunk.take().unwrap().send(Some(td));
-                        }
-                    });
-                });
-            }
-
-            // Iterate over channels and append total difficulty.
-            for mut channel in channels {
-                // data is received in sorted order
-                while let Some(entry) = channel.recv().await {
-                    let (number, td) = entry?;
-                    cursor_td.append(number, td.into())?;
-                }
-            }
+            self.consensus
+                .validate_header(&header, td)
+                .map_err(|error| StageError::Validation { block: header.number, error })?;
+            cursor_td.append(block_number, td.into())?;
         }
-
         info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
     }
@@ -303,7 +207,7 @@ mod tests {
             let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
 
             if start + 1 >= end {
-                return Ok(Vec::default())
+                return Ok(Vec::default());
             }
 
             let mut headers = random_header_range(start + 1..end, head.hash());
