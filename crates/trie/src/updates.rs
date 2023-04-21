@@ -9,10 +9,10 @@ use reth_primitives::{
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     H256,
 };
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 /// The key of a trie node.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TrieKey {
     /// A node in the account trie.
     AccountNode(StoredNibbles),
@@ -41,16 +41,21 @@ impl TrieOp {
 /// The aggregation of trie updates.
 #[derive(Debug, Default, Clone, Deref)]
 pub struct TrieUpdates {
-    trie_operations: BTreeMap<TrieKey, TrieOp>,
+    trie_operations: HashMap<TrieKey, TrieOp>,
 }
 
 impl<const N: usize> From<[(TrieKey, TrieOp); N]> for TrieUpdates {
     fn from(value: [(TrieKey, TrieOp); N]) -> Self {
-        Self { trie_operations: BTreeMap::from(value) }
+        Self { trie_operations: HashMap::from(value) }
     }
 }
 
 impl TrieUpdates {
+    /// Convert the updates into an iterator.
+    pub fn into_iter(self) -> impl Iterator<Item = (TrieKey, TrieOp)> {
+        self.trie_operations.into_iter()
+    }
+
     /// Schedule a delete operation on a trie key.
     ///
     /// # Panics
@@ -63,18 +68,13 @@ impl TrieUpdates {
         }
     }
 
-    /// Append the updates to the current updates.
-    pub fn append(&mut self, other: &mut Self) {
-        self.trie_operations.append(&mut other.trie_operations);
-    }
-
     /// Extend the updates with trie updates.
     pub fn extend(&mut self, updates: impl Iterator<Item = (TrieKey, TrieOp)>) {
         self.trie_operations.extend(updates);
     }
 
     /// Extend the updates with account trie updates.
-    pub fn extend_with_account_updates(&mut self, updates: BTreeMap<Nibbles, BranchNodeCompact>) {
+    pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
         self.extend(updates.into_iter().map(|(nibbles, node)| {
             (TrieKey::AccountNode(nibbles.hex_data.into()), TrieOp::Update(node))
         }));
@@ -84,7 +84,7 @@ impl TrieUpdates {
     pub fn extend_with_storage_updates(
         &mut self,
         hashed_address: H256,
-        updates: BTreeMap<Nibbles, BranchNodeCompact>,
+        updates: HashMap<Nibbles, BranchNodeCompact>,
     ) {
         self.extend(updates.into_iter().map(|(nibbles, node)| {
             (TrieKey::StorageNode(hashed_address, nibbles.hex_data.into()), TrieOp::Update(node))

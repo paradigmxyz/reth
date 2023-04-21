@@ -20,6 +20,7 @@ use reth_rlp::RlpEncodableWrapper;
     RlpEncodableWrapper,
     PartialOrd,
     Ord,
+    Hash,
     Index,
     From,
     Deref,

@@ -256,8 +256,8 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                     );
 
                 let storage_root = if retain_updates {
-                    let (root, mut updates) = storage_root_calculator.root_with_updates()?;
-                    trie_updates.append(&mut updates);
+                    let (root, updates) = storage_root_calculator.root_with_updates()?;
+                    trie_updates.extend(updates.into_iter());
                     root
                 } else {
                     storage_root_calculator.root()?
@@ -273,7 +273,7 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                 let total_updates_len =
                     trie_updates.len() + walker.updates_len() + hash_builder.updates_len();
                 if retain_updates && total_updates_len as u64 >= self.threshold {
-                    let (walker_stack, mut walker_updates) = walker.split();
+                    let (walker_stack, walker_updates) = walker.split();
                     let (hash_builder, hash_builder_updates) = hash_builder.split();
 
                     let state = IntermediateStateRootState {
@@ -283,7 +283,7 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                         last_account_key: hashed_address,
                     };
 
-                    trie_updates.append(&mut walker_updates);
+                    trie_updates.extend(walker_updates.into_iter());
                     trie_updates.extend_with_account_updates(hash_builder_updates);
 
                     return Ok(StateRootProgress::Progress(state, trie_updates))
@@ -296,10 +296,10 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
 
         let root = hash_builder.root();
 
-        let (_, mut walker_updates) = walker.split();
+        let (_, walker_updates) = walker.split();
         let (_, hash_builder_updates) = hash_builder.split();
 
-        trie_updates.append(&mut walker_updates);
+        trie_updates.extend(walker_updates.into_iter());
         trie_updates.extend_with_account_updates(hash_builder_updates);
 
         Ok(StateRootProgress::Complete(root, trie_updates))
@@ -406,10 +406,10 @@ impl<'a, 'tx, TX: DbTx<'tx>> StorageRoot<'a, TX> {
         let root = hash_builder.root();
 
         let (_, hash_builder_updates) = hash_builder.split();
-        let (_, mut walker_updates) = walker.split();
+        let (_, walker_updates) = walker.split();
 
         let mut trie_updates = TrieUpdates::default();
-        trie_updates.append(&mut walker_updates);
+        trie_updates.extend(walker_updates.into_iter());
         trie_updates.extend_with_storage_updates(self.hashed_address, hash_builder_updates);
 
         tracing::debug!(target: "trie::storage_root", ?root, hashed_address = ?self.hashed_address, "calculated storage root");

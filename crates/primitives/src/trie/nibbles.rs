@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// The nibbles are the keys for the AccountsTrie and the subkeys for the StorageTrie.
 #[main_codec]
-#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StoredNibbles {
     /// The inner nibble bytes
     pub inner: Bytes,
@@ -18,7 +18,7 @@ impl From<Vec<u8>> for StoredNibbles {
 }
 
 /// The representation of nibbles of the merkle trie stored in the database.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Deref)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Hash, Deref)]
 pub struct StoredNibblesSubKey(StoredNibbles);
 
 impl From<Vec<u8>> for StoredNibblesSubKey {
