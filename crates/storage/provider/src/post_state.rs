@@ -11,9 +11,7 @@ use reth_primitives::{
     BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
 };
 use reth_trie::{
-    hashed_cursor::{
-        HashedCursorFactory, HashedPostState, HashedPostStateCursorFactory, HashedStorage,
-    },
+    hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
 use std::collections::BTreeMap;
@@ -187,14 +185,14 @@ impl PostState {
     pub fn hash_state_slow(&self) -> HashedPostState {
         let mut accounts = BTreeMap::default();
         for (address, account) in self.accounts() {
-            accounts.insert(keccak256(address), account.clone());
+            accounts.insert(keccak256(address), *account);
         }
 
         let mut storages = BTreeMap::default();
         for (address, storage) in self.storage() {
             let mut hashed_storage = BTreeMap::default();
             for (slot, value) in &storage.storage {
-                hashed_storage.insert(keccak256(H256(slot.to_be_bytes())), value.clone());
+                hashed_storage.insert(keccak256(H256(slot.to_be_bytes())), *value);
             }
             storages.insert(
                 keccak256(address),
