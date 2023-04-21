@@ -25,12 +25,7 @@
 
 # Table design
 
-Historical state changes are indexed by autoincrementing enumeration called `TransitionId`. This means that `reth` stores the state for every account after every transaction that touched it, and it provides indexes for accessing that data quickly. While this may make the database size bigger (needs benchmark once `reth` is closer to prod), it also enables blazing-fast historical tracing and simulations because there is no need to re-execute all transactions inside a block.
-
-State transitions differ from transaction level enumeration in order to account for block rewards.
-e.g. If block #1 contains transactions from id 0 to 5 (inclusive) and has a reward, the reward will be assigned transition id 6 and transition ids in block #2 will start block index 7.
-
-Two additional tables `TxTransitionIdIndex` and `BlockTransitionIdIndex` are introduced to enable reverse lookup of transition by transaction id and block number respectively. The transition id at block number denotes the final state transition of the block. If block has a reward, the state transition at block number `x` points at data about the state transition for the reward distribution. Otherwise, it points to the state transition at the last transaction in block number `x`.
+Historical state changes are indexed by `BlockNumber`. This means that `reth` stores the state for every account after every block that touched it, and it provides indexes for accessing that data quickly. While this may make the database size bigger (needs benchmark once `reth` is closer to prod).
 
 Below, you can see the table design that implements this scheme:
 
