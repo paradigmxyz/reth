@@ -7,8 +7,12 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{
-    bloom::logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, BlockNumber, Bloom,
-    Bytecode, Log, Receipt, StorageEntry, H256, U256,
+    bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
+    BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
+};
+use reth_trie::{
+    hashed_cursor::{HashedCursorFactory, HashedPostState, HashedPostStateFactory, HashedStorage},
+    StateRoot, StateRootError,
 };
 use std::collections::BTreeMap;
 
@@ -175,6 +179,40 @@ impl PostState {
     /// Returns the receipt root for all recorded receipts.
     pub fn receipts_root(&self) -> H256 {
         calculate_receipt_root_ref(self.receipts().iter().map(Into::into))
+    }
+
+    /// Returns the hashed post state.
+    pub fn hash_state_slow(&self) -> HashedPostState {
+        let mut accounts = BTreeMap::default();
+        for (address, account) in self.accounts() {
+            accounts.insert(keccak256(address), account.clone());
+        }
+
+        let mut storages = BTreeMap::default();
+        for (address, storage) in self.storage() {
+            let mut hashed_storage = BTreeMap::default();
+            for (slot, value) in &storage.storage {
+                hashed_storage.insert(keccak256(H256(slot.to_be_bytes())), value.clone());
+            }
+            storages.insert(
+                keccak256(address),
+                HashedStorage { wiped: storage.wiped, storage: hashed_storage },
+            );
+        }
+
+        HashedPostState { accounts, storages }
+    }
+
+    /// Calculate the state root for this [PostState].
+    pub fn state_root_slow<'a, TX: DbTx<'a>>(&self, tx: &TX) -> Result<H256, StateRootError> {
+        let hashed_post_state = self.hash_state_slow();
+        let (account_prefixset, storage_prefixset) = hashed_post_state.construct_prefix_sets();
+        let hashed_cursor_factory = HashedPostStateFactory::new(&tx, &hashed_post_state);
+        StateRoot::new(tx)
+            .with_hashed_cursor_factory(&hashed_cursor_factory)
+            .with_changed_account_prefixes(account_prefixset)
+            .with_changed_storage_prefixes(storage_prefixset)
+            .root()
     }
 
     // todo: note overwrite behavior, i.e. changes in `other` take precedent
