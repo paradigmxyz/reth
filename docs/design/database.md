@@ -31,9 +31,30 @@ Below, you can see the table design that implements this scheme:
 
 ```mermaid
 erDiagram
+CanonicalHeaders {
+    u64 BlockNumber "PK"
+    H256 HeaderHash "Value for CanonicalHeaders"
+}
+HeaderNumbers {
+    H256 BlockHash "PK"
+    u64 BlockNumber
+}
+Headers {
+    u64 BlockNumber "PK"
+    Header Data
+}
+BlockBodyIndices {
+    u64 BlockNumber "PK"
+    u64 first_tx_num
+    u64 tx_count
+}
+Receipts {
+    u64 TxNumber "PK"
+    Receipt Data
+}
 Transactions {
     u64 TxNumber "PK"
-    Transaction Data
+    TransactionSigned Data
 }
 TransactionHash {
     H256 TxHash "PK"
@@ -67,6 +88,14 @@ EVM ||--o{ AccountHistory: "Load Account by first greater BlockNumber"
 EVM ||--o{ StorageHistory: "Load Storage Entry by first greater BlockNumber"
 TransactionHash ||--o{ Transactions : index
 Transactions ||--o{ TransactionBlock : index
+BlockBodyIndices ||--o{ TransactionBlock : "index"
+TransactionBlock ||--o{ BlockBodyIndices : "index"
+Headers ||--o{ AccountChangeSet : "unique index"
 AccountHistory ||--o{ AccountChangeSet : index
 StorageHistory ||--o{ StorageChangeSet : index
+Headers ||--o{ StorageChangeSet : "unique index"
+BlockBodyIndices ||--o{ Headers : "index"
+Headers ||--o{ HeaderNumbers : "Calculate hash from header"
+CanonicalHeaders ||--o{ Headers : "index"
+Transactions ||--o{ Receipts : index
 ```
