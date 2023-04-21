@@ -6,12 +6,12 @@ use crate::{
     prefix_set::{PrefixSet, PrefixSetLoader},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie_cursor::{AccountTrieCursor, StorageTrieCursor},
-    updates::TrieUpdates,
+    updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
     StateRootError, StorageRootError,
 };
 use reth_db::{tables, transaction::DbTx};
-use reth_primitives::{keccak256, Address, BlockNumber, StorageEntry, H256};
+use reth_primitives::{keccak256, proofs::EMPTY_ROOT, Address, BlockNumber, StorageEntry, H256};
 use reth_rlp::Encodable;
 use std::{collections::HashMap, ops::RangeInclusive};
 
@@ -432,14 +432,13 @@ where
             self.hashed_address,
         );
 
-        // TODO: fix this
         // // do not add a branch node on empty storage
-        // if hashed_storage_cursor.seek_exact(self.hashed_address)?.is_none() {
-        //     return Ok((
-        //         EMPTY_ROOT,
-        //         TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
-        //     ))
-        // }
+        if hashed_storage_cursor.is_empty(self.hashed_address)? {
+            return Ok((
+                EMPTY_ROOT,
+                TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
+            ))
+        }
 
         let mut walker = TrieWalker::new(&mut trie_cursor, self.changed_prefixes.clone())
             .with_updates(retain_updates);
@@ -488,9 +487,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
-        updates::{TrieKey, TrieOp},
+    use crate::test_utils::{
+        state_root, state_root_prehashed, storage_root, storage_root_prehashed,
     };
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{
@@ -502,7 +500,7 @@ mod tests {
     use reth_primitives::{
         hex_literal::hex,
         keccak256,
-        proofs::{KeccakHasher, EMPTY_ROOT},
+        proofs::KeccakHasher,
         trie::{BranchNodeCompact, TrieMask},
         Account, Address, H256, U256,
     };

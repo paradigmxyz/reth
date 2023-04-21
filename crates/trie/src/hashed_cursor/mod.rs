@@ -36,6 +36,9 @@ pub trait HashedAccountCursor {
 
 /// The cursor for iterating over hashed storage entries.
 pub trait HashedStorageCursor {
+    /// Returns `true` if there are no entries for a given key.
+    fn is_empty(&mut self, key: H256) -> Result<bool, reth_db::Error>;
+
     /// Seek an entry greater or equal to the given key/subkey and position the cursor there.
     fn seek(&mut self, key: H256, subkey: H256) -> Result<Option<StorageEntry>, reth_db::Error>;
 

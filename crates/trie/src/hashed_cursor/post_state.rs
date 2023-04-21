@@ -249,6 +249,14 @@ impl<'b, 'tx, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedStorage> + DbDupCursorRO<'tx, tables::HashedStorage>,
 {
+    fn is_empty(&mut self, key: H256) -> Result<bool, reth_db::Error> {
+        let is_empty = match self.post_state.storages.get(&key) {
+            Some(storage) => storage.wiped && storage.storage.is_empty(),
+            None => self.cursor.seek_exact(key)?.is_none(),
+        };
+        Ok(is_empty)
+    }
+
     fn seek(&mut self, key: H256, subkey: H256) -> Result<Option<StorageEntry>, reth_db::Error> {
         self.last_slot = None;
         self.account = Some(key);
