@@ -1,10 +1,10 @@
 use crate::{
     account::EthAccount,
-    cursor::{AccountTrieCursor, StorageTrieCursor},
     hash_builder::HashBuilder,
     nibbles::Nibbles,
     prefix_set::{PrefixSet, PrefixSetLoader},
     progress::{IntermediateStateRootState, StateRootProgress},
+    trie_cursor::{AccountTrieCursor, StorageTrieCursor},
     updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
     StateRootError, StorageRootError,
