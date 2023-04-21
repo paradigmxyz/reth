@@ -246,17 +246,6 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
     _tx_phantom: PhantomData<&'tx T>,
 }
-// impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> IntoIterator
-//     for RangeWalker<'cursor, 'tx, T, CURSOR>
-// {
-//     type Item = <Self as Iterator>::Item;
-
-//     type IntoIter = Self;
-
-//     fn into_iter(self) -> Self::IntoIter {
-//         self
-//     }
-// }
 
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for RangeWalker<'cursor, 'tx, T, CURSOR>

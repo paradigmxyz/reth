@@ -5,10 +5,10 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable, RawValue,
+    RawKey, RawTable,
 };
 use reth_interfaces::{consensus::Consensus, provider::ProviderError};
-use reth_primitives::{BlockNumber, Header, U256};
+use reth_primitives::U256;
 use reth_provider::Transaction;
 use std::{
     cmp::{max, min},
@@ -46,7 +46,11 @@ impl TotalDifficultyStage {
     }
 }
 
-const STEP_BY : usize = 10_000;
+/// The number of blocks to process in a single step
+const STEP_BY: usize = 10_000;
+
+/// Minimum number of blocks to process in a single task.
+const MIN_TASK_CHUNK: usize = 100;
 
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for TotalDifficultyStage {
@@ -79,46 +83,47 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
 
-        // Acquire headers
-        //let raw_range =
-        //    RawKey::new(*range.start())..=RawKey::new(*range.end());
-        //let header_walker = cursor_headers.walk_range(raw_range)?;
-        // Walk over newly inserted headers, update & insert td
+        // Walk over the range and do it in STEP_BY chunks, as all headers will be read in same
+        // time.
         let end_range = *range.end();
         for start_range in range.step_by(STEP_BY) {
-            // do 10k blocks in parallel
+            // do STEP_BY blocks in parallel if possible.
             let mut channels: Vec<mpsc::UnboundedReceiver<_>> = Vec::new();
 
+            // result notification that would return TD of the block.
             let (first_sender, receiver) = oneshot::channel();
+            // send first TD, this will start first task.
             let _ = first_sender.send(Some(td));
+            // wrap oneshot inside Option, so it can be used to send TD to next task.
             let mut td_receiver = Some(receiver);
-            //let big_chunks = big_chunks.collect::<Result<Vec<_>, _>>()?;
+
+            // set range of headers we want to iterate over.
             let step_end_range = min(end_range, start_range + STEP_BY as u64);
             let items_num = step_end_range - start_range;
             let raw_range = RawKey::new(start_range)..=RawKey::new(step_end_range);
             let walker = cursor_headers.walk_range(raw_range)?;
 
+            // create N chunks of headers but only if the chunk has at least 10 items;
             for parallel_chunk in &walker
                 .into_iter()
-                .chunks(max(100, items_num as usize / rayon::current_num_threads()))
+                .chunks(max(MIN_TASK_CHUNK, items_num as usize / rayon::current_num_threads()))
             {
                 // An _unordered_ channel to receive results from a rayon job
                 let (send_all_td, receive_all_td) = mpsc::unbounded_channel();
                 channels.push(receive_all_td);
 
-                let chunk: Vec<(RawKey<BlockNumber>, RawValue<Header>)> =
-                    parallel_chunk.collect::<Result<Vec<_>, _>>()?;
+                let parallel_chunk = parallel_chunk.collect::<Result<Vec<_>, _>>()?;
 
+                // oneshot to notify next task that it can start to work and to send the td.
                 let (notify_next_chunk, next_receiver) = oneshot::channel();
 
                 // switch receiver and put curent receiver to this task.
                 let this_td_receiver = td_receiver.take().unwrap();
-                // save receiver for next task.
                 td_receiver = Some(next_receiver);
 
                 let consensus = self.consensus.clone();
                 tokio::spawn(async move {
-                    // use tokio task to wait for the td receiver
+                    // wait for the td, to start the task.
                     let Some(mut td) = this_td_receiver.await.unwrap() else {
                         // if `None` it means there is a problem so we need to cancel all
                         // pending tasks by sending `None`.
@@ -127,27 +132,27 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
                     };
                     // wrapping to Option as oneshot consumes itself when it is sent.
                     let mut notify_next_chunk = Some(notify_next_chunk);
-                    // Spawn the hashing task onto the global rayon pool
+                    // Spawn the task onto the global rayon pool
                     rayon::spawn(move || {
                         let mut send_notification = true;
-                        for (number, header) in chunk.into_iter() {
+                        for (number, header) in parallel_chunk.into_iter() {
                             let header = header.value().unwrap();
                             td += header.difficulty;
 
                             let ret = consensus.validate_header(&header, td).map_err(|error| {
                                 StageError::Validation { block: header.number, error }
                             });
+                            // return error if there is one.
                             if let Err(err) = ret {
                                 let _ = send_all_td.send(Err(err));
                                 let _ = notify_next_chunk.take().unwrap().send(None);
-                                return;
+                                return
                             }
-
+                            // send TD to the channel so that it can be appended to the db table.
                             let _ = send_all_td.send(Ok((number.key().unwrap(), td)));
 
-                            // if diffuculty is zero means that we switched to paris
+                            // if diffuculty is zero it means that we switched to paris
                             // so we should notify others to start processing next chunk
-
                             if send_notification && header.difficulty == U256::ZERO {
                                 send_notification = false;
                                 let _ = notify_next_chunk.take().unwrap().send(Some(td));
@@ -162,11 +167,11 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
                 });
             }
 
-            // Iterate over channels and append the hashed accounts.
+            // Iterate over channels and append total difficulty.
             for mut channel in channels {
                 // data is received in sorted order
                 while let Some(entry) = channel.recv().await {
-                    let (number, td) = entry.unwrap();
+                    let (number, td) = entry?;
                     cursor_td.append(number, td.into())?;
                 }
             }
@@ -298,7 +303,7 @@ mod tests {
             let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
 
             if start + 1 >= end {
-                return Ok(Vec::default());
+                return Ok(Vec::default())
             }
 
             let mut headers = random_header_range(start + 1..end, head.hash());

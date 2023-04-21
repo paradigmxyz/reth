@@ -56,7 +56,7 @@ impl<K: Key> RawKey<K> {
     }
 }
 
-impl<K:Key> From<K> for RawKey<K> {
+impl<K: Key> From<K> for RawKey<K> {
     fn from(key: K) -> Self {
         RawKey::new(key)
     }

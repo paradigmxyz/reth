@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use reth_primitives::{
-    BlockHash, BlockNumber, InvalidTransactionError, SealedBlock, SealedHeader, H256, U256, Header,
+    BlockHash, BlockNumber, Header, InvalidTransactionError, SealedBlock, SealedHeader, H256, U256,
 };
 use std::fmt::Debug;
 
