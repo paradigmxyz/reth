@@ -143,7 +143,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         // make last block have valid state root
         let root = {
             let mut tx_mut = tx.inner();
-            let root = StateRoot::new(tx.inner().deref()).root().unwrap();
+            let root = StateRoot::new(tx_mut.deref()).root().unwrap();
             tx_mut.commit().unwrap();
             root
         };
