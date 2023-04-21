@@ -1,4 +1,4 @@
-use crate::{cursor::CursorSubNode, hash_builder::HashBuilder, updates::TrieUpdates, Nibbles};
+use crate::{hash_builder::HashBuilder, trie_cursor::CursorSubNode, updates::TrieUpdates, Nibbles};
 use reth_primitives::{trie::StoredSubNode, MerkleCheckpoint, H256};
 
 /// The progress of the state root computation.

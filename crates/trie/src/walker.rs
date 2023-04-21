@@ -1,6 +1,6 @@
 use crate::{
-    cursor::{CursorSubNode, TrieCursor},
     prefix_set::PrefixSet,
+    trie_cursor::{CursorSubNode, TrieCursor},
     updates::TrieUpdates,
     Nibbles,
 };
@@ -252,7 +252,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cursor::{AccountTrieCursor, StorageTrieCursor};
+    use crate::trie_cursor::{AccountTrieCursor, StorageTrieCursor};
     use reth_db::{
         cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
     };

@@ -2,6 +2,14 @@ use crate::updates::TrieKey;
 use reth_db::{table::Key, Error};
 use reth_primitives::trie::BranchNodeCompact;
 
+mod account_cursor;
+mod storage_cursor;
+mod subnode;
+
+pub use self::{
+    account_cursor::AccountTrieCursor, storage_cursor::StorageTrieCursor, subnode::CursorSubNode,
+};
+
 /// A cursor for navigating a trie that works with both Tables and DupSort tables.
 pub trait TrieCursor<K: Key> {
     /// Move the cursor to the key and return if it is an exact match.
