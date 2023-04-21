@@ -2,7 +2,9 @@ on:
   push:
     branches:
       - main
-  pull_request:
+  schedule:
+    # every 15 minutes (for testing)
+    - cron: '15 * * * *'
 
 env:
   RUSTFLAGS: -D warnings
