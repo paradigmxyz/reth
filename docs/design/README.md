@@ -5,6 +5,6 @@ Docs under this page contain some context on how we've iterated on the Reth desi
 - [Database](./database.md)
 - Networking
     - [P2P](./p2p.md)
-    - [Headers Downloaders](./headers-downloaders.md)
+    - [Headers Downloader](./headers-downloader.md)
 - [Metrics](./metrics.md): Guidelines on metrics and traces.
 - [Review of Other Codebases](./review.md)

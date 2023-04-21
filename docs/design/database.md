@@ -12,7 +12,7 @@
     * This allows for [out-of-the-box benchmarking](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/db/benches/encoding_iai.rs#L5) (using [Criterion](https://github.com/bheisler/criterion.rs) and [Iai](https://github.com/bheisler/iai))
     * It also enables [out-of-the-box fuzzing](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/interfaces/src/db/codecs/fuzz/mod.rs) using [trailofbits/test-fuzz](https://github.com/trailofbits/test-fuzz).
 * We implemented that trait for the following encoding formats:
-    * [Ethereum-specific Compact Encoding](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/compact/mod.rs): A lot of Ethereum datatypes have unnecessary zeros when serialized, or optional (e.g. on empty hashes) which would be nice not to pay in storage costs. 
+    * [Ethereum-specific Compact Encoding](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/compact/mod.rs): A lot of Ethereum datatypes have unnecessary zeros when serialized, or optional (e.g. on empty hashes) which would be nice not to pay in storage costs.
         * [Erigon](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) achieves that by having a `bitfield` set on  Table "PlainState which adds a bitfield to Accounts.
         * Akula expanded it for other tables and datatypes manually. It also saved some more space by storing the length of certain types (U256, u64) using the modular_bitfield crate, which compacts this information.
         * We generalized it for all types, by writing a derive macro that autogenerates code for implementing the trait. It, also generates the interfaces required for fuzzing using ToB/test-fuzz:
@@ -44,42 +44,34 @@ TransactionHash {
     H256 TxHash "PK"
     u64 TxNumber
 }
-TxTransitionIdIndex {
+TransactionBlock {
     u64 TxNumber "PK"
-    u64 TransitionId 
-}
-BlockTransitionIdIndex {
-    u64 BlockNumber "PK"
-    u64 TransitionId
+    u64 BlockNumber
 }
 AccountHistory {
     H256 Account "PK"
-    BlockNumberList TransitionIdList "List of transitions where account was changed"
+    BlockNumberList BlockNumberList "List of transitions where account was changed"
 }
 StorageHistory {
     H256 Account "PK"
     H256 StorageKey "PK"
-    BlockNumberList TransitionIdList "List of transitions where account storage entry was changed"
+    BlockNumberList BlockNumberList "List of transitions where account storage entry was changed"
 }
 AccountChangeSet {
-    u64 TransitionId "PK"
+    u64 BlockNumber "PK"
     H256 Account "PK"
     ChangeSet AccountChangeSet "Account before transition"
 }
 StorageChangeSet {
-    u64 TransitionId "PK"
+    u64 BlockNumber "PK"
     H256 Account "PK"
     H256 StorageKey "PK"
     ChangeSet StorageChangeSet "Storage entry before transition"
 }
-EVM ||--o{ AccountHistory: "Load Account by first greater TransitionId"
-EVM ||--o{ StorageHistory: "Load Storage Entry by first greater TransitionId"
+EVM ||--o{ AccountHistory: "Load Account by first greater BlockNumber"
+EVM ||--o{ StorageHistory: "Load Storage Entry by first greater BlockNumber"
 TransactionHash ||--o{ Transactions : index
-Transactions ||--o{ TxTransitionIdIndex : index
+Transactions ||--o{ TransactionBlock : index
 AccountHistory ||--o{ AccountChangeSet : index
-BlockTransitionIdIndex ||--o{ AccountChangeSet : "unique index"
-TxTransitionIdIndex ||--o{ AccountChangeSet : "unique index"
 StorageHistory ||--o{ StorageChangeSet : index
-BlockTransitionIdIndex ||--o{ StorageChangeSet : "unique index"
-TxTransitionIdIndex ||--o{ StorageChangeSet : "unique index"
 ```
