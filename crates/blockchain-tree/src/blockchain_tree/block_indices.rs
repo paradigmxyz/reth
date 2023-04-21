@@ -274,8 +274,9 @@ impl BlockIndices {
     }
 
     /// Used for finalization of block.
+    ///
     /// Return list of chains for removal that depend on finalized canonical chain.
-    pub fn finalize_canonical_blocks(
+    pub(crate) fn finalize_canonical_blocks(
         &mut self,
         finalized_block: BlockNumber,
         num_of_additional_canonical_hashes_to_retain: u64,
