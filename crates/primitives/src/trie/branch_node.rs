@@ -1,5 +1,6 @@
 use super::TrieMask;
 use crate::H256;
+use bytes::Buf;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +89,7 @@ impl Compact for BranchNodeCompact {
         buf_size
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
     where
         Self: Sized,
     {
@@ -98,9 +99,9 @@ impl Compact for BranchNodeCompact {
         assert_eq!(buf.len() % hash_len, 6);
 
         // Consume the masks.
-        let (state_mask, buf) = TrieMask::from_compact(buf, len);
-        let (tree_mask, buf) = TrieMask::from_compact(buf, len);
-        let (hash_mask, buf) = TrieMask::from_compact(buf, len);
+        let (state_mask, buf) = TrieMask::from_compact(buf, 0);
+        let (tree_mask, buf) = TrieMask::from_compact(buf, 0);
+        let (hash_mask, buf) = TrieMask::from_compact(buf, 0);
 
         let mut buf = buf;
         let mut num_hashes = buf.len() / hash_len;
@@ -108,18 +109,16 @@ impl Compact for BranchNodeCompact {
 
         // Check if the root hash is present
         if hash_mask.count_ones() as usize + 1 == num_hashes {
-            let (hash, remaining) = H256::from_compact(buf, hash_len);
-            root_hash = Some(hash);
-            buf = remaining;
+            root_hash = Some(H256::from_slice(&buf[..hash_len]));
+            buf.advance(hash_len);
             num_hashes -= 1;
         }
 
         // Consume all remaining hashes.
         let mut hashes = Vec::<H256>::with_capacity(num_hashes);
         for _ in 0..num_hashes {
-            let (hash, remaining) = H256::from_compact(buf, hash_len);
-            hashes.push(hash);
-            buf = remaining;
+            hashes.push(H256::from_slice(&buf[..hash_len]));
+            buf.advance(hash_len);
         }
 
         (Self::new(state_mask, tree_mask, hash_mask, hashes, root_hash), buf)

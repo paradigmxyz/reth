@@ -1,5 +1,8 @@
 use crate::{nodes::CHILD_INDEX_RANGE, Nibbles};
-use reth_primitives::{trie::BranchNodeCompact, H256};
+use reth_primitives::{
+    trie::{BranchNodeCompact, StoredSubNode},
+    H256,
+};
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -28,6 +31,23 @@ impl std::fmt::Debug for CursorSubNode {
             .field("hash_flag", &self.hash_flag())
             .field("hash", &self.hash())
             .finish()
+    }
+}
+
+impl From<StoredSubNode> for CursorSubNode {
+    fn from(value: StoredSubNode) -> Self {
+        let nibble = match value.nibble {
+            Some(n) => n as i8,
+            None => -1,
+        };
+        Self { key: Nibbles::from(value.key), nibble, node: value.node }
+    }
+}
+
+impl From<CursorSubNode> for StoredSubNode {
+    fn from(value: CursorSubNode) -> Self {
+        let nibble = if value.nibble >= 0 { Some(value.nibble as u8) } else { None };
+        Self { key: value.key.hex_data, nibble, node: value.node }
     }
 }
 
