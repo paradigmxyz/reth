@@ -142,6 +142,34 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         })
     }
 
+    /// Ensures that block matches range requirements depending on the current state of the tree.
+    ///   - Ensures that the block's height is not lagging behind the currently tracked last
+    ///     finalized block.
+    ///   - Ensures that the distance of from the currently tracked last finalized block and the
+    ///     given block's number is not larger than the configured maximum block range
+    pub(crate) fn ensure_block_is_in_range(&self, block: &SealedBlock) -> Result<(), ExecError> {
+        // check if block number is inside pending block slide
+        let last_finalized_block = self.block_indices.last_finalized_block();
+        if block.number <= last_finalized_block {
+            return Err(ExecError::PendingBlockIsFinalized {
+                block_number: block.number,
+                block_hash: block.hash(),
+                last_finalized: last_finalized_block,
+            })
+        }
+
+        // we will not even try to insert blocks that are too far in the future.
+        if block.number > last_finalized_block + self.config.max_blocks_in_chain() {
+            return Err(ExecError::PendingBlockIsInFuture {
+                block_number: block.number,
+                block_hash: block.hash(),
+                last_finalized: last_finalized_block,
+            })
+        }
+
+        Ok(())
+    }
+
     /// Expose internal indices of the BlockchainTree.
     pub fn block_indices(&self) -> &BlockIndices {
         &self.block_indices
@@ -230,7 +258,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             let canonical_block_hashes = self.block_indices.canonical_chain();
 
             // append the block if it is continuing the chain.
-            if chain_tip == block.parent_hash {
+            return if chain_tip == block.parent_hash {
                 let block_hash = block.hash();
                 let block_number = block.number;
                 parent_chain.append_block(
@@ -242,7 +270,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 )?;
 
                 self.block_indices.insert_non_fork_block(block_number, block_hash, chain_id);
-                return Ok(BlockStatus::Valid)
+                Ok(BlockStatus::Valid)
             } else {
                 let chain = parent_chain.new_chain_fork(
                     block,
@@ -252,7 +280,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                     &self.externals,
                 )?;
                 self.insert_chain(chain);
-                return Ok(BlockStatus::Accepted)
+                Ok(BlockStatus::Accepted)
             }
         }
         // if not found, check if the parent can be found inside canonical chain.
@@ -379,15 +407,15 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// Insert a block (with senders recovered) in the tree.
     ///
-    /// Returns `true` if:
+    /// Returns the [BlockStatus] on success:
     ///
     /// - The block is already part of a sidechain in the tree, or
     /// - The block is already part of the canonical chain, or
     /// - The parent is part of a sidechain in the tree, and we can fork at this block, or
     /// - The parent is part of the canonical chain, and we can fork at this block
     ///
-    /// Otherwise `false` is returned, indicating that neither the block nor its parent is part of
-    /// the chain or any sidechains.
+    /// Otherwise, and error is returned, indicating that neither the block nor its parent is part
+    /// of the chain or any sidechains.
     ///
     /// This means that if the block becomes canonical, we need to fetch the missing blocks over
     /// P2P.
@@ -400,35 +428,24 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<BlockStatus, Error> {
-        // check if block number is inside pending block slide
-        let last_finalized_block = self.block_indices.last_finalized_block();
-        if block.number <= last_finalized_block {
-            return Err(ExecError::PendingBlockIsFinalized {
-                block_number: block.number,
-                block_hash: block.hash(),
-                last_finalized: last_finalized_block,
-            }
-            .into())
-        }
+        self.ensure_block_is_in_range(&block.block)?;
+        self.insert_in_range_block_with_senders(block)
+    }
 
-        // we will not even try to insert blocks that are too far in future.
-        if block.number > last_finalized_block + self.config.max_blocks_in_chain() {
-            return Err(ExecError::PendingBlockIsInFuture {
-                block_number: block.number,
-                block_hash: block.hash(),
-                last_finalized: last_finalized_block,
-            }
-            .into())
-        }
-
+    /// Same as [BlockchainTree::insert_block_with_senders] but expects that the block is in range,
+    /// See [BlockchainTree::ensure_block_is_in_range].
+    pub(crate) fn insert_in_range_block_with_senders(
+        &mut self,
+        block: SealedBlockWithSenders,
+    ) -> Result<BlockStatus, Error> {
         // check if block known and is already inside Tree
         if let Some(chain_id) = self.block_indices.get_blocks_chain_id(&block.hash()) {
             let canonical_fork = self.canonical_fork(chain_id).expect("Chain id is valid");
-            // if block chain extends canonical chain
-            if canonical_fork == self.block_indices.canonical_tip() {
-                return Ok(BlockStatus::Valid)
+            // if blockchain extends canonical chain
+            return if canonical_fork == self.block_indices.canonical_tip() {
+                Ok(BlockStatus::Valid)
             } else {
-                return Ok(BlockStatus::Accepted)
+                Ok(BlockStatus::Accepted)
             }
         }
 
