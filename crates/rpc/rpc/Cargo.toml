@@ -57,6 +57,7 @@ thiserror = "1.0"
 hex = "0.4"
 rand = "0.8.5"
 tracing = "0.1"
+tracing-futures = "0.2"
 schnellru = "0.2"
 futures = "0.3.26"
 

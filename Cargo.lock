@@ -5177,6 +5177,7 @@ dependencies = [
  "tokio-util 0.7.7",
  "tower",
  "tracing",
+ "tracing-futures",
 ]
 
 [[package]]

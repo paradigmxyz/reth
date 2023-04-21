@@ -4,7 +4,13 @@ use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_types::{state::StateOverride, CallRequest, Log, RichBlock, SyncStatus};
-use tracing::trace;
+use tracing_futures::Instrument;
+
+macro_rules! engine_span {
+    () => {
+        tracing::trace_span!(target: "rpc", "engine")
+    };
+}
 
 /// A wrapper type for the `EthApi` and `EthFilter` implementations that only expose the required
 /// subset for the `eth_` namespace used in auth server alongside the `engine_` namespace.
@@ -29,19 +35,22 @@ where
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
-        trace!(target: "rpc::eth", "Serving eth_syncing [engine]");
+        let span = engine_span!();
+        let _enter = span.enter();
         self.eth.syncing()
     }
 
     /// Handler for: `eth_chainId`
     async fn chain_id(&self) -> Result<Option<U64>> {
-        trace!(target: "rpc::eth", "Serving eth_chainId [engine]");
+        let span = engine_span!();
+        let _enter = span.enter();
         self.eth.chain_id().await
     }
 
     /// Handler for: `eth_blockNumber`
     fn block_number(&self) -> Result<U256> {
-        trace!(target: "rpc::eth", "Serving eth_blockNumber [engine]");
+        let span = engine_span!();
+        let _enter = span.enter();
         self.eth.block_number()
     }
 
@@ -52,20 +61,17 @@ where
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
     ) -> Result<Bytes> {
-        trace!(target: "rpc::eth", "Serving eth_call [engine]");
-        self.eth.call(request, block_number, state_overrides).await
+        self.eth.call(request, block_number, state_overrides).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
-        trace!(target: "rpc::eth", "Serving eth_getCode [engine]");
-        self.eth.get_code(address, block_number).await
+        self.eth.get_code(address, block_number).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_getBlockByHash`
     async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
-        trace!(target: "rpc::eth", "Serving eth_getBlockByHash [engine]");
-        self.eth.block_by_hash(hash, full).await
+        self.eth.block_by_hash(hash, full).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_getBlockByNumber`
@@ -74,19 +80,16 @@ where
         number: BlockNumberOrTag,
         full: bool,
     ) -> Result<Option<RichBlock>> {
-        trace!(target: "rpc::eth", "Serving eth_getBlockByNumber [engine]");
-        self.eth.block_by_number(number, full).await
+        self.eth.block_by_number(number, full).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, bytes: Bytes) -> Result<H256> {
-        trace!(target: "rpc::eth", "Serving eth_sendRawTransaction [engine]");
-        self.eth.send_raw_transaction(bytes).await
+        self.eth.send_raw_transaction(bytes).instrument(engine_span!()).await
     }
 
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
-        trace!(target: "rpc::eth", "Serving eth_getLogs [engine]");
-        self.eth_filter.logs(filter).await
+        self.eth_filter.logs(filter).instrument(engine_span!()).await
     }
 }
