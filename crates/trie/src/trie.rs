@@ -6,16 +6,12 @@ use crate::{
     prefix_set::{PrefixSet, PrefixSetLoader},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie_cursor::{AccountTrieCursor, StorageTrieCursor},
-    updates::{TrieKey, TrieOp, TrieUpdates},
+    updates::TrieUpdates,
     walker::TrieWalker,
     StateRootError, StorageRootError,
 };
-use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
-    transaction::DbTx,
-};
-use reth_primitives::{keccak256, proofs::EMPTY_ROOT, Address, BlockNumber, StorageEntry, H256};
+use reth_db::{tables, transaction::DbTx};
+use reth_primitives::{keccak256, Address, BlockNumber, StorageEntry, H256};
 use reth_rlp::Encodable;
 use std::{collections::HashMap, ops::RangeInclusive};
 

@@ -145,9 +145,8 @@ where
             .post_state
             .accounts
             .iter()
-            .skip_while(|(k, v)| k < &&key || v.is_none())
-            .next()
-            .map(|(address, info)| (*address, info.unwrap().clone()));
+            .find(|(k, v)| k >= &&key && v.is_some())
+            .map(|(address, info)| (*address, info.unwrap()));
         if let Some((address, account)) = post_state_item {
             // It's an exact match, return the account from post state without looking up in the
             // database.
@@ -193,9 +192,8 @@ where
             .post_state
             .accounts
             .iter()
-            .skip_while(|(k, v)| k <= &last_account || v.is_none())
-            .next()
-            .map(|(address, info)| (*address, info.unwrap().clone()));
+            .find(|(k, v)| k > &last_account && v.is_some())
+            .map(|(address, info)| (*address, info.unwrap()));
         let result = self.next_account(post_state_item, db_item)?;
         self.last_account = result.as_ref().map(|(address, _)| *address);
         Ok(result)
@@ -228,7 +226,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
         let result = match (post_state_item, db_item) {
             // If both are not empty, return the smallest of the two
             (Some((post_state_slot, post_state_value)), Some(db_entry)) => {
-                if post_state_slot < &&db_entry.key {
+                if post_state_slot < &db_entry.key {
                     Some(StorageEntry { key: *post_state_slot, value: *post_state_value })
                 } else {
                     Some(db_entry)
@@ -309,7 +307,7 @@ where
             .post_state
             .storages
             .get(&account)
-            .map(|storage| storage.storage.iter().skip_while(|(slot, _)| slot <= &&last_slot))
+            .map(|storage| storage.storage.iter().skip_while(|(slot, _)| slot <= &last_slot))
             .and_then(|mut iter| iter.next());
         let result = self.next_slot(post_state_item, db_item)?;
         self.last_slot = result.as_ref().map(|entry| entry.key);
