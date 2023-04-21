@@ -11,7 +11,9 @@ use reth_primitives::{
     BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
 };
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostState, HashedPostStateFactory, HashedStorage},
+    hashed_cursor::{
+        HashedCursorFactory, HashedPostState, HashedPostStateCursorFactory, HashedStorage,
+    },
     StateRoot, StateRootError,
 };
 use std::collections::BTreeMap;
@@ -207,7 +209,7 @@ impl PostState {
     pub fn state_root_slow<'a, TX: DbTx<'a>>(&self, tx: &TX) -> Result<H256, StateRootError> {
         let hashed_post_state = self.hash_state_slow();
         let (account_prefixset, storage_prefixset) = hashed_post_state.construct_prefix_sets();
-        let hashed_cursor_factory = HashedPostStateFactory::new(&tx, &hashed_post_state);
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(&tx, &hashed_post_state);
         StateRoot::new(tx)
             .with_hashed_cursor_factory(&hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefixset)

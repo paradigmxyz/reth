@@ -53,19 +53,19 @@ impl HashedPostState {
 }
 
 /// The hashed cursor factory for the post state.
-pub struct HashedPostStateFactory<'a, TX> {
+pub struct HashedPostStateCursorFactory<'a, TX> {
     tx: &'a TX,
     post_state: &'a HashedPostState,
 }
 
-impl<'a, TX> HashedPostStateFactory<'a, TX> {
+impl<'a, TX> HashedPostStateCursorFactory<'a, TX> {
     /// Create a new factory.
     pub fn new(tx: &'a TX, post_state: &'a HashedPostState) -> Self {
         Self { tx, post_state }
     }
 }
 
-impl<'a, TX: DbTx<'a>> HashedCursorFactory<'a> for HashedPostStateFactory<'a, TX> {
+impl<'a, TX: DbTx<'a>> HashedCursorFactory<'a> for HashedPostStateCursorFactory<'a, TX> {
     type AccountCursor<'tx> = HashedPostStateAccountCursor<'a, <TX as DbTxGAT<'tx>>::Cursor<tables::HashedAccount>> where Self: 'tx;
     type StorageCursor<'tx> = HashedPostStateStorageCursor<'a, <TX as DbTxGAT<'tx>>::DupCursor<tables::HashedStorage>> where Self: 'tx;
 
