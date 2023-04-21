@@ -8,11 +8,7 @@ use reth_primitives::{
     trie::{BranchNodeCompact, HashBuilderState, HashBuilderValue, TrieMask},
     H256,
 };
-use std::{collections::BTreeMap, fmt::Debug, sync::mpsc};
-
-/// A type alias for a sender of branch nodes.
-/// Branch nodes are sent by the Hash Builder to be stored in the database.
-pub type BranchNodeSender = mpsc::Sender<(Nibbles, BranchNodeCompact)>;
+use std::{collections::BTreeMap, fmt::Debug};
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder
 /// is to build the Merkle proof that is essential for verifying the integrity and authenticity of
