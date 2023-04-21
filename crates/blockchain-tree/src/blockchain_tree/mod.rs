@@ -519,7 +519,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Make a block and its parent part of the canonical chain.
+    /// Make a block and its parent part of the canonical chain and commit the blocks to the
+    /// database.
     ///
     /// # Note
     ///

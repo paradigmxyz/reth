@@ -368,48 +368,56 @@ where
     ///
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
+    #[instrument(skip(self), fields(block_number = payload.block_number.as_u64(), block_hash = ?payload.block_hash), target = "consensus::engine")]
     fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
-        let block_number = payload.block_number.as_u64();
-        let block_hash = payload.block_hash;
-        trace!(target: "consensus::engine", ?block_hash, block_number, "Received new payload");
+        trace!(target: "consensus::engine", "Received new payload");
         let block = match SealedBlock::try_from(payload) {
             Ok(block) => block,
             Err(error) => {
-                error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
+                error!(target: "consensus::engine", ?error, "Invalid payload");
                 return error.into()
             }
         };
 
-        let status = if self.is_pipeline_idle() {
-            let block_hash = block.hash;
-            match self.blockchain_tree.insert_block(block) {
-                Ok(status) => {
-                    let latest_valid_hash =
-                        matches!(status, BlockStatus::Valid).then_some(block_hash);
-                    let status = match status {
-                        BlockStatus::Valid => PayloadStatusEnum::Valid,
-                        BlockStatus::Accepted => PayloadStatusEnum::Accepted,
-                        BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
-                    };
-                    PayloadStatus::new(status, latest_valid_hash)
-                }
-                Err(error) => {
-                    let latest_valid_hash =
-                        matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. }))
-                            .then_some(H256::zero());
-                    let status = match error {
-                        Error::Execution(ExecutorError::PendingBlockIsInFuture { .. }) => {
-                            PayloadStatusEnum::Syncing
-                        }
-                        error => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
-                    };
-                    PayloadStatus::new(status, latest_valid_hash)
-                }
+        let block_hash = block.hash;
+        let mut status = match self.blockchain_tree.insert_block(block) {
+            Ok(status) => {
+                let latest_valid_hash = status.is_valid().then_some(block_hash);
+                let status = match status {
+                    BlockStatus::Valid => PayloadStatusEnum::Valid,
+                    BlockStatus::Accepted => PayloadStatusEnum::Accepted,
+                    BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
+                };
+                PayloadStatus::new(status, latest_valid_hash)
             }
-        } else {
-            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+            Err(error) => {
+                let latest_valid_hash =
+                    matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. }))
+                        .then_some(H256::zero());
+                let status = match error {
+                    Error::Execution(ExecutorError::PendingBlockIsInFuture {
+                        last_finalized,
+                        ..
+                    }) => {
+                        trace!(target: "consensus::engine", ?last_finalized, "payload too far into the future, syncing");
+                        PayloadStatusEnum::Syncing
+                    }
+                    error => {
+                        warn!(target: "consensus::engine", ?error, "received invalid payload");
+                        PayloadStatusEnum::Invalid { validation_error: error.to_string() }
+                    }
+                };
+                PayloadStatus::new(status, latest_valid_hash)
+            }
         };
-        trace!(target: "consensus::engine", ?block_hash, block_number, ?status, "Returning payload status");
+
+        if !self.is_pipeline_idle() {
+            // pipeline is currently syncing
+            trace!(target: "consensus::engine",  "pipeline is syncing, returning syncing status");
+            status = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
+        }
+
+        trace!(target: "consensus::engine", ?status, "Returning payload status");
         status
     }
 

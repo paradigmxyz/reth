@@ -70,6 +70,23 @@ pub enum BlockStatus {
     Disconnected,
 }
 
+impl BlockStatus {
+    /// Returns `true` if the block is valid.
+    pub fn is_valid(&self) -> bool {
+        matches!(self, BlockStatus::Valid)
+    }
+
+    /// Returns `true` if the block is accepted.
+    pub fn is_accepted(&self) -> bool {
+        matches!(self, BlockStatus::Accepted)
+    }
+
+    /// Returns `true` if the block is disconnected.
+    pub fn is_disconnected(&self) -> bool {
+        matches!(self, BlockStatus::Disconnected)
+    }
+}
+
 /// Allows read only functionality on the blockchain tree.
 ///
 /// Tree contains all blocks that are not canonical that can potentially be included
