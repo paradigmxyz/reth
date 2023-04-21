@@ -8,7 +8,7 @@ use reth_primitives::{
     trie::{BranchNodeCompact, HashBuilderState, HashBuilderValue, TrieMask},
     H256,
 };
-use std::{collections::BTreeMap, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug};
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder
 /// is to build the Merkle proof that is essential for verifying the integrity and authenticity of
@@ -45,7 +45,7 @@ pub struct HashBuilder {
 
     stored_in_database: bool,
 
-    updated_branch_nodes: Option<BTreeMap<Nibbles, BranchNodeCompact>>,
+    updated_branch_nodes: Option<HashMap<Nibbles, BranchNodeCompact>>,
 }
 
 impl From<HashBuilderState> for HashBuilder {
@@ -91,12 +91,12 @@ impl HashBuilder {
     /// Call [HashBuilder::split] to get the updates to branch nodes.
     pub fn set_updates(&mut self, retain_updates: bool) {
         if retain_updates {
-            self.updated_branch_nodes = Some(BTreeMap::default());
+            self.updated_branch_nodes = Some(HashMap::default());
         }
     }
 
     /// Splits the [HashBuilder] into a [HashBuilder] and hash builder updates.
-    pub fn split(mut self) -> (Self, BTreeMap<Nibbles, BranchNodeCompact>) {
+    pub fn split(mut self) -> (Self, HashMap<Nibbles, BranchNodeCompact>) {
         let updates = self.updated_branch_nodes.take();
         (self, updates.unwrap_or_default())
     }

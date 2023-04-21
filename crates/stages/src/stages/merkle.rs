@@ -195,7 +195,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             match progress {
                 StateRootProgress::Progress(state, updates) => {
                     updates.flush(tx.deref_mut())?;
-                    self.save_execution_checkpoint(tx, Some(state.into()))?;
+                    self.save_execution_checkpoint(tx, Some((*state).into()))?;
                     return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
                 }
                 StateRootProgress::Complete(root, updates) => {
