@@ -10,3 +10,6 @@ crates/storage/             @rakita @joshieDo
 crates/transaction-pool/    @mattsse
 crates/rpc/                 @mattsse @Rjected
 crates/payload/             @mattsse @Rjected
+crates/consensus/auto-seal  @mattsse
+crates/consensus/beacon     @rkrasiuk
+crates/trie                 @rkrasiuk
