@@ -1,19 +1,15 @@
-use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
 use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
-    provider::ProviderError,
 };
 use reth_provider::Transaction;
 use std::sync::Arc;
@@ -28,7 +24,6 @@ pub const BODIES: StageId = StageId("Bodies");
 /// The body stage downloads block bodies for all block headers stored locally in the database.
 ///
 /// # Empty blocks
-
 ///
 /// Blocks with an ommers hash corresponding to no ommers *and* a transaction root corresponding to
 /// no transactions will not have a block body downloaded for them, since it would be meaningless to
@@ -76,13 +71,16 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let (start_block, end_block) = exec_or_return!(input, "sync::stages::bodies");
+        let range = input.next_block_range();
+        if range.is_empty() {
+            let (from, to) = range.into_inner();
+            info!(target: "sync::stages::bodies", from, "Target block already reached");
+            return Ok(ExecOutput::done(to))
+        }
 
         // Update the header range on the downloader
-        self.downloader.set_download_range(start_block..end_block + 1)?;
-
-        // Cursor used to get total difficulty
-        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
+        self.downloader.set_download_range(range.clone())?;
+        let (from_block, to_block) = range.into_inner();
 
         // Cursors used to write bodies, ommers and transactions
         let mut block_meta_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
@@ -91,11 +89,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
-        // Get id for the first transaction and first transition in the block
-        let (mut next_tx_num, mut next_transition_id) = tx.get_next_block_ids(start_block)?;
+        // Get id for the next tx_num of zero if there are no transactions.
+        let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
-        let mut highest_block = input.stage_progress.unwrap_or_default();
-        debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = next_tx_num, next_transition_id, "Commencing sync");
+        debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
@@ -103,15 +100,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
 
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
+
+        let mut highest_block = from_block;
         for response in downloaded_bodies {
             // Write block
             let block_number = response.block_number();
-            let difficulty = response.difficulty();
 
             let first_tx_num = next_tx_num;
-            let first_transition_id = next_transition_id;
             let mut tx_count = 0;
-            let mut has_withdrawals = false;
             match response {
                 BlockResponse::Full(block) => {
                     tx_count = block.body.len() as u64;
@@ -145,7 +141,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     // Write withdrawals if any
                     if let Some(withdrawals) = block.withdrawals {
                         if !withdrawals.is_empty() {
-                            has_withdrawals = true;
                             withdrawals_cursor
                                 .append(block_number, StoredBlockWithdrawals { withdrawals })?;
                         }
@@ -154,31 +149,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 BlockResponse::Empty(_) => {}
             };
 
-            // The block transition marks the final state at the end of the block.
-            // Increment the transition if the block contains an addition block reward.
-            // If the block does not have a reward, the transition will be the same as the
-            // transition at the last transaction of this block.
-            let td = td_cursor
-                .seek(block_number)?
-                .ok_or(ProviderError::TotalDifficulty { number: block_number })?
-                .1;
-            let has_reward = self.consensus.has_block_reward(td.into(), difficulty);
-            let has_block_change = has_reward || has_withdrawals;
-
-            // Increment transition id for each transaction,
-            // and by +1 if the block has its own state change (an block reward or withdrawals).
-            next_transition_id += tx_count + has_block_change as u64;
-
             // insert block meta
-            block_meta_cursor.append(
-                block_number,
-                StoredBlockBodyIndices {
-                    first_tx_num,
-                    first_transition_id,
-                    has_block_change,
-                    tx_count,
-                },
-            )?;
+            block_meta_cursor
+                .append(block_number, StoredBlockBodyIndices { first_tx_num, tx_count })?;
 
             highest_block = block_number;
         }
@@ -186,8 +159,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
-        let done = highest_block == end_block;
-        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, done, "Sync iteration finished");
+        let done = highest_block == to_block;
+        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: highest_block, done })
     }
 
@@ -432,7 +405,6 @@ mod tests {
             transaction::{DbTx, DbTxMut},
         };
         use reth_interfaces::{
-            consensus::Consensus,
             p2p::{
                 bodies::{
                     client::{BodiesClient, BodiesFut},
@@ -451,7 +423,7 @@ mod tests {
         use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{
             collections::{HashMap, VecDeque},
-            ops::Range,
+            ops::RangeInclusive,
             pin::Pin,
             sync::Arc,
             task::{Context, Poll},
@@ -526,17 +498,15 @@ mod tests {
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.stage_progress.unwrap_or_default();
-                let end = input.previous_stage_progress() + 1;
-                let blocks = random_block_range(start..end, GENESIS_HASH, 0..2);
+                let end = input.previous_stage_progress();
+                let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.tx.commit(|tx| {
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
-                            first_transition_id: 0,
                             tx_count: progress.body.len() as u64,
-                            has_block_change: true,
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx();
@@ -628,7 +598,6 @@ mod tests {
                 self.tx.query(|tx| {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
-                    let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
@@ -640,7 +609,6 @@ mod tests {
                     };
 
                     let mut prev_number: Option<BlockNumber> = None;
-                    let mut expected_transition_id = 0;
 
                     for entry in bodies_cursor.walk(Some(first_body_key))? {
                         let (number, body) = entry?;
@@ -675,23 +643,11 @@ mod tests {
                             assert_eq!(tx_block_id, Some(number));
                         }
 
-                        assert_eq!(body.first_transition_id, expected_transition_id);
-
                         for tx_id in body.tx_num_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
                             assert!(tx_entry.is_some(), "Transaction is missing.");
-                            // Increment expected id for each transaction transition.
-                            expected_transition_id += 1;
                         }
 
-                        // Increment expected id for block reward.
-                        let td = td_cursor
-                            .seek(number)?
-                            .expect("Missing TD for header")
-                            .1;
-                        if self.consensus.has_block_reward(td.into(), header.difficulty) {
-                            expected_transition_id += 1;
-                        }
 
                         prev_number = Some(number);
                     }
@@ -747,13 +703,16 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
+            fn set_download_range(
+                &mut self,
+                range: RangeInclusive<BlockNumber>,
+            ) -> DownloadResult<()> {
                 self.headers =
                     VecDeque::from(self.db.view(|tx| -> DownloadResult<Vec<SealedHeader>> {
                         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
                         let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-                        let walker = canonical_cursor.walk_range(range.start..range.end)?;
+                        let walker = canonical_cursor.walk_range(range)?;
 
                         let mut headers = Vec::default();
                         for entry in walker {

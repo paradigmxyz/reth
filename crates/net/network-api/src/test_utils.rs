@@ -1,10 +1,8 @@
-use crate::{
-    EthProtocolInfo, NetworkError, NetworkInfo, NetworkStatus, PeerKind, Peers, PeersInfo,
-    ReputationChangeKind,
-};
+use crate::{NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, ReputationChangeKind};
 use async_trait::async_trait;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
 use reth_primitives::{rpc::Chain::Mainnet, NodeRecord, PeerId};
+use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 
 /// A type that implements all network trait that does nothing.

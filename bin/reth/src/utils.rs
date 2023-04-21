@@ -70,11 +70,11 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Seeds the database with some random data, only used for testing
     pub fn seed(&mut self, len: u64) -> Result<()> {
         info!(target: "reth::cli", "Generating random block range from 0 to {len}");
-        let chain = random_block_range(0..len, Default::default(), 0..64);
+        let chain = random_block_range(0..=len - 1, Default::default(), 0..64);
 
         self.db.update(|tx| {
             chain.into_iter().try_for_each(|block| {
-                insert_canonical_block(tx, block, None, true)?;
+                insert_canonical_block(tx, block, None)?;
                 Ok::<_, eyre::Error>(())
             })
         })??;

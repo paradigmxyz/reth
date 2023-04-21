@@ -45,18 +45,24 @@ pub trait TransactionValidator: Send + Sync {
     /// This will be used by the transaction-pool to check whether the transaction should be
     /// inserted into the pool or discarded right away.
     ///
-    ///
-    /// Implementers of this trait must ensure that the transaction is correct, i.e. that it
-    /// complies with at least all static constraints, which includes checking for:
+    /// Implementers of this trait must ensure that the transaction is well-formed, i.e. that it
+    /// complies at least all static constraints, which includes checking for:
     ///
     ///    * chain id
     ///    * gas limit
     ///    * max cost
     ///    * nonce >= next nonce of the sender
+    ///    * ...
     ///
-    /// The transaction pool makes no assumptions about the validity of the transaction at the time
-    /// of this call before it inserts it. However, the validity of this transaction is still
-    /// subject to future changes enforced by the pool, for example nonce changes.
+    /// See [InvalidTransactionError](InvalidTransactionError) for common errors variants.
+    ///
+    /// The transaction pool makes no additional assumptions about the validity of the transaction
+    /// at the time of this call before it inserts it into the pool. However, the validity of
+    /// this transaction is still subject to future (dynamic) changes enforced by the pool, for
+    /// example nonce or balance changes. Hence, any validation checks must be applied in this
+    /// function.
+    ///
+    /// See [EthTransactionValidator] for a reference implementation.
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,

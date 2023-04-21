@@ -20,7 +20,7 @@ reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] 
 reth-transaction-pool = { path = "../../crates/transaction-pool" }
 reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
 reth-auto-seal-consensus = { path = "../../crates/consensus/auto-seal" }
-reth-executor = { path = "../../crates/executor" }
+reth-blockchain-tree = { path = "../../crates/blockchain-tree" }
 reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
@@ -84,3 +84,4 @@ tempfile = { version = "3.3.0" }
 backon = "0.4"
 hex = "0.4"
 thiserror = "1.0"
+pretty_assertions = "1.3.0"

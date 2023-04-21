@@ -19,7 +19,7 @@ pub trait CanonStateSubscriptions: Send + Sync {
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
 /// and will return all [`crate::PostState`] and [`reth_primitives::SealedBlockWithSenders`] of both
-/// reverted and commited blocks.
+/// reverted and committed blocks.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub enum CanonStateNotification {
@@ -57,7 +57,7 @@ impl CanonStateNotification {
     }
 
     /// Get new chain if any.
-    pub fn commited(&self) -> Option<Arc<Chain>> {
+    pub fn committed(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Reorg { new, .. } => Some(new.clone()),
             Self::Revert { .. } => None,
@@ -77,7 +77,7 @@ impl CanonStateNotification {
                 .extend(old.receipts_with_attachment().into_iter().map(|receipt| (receipt, true)));
         }
         // get new receipts
-        if let Some(new) = self.commited() {
+        if let Some(new) = self.committed() {
             receipts
                 .extend(new.receipts_with_attachment().into_iter().map(|receipt| (receipt, false)));
         }

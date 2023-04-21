@@ -60,7 +60,7 @@ These crates are related to networking (p2p and RPC), as well as networking prot
 
 These crates are Ethereum-specific (e.g. EVM, consensus, transaction pools).
 
-- [`executor`](../../crates/executor): Blazing-fast instrumented EVM using [`revm`](https://github.com/bluealloy/revm/). Used during consensus, syncing & during transaction simulation / gas estimation.
+- [`executor`](../../crates/blockchain-tree): Blazing-fast instrumented EVM using [`revm`](https://github.com/bluealloy/revm/). Used during consensus, syncing & during transaction simulation / gas estimation.
 - [`consensus`](../../crates/consensus): Implementations of consensus protocols.
 - [`transaction-pool`](../../crates/transaction-pool): An in-memory pending transactions pool.
 

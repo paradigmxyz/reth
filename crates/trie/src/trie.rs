@@ -16,10 +16,10 @@ use reth_primitives::{
     keccak256,
     proofs::EMPTY_ROOT,
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibblesSubKey},
-    Address, StorageEntry, TransitionId, H256,
+    Address, BlockNumber, StorageEntry, H256,
 };
 use reth_rlp::Encodable;
-use std::{collections::HashMap, ops::Range, sync::mpsc};
+use std::{collections::HashMap, ops::RangeInclusive, sync::mpsc};
 
 /// The branch node update sender
 pub type BranchNodeUpdateSender = mpsc::Sender<BranchNodeUpdate>;
@@ -77,11 +77,11 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
     /// The updated state root hash.
     pub fn incremental_root(
         tx: &'a TX,
-        tid_range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
         branch_node_sender: Option<BranchNodeUpdateSender>,
     ) -> Result<H256, StateRootError> {
         tracing::debug!(target: "loader", "incremental state root");
-        let (account_prefixes, storage_prefixes) = PrefixSetLoader::new(tx).load(tid_range)?;
+        let (account_prefixes, storage_prefixes) = PrefixSetLoader::new(tx).load(range)?;
         let this = Self::new(tx)
             .with_changed_account_prefixes(account_prefixes)
             .with_changed_storage_prefixes(storage_prefixes);
@@ -162,7 +162,7 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
 
                 let account = EthAccount::from(account).with_storage_root(storage_root);
                 let mut account_rlp = Vec::with_capacity(account.length());
-                account.encode(&mut account_rlp);
+                account.encode(&mut &mut account_rlp);
 
                 hash_builder.add_leaf(account_nibbles, &account_rlp);
 
@@ -190,18 +190,20 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
                         }
                     }
                     BranchNodeUpdate::Storage(hashed_address, nibbles, node) => {
-                        let key: StoredNibblesSubKey = nibbles.hex_data.into();
-                        if let Some(entry) =
-                            storage_cursor.seek_by_key_subkey(hashed_address, key.clone())?
-                        {
-                            // "seek exact"
-                            if entry.nibbles == key {
-                                storage_cursor.delete_current()?;
+                        if !nibbles.is_empty() {
+                            let key: StoredNibblesSubKey = nibbles.hex_data.into();
+                            if let Some(entry) =
+                                storage_cursor.seek_by_key_subkey(hashed_address, key.clone())?
+                            {
+                                // "seek exact"
+                                if entry.nibbles == key {
+                                    storage_cursor.delete_current()?;
+                                }
                             }
-                        }
 
-                        storage_cursor
-                            .upsert(hashed_address, StorageTrieEntry { nibbles: key, node })?;
+                            storage_cursor
+                                .upsert(hashed_address, StorageTrieEntry { nibbles: key, node })?;
+                        }
                     }
                 }
             }

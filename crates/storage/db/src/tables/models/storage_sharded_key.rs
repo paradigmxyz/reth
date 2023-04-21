@@ -4,7 +4,7 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use reth_primitives::{TransitionId, H160, H256};
+use reth_primitives::{BlockNumber, H160, H256};
 
 use super::ShardedKey;
 
@@ -27,8 +27,8 @@ pub struct StorageShardedKey {
 
 impl StorageShardedKey {
     /// Creates a new `StorageShardedKey`.
-    pub fn new(address: H160, storage_key: H256, highest_transition_id: TransitionId) -> Self {
-        Self { address, sharded_key: ShardedKey { key: storage_key, highest_transition_id } }
+    pub fn new(address: H160, storage_key: H256, highest_block_number: BlockNumber) -> Self {
+        Self { address, sharded_key: ShardedKey { key: storage_key, highest_block_number } }
     }
 }
 
@@ -38,7 +38,7 @@ impl Encode for StorageShardedKey {
     fn encode(self) -> Self::Encoded {
         let mut buf: Vec<u8> = Encode::encode(self.address).into();
         buf.extend_from_slice(&Encode::encode(self.sharded_key.key));
-        buf.extend_from_slice(&self.sharded_key.highest_transition_id.to_be_bytes());
+        buf.extend_from_slice(&self.sharded_key.highest_block_number.to_be_bytes());
         buf
     }
 }

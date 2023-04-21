@@ -162,7 +162,7 @@ pub fn get_bit_size(ftype: &str) -> u8 {
     match ftype {
         "TransactionKind" | "bool" | "Option" | "Signature" => 1,
         "TxType" => 2,
-        "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "TransitionId" | "NumTransactions" => 4,
+        "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
         "U256" => 6,
         _ => 0,

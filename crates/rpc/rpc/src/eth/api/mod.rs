@@ -15,6 +15,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 
 mod block;
 mod call;
+mod fees;
 mod server;
 mod sign;
 mod state;

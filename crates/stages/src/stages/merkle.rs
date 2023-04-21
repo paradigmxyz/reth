@@ -115,33 +115,31 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             MerkleStage::Both { clean_threshold } => *clean_threshold,
         };
 
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
+        let range = input.next_block_range();
+        let (from_block, to_block) = range.clone().into_inner();
+        let current_blook = input.previous_stage_progress();
 
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        let to_transition = tx.get_block_transition(previous_stage_progress)?;
+        let block_root = tx.get_header(current_blook)?.state_root;
 
-        let block_root = tx.get_header(previous_stage_progress)?.state_root;
-
-        let trie_root = if from_transition == to_transition {
+        let trie_root = if range.is_empty() {
             block_root
-        } else if to_transition - from_transition > threshold || stage_progress == 0 {
+        } else if to_block - from_block > threshold || from_block == 1 {
             // if there are more blocks than threshold it is faster to rebuild the trie
-            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
+            debug!(target: "sync::stages::merkle::exec", current = ?current_blook, target = ?to_block, "Rebuilding trie");
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
             StateRoot::new(tx.deref_mut()).root(None).map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target =
-                ?previous_stage_progress, "Updating trie"); // Iterate over
-            StateRoot::incremental_root(tx.deref_mut(), from_transition..to_transition, None)
+            debug!(target: "sync::stages::merkle::exec", current = ?current_blook, target =
+                ?to_block, "Updating trie"); // Iterate over
+            StateRoot::incremental_root(tx.deref_mut(), range, None)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 
-        self.validate_state_root(trie_root, block_root, previous_stage_progress)?;
+        self.validate_state_root(trie_root, block_root, to_block)?;
 
         info!(target: "sync::stages::merkle::exec", "Stage finished");
-        Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
+        Ok(ExecOutput { stage_progress: to_block, done: true })
     }
 
     /// Unwind the stage.
@@ -150,6 +148,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        let range = input.unwind_block_range();
         if matches!(self, MerkleStage::Execution { .. }) {
             info!(target: "sync::stages::merkle::exec", "Stage is always skipped");
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -161,14 +160,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
-        let from_transition = tx.get_block_transition(input.unwind_to)?;
-        let to_transition = tx.get_block_transition(input.stage_progress)?;
-
         // Unwind trie only if there are transitions
-        if from_transition < to_transition {
-            let block_root =
-                StateRoot::incremental_root(tx.deref_mut(), from_transition..to_transition, None)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+        if !range.is_empty() {
+            let block_root = StateRoot::incremental_root(tx.deref_mut(), range, None)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
             let target_root = tx.get_header(input.unwind_to)?.state_root;
             self.validate_state_root(block_root, target_root, input.unwind_to)?;
         } else {
@@ -288,7 +283,8 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.stage_progress.unwrap_or_default();
-            let end = input.previous_stage_progress() + 1;
+            let start = stage_progress + 1;
+            let end = input.previous_stage_progress();
 
             let num_of_accounts = 31;
             let accounts = random_contract_account_range(&mut (0..num_of_accounts))
@@ -313,7 +309,7 @@ mod tests {
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
-            blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..3));
+            blocks.extend(random_block_range(start..=end, head_hash, 0..3));
             self.tx.insert_blocks(blocks.iter(), None)?;
 
             let (transitions, final_state) = random_transition_range(
@@ -322,7 +318,8 @@ mod tests {
                 0..3,
                 0..256,
             );
-            self.tx.insert_transitions(transitions, None)?;
+            // add block changeset from block 1.
+            self.tx.insert_transitions(transitions, Some(start))?;
             self.tx.insert_accounts_and_storages(final_state)?;
 
             // Calculate state root
@@ -349,7 +346,7 @@ mod tests {
                 Ok(state_root_prehashed(accounts.into_iter()))
             })?;
 
-            let last_block_number = end - 1;
+            let last_block_number = end;
             self.tx.commit(|tx| {
                 let mut last_header = tx.get::<tables::Headers>(last_block_number)?.unwrap();
                 last_header.state_root = root;
@@ -371,12 +368,7 @@ mod tests {
 
     impl UnwindStageTestRunner for MerkleTestRunner {
         fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            let target_transition = self
-                .tx
-                .inner()
-                .get_block_transition(input.unwind_to)
-                .map_err(|e| TestRunnerError::Internal(Box::new(e)))
-                .unwrap();
+            let target_block = input.unwind_to + 1;
 
             self.tx
                 .commit(|tx| {
@@ -392,7 +384,7 @@ mod tests {
                     while let Some((tid_address, entry)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
-                        if tid_address.transition_id() < target_transition {
+                        if tid_address.block_number() < target_block {
                             break
                         }
 
@@ -420,10 +412,10 @@ mod tests {
                         tx.cursor_dup_write::<tables::AccountChangeSet>().unwrap();
                     let mut rev_changeset_walker = changeset_cursor.walk_back(None).unwrap();
 
-                    while let Some((transition_id, account_before_tx)) =
+                    while let Some((block_number, account_before_tx)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
-                        if transition_id < target_transition {
+                        if block_number < target_block {
                             break
                         }
 

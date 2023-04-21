@@ -1,17 +1,14 @@
-use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use metrics_core::Counter;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::TransitionIdAddress,
+    models::BlockNumberAddress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_metrics_derive::Metrics;
-use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
+use reth_primitives::{Block, BlockNumber, BlockWithSenders, U256};
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
@@ -111,16 +108,14 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
-        let last_block = input.stage_progress.unwrap_or_default();
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         // Create state provider with cached state
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
 
         // Fetch transactions, execute them and generate results
         let mut state = PostState::default();
-        for block_number in start_block..=end_block {
+        for block_number in range.clone() {
             let (block, td) = Self::read_block_with_senders(tx, block_number)?;
 
             // Configure the executor to use the current state.
@@ -137,17 +132,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             state.extend(block_state);
         }
 
-        // put execution results to database
-        let first_transition_id = tx.get_block_transition(last_block)?;
-
         let start = Instant::now();
-        trace!(target: "sync::stages::execution", changes = state.changes().len(), accounts = state.accounts().len(), "Writing updated state to database");
-        state.write_to_db(&**tx, first_transition_id)?;
+        trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
+        state.write_to_db(&**tx)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
-        let done = !capped;
-        info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
-        Ok(ExecOutput { stage_progress: end_block, done })
+        info!(target: "sync::stages::execution", stage_progress = *range.end(), is_final_range, "Sync iteration finished");
+        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 }
 
@@ -204,25 +195,16 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+        let block_range = input.unwind_to + 1..=input.stage_progress;
 
-        if from_transition_rev > to_transition_rev {
-            panic!("Unwind transition {} (stage progress block #{}) is higher than the transition {} of (unwind block #{})", from_transition_rev, input.stage_progress, to_transition_rev, input.unwind_to);
-        }
-        let num_of_tx = (to_transition_rev - from_transition_rev) as usize;
-
-        // if there is no transaction ids, this means blocks were empty and block reward change set
-        // is not present.
-        if num_of_tx == 0 {
+        if block_range.is_empty() {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
-        let account_changeset_batch = account_changeset
-            .walk_range(from_transition_rev..to_transition_rev)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let account_changeset_batch =
+            account_changeset.walk_range(block_range.clone())?.collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
@@ -235,10 +217,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
-            .walk_range(
-                TransitionIdAddress((from_transition_rev, Address::zero()))..
-                    TransitionIdAddress((to_transition_rev, Address::zero())),
-            )?
+            .walk_range(BlockNumberAddress::range(block_range.clone()))?
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
@@ -258,17 +237,17 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         // Discard unwinded changesets
         let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
-        while let Some((transition_id, _)) = rev_acc_changeset_walker.next().transpose()? {
-            if transition_id < from_transition_rev {
+        while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
+            if block_num < *block_range.start() {
                 break
             }
             // delete all changesets
-            tx.delete::<tables::AccountChangeSet>(transition_id, None)?;
+            tx.delete::<tables::AccountChangeSet>(block_num, None)?;
         }
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
-            if key.transition_id() < from_transition_rev {
+            if key.block_number() < *block_range.start() {
                 break
             }
             // delete all changesets
@@ -320,8 +299,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(tx.deref_mut(), genesis, None, true).unwrap();
-        insert_canonical_block(tx.deref_mut(), block.clone(), None, true).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
         tx.commit().unwrap();
 
         // insert pre state
@@ -409,8 +388,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(tx.deref_mut(), genesis, None, true).unwrap();
-        insert_canonical_block(tx.deref_mut(), block.clone(), None, true).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
         tx.commit().unwrap();
 
         // variables
@@ -476,8 +455,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(tx.deref_mut(), genesis, None, true).unwrap();
-        insert_canonical_block(tx.deref_mut(), block.clone(), None, true).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
         tx.commit().unwrap();
 
         // variables
@@ -566,20 +545,15 @@ mod tests {
         assert_eq!(
             account_changesets,
             vec![
-                (1, AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) }),
-                (1, AccountBeforeTx { address: beneficiary_address, info: None }),
-                (1, AccountBeforeTx { address: caller_address, info: Some(caller_info) }),
                 (
-                    2,
-                    AccountBeforeTx {
-                        address: beneficiary_address,
-                        info: Some(Account {
-                            nonce: 0,
-                            balance: U256::from(0x230a0),
-                            bytecode_hash: None
-                        })
-                    }
-                )
+                    block.number,
+                    AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) },
+                ),
+                (block.number, AccountBeforeTx { address: beneficiary_address, info: None }),
+                (
+                    block.number,
+                    AccountBeforeTx { address: caller_address, info: Some(caller_info) }
+                ),
             ]
         );
 
@@ -587,11 +561,11 @@ mod tests {
             storage_changesets,
             vec![
                 (
-                    (1, destroyed_address).into(),
+                    (block.number, destroyed_address).into(),
                     StorageEntry { key: H256::zero(), value: U256::ZERO }
                 ),
                 (
-                    (1, destroyed_address).into(),
+                    (block.number, destroyed_address).into(),
                     StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1u64) }
                 )
             ]

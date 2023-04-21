@@ -13,6 +13,7 @@ pub mod eth_dao_fork;
 pub use reth_provider::post_state;
 
 pub mod blockchain_tree;
+pub use blockchain_tree::*;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out executor and executor factory

@@ -1,16 +1,29 @@
 //! Output of execution.
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    models::{AccountBeforeTx, TransitionIdAddress},
+    models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
 use reth_primitives::{
-    bloom::logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, Bloom, Bytecode, Log,
-    Receipt, StorageEntry, TransitionId, H256, U256,
+    bloom::logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, BlockNumber, Bloom,
+    Bytecode, Log, Receipt, StorageEntry, H256, U256,
 };
 use std::collections::BTreeMap;
+
+/// Storage for an account with the old and new values for each slot: (slot -> (old, new)).
+pub type StorageChangeset = BTreeMap<U256, (U256, U256)>;
+
+/// A mapping of `block -> address -> account` that represents what accounts were changed, and what
+/// their state were prior to that change.
+///
+/// If the prior state was `None`, then the account is new.
+pub type AccountChanges = BTreeMap<BlockNumber, BTreeMap<Address, Option<Account>>>;
+
+/// A mapping of `block -> account -> slot -> old value` that represents what slots were changed,
+/// and what their values were prior to that change.
+pub type StorageChanges = BTreeMap<BlockNumber, BTreeMap<Address, Storage>>;
 
 /// Storage for an account.
 ///
@@ -29,104 +42,7 @@ pub struct Storage {
     pub storage: BTreeMap<U256, U256>,
 }
 
-/// Storage for an account with the old and new values for each slot.
-/// TODO: Do we actually need (old, new) anymore, or is (old) sufficient? (Check the writes)
-/// If we don't, we can unify this and [Storage].
-pub type StorageChangeset = BTreeMap<U256, (U256, U256)>;
-
-/// A change to the state of accounts or storage.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Change {
-    /// A new account was created.
-    AccountCreated {
-        /// The ID of the transition this change is a part of.
-        id: TransitionId,
-        /// The address of the account that was created.
-        address: Address,
-        /// The account.
-        account: Account,
-    },
-    /// An existing account was changed.
-    AccountChanged {
-        /// The ID of the transition this change is a part of.
-        id: TransitionId,
-        /// The address of the account that was changed.
-        address: Address,
-        /// The account before the change.
-        old: Account,
-        /// The account after the change.
-        new: Account,
-    },
-    /// Storage slots for an account were changed.
-    StorageChanged {
-        /// The ID of the transition this change is a part of.
-        id: TransitionId,
-        /// The address of the account associated with the storage slots.
-        address: Address,
-        /// The storage changeset.
-        changeset: StorageChangeset,
-    },
-    /// Storage was wiped
-    StorageWiped {
-        /// The ID of the transition this change is a part of.
-        id: TransitionId,
-        /// The address of the account whose storage was wiped.
-        address: Address,
-    },
-    /// An account was destroyed.
-    ///
-    /// This removes all of the information associated with the account. An accompanying
-    /// [Change::StorageWiped] will also be present to mark the deletion of storage.
-    ///
-    /// If a change to an account satisfies the conditions for EIP-158, this change variant is also
-    /// applied instead of the change that would otherwise have happened.
-    AccountDestroyed {
-        /// The ID of the transition this change is a part of.
-        id: TransitionId,
-        /// The address of the destroyed account.
-        address: Address,
-        /// The account before it was destroyed.
-        old: Account,
-    },
-}
-
-impl Change {
-    /// Get the transition ID for the change
-    pub fn transition_id(&self) -> TransitionId {
-        match self {
-            Change::AccountChanged { id, .. } |
-            Change::AccountCreated { id, .. } |
-            Change::StorageChanged { id, .. } |
-            Change::StorageWiped { id, .. } |
-            Change::AccountDestroyed { id, .. } => *id,
-        }
-    }
-
-    /// Get the address of the account this change operates on.
-    pub fn address(&self) -> Address {
-        match self {
-            Change::AccountChanged { address, .. } |
-            Change::AccountCreated { address, .. } |
-            Change::StorageChanged { address, .. } |
-            Change::StorageWiped { address, .. } |
-            Change::AccountDestroyed { address, .. } => *address,
-        }
-    }
-
-    /// Set the transition ID of this change.
-    pub fn set_transition_id(&mut self, new_id: TransitionId) {
-        match self {
-            Change::AccountChanged { ref mut id, .. } |
-            Change::AccountCreated { ref mut id, .. } |
-            Change::StorageChanged { ref mut id, .. } |
-            Change::StorageWiped { ref mut id, .. } |
-            Change::AccountDestroyed { ref mut id, .. } => {
-                *id = new_id;
-            }
-        }
-    }
-}
-
+// todo: rewrite all the docs for this
 /// The state of accounts after execution of one or more transactions, including receipts and new
 /// bytecode.
 ///
@@ -144,22 +60,12 @@ impl Change {
 ///
 /// # Transitions
 ///
-/// Each [Change] has an `id` field that marks what transition it is part of. Each transaction is
-/// its own transition, but there may be 0 or 1 transitions associated with the block.
-///
 /// The block level transition includes:
 ///
 /// - Block rewards
 /// - Ommer rewards
 /// - Withdrawals
 /// - The irregular state change for the DAO hardfork
-///
-/// [PostState::finish_transition] *must* be called after every transaction, and after every block.
-///
-/// The first transaction executed and added to the [PostState] has a transition ID of 0, the next
-/// one a transition ID of 1, and so on. If the [PostState] is for a single block, and the number of
-/// transitions ([PostState::transitions_count]) is greater than the number of transactions in the
-/// block, then the last transition is the block transition.
 ///
 /// For multi-block [PostState]s it is not possible to figure out what transition ID maps on to a
 /// transaction or a block.
@@ -169,10 +75,8 @@ impl Change {
 /// Since most [PostState]s in reth are for multiple blocks it is better to pre-allocate capacity
 /// for receipts and changes, which [PostState::new] does, and thus it (or
 /// [PostState::with_tx_capacity]) should be preferred to using the [Default] implementation.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct PostState {
-    /// The ID of the current transition.
-    current_transition_id: TransitionId,
     /// The state of all modified accounts after execution.
     ///
     /// If the value contained is `None`, then the account should be deleted.
@@ -182,25 +86,19 @@ pub struct PostState {
     /// If the contained [Storage] is marked as wiped, then all storage values should be cleared
     /// from the database.
     storage: BTreeMap<Address, Storage>,
-    /// The changes to state that happened during execution
-    changes: Vec<Change>,
+    /// The state of accounts before they were changed in the given block.
+    ///
+    /// If the value is `None`, then the account is new, otherwise it is a change.
+    account_changes: AccountChanges,
+    /// The state of account storage before it was changed in the given block.
+    ///
+    /// This map only contains old values for storage slots.
+    storage_changes: StorageChanges,
     /// New code created during the execution
     bytecode: BTreeMap<H256, Bytecode>,
     /// The receipt(s) of the executed transaction(s).
     receipts: Vec<Receipt>,
 }
-
-/// Used to determine preallocation sizes of [PostState]'s internal [Vec]s. It denotes the number of
-/// best-guess changes each transaction causes to state.
-const BEST_GUESS_CHANGES_PER_TX: usize = 8;
-
-/// How many [Change]s to preallocate for in [PostState].
-///
-/// This is just a guesstimate based on:
-///
-/// - Each block having ~200-300 transactions
-/// - Each transaction having some amount of changes
-const PREALLOC_CHANGES_SIZE: usize = 256 * BEST_GUESS_CHANGES_PER_TX;
 
 impl PostState {
     /// Create an empty [PostState].
@@ -210,16 +108,22 @@ impl PostState {
 
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
     pub fn with_tx_capacity(txs: usize) -> Self {
-        Self {
-            changes: Vec::with_capacity(txs * BEST_GUESS_CHANGES_PER_TX),
-            receipts: Vec::with_capacity(txs),
-            ..Default::default()
-        }
+        Self { receipts: Vec::with_capacity(txs), ..Default::default() }
     }
 
-    /// Get the latest state of accounts.
+    /// Get the latest state of all changed accounts.
     pub fn accounts(&self) -> &BTreeMap<Address, Option<Account>> {
         &self.accounts
+    }
+
+    /// Get a reference to all the account changes
+    pub fn account_changes(&self) -> &AccountChanges {
+        &self.account_changes
+    }
+
+    /// Get a reference to all the storage changes
+    pub fn storage_changes(&self) -> &StorageChanges {
+        &self.storage_changes
     }
 
     /// Get the latest state for a specific account.
@@ -241,11 +145,6 @@ impl PostState {
     /// Get the storage for an account.
     pub fn account_storage(&self, address: &Address) -> Option<&Storage> {
         self.storage.get(address)
-    }
-
-    /// Get the changes causing this [PostState].
-    pub fn changes(&self) -> &[Change] {
-        &self.changes
     }
 
     /// Get the newly created bytecodes
@@ -278,52 +177,87 @@ impl PostState {
         calculate_receipt_root_ref(self.receipts().iter().map(Into::into))
     }
 
-    /// Get the number of transitions causing this [PostState]
-    pub fn transitions_count(&self) -> TransitionId {
-        self.current_transition_id
-    }
-
+    // todo: note overwrite behavior, i.e. changes in `other` take precedent
     /// Extend this [PostState] with the changes in another [PostState].
-    pub fn extend(&mut self, other: PostState) {
-        if other.changes.is_empty() {
-            return
+    pub fn extend(&mut self, mut other: PostState) {
+        // Update plain state
+        self.accounts.extend(other.accounts);
+        for (address, their_storage) in other.storage {
+            let our_storage = self.storage.entry(address).or_default();
+            if their_storage.wiped {
+                our_storage.wiped = true;
+                our_storage.storage.clear();
+            }
+            our_storage.storage.extend(their_storage.storage);
         }
 
-        self.changes.reserve(other.changes.len());
+        // Insert account change sets
+        for (block_number, account_changes) in std::mem::take(&mut other.account_changes) {
+            let block = self.account_changes.entry(block_number).or_default();
+            for (address, account) in account_changes {
+                if block.contains_key(&address) {
+                    continue
+                }
+                block.insert(address, account);
+            }
+        }
 
-        let mut next_transition_id = self.current_transition_id;
-        for mut change in other.changes.into_iter() {
-            next_transition_id = self.current_transition_id + change.transition_id();
-            change.set_transition_id(next_transition_id);
-            self.add_and_apply(change);
+        // Insert storage change sets
+        for (block_number, storage_changes) in std::mem::take(&mut other.storage_changes) {
+            for (address, their_storage) in storage_changes {
+                let our_storage = self
+                    .storage_changes
+                    .entry(block_number)
+                    .or_default()
+                    .entry(address)
+                    .or_default();
+
+                if their_storage.wiped {
+                    our_storage.wiped = true;
+                }
+                for (slot, value) in their_storage.storage {
+                    our_storage.storage.entry(slot).or_insert(value);
+                }
+            }
         }
         self.receipts.extend(other.receipts);
         self.bytecode.extend(other.bytecode);
-        self.current_transition_id = next_transition_id + 1;
     }
 
-    /// Reverts each change up to and including any change that is part of `transition_id`.
+    /// Reverts each change up to and including any change that is part of `block_number`.
     ///
     /// The reverted changes are removed from this post-state, and their effects are reverted.
-    ///
-    /// The reverted changes are returned.
-    pub fn revert_to(&mut self, transition_id: TransitionId) -> Vec<Change> {
-        let mut changes_to_revert = Vec::new();
-        self.changes.retain(|change| {
-            if change.transition_id() >= transition_id {
-                changes_to_revert.push(change.clone());
+    pub fn revert_to(&mut self, target_block_number: BlockNumber) {
+        let mut account_changes_to_revert = BTreeMap::new();
+        self.account_changes.retain(|block_number, accounts| {
+            if *block_number > target_block_number {
+                account_changes_to_revert.insert(*block_number, accounts.clone());
                 false
             } else {
                 true
             }
         });
-
-        for change in changes_to_revert.iter_mut().rev() {
-            change.set_transition_id(change.transition_id() - transition_id as TransitionId);
-            self.revert(change.clone());
+        for (_, accounts) in account_changes_to_revert.into_iter().rev() {
+            self.accounts.extend(accounts);
         }
-        self.current_transition_id = transition_id as TransitionId;
-        changes_to_revert
+
+        let mut storage_changes_to_revert = BTreeMap::new();
+        self.storage_changes.retain(|block_number, storages| {
+            if *block_number > target_block_number {
+                storage_changes_to_revert.insert(*block_number, storages.clone());
+                false
+            } else {
+                true
+            }
+        });
+        for (_, storages) in storage_changes_to_revert.into_iter().rev() {
+            for (address, storage) in storages {
+                self.storage.entry(address).and_modify(|head_storage| {
+                    head_storage.wiped = storage.wiped;
+                    head_storage.storage.extend(storage.clone().storage);
+                });
+            }
+        }
     }
 
     /// Reverts each change up to and including any change that is part of `transition_id`.
@@ -338,66 +272,92 @@ impl PostState {
     /// 1. This post-state has the changes reverted
     /// 2. The returned post-state does *not* have the changes reverted, but only contains the
     /// descriptions of the changes that were reverted in the first post-state.
-    pub fn split_at(&mut self, transition_id: TransitionId) -> Self {
+    pub fn split_at(&mut self, revert_to_block: BlockNumber) -> Self {
         // Clone ourselves
         let mut non_reverted_state = self.clone();
 
         // Revert the desired changes
-        let reverted_changes = self.revert_to(transition_id);
+        self.revert_to(revert_to_block);
 
-        // Compute the new `current_transition_id` for `non_reverted_state`.
-        let new_transition_id =
-            reverted_changes.last().map(|c| c.transition_id()).unwrap_or_default();
-        non_reverted_state.changes = reverted_changes;
-        non_reverted_state.current_transition_id = new_transition_id + 1;
+        // Remove all changes in the returned post-state that were not reverted
+        non_reverted_state
+            .storage_changes
+            .retain(|block_number, _| *block_number > revert_to_block);
+        non_reverted_state
+            .account_changes
+            .retain(|block_number, _| *block_number > revert_to_block);
 
         non_reverted_state
     }
 
     /// Add a newly created account to the post-state.
-    pub fn create_account(&mut self, address: Address, account: Account) {
-        self.add_and_apply(Change::AccountCreated {
-            id: self.current_transition_id,
-            address,
-            account,
-        });
+    pub fn create_account(
+        &mut self,
+        block_number: BlockNumber,
+        address: Address,
+        account: Account,
+    ) {
+        self.accounts.insert(address, Some(account));
+        self.account_changes.entry(block_number).or_default().entry(address).or_insert(None);
     }
 
     /// Add a changed account to the post-state.
     ///
     /// If the account also has changed storage values, [PostState::change_storage] should also be
     /// called.
-    pub fn change_account(&mut self, address: Address, old: Account, new: Account) {
-        self.add_and_apply(Change::AccountChanged {
-            id: self.current_transition_id,
-            address,
-            old,
-            new,
-        });
+    pub fn change_account(
+        &mut self,
+        block_number: BlockNumber,
+        address: Address,
+        old: Account,
+        new: Account,
+    ) {
+        self.accounts.insert(address, Some(new));
+        self.account_changes.entry(block_number).or_default().entry(address).or_insert(Some(old));
     }
 
     /// Mark an account as destroyed.
-    pub fn destroy_account(&mut self, address: Address, account: Account) {
-        self.add_and_apply(Change::AccountDestroyed {
-            id: self.current_transition_id,
-            address,
-            old: account,
-        });
-        self.add_and_apply(Change::StorageWiped { id: self.current_transition_id, address });
+    pub fn destroy_account(
+        &mut self,
+        block_number: BlockNumber,
+        address: Address,
+        account: Account,
+    ) {
+        self.accounts.insert(address, None);
+        self.account_changes
+            .entry(block_number)
+            .or_default()
+            .entry(address)
+            .or_insert(Some(account));
+        let storage = self.storage.entry(address).or_default();
+        storage.wiped = true;
+        storage.storage.clear();
+        let storage_changes =
+            self.storage_changes.entry(block_number).or_default().entry(address).or_default();
+        storage_changes.wiped = true;
     }
 
     /// Add changed storage values to the post-state.
-    pub fn change_storage(&mut self, address: Address, changeset: StorageChangeset) {
-        self.add_and_apply(Change::StorageChanged {
-            id: self.current_transition_id,
-            address,
-            changeset,
-        });
+    pub fn change_storage(
+        &mut self,
+        block_number: BlockNumber,
+        address: Address,
+        changeset: StorageChangeset,
+    ) {
+        self.storage
+            .entry(address)
+            .or_default()
+            .storage
+            .extend(changeset.iter().map(|(slot, (_, new))| (*slot, *new)));
+        let storage_changes =
+            self.storage_changes.entry(block_number).or_default().entry(address).or_default();
+        for (slot, (old, _)) in changeset.into_iter() {
+            storage_changes.storage.entry(slot).or_insert(old);
+        }
     }
 
     /// Add new bytecode to the post-state.
     pub fn add_bytecode(&mut self, code_hash: H256, bytecode: Bytecode) {
-        // TODO: Is this faster than just doing `.insert`?
         // Assumption: `insert` will override the value if present, but since the code hash for a
         // given bytecode will always be the same, we are overriding with the same value.
         //
@@ -413,137 +373,45 @@ impl PostState {
         self.receipts.push(receipt);
     }
 
-    /// Mark all prior changes as being part of one transition, and start a new one.
-    pub fn finish_transition(&mut self) {
-        self.current_transition_id += 1;
-    }
-
-    /// Add a new change, and apply its transformations to the current state
-    pub fn add_and_apply(&mut self, change: Change) {
-        match &change {
-            Change::AccountCreated { address, account, .. } |
-            Change::AccountChanged { address, new: account, .. } => {
-                self.accounts.insert(*address, Some(*account));
-            }
-            Change::AccountDestroyed { address, .. } => {
-                self.accounts.insert(*address, None);
-            }
-            Change::StorageChanged { address, changeset, .. } => {
-                let storage = self.storage.entry(*address).or_default();
-                for (slot, (_, current_value)) in changeset {
-                    storage.storage.insert(*slot, *current_value);
-                }
-            }
-            Change::StorageWiped { address, .. } => {
-                let storage = self.storage.entry(*address).or_default();
-                storage.wiped = true;
-                storage.storage.clear();
-            }
-        }
-
-        self.changes.push(change);
-    }
-
-    /// Revert a change, applying the inverse of its transformations to the current state.
-    fn revert(&mut self, change: Change) {
-        match &change {
-            Change::AccountCreated { address, .. } => {
-                self.accounts.remove(address);
-            }
-            Change::AccountChanged { address, old, .. } => {
-                self.accounts.insert(*address, Some(*old));
-            }
-            Change::AccountDestroyed { address, old, .. } => {
-                self.accounts.insert(*address, Some(*old));
-            }
-            Change::StorageChanged { address, changeset, .. } => {
-                let storage = self.storage.entry(*address).or_default();
-                for (slot, (old_value, _)) in changeset {
-                    storage.storage.insert(*slot, *old_value);
-                }
-            }
-            Change::StorageWiped { address, .. } => {
-                let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
-            }
-        }
-    }
-
     /// Write the post state to the database.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-        mut self,
-        tx: &TX,
-        first_transition_id: TransitionId,
-    ) -> Result<(), DbError> {
-        // Collect and sort changesets by their key to improve write performance
-        let mut changesets = std::mem::take(&mut self.changes);
-        changesets
-            .sort_unstable_by_key(|changeset| (changeset.transition_id(), changeset.address()));
-
-        // Partition changesets into account and storage changes
-        let (account_changes, storage_changes): (Vec<Change>, Vec<Change>) =
-            changesets.into_iter().partition(|changeset| {
-                matches!(
-                    changeset,
-                    Change::AccountChanged { .. } |
-                        Change::AccountCreated { .. } |
-                        Change::AccountDestroyed { .. }
-                )
-            });
-
+    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(self, tx: &TX) -> Result<(), DbError> {
         // Write account changes
-        tracing::trace!(target: "provider::post_state", len = account_changes.len(), "Writing account changes");
+        tracing::trace!(target: "provider::post_state", "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-        for changeset in account_changes.into_iter() {
-            match changeset {
-                Change::AccountDestroyed { id, address, old } |
-                Change::AccountChanged { id, address, old, .. } => {
-                    let destroyed = matches!(changeset, Change::AccountDestroyed { .. });
-                    let transition_id = first_transition_id + id;
-                    tracing::trace!(target: "provider::post_state", transition_id, ?address, ?old, destroyed, "Account changed");
-                    account_changeset_cursor
-                        .append_dup(transition_id, AccountBeforeTx { address, info: Some(old) })?;
-                }
-                Change::AccountCreated { id, address, .. } => {
-                    let transition_id = first_transition_id + id;
-                    tracing::trace!(target: "provider::post_state", transition_id, ?address, "Account created");
-                    account_changeset_cursor
-                        .append_dup(transition_id, AccountBeforeTx { address, info: None })?;
-                }
-                _ => unreachable!(),
+        for (block_number, account_changes) in self.account_changes.into_iter() {
+            for (address, info) in account_changes.into_iter() {
+                tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
+                account_changeset_cursor
+                    .append_dup(block_number, AccountBeforeTx { address, info })?;
             }
         }
 
         // Write storage changes
-        tracing::trace!(target: "provider::post_state", len = storage_changes.len(), "Writing storage changes");
+        tracing::trace!(target: "provider::post_state", "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
-        for changeset in storage_changes.into_iter() {
-            match changeset {
-                Change::StorageChanged { id, address, changeset } => {
-                    let storage_id = TransitionIdAddress((first_transition_id + id, address));
+        for (block_number, storage_changes) in self.storage_changes.into_iter() {
+            for (address, mut storage) in storage_changes.into_iter() {
+                let storage_id = BlockNumberAddress((block_number, address));
 
-                    for (key, (old_value, _)) in changeset {
-                        tracing::trace!(target: "provider::post_state", ?storage_id, ?key, ?old_value, "Storage changed");
-                        storage_changeset_cursor.append_dup(
-                            storage_id,
-                            StorageEntry { key: H256(key.to_be_bytes()), value: old_value },
-                        )?;
-                    }
-                }
-                Change::StorageWiped { id, address } => {
-                    let storage_id = TransitionIdAddress((first_transition_id + id, address));
-
+                if storage.wiped {
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
-                        storage_changeset_cursor.append_dup(storage_id, entry)?;
+                        storage.storage.insert(entry.key.into(), entry.value);
 
                         while let Some(entry) = storages_cursor.next_dup_val()? {
-                            storage_changeset_cursor.append_dup(storage_id, entry)?;
+                            storage.storage.insert(entry.key.into(), entry.value);
                         }
                     }
                 }
-                _ => unreachable!(),
+
+                for (slot, old_value) in storage.storage {
+                    tracing::trace!(target: "provider::post_state", ?storage_id, ?slot, ?old_value, "Storage changed");
+                    storage_changeset_cursor.append_dup(
+                        storage_id,
+                        StorageEntry { key: H256(slot.to_be_bytes()), value: old_value },
+                    )?;
+                }
             }
         }
 
@@ -592,14 +460,13 @@ impl PostState {
             bytecodes_cursor.upsert(hash, bytecode)?;
         }
 
-        // write the receipts of the transactions
+        // Write the receipts of the transactions
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-
         let mut next_tx_num =
             if let Some(last_tx) = receipts_cursor.last()?.map(|(tx_num, _)| tx_num) {
                 last_tx + 1
             } else {
-                // the very first tx
+                // The very first tx
                 0
             };
         for receipt in self.receipts.into_iter() {
@@ -608,19 +475,6 @@ impl PostState {
         }
 
         Ok(())
-    }
-}
-
-impl Default for PostState {
-    fn default() -> Self {
-        Self {
-            current_transition_id: 0,
-            accounts: Default::default(),
-            storage: Default::default(),
-            changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE),
-            bytecode: Default::default(),
-            receipts: vec![],
-        }
     }
 }
 
@@ -639,42 +493,33 @@ mod tests {
     #[test]
     fn extend_empty() {
         let mut a = PostState::new();
-        assert_eq!(a.current_transition_id, 0);
 
         // Extend empty poststate with another empty poststate
         a.extend(PostState::new());
-        assert_eq!(a.current_transition_id, 0);
 
         // Add single transition and extend with empty poststate
-        a.create_account(Address::zero(), Account::default());
-        a.finish_transition();
-        let transition_id = a.current_transition_id;
+        a.create_account(1, Address::zero(), Account::default());
         a.extend(PostState::new());
-        assert_eq!(a.current_transition_id, transition_id);
+        assert_eq!(a.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 1);
     }
 
     #[test]
     fn extend() {
         let mut a = PostState::new();
-        a.create_account(Address::zero(), Account::default());
-        a.destroy_account(Address::zero(), Account::default());
-        a.finish_transition();
+        a.create_account(1, Address::zero(), Account::default());
+        a.destroy_account(1, Address::zero(), Account::default());
 
-        assert_eq!(a.transitions_count(), 1);
-        assert_eq!(a.changes().len(), 3);
+        assert_eq!(a.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 1);
 
         let mut b = PostState::new();
-        b.create_account(Address::repeat_byte(0xff), Account::default());
-        b.finish_transition();
+        b.create_account(2, Address::repeat_byte(0xff), Account::default());
 
-        assert_eq!(b.transitions_count(), 1);
-        assert_eq!(b.changes.len(), 1);
+        assert_eq!(b.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 1);
 
         let mut c = a.clone();
         c.extend(b.clone());
 
-        assert_eq!(c.transitions_count(), 2);
-        assert_eq!(c.changes.len(), a.changes.len() + b.changes.len());
+        assert_eq!(c.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 2);
     }
 
     #[test]
@@ -692,10 +537,10 @@ mod tests {
         let account_b_changed = Account { balance: U256::from(3), nonce: 3, bytecode_hash: None };
 
         // 0x00.. is created
-        post_state.create_account(address_a, account_a);
+        post_state.create_account(1, address_a, account_a);
         // 0x11.. is changed (balance + 1, nonce + 1)
-        post_state.change_account(address_b, account_b, account_b_changed);
-        post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
+        post_state.change_account(1, address_b, account_b, account_b_changed);
+        post_state.write_to_db(&tx).expect("Could not write post state to DB");
 
         // Check plain state
         assert_eq!(
@@ -714,20 +559,20 @@ mod tests {
             .cursor_dup_read::<tables::AccountChangeSet>()
             .expect("Could not open changeset cursor");
         assert_eq!(
-            changeset_cursor.seek_exact(0).expect("Could not read account change set"),
-            Some((0, AccountBeforeTx { address: address_a, info: None })),
+            changeset_cursor.seek_exact(1).expect("Could not read account change set"),
+            Some((1, AccountBeforeTx { address: address_a, info: None })),
             "Account A changeset is wrong"
         );
         assert_eq!(
             changeset_cursor.next_dup().expect("Changeset table is malformed"),
-            Some((0, AccountBeforeTx { address: address_b, info: Some(account_b) })),
+            Some((1, AccountBeforeTx { address: address_b, info: Some(account_b) })),
             "Account B changeset is wrong"
         );
 
         let mut post_state = PostState::new();
         // 0x11.. is destroyed
-        post_state.destroy_account(address_b, account_b_changed);
-        post_state.write_to_db(&tx, 1).expect("Could not write second post state to DB");
+        post_state.destroy_account(2, address_b, account_b_changed);
+        post_state.write_to_db(&tx).expect("Could not write second post state to DB");
 
         // Check new plain state for account B
         assert_eq!(
@@ -738,8 +583,8 @@ mod tests {
 
         // Check change set
         assert_eq!(
-            changeset_cursor.seek_exact(1).expect("Could not read account change set"),
-            Some((1, AccountBeforeTx { address: address_b, info: Some(account_b_changed) })),
+            changeset_cursor.seek_exact(2).expect("Could not read account change set"),
+            Some((2, AccountBeforeTx { address: address_b, info: Some(account_b_changed) })),
             "Account B changeset is wrong after deletion"
         );
     }
@@ -764,9 +609,9 @@ mod tests {
         // 0x01 => 1 => 2
         let storage_b_changeset = BTreeMap::from([(U256::from(1), (U256::from(1), U256::from(2)))]);
 
-        post_state.change_storage(address_a, storage_a_changeset);
-        post_state.change_storage(address_b, storage_b_changeset);
-        post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
+        post_state.change_storage(1, address_a, storage_a_changeset);
+        post_state.change_storage(1, address_b, storage_b_changeset);
+        post_state.write_to_db(&tx).expect("Could not write post state to DB");
 
         // Check plain storage state
         let mut storage_cursor = tx
@@ -811,9 +656,9 @@ mod tests {
             .cursor_dup_read::<tables::StorageChangeSet>()
             .expect("Could not open storage changeset cursor");
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((0, address_a))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
             Some((
-                TransitionIdAddress((0, address_a)),
+                BlockNumberAddress((1, address_a)),
                 StorageEntry { key: H256::zero(), value: U256::from(0) }
             )),
             "Slot 0 for account A should have changed from 0"
@@ -821,7 +666,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                TransitionIdAddress((0, address_a)),
+                BlockNumberAddress((1, address_a)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(0) }
             )),
             "Slot 1 for account A should have changed from 0"
@@ -833,9 +678,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((0, address_b))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_b))).unwrap(),
             Some((
-                TransitionIdAddress((0, address_b)),
+                BlockNumberAddress((1, address_b)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(1) }
             )),
             "Slot 1 for account B should have changed from 1"
@@ -848,8 +693,8 @@ mod tests {
 
         // Delete account A
         let mut post_state = PostState::new();
-        post_state.destroy_account(address_a, Account::default());
-        post_state.write_to_db(&tx, 1).expect("Could not write post state to DB");
+        post_state.destroy_account(2, address_a, Account::default());
+        post_state.write_to_db(&tx).expect("Could not write post state to DB");
 
         assert_eq!(
             storage_cursor.seek_exact(address_a).unwrap(),
@@ -858,9 +703,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((1, address_a))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((2, address_a))).unwrap(),
             Some((
-                TransitionIdAddress((1, address_a)),
+                BlockNumberAddress((2, address_a)),
                 StorageEntry { key: H256::zero(), value: U256::from(1) }
             )),
             "Slot 0 for account A should have changed from 1 on deletion"
@@ -868,7 +713,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                TransitionIdAddress((1, address_a)),
+                BlockNumberAddress((2, address_a)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account A should have changed from 2 on deletion"
@@ -902,14 +747,11 @@ mod tests {
         let mut state = PostState::new();
 
         // Create some storage for account A (simulates a contract deployment)
-        state.change_storage(address_a, storage_changeset_one);
-        state.finish_transition();
+        state.change_storage(1, address_a, storage_changeset_one);
         // Next transition destroys the account (selfdestruct)
-        state.destroy_account(address_a, Account::default());
-        state.finish_transition();
+        state.destroy_account(2, address_a, Account::default());
         // Next transition recreates account A with some storage (simulates a contract deployment)
-        state.change_storage(address_a, storage_changeset_two);
-        state.finish_transition();
+        state.change_storage(3, address_a, storage_changeset_two);
 
         // All the storage of account A has to be deleted in the database (wiped)
         assert!(
@@ -928,23 +770,317 @@ mod tests {
     fn revert_to() {
         let mut state = PostState::new();
         state.create_account(
+            1,
             Address::repeat_byte(0),
             Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
         );
-        state.finish_transition();
-        let revert_to = state.current_transition_id;
+        let revert_to = 1;
         state.create_account(
+            2,
             Address::repeat_byte(0xff),
             Account { nonce: 2, balance: U256::from(2), bytecode_hash: None },
         );
-        state.finish_transition();
 
-        assert_eq!(state.transitions_count(), 2);
-        assert_eq!(state.accounts().len(), 2);
+        assert_eq!(
+            state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
+            2
+        );
 
-        let reverted_changes = state.revert_to(revert_to);
-        assert_eq!(state.accounts().len(), 1);
-        assert_eq!(state.transitions_count(), 1);
-        assert_eq!(reverted_changes.len(), 1);
+        state.revert_to(revert_to);
+        assert_eq!(
+            state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
+            1
+        );
+    }
+
+    /// Checks that if an account is touched multiple times in the same block,
+    /// then the old value from the first change is kept and not overwritten.
+    ///
+    /// This is important because post states from different transactions in the same block may see
+    /// different states of the same account as the old value, but the changeset should reflect the
+    /// state of the account before the block.
+    #[test]
+    fn account_changesets_keep_old_values() {
+        let mut state = PostState::new();
+        let block = 1;
+        let address = Address::repeat_byte(0);
+
+        // A transaction in block 1 creates the account
+        state.create_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+        );
+
+        // A transaction in block 1 then changes the same account
+        state.change_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+            Account { nonce: 1, balance: U256::from(2), bytecode_hash: None },
+        );
+
+        // The value in the changeset for the account should be `None` since this was an account
+        // creation
+        assert_eq!(
+            state.account_changes(),
+            &BTreeMap::from([(block, BTreeMap::from([(address, None)]))]),
+            "The changeset for the account is incorrect"
+        );
+
+        // The latest state of the account should be: nonce = 1, balance = 2, bytecode hash = None
+        assert_eq!(
+            state.accounts.get(&address).unwrap(),
+            &Some(Account { nonce: 1, balance: U256::from(2), bytecode_hash: None }),
+            "The latest state of the account is incorrect"
+        );
+
+        // Another transaction in block 1 then changes the account yet again
+        state.change_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(2), bytecode_hash: None },
+            Account { nonce: 2, balance: U256::from(1), bytecode_hash: None },
+        );
+
+        // The value in the changeset for the account should still be `None`
+        assert_eq!(
+            state.account_changes(),
+            &BTreeMap::from([(block, BTreeMap::from([(address, None)]))]),
+            "The changeset for the account is incorrect"
+        );
+
+        // The latest state of the account should be: nonce = 2, balance = 1, bytecode hash = None
+        assert_eq!(
+            state.accounts.get(&address).unwrap(),
+            &Some(Account { nonce: 2, balance: U256::from(1), bytecode_hash: None }),
+            "The latest state of the account is incorrect"
+        );
+    }
+
+    /// Checks that if a storage slot is touched multiple times in the same block,
+    /// then the old value from the first change is kept and not overwritten.
+    ///
+    /// This is important because post states from different transactions in the same block may see
+    /// different states of the same account as the old value, but the changeset should reflect the
+    /// state of the account before the block.
+    #[test]
+    fn storage_changesets_keep_old_values() {
+        let mut state = PostState::new();
+        let block = 1;
+        let address = Address::repeat_byte(0);
+
+        // A transaction in block 1 changes:
+        //
+        // Slot 0: 0 -> 1
+        // Slot 1: 3 -> 4
+        state.change_storage(
+            block,
+            address,
+            BTreeMap::from([
+                (U256::from(0), (U256::from(0), U256::from(1))),
+                (U256::from(1), (U256::from(3), U256::from(4))),
+            ]),
+        );
+
+        // A transaction in block 1 changes:
+        //
+        // Slot 0: 1 -> 2
+        // Slot 1: 4 -> 5
+        state.change_storage(
+            block,
+            address,
+            BTreeMap::from([
+                (U256::from(0), (U256::from(1), U256::from(2))),
+                (U256::from(1), (U256::from(4), U256::from(5))),
+            ]),
+        );
+
+        // The storage changeset for the account in block 1 should now be:
+        //
+        // Slot 0: 0 (the value before the first tx in the block)
+        // Slot 1: 3
+        assert_eq!(
+            state.storage_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([
+                            (U256::from(0), U256::from(0)),
+                            (U256::from(1), U256::from(3))
+                        ]),
+                        wiped: false,
+                    }
+                )])
+            )]),
+            "The changeset for the storage is incorrect"
+        );
+
+        // The latest state of the storage should be:
+        //
+        // Slot 0: 2
+        // Slot 1: 5
+        assert_eq!(
+            state.storage(),
+            &BTreeMap::from([(
+                address,
+                Storage {
+                    storage: BTreeMap::from([
+                        (U256::from(0), U256::from(2)),
+                        (U256::from(1), U256::from(5))
+                    ]),
+                    wiped: false
+                }
+            )]),
+            "The latest state of the storage is incorrect"
+        );
+    }
+
+    /// Tests that the oldest value for changesets is kept when extending a post state from another
+    /// post state.
+    ///
+    /// In other words, this tests the same cases as `account_changesets_keep_old_values` and
+    /// `storage_changesets_keep_old_values`, but in the case where accounts/slots are changed in
+    /// different post states that are then merged.
+    #[test]
+    fn extending_preserves_changesets() {
+        let mut a = PostState::new();
+        let mut b = PostState::new();
+        let block = 1;
+        let address = Address::repeat_byte(0);
+
+        // The first state (a) represents a transaction that creates an account with some storage
+        // slots
+        //
+        // Expected changeset state:
+        // - Account: None
+        // - Storage: Slot 0: 0
+        a.create_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+        );
+        a.change_storage(
+            block,
+            address,
+            BTreeMap::from([(U256::from(0), (U256::from(0), U256::from(1)))]),
+        );
+        assert_eq!(
+            a.account_changes(),
+            &BTreeMap::from([(block, BTreeMap::from([(address, None)]))]),
+            "The changeset for the account is incorrect in state A"
+        );
+        assert_eq!(
+            a.storage_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
+                        wiped: false,
+                    }
+                )])
+            )]),
+            "The changeset for the storage is incorrect in state A"
+        );
+
+        // The second state (b) represents a transaction that changes some slots and account info
+        // for the same account
+        //
+        // Expected changeset state is the same, i.e.:
+        // - Account: None
+        // - Storage: Slot 0: 0
+        b.change_account(
+            block,
+            address,
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+            Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
+        );
+        b.change_storage(
+            block,
+            address,
+            BTreeMap::from([(U256::from(0), (U256::from(1), U256::from(2)))]),
+        );
+        assert_eq!(
+            b.account_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Some(Account { nonce: 1, balance: U256::from(1), bytecode_hash: None })
+                )])
+            )]),
+            "The changeset for the account is incorrect in state B"
+        );
+        assert_eq!(
+            b.storage_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([(U256::from(0), U256::from(1)),]),
+                        wiped: false,
+                    }
+                )])
+            )]),
+            "The changeset for the storage is incorrect in state B"
+        );
+
+        // Now we merge the states
+        a.extend(b);
+
+        // The expected state is:
+        //
+        // Changesets:
+        // - Account: None
+        // - Storage: Slot 0: 0
+        //
+        // Accounts:
+        // - Nonce 1, balance 10, bytecode hash None
+        //
+        // Storage:
+        // - Slot 0: 2
+        assert_eq!(
+            a.account_changes(),
+            &BTreeMap::from([(block, BTreeMap::from([(address, None)]))]),
+            "The changeset for the account is incorrect in the merged state"
+        );
+        assert_eq!(
+            a.storage_changes(),
+            &BTreeMap::from([(
+                block,
+                BTreeMap::from([(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
+                        wiped: false,
+                    }
+                )])
+            )]),
+            "The changeset for the storage is incorrect in the merged state"
+        );
+        assert_eq!(
+            a.accounts(),
+            &BTreeMap::from([(
+                address,
+                Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None })
+            )]),
+            "The state of accounts in the merged state is incorrect"
+        );
+        assert_eq!(
+            a.storage(),
+            &BTreeMap::from([(
+                address,
+                Storage {
+                    storage: BTreeMap::from([(U256::from(0), U256::from(2)),]),
+                    wiped: false
+                }
+            )]),
+            "The latest state of the storage is incorrect in the merged state"
+        );
     }
 }

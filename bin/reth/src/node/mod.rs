@@ -15,6 +15,9 @@ use futures::{pin_mut, stream::select as stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
+use reth_blockchain_tree::{
+    config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
+};
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
@@ -25,9 +28,6 @@ use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
-};
-use reth_executor::blockchain_tree::{
-    config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},

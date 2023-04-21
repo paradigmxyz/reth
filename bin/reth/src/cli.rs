@@ -1,10 +1,8 @@
 //! CLI definition and entrypoint to executable
-use std::str::FromStr;
-
 use crate::{
     chain, config, db,
     dirs::{LogsDir, PlatformPath},
-    drop_stage, dump_stage, node, p2p,
+    drop_stage, dump_stage, merkle_debug, node, p2p,
     runner::CliRunner,
     stage, test_eth_chain, test_vectors,
 };
@@ -14,6 +12,7 @@ use reth_tracing::{
     tracing_subscriber::{filter::Directive, registry::LookupSpan},
     BoxedLayer, FileWorkerGuard,
 };
+use std::str::FromStr;
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
@@ -29,16 +28,21 @@ pub fn run() -> eyre::Result<()> {
 
     match opt.command {
         Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-        Commands::Init(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Import(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Stage(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::DumpStage(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::DropStage(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::DumpStage(command) => {
+            // TODO: This should be run_blocking_until_ctrl_c as well, but fails to compile due to
+            // weird compiler GAT issues.
+            runner.run_until_ctrl_c(command.execute())
+        }
+        Commands::DropStage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::MerkleDebug(command) => runner.run_until_ctrl_c(command.execute()),
     }
 }
 
@@ -83,6 +87,9 @@ pub enum Commands {
     /// Write config to stdout
     #[command(name = "config")]
     Config(config::Command),
+    /// Debug state root calculation
+    #[command(name = "merkle-debug")]
+    MerkleDebug(merkle_debug::Command),
 }
 
 #[derive(Debug, Parser)]
