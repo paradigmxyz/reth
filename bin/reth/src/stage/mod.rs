@@ -16,7 +16,7 @@ use reth_staged_sync::{
     Config,
 };
 use reth_stages::{
-    stages::{BodyStage, ExecutionStage, SenderRecoveryStage, TransactionLookupStage},
+    stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
     ExecInput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -181,16 +181,6 @@ impl Command {
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }
-                stage.execute(&mut tx, input).await?;
-            }
-            StageEnum::TxLookup => {
-                let mut stage = TransactionLookupStage::new(num_blocks);
-
-                // Unwind first
-                if !self.skip_unwind {
-                    stage.unwind(&mut tx, unwind).await?;
-                }
-
                 stage.execute(&mut tx, input).await?;
             }
             _ => {}

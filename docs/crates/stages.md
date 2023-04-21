@@ -190,10 +190,6 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 * TODO: explain stage
 <br>
 
-## TransactionLookupStage
-* TODO: explain stage
-<br>
-
 ## IndexStorageHistoryStage
 * TODO: explain stage
 <br>

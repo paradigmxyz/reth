@@ -20,8 +20,6 @@ mod merkle;
 mod sender_recovery;
 /// The total difficulty stage
 mod total_difficulty;
-/// The transaction lookup stage
-mod tx_lookup;
 
 pub use bodies::*;
 pub use execution::*;
@@ -34,4 +32,3 @@ pub use index_storage_history::*;
 pub use merkle::*;
 pub use sender_recovery::*;
 pub use total_difficulty::*;
-pub use tx_lookup::*;

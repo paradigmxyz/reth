@@ -6,7 +6,7 @@ use pprof::criterion::{Output, PProfProfiler};
 use reth_db::mdbx::{Env, WriteMap};
 use reth_interfaces::test_utils::TestConsensus;
 use reth_stages::{
-    stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
+    stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage},
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
@@ -18,7 +18,7 @@ use setup::StageRange;
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
-    targets = transaction_lookup, account_hashing, senders, total_difficulty, merkle
+    targets = account_hashing, senders, total_difficulty, merkle
 }
 criterion_main!(benches);
 
@@ -54,21 +54,6 @@ fn senders(c: &mut Criterion) {
 
         measure_stage(&mut group, setup::stage_unwind, stage, 0..DEFAULT_NUM_BLOCKS, label);
     }
-}
-
-fn transaction_lookup(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Stages");
-    // don't need to run each stage for that many times
-    group.sample_size(10);
-    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS);
-
-    measure_stage(
-        &mut group,
-        setup::stage_unwind,
-        stage,
-        0..DEFAULT_NUM_BLOCKS,
-        "TransactionLookup".to_string(),
-    );
 }
 
 fn total_difficulty(c: &mut Criterion) {
