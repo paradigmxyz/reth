@@ -1,5 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use futures_util::TryStreamExt;
+use rayon::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -88,6 +89,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
+        let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
@@ -102,6 +104,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
 
         let mut highest_block = from_block;
+        let mut tx_hashes = Vec::with_capacity(downloaded_bodies.len() * 10);
+
         for response in downloaded_bodies {
             // Write block
             let block_number = response.block_number();
@@ -118,6 +122,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                     // Write transactions
                     for transaction in block.body {
+                        // Store TxHash -> TxNum to be sorted later
+                        tx_hashes.push((transaction.hash(), next_tx_num));
                         // Append the transaction
                         tx_cursor.append(next_tx_num, transaction.into())?;
                         // Increment transaction id for each transaction.
@@ -154,6 +160,29 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 .append(block_number, StoredBlockBodyIndices { first_tx_num, tx_count })?;
 
             highest_block = block_number;
+        }
+
+        // Pre-sort before inserting into [`tables::TxHashNumber`]
+        tx_hashes.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
+
+        // If the last inserted element in the database is equal or bigger than the first
+        // in our set, then we need to insert inside the DB. If it is smaller then last
+        // element in the DB, we can append to the DB.
+        // Append probably only ever happens during sync, on the first table insertion.
+        let insert = tx_hashes
+            .first()
+            .zip(txhash_cursor.last()?)
+            .map(|((first, _), (last, _))| first <= &last)
+            .unwrap_or_default();
+        // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is
+        // none. if it is some and if first is smaller than last, we will do append.
+
+        for (tx_hash, tx_num) in tx_hashes {
+            if insert {
+                txhash_cursor.insert(tx_hash, tx_num)?;
+            } else {
+                txhash_cursor.append(tx_hash, tx_num)?;
+            }
         }
 
         // The stage is "done" if:
