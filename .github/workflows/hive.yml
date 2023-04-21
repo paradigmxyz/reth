@@ -1,0 +1,146 @@
+on:
+  schedule:
+    # every day
+    - cron: '0 0 * * *'
+
+env:
+  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+name: hive
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+      - run: mkdir artifacts
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Build and export reth image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          tags: paradigmxyz/reth:main
+          outputs: type=docker,dest=./artifacts/reth_image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # TODO: replace when we are not using a fork
+      - name: Checkout hive tests
+        uses: actions/checkout@v3
+        with:
+          repository: paradigmxyz/hive
+          ref: master
+          path: hivetests
+
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '^1.13.1'
+      - run: go version
+      - name: Build hive tool
+        run: |
+          cd hivetests
+          go build .
+          mv ./hive ../artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: artifacts
+          path: ./artifacts
+
+
+  test:
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      matrix:
+        experimental: [true]
+        sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
+        include:
+          - sim: devp2p
+            limit: discv4
+            experimental: true
+          - sim: devp2p
+            limit: eth
+            # we have excluded these tests because we do not support block
+            # announcements
+            # exclude: [TestLargeAnnounce, TestBroadcast, TestBlockHashAnnounce]
+            include: [TestStatus, TestGetBlockHeaders, TestSimultaneousRequests, TestSameRequestID, TestZeroRequestID, TestGetBlockBodies, TestMaliciousHandshake, TestMaliciousStatus, TestTransaction, TestMaliciousTx]
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-exchange-capabilities
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-withdrawals
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-auth
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-transition
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-api
+            experimental: true
+            # eth_ rpc methods
+          - sim: ethereum/rpc-compat
+            include: [eth_blockNumber, eth_call, eth_chainId, eth_createAccessList, eth_estimateGas, eth_feeHistory, eth_getBalance, eth_getBlockBy, eth_getBlockTransactionCountBy, eth_getCode, eth_getStorage, eth_getTransactionBy, eth_getTransactionCount, eth_sendRawTransaction, eth_syncing]
+            experimental: true
+            # not running eth_getProof tests because we do not support
+            # eth_getProof yet
+            # - sim: ethereum/rpc-compat
+            #   include: [eth_getProof/get-account-proof-with-storage, eth_getProof/get-account-proof]
+            #   experimental: true
+            # debug_ rpc methods
+          - sim: ethereum/rpc-compat
+            include: [debug_]
+            experimental: true
+      fail-fast: false
+    needs: prepare
+    name: run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: artifacts
+          path: /tmp
+
+      - name: Load Docker image
+        run: |
+          docker load --input /tmp/reth_image.tar
+          docker image ls -a
+      - name: Move hive binary
+        run: |
+          mv /tmp/hive /usr/local/bin
+          chmod +x /usr/local/bin/hive
+
+      # TODO: replace when we are not using a fork
+      - name: Checkout hive tests
+        uses: actions/checkout@v3
+        with:
+          repository: paradigmxyz/hive
+          ref: master
+          path: hivetests
+
+      - name: Run ${{ matrix.sim }} simulator
+        run: |
+          cd hivetests
+          hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --client reth
+
+      - name: Print simulator output
+        if: ${{ failure() }}
+        run: |
+          cat hivetests/workspace/logs/*simulator*.log
+
+      - name: Print reth client logs
+        if: ${{ failure() }}
+        run: |
+          cat hivetests/workspace/logs/reth/client-*.log
