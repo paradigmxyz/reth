@@ -488,12 +488,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        state_root, state_root_prehashed, storage_root, storage_root_prehashed,
+    use crate::{
+        test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
+        updates::{TrieKey, TrieOp},
     };
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{
-        cursor::DbCursorRW,
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
         tables,
         transaction::DbTxMut,
@@ -501,7 +502,7 @@ mod tests {
     use reth_primitives::{
         hex_literal::hex,
         keccak256,
-        proofs::KeccakHasher,
+        proofs::{KeccakHasher, EMPTY_ROOT},
         trie::{BranchNodeCompact, TrieMask},
         Account, Address, H256, U256,
     };
