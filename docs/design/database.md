@@ -54,7 +54,7 @@ Receipts {
 }
 Transactions {
     u64 TxNumber "PK"
-    TransactionSigned Data
+    TransactionSignedNoHash Data
 }
 TransactionHash {
     H256 TxHash "PK"
