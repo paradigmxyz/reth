@@ -99,7 +99,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 for entry in chunk {
-                    rlp_buf.truncate(0);
+                    rlp_buf.clear();
                     let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
                 }
             });
