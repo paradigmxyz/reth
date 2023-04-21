@@ -123,7 +123,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 for entry in chunk {
-                    rlp_buf.truncate(0);
+                    rlp_buf.clear();
                     let _ = tx.send(recover(entry, &mut rlp_buf));
                 }
             });
