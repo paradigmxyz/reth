@@ -420,11 +420,11 @@ where
                 // If we received the transactions as the response to our GetPooledTransactions
                 // requests (based on received `NewPooledTransactionHashes`) then we already
                 // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`]
-                if source.is_broadcast() && !peer.transactions.insert(tx.hash) {
+                if source.is_broadcast() && !peer.transactions.insert(tx.hash()) {
                     num_already_seen += 1;
                 }
 
-                match self.transactions_by_peers.entry(tx.hash) {
+                match self.transactions_by_peers.entry(tx.hash()) {
                     Entry::Occupied(mut entry) => {
                         // transaction was already inserted
                         entry.get_mut().push(peer_id);
@@ -566,7 +566,7 @@ struct PropagateTransaction {
 
 impl PropagateTransaction {
     fn hash(&self) -> TxHash {
-        self.transaction.hash
+        self.transaction.hash()
     }
 
     fn new(transaction: Arc<TransactionSigned>) -> Self {

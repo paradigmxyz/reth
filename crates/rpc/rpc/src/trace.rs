@@ -233,7 +233,7 @@ where
                 for (idx, tx) in transactions.into_iter().enumerate() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx_info = TransactionInfo {
-                        hash: Some(tx.hash),
+                        hash: Some(tx.hash()),
                         index: Some(idx as u64),
                         block_hash: Some(block_hash),
                         block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),

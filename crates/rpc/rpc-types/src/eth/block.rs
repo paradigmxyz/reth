@@ -115,7 +115,7 @@ impl Block {
         block_hash: Option<H256>,
     ) -> Self {
         let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-        let transactions = block.body.iter().map(|tx| tx.hash).collect();
+        let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
         Self::from_block_with_transactions(
             block_hash,

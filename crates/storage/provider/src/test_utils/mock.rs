@@ -152,7 +152,7 @@ impl TransactionsProvider for MockEthProvider {
             .blocks
             .lock()
             .iter()
-            .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash == hash).cloned()))
+            .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash() == hash).cloned()))
     }
 
     fn transaction_by_hash_with_meta(

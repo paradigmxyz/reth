@@ -293,7 +293,7 @@ mod tests {
         // first run, hash first half of storages.
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == false && stage_progress == 100);
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if !done && stage_progress == 100);
         assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 500);
         let (progress_address, progress_key) = runner
             .tx
@@ -301,8 +301,7 @@ mod tests {
                 let (address, entry) = tx
                     .cursor_read::<tables::PlainStorageState>()?
                     .walk(None)?
-                    .skip(500)
-                    .next()
+                    .nth(500)
                     .unwrap()
                     .unwrap();
                 Ok((address, entry.key))
@@ -325,7 +324,7 @@ mod tests {
         runner.set_commit_threshold(2);
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == false && stage_progress == 100);
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if !done && stage_progress == 100);
         assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 502);
         let (progress_address, progress_key) = runner
             .tx
@@ -333,8 +332,7 @@ mod tests {
                 let (address, entry) = tx
                     .cursor_read::<tables::PlainStorageState>()?
                     .walk(None)?
-                    .skip(502)
-                    .next()
+                    .nth(502)
                     .unwrap()
                     .unwrap();
                 Ok((address, entry.key))
@@ -359,7 +357,7 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == true && stage_progress == 500);
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done && stage_progress == 500);
         assert_eq!(
             runner.tx.table::<tables::HashedStorage>().unwrap().len(),
             runner.tx.table::<tables::PlainStorageState>().unwrap().len()
@@ -420,7 +418,7 @@ mod tests {
                 self.tx.commit(|tx| {
                     progress.body.iter().try_for_each(|transaction| {
                         tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
-                        tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
+                        tx.put::<tables::Transactions>(next_tx_num, transaction.clone().into())?;
 
                         let (addr, _) = accounts
                             .get_mut(rand::random::<usize>() % n_accounts as usize)

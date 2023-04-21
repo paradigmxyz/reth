@@ -243,7 +243,7 @@ impl TestTransaction {
                     },
                 )?;
                 block.body.iter().try_for_each(|body_tx| {
-                    tx.put::<tables::Transactions>(next_tx_num, body_tx.clone())?;
+                    tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
                     next_tx_num += 1;
                     Ok(())
                 })

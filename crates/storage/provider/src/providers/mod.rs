@@ -169,7 +169,10 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
-        self.db.view(|tx| tx.get::<tables::Transactions>(id))?.map_err(Into::into)
+        self.db
+            .view(|tx| tx.get::<tables::Transactions>(id))?
+            .map_err(Into::into)
+            .map(|tx| tx.map(Into::into))
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
@@ -182,6 +185,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                 }
             })?
             .map_err(Into::into)
+            .map(|tx| tx.map(Into::into))
     }
 
     fn transaction_by_hash_with_meta(
@@ -216,7 +220,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                                         block_number,
                                     };
 
-                                    return Ok(Some((transaction, meta)))
+                                    return Ok(Some((transaction.into(), meta)))
                                 }
                             }
                         }
@@ -248,7 +252,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                     let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let transactions = tx_cursor
                         .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, tx)| tx))
+                        .map(|result| result.map(|(_, tx)| tx.into()))
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     Ok(Some(transactions))
                 }
@@ -274,7 +278,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                 results.push(
                     tx_cursor
                         .walk_range(tx_num_range)?
-                        .map(|result| result.map(|(_, tx)| tx))
+                        .map(|result| result.map(|(_, tx)| tx.into()))
                         .collect::<std::result::Result<Vec<_>, _>>()?,
                 );
             }

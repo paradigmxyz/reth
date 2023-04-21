@@ -1,4 +1,5 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use itertools::Itertools;
 use rayon::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -6,7 +7,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_primitives::{rpc_utils::keccak256, BlockNumber, TransactionSignedNoHash, TxNumber, H256};
 use reth_provider::Transaction;
+use thiserror::Error;
+use tokio::sync::mpsc;
 use tracing::*;
 
 /// The [`StageId`] of the transaction lookup stage.
@@ -19,7 +23,7 @@ pub const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
 /// [`tables::TxHashNumber`] This is used for looking up changesets via the transaction hash.
 #[derive(Debug, Clone)]
 pub struct TransactionLookupStage {
-    /// The number of table entries to commit at once
+    /// The number of blocks to commit at once
     commit_threshold: u64,
 }
 
@@ -43,7 +47,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         TRANSACTION_LOOKUP
     }
 
-    /// Write total difficulty entries
+    /// Write transaction hash -> id entries
     async fn execute(
         &mut self,
         tx: &mut Transaction<'_, DB>,
@@ -58,26 +62,57 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
         let mut block_meta_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+
+        let (_, first_block) = block_meta_cursor.seek_exact(start_block)?.ok_or(
+            StageError::from(TransactionLookupStageError::TransactionLookup { block: start_block }),
+        )?;
+
+        let (_, last_block) = block_meta_cursor.seek_exact(end_block)?.ok_or(StageError::from(
+            TransactionLookupStageError::TransactionLookup { block: end_block },
+        ))?;
+
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+        let tx_walker =
+            tx_cursor.walk_range(first_block.first_tx_num()..=last_block.last_tx_num())?;
 
-        // Walk over block bodies within a specified range.
-        let bodies = block_meta_cursor.walk_range(start_block..=end_block)?;
+        let mut channels = Vec::new();
 
-        let mut total_transactions = 0;
-        let mut tx_ranges = Vec::with_capacity((end_block - start_block) as usize);
+        for chunk in &tx_walker.chunks(100_000 / rayon::current_num_threads()) {
+            let (tx, rx) = mpsc::unbounded_channel();
+            channels.push(rx);
 
-        for block_meta_entry in bodies {
-            let (_, block_meta) = block_meta_entry?;
-            total_transactions += block_meta.tx_count;
-            tx_ranges.push(block_meta.tx_num_range());
+            // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
+            let chunk: Vec<_> = chunk.collect();
+
+            // closure that will calculate the TxHash
+            let calculate_hash =
+                |entry: Result<(TxNumber, TransactionSignedNoHash), reth_db::Error>,
+                 rlp_buf: &mut Vec<u8>|
+                 -> Result<(H256, u64), Box<StageError>> {
+                    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
+                    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+                    Ok((H256(keccak256(rlp_buf)), tx_id))
+                };
+
+            // Spawn the task onto the global rayon pool
+            // This task will send the results through the channel after it has calculated the hash.
+            rayon::spawn(move || {
+                let mut rlp_buf = Vec::with_capacity(128);
+                for entry in chunk {
+                    rlp_buf.truncate(0);
+                    let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
+                }
+            });
         }
 
-        // Collect transactions for each body
-        let mut tx_list = Vec::with_capacity(total_transactions as usize);
-        for tx_num_range in tx_ranges {
-            for tx_entry in tx_cursor.walk_range(tx_num_range)? {
-                let (id, transaction) = tx_entry?;
-                tx_list.push((transaction.hash(), id));
+        let mut tx_list =
+            Vec::with_capacity((last_block.last_tx_num() - first_block.first_tx_num()) as usize);
+
+        // Iterate over channels and append the tx hashes to be sorted out later
+        for mut channel in channels {
+            while let Some(tx) = channel.recv().await {
+                let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
+                tx_list.push((tx_hash, tx_id));
             }
         }
 
@@ -131,7 +166,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
                 if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
-                    if tx_hash_number_cursor.seek_exact(transaction.hash)?.is_some() {
+                    if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
                         tx_hash_number_cursor.delete_current()?;
                     }
                 }
@@ -139,6 +174,18 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
+    }
+}
+
+#[derive(Error, Debug)]
+enum TransactionLookupStageError {
+    #[error("Transaction lookup failed to find block {block}.")]
+    TransactionLookup { block: BlockNumber },
+}
+
+impl From<TransactionLookupStageError> for StageError {
+    fn from(error: TransactionLookupStageError) -> Self {
+        StageError::Fatal(Box::new(error))
     }
 }
 
@@ -316,7 +363,7 @@ mod tests {
                                 .expect("no transaction entry");
                             assert_eq!(
                                 Some(tx_id),
-                                tx.get::<tables::TxHashNumber>(transaction.hash)?,
+                                tx.get::<tables::TxHashNumber>(transaction.hash())?,
                             );
                         }
                     }

@@ -119,7 +119,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     // Write transactions
                     for transaction in block.body {
                         // Append the transaction
-                        tx_cursor.append(next_tx_num, transaction)?;
+                        tx_cursor.append(next_tx_num, transaction.into())?;
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
                     }
@@ -510,7 +510,7 @@ mod tests {
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx();
-                            tx.put::<tables::Transactions>(tx_num, transaction)
+                            tx.put::<tables::Transactions>(tx_num, transaction.into())
                         })?;
 
                         if body.tx_count != 0 {

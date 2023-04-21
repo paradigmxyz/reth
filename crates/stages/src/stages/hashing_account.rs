@@ -346,7 +346,7 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == false && stage_progress == 10);
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if !done && stage_progress == 10);
         assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 5);
         let fifth_address = runner
             .tx
@@ -354,8 +354,7 @@ mod tests {
                 let (address, _) = tx
                     .cursor_read::<tables::PlainAccountState>()?
                     .walk(None)?
-                    .skip(5)
-                    .next()
+                    .nth(5)
                     .unwrap()
                     .unwrap();
                 Ok(address)
@@ -373,7 +372,7 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done == true && stage_progress == 20);
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done && stage_progress == 20);
         assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 10);
 
         // Validate the stage execution

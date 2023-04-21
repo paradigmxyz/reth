@@ -71,7 +71,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     for (transaction, sender) in tx_iter {
         let hash = transaction.hash();
         tx.put::<tables::TxSenders>(next_tx_num, sender)?;
-        tx.put::<tables::Transactions>(next_tx_num, transaction)?;
+        tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
         tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
         next_tx_num += 1;
     }
