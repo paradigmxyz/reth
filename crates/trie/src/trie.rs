@@ -1060,7 +1060,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .collect::<BTreeMap<_, _>>();
+            .collect::<HashMap<_, _>>();
 
         assert_trie_updates(&account_updates);
     }
@@ -1080,7 +1080,7 @@ mod tests {
         // read the account updates from the db
         let mut accounts_trie = tx.cursor_read::<tables::AccountsTrie>().unwrap();
         let walker = accounts_trie.walk(None).unwrap();
-        let mut account_updates = BTreeMap::new();
+        let mut account_updates = HashMap::new();
         for item in walker {
             let (key, node) = item.unwrap();
             account_updates.insert(key.inner[..].into(), node);
@@ -1148,7 +1148,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .collect::<BTreeMap<_, _>>();
+            .collect::<HashMap<_, _>>();
         assert_eq!(expected_updates, storage_updates);
 
         assert_trie_updates(&storage_updates);
@@ -1157,7 +1157,7 @@ mod tests {
     fn extension_node_storage_trie(
         tx: &mut Transaction<'_, Env<WriteMap>>,
         hashed_address: H256,
-    ) -> (H256, BTreeMap<Nibbles, BranchNodeCompact>) {
+    ) -> (H256, HashMap<Nibbles, BranchNodeCompact>) {
         let value = U256::from(1);
 
         let mut hashed_storage = tx.cursor_write::<tables::HashedStorage>().unwrap();
@@ -1208,7 +1208,7 @@ mod tests {
         hb.root()
     }
 
-    fn assert_trie_updates(account_updates: &BTreeMap<Nibbles, BranchNodeCompact>) {
+    fn assert_trie_updates(account_updates: &HashMap<Nibbles, BranchNodeCompact>) {
         assert_eq!(account_updates.len(), 2);
 
         let node = account_updates.get(&vec![0x3].into()).unwrap();
