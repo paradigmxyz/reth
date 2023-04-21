@@ -1,10 +1,7 @@
 on:
-  push:
-    branches:
-      - main
   schedule:
-    # every 15 minutes (for testing)
-    - cron: '15 * * * *'
+    # every day
+    - cron: '0 0 * * *'
 
 env:
   RUSTFLAGS: -D warnings
@@ -64,9 +61,7 @@ jobs:
     strategy:
       matrix:
         experimental: [true]
-        # TODO: re-enable sync, rpc when passing
-        # sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
-        sim: [smoke/genesis, smoke/network]
+        sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
         include:
           - sim: devp2p
             limit: discv4
@@ -81,26 +76,23 @@ jobs:
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
             experimental: true
-          # TODO: re-enable engine-withdrawals when passing
-          # - sim: ethereum/engine
-          #   limit: engine-withdrawals
-          #   experimental: true
+          - sim: ethereum/engine
+            limit: engine-withdrawals
+            experimental: true
           - sim: ethereum/engine
             limit: engine-auth
             experimental: true
-          # TODO: re-add engine-transition when passing
-          # - sim: ethereum/engine
-          #   limit: engine-transition
-          #   experimental: true
-          # TODO: re-add engine-api when passing
-          # - sim: ethereum/engine
-          #   limit: engine-api
-          #   experimental: true
+          - sim: ethereum/engine
+            limit: engine-transition
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-api
+            experimental: true
             # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include: [eth_blockNumber, eth_call, eth_chainId, eth_createAccessList, eth_estimateGas, eth_feeHistory, eth_getBalance, eth_getBlockBy, eth_getBlockTransactionCountBy, eth_getCode, eth_getStorage, eth_getTransactionBy, eth_getTransactionCount, eth_sendRawTransaction, eth_syncing]
             experimental: true
-            # running eth_getProof tests separately because we do not support
+            # not running eth_getProof tests because we do not support
             # eth_getProof yet
             # - sim: ethereum/rpc-compat
             #   include: [eth_getProof/get-account-proof-with-storage, eth_getProof/get-account-proof]
