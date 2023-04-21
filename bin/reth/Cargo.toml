@@ -5,6 +5,10 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
+build = "build.rs"
+
+[build-dependencies]
+built = { version = "0.6", features = ["git2", "chrono", "semver"] }
 
 [dependencies]
 # reth
@@ -34,6 +38,7 @@ reth-net-nat = { path = "../../crates/net/nat" }
 reth-payload-builder = { path = "../../crates/payload/builder" }
 reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
+built = { version = "0.6", features = ["chrono", "semver"] }
 
 # crypto
 secp256k1 = { version = "0.26.0", features = [
