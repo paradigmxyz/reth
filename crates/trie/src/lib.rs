@@ -26,7 +26,7 @@ pub mod hash_builder;
 pub mod prefix_set;
 
 /// The cursor implementations for navigating account and storage tries.
-pub mod cursor;
+pub mod trie_cursor;
 
 /// The trie walker for iterating over the trie nodes.
 pub mod walker;
