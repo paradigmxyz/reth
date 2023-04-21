@@ -207,7 +207,7 @@ mod tests {
             let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
 
             if start + 1 >= end {
-                return Ok(Vec::default());
+                return Ok(Vec::default())
             }
 
             let mut headers = random_header_range(start + 1..end, head.hash());
