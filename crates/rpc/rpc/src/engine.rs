@@ -61,23 +61,17 @@ where
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
     ) -> Result<Bytes> {
-        self.eth.call(request, block_number, state_overrides)
-            .instrument(engine_span!())
-            .await
+        self.eth.call(request, block_number, state_overrides).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
-        self.eth.get_code(address, block_number)
-            .instrument(engine_span!())
-            .await
+        self.eth.get_code(address, block_number).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_getBlockByHash`
     async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
-        self.eth.block_by_hash(hash, full)
-            .instrument(engine_span!())
-            .await
+        self.eth.block_by_hash(hash, full).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_getBlockByNumber`
@@ -86,22 +80,16 @@ where
         number: BlockNumberOrTag,
         full: bool,
     ) -> Result<Option<RichBlock>> {
-        self.eth.block_by_number(number, full)
-            .instrument(engine_span!())
-            .await
+        self.eth.block_by_number(number, full).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, bytes: Bytes) -> Result<H256> {
-        self.eth.send_raw_transaction(bytes)
-            .instrument(engine_span!())
-            .await
+        self.eth.send_raw_transaction(bytes).instrument(engine_span!()).await
     }
 
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
-        self.eth_filter.logs(filter)
-            .instrument(engine_span!())
-            .await
+        self.eth_filter.logs(filter).instrument(engine_span!()).await
     }
 }
