@@ -75,14 +75,17 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let tx_walker =
             tx_cursor.walk_range(first_block.first_tx_num()..=last_block.last_tx_num())?;
 
-        let mut channels = Vec::new();
+        let chunk_size = 100_000 / rayon::current_num_threads();
+        let mut channels = Vec::with_capacity(chunk_size);
+        let mut transaction_count = 0;
 
-        for chunk in &tx_walker.chunks(100_000 / rayon::current_num_threads()) {
+        for chunk in &tx_walker.chunks(chunk_size) {
             let (tx, rx) = mpsc::unbounded_channel();
             channels.push(rx);
 
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
             let chunk: Vec<_> = chunk.collect();
+            transaction_count += chunk.len();
 
             // closure that will calculate the TxHash
             let calculate_hash =
@@ -105,8 +108,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             });
         }
 
-        let mut tx_list =
-            Vec::with_capacity((last_block.last_tx_num() - first_block.first_tx_num()) as usize);
+        let mut tx_list = Vec::with_capacity(transaction_count);
 
         // Iterate over channels and append the tx hashes to be sorted out later
         for mut channel in channels {
