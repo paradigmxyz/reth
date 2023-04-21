@@ -14,9 +14,9 @@ use reth_db::{
     tables,
     transaction::DbTx,
 };
-use reth_primitives::{keccak256, proofs::EMPTY_ROOT, Address, StorageEntry, TransitionId, H256};
+use reth_primitives::{keccak256, proofs::EMPTY_ROOT, Address, BlockNumber, StorageEntry, H256};
 use reth_rlp::Encodable;
-use std::{collections::HashMap, ops::Range};
+use std::{collections::HashMap, ops::RangeInclusive};
 
 /// StateRoot is used to compute the root node of a state trie.
 pub struct StateRoot<'a, TX> {
@@ -77,7 +77,7 @@ impl<'a, TX> StateRoot<'a, TX> {
 }
 
 impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
-    /// Given a transition id range, identifies all the accounts and storage keys that
+    /// Given a block number range, identifies all the accounts and storage keys that
     /// have changed.
     ///
     /// # Returns
@@ -85,9 +85,9 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
     /// An instance of state root calculator with account and storage prefixes loaded.
     pub fn incremental_root_calculator(
         tx: &'a TX,
-        tid_range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let (account_prefixes, storage_prefixes) = PrefixSetLoader::new(tx).load(tid_range)?;
+        let (account_prefixes, storage_prefixes) = PrefixSetLoader::new(tx).load(range)?;
         Ok(Self::new(tx)
             .with_changed_account_prefixes(account_prefixes)
             .with_changed_storage_prefixes(storage_prefixes))
@@ -101,10 +101,10 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
     /// The updated state root.
     pub fn incremental_root(
         tx: &'a TX,
-        tid_range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<H256, StateRootError> {
         tracing::debug!(target: "loader", "incremental state root");
-        Self::incremental_root_calculator(tx, tid_range)?.root()
+        Self::incremental_root_calculator(tx, range)?.root()
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
@@ -117,10 +117,10 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
     /// The updated state root and the trie updates.
     pub fn incremental_root_with_updates(
         tx: &'a TX,
-        tid_range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<(H256, TrieUpdates), StateRootError> {
         tracing::debug!(target: "loader", "incremental state root");
-        Self::incremental_root_calculator(tx, tid_range)?.root_with_updates()
+        Self::incremental_root_calculator(tx, range)?.root_with_updates()
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
@@ -131,10 +131,10 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
     /// The intermediate progress of state root computation.
     pub fn incremental_root_with_progress(
         tx: &'a TX,
-        tid_range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError> {
         tracing::debug!(target: "loader", "incremental state root with progress");
-        Self::incremental_root_calculator(tx, tid_range)?.root_with_progress()
+        Self::incremental_root_calculator(tx, range)?.root_with_progress()
     }
 
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
@@ -265,7 +265,7 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
 
                 let account = EthAccount::from(account).with_storage_root(storage_root);
                 let mut account_rlp = Vec::with_capacity(account.length());
-                account.encode(&mut account_rlp);
+                account.encode(&mut &mut account_rlp);
 
                 hash_builder.add_leaf(account_nibbles, &account_rlp);
 

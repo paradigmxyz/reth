@@ -10,7 +10,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, TransitionId, H256,
+    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
 };
 use std::marker::PhantomData;
 
@@ -25,48 +25,48 @@ use std::marker::PhantomData;
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
     tx: &'b TX,
-    /// Transition is main indexer of account and storage changes
-    transition: TransitionId,
+    /// Block number is main index for the history state of accounts and storages.
+    block_number: BlockNumber,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
 
 impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     /// Create new StateProvider from history transaction number
-    pub fn new(tx: &'b TX, transition: TransitionId) -> Self {
-        Self { tx, transition, _phantom: PhantomData {} }
+    pub fn new(tx: &'b TX, block_number: BlockNumber) -> Self {
+        Self { tx, block_number, _phantom: PhantomData {} }
     }
 }
 impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
-        // history key to search IntegerList of transition id changesets.
-        let history_key = ShardedKey::new(address, self.transition);
+        // history key to search IntegerList of block number changesets.
+        let history_key = ShardedKey::new(address, self.block_number);
 
-        let changeset_transition_id = self
+        let changeset_block_number = self
             .tx
             .cursor_read::<tables::AccountHistory>()?
             .seek(history_key)?
             .filter(|(key, _)| key.key == address)
             .map(|(_, list)| {
-                list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)
+                list.0.enable_rank().successor(self.block_number as usize).map(|i| i as u64)
             });
 
-        // if changeset transition id is present we are getting value from changeset
-        if let Some(Some(changeset_transition_id)) = changeset_transition_id {
+        // if changeset of the block is present we are getting value from that changeset
+        if let Some(Some(changeset_block_number)) = changeset_block_number {
             let account = self
                 .tx
                 .cursor_dup_read::<tables::AccountChangeSet>()?
-                .seek_by_key_subkey(changeset_transition_id, address)?
+                .seek_by_key_subkey(changeset_block_number, address)?
                 .filter(|acc| acc.address == address)
                 .ok_or(ProviderError::AccountChangeset {
-                    transition_id: changeset_transition_id,
+                    block_number: changeset_block_number,
                     address,
                 })?;
             Ok(account.info)
         } else {
             // if changeset is not present that means that there was history shard but we need to
-            // use newest value from plain state
+            // use newest value from plain state. Or zero if none.
             Ok(self.tx.get::<tables::PlainAccountState>(address)?)
         }
     }
@@ -95,27 +95,27 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for HistoricalStateProviderRef<'a, 
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get storage.
     fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
-        // history key to search IntegerList of transition id changesets.
-        let history_key = StorageShardedKey::new(address, storage_key, self.transition);
+        // history key to search IntegerList of block changesets.
+        let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
 
-        let changeset_transition_id = self
+        let changeset_block_number = self
             .tx
             .cursor_read::<tables::StorageHistory>()?
             .seek(history_key)?
             .filter(|(key, _)| key.address == address && key.sharded_key.key == storage_key)
             .map(|(_, list)| {
-                list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)
+                list.0.enable_rank().successor(self.block_number as usize).map(|i| i as u64)
             });
 
         // if changeset transition id is present we are getting value from changeset
-        if let Some(Some(changeset_transition_id)) = changeset_transition_id {
+        if let Some(Some(changeset_block_number)) = changeset_block_number {
             let storage_entry = self
                 .tx
                 .cursor_dup_read::<tables::StorageChangeSet>()?
-                .seek_by_key_subkey((changeset_transition_id, address).into(), storage_key)?
+                .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
                 .filter(|entry| entry.key == storage_key)
                 .ok_or(ProviderError::StorageChangeset {
-                    transition_id: changeset_transition_id,
+                    block_number: changeset_block_number,
                     address,
                     storage_key,
                 })?;
@@ -151,22 +151,22 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
 pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     /// Database transaction
     tx: TX,
-    /// Transition is main indexer of account and storage changes
-    transition: TransitionId,
+    /// State at the block number is the main indexer of the state.
+    block_number: BlockNumber,
     /// Phantom lifetime `'a`
     _phantom: PhantomData<&'a TX>,
 }
 
 impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
     /// Create new StateProvider from history transaction number
-    pub fn new(tx: TX, transition: TransitionId) -> Self {
-        Self { tx, transition, _phantom: PhantomData {} }
+    pub fn new(tx: TX, block_number: BlockNumber) -> Self {
+        Self { tx, block_number, _phantom: PhantomData {} }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref<'b>(&'b self) -> HistoricalStateProviderRef<'a, 'b, TX> {
-        HistoricalStateProviderRef::new(&self.tx, self.transition)
+        HistoricalStateProviderRef::new(&self.tx, self.block_number)
     }
 }
 
@@ -184,7 +184,7 @@ mod tests {
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
         tables,
         transaction::{DbTx, DbTxMut},
-        TransitionList,
+        BlockNumberList,
     };
     use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
 
@@ -204,13 +204,13 @@ mod tests {
         let tx = db.tx_mut().unwrap();
 
         tx.put::<tables::AccountHistory>(
-            ShardedKey { key: ADDRESS, highest_transition_id: 7 },
-            TransitionList::new([3, 7]).unwrap(),
+            ShardedKey { key: ADDRESS, highest_block_number: 7 },
+            BlockNumberList::new([3, 7]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::AccountHistory>(
-            ShardedKey { key: ADDRESS, highest_transition_id: u64::MAX },
-            TransitionList::new([10, 15]).unwrap(),
+            ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
+            BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
 
@@ -291,17 +291,17 @@ mod tests {
         tx.put::<tables::StorageHistory>(
             StorageShardedKey {
                 address: ADDRESS,
-                sharded_key: ShardedKey { key: STORAGE, highest_transition_id: 7 },
+                sharded_key: ShardedKey { key: STORAGE, highest_block_number: 7 },
             },
-            TransitionList::new([3, 7]).unwrap(),
+            BlockNumberList::new([3, 7]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::StorageHistory>(
             StorageShardedKey {
                 address: ADDRESS,
-                sharded_key: ShardedKey { key: STORAGE, highest_transition_id: u64::MAX },
+                sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
             },
-            TransitionList::new([10, 15]).unwrap(),
+            BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
 

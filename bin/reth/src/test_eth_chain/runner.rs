@@ -10,8 +10,8 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{
-    keccak256, Account as RethAccount, Address, Bytecode, ChainSpec, ForkCondition, Hardfork,
-    JsonU256, SealedBlock, SealedHeader, StorageEntry, H256, U256,
+    keccak256, Account as RethAccount, Address, Bytecode, ChainSpec, JsonU256, SealedBlock,
+    SealedHeader, StorageEntry, H256, U256,
 };
 use reth_provider::Transaction;
 use reth_rlp::Decodable;
@@ -130,8 +130,6 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
         debug!(target: "reth::cli", name, network = ?suite.network, "Running test");
 
         let chain_spec: ChainSpec = suite.network.into();
-        // if paris aka merge is not activated we dont have block rewards;
-        let has_block_reward = !matches!(chain_spec.fork(Hardfork::Paris), ForkCondition::Never);
 
         // Create db and acquire transaction
         let db = create_test_rw_db();
@@ -140,13 +138,13 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
         // insert genesis
         let header: SealedHeader = suite.genesis_block_header.into();
         let genesis_block = SealedBlock { header, body: vec![], ommers: vec![], withdrawals: None };
-        reth_provider::insert_canonical_block(&tx, genesis_block, None, has_block_reward)?;
+        reth_provider::insert_canonical_block(&tx, genesis_block, None)?;
 
         let mut last_block = None;
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
             let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
             last_block = Some(decoded.number);
-            reth_provider::insert_canonical_block(&tx, decoded, None, has_block_reward)?;
+            reth_provider::insert_canonical_block(&tx, decoded, None)?;
             Ok(())
         })?;
 

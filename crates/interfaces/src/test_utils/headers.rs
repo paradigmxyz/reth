@@ -337,8 +337,4 @@ impl Consensus for TestConsensus {
             Ok(())
         }
     }
-
-    fn has_block_reward(&self, _: U256, _: U256) -> bool {
-        true
-    }
 }

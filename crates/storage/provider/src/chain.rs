@@ -4,7 +4,7 @@ use crate::PostState;
 use reth_interfaces::{executor::Error as ExecError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransitionId, TxHash,
+    TxHash,
 };
 use std::collections::BTreeMap;
 
@@ -23,12 +23,6 @@ pub struct Chain {
     pub state: PostState,
     /// All blocks in this chain.
     pub blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
-    /// A mapping of each block number in the chain to the highest transition ID in the chain's
-    /// state after execution of the block.
-    ///
-    /// This is used to revert changes in the state until a certain block number when the chain is
-    /// split.
-    pub block_transitions: BTreeMap<BlockNumber, TransitionId>,
 }
 
 impl Chain {
@@ -47,11 +41,6 @@ impl Chain {
         self.blocks.iter().find_map(|(num, block)| (block.hash() == block_hash).then_some(*num))
     }
 
-    /// Return block inner transition ids.
-    pub fn block_transitions(&self) -> &BTreeMap<BlockNumber, TransitionId> {
-        &self.block_transitions
-    }
-
     /// Returns the block with matching hash.
     pub fn block(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
         self.blocks
@@ -65,12 +54,11 @@ impl Chain {
             return Some(self.state.clone())
         }
 
-        if let Some(&transition_id) = self.block_transitions.get(&block_number) {
+        if self.blocks.get(&block_number).is_some() {
             let mut state = self.state.clone();
-            state.revert_to(transition_id);
+            state.revert_to(block_number);
             return Some(state)
         }
-
         None
     }
 
@@ -113,41 +101,13 @@ impl Chain {
     /// Create new chain with given blocks and post state.
     pub fn new(blocks: Vec<(SealedBlockWithSenders, PostState)>) -> Self {
         let mut state = PostState::default();
-        let mut block_transitions = BTreeMap::new();
         let mut block_num_hash = BTreeMap::new();
         for (block, block_state) in blocks.into_iter() {
             state.extend(block_state);
-            block_transitions.insert(block.number, state.transitions_count());
             block_num_hash.insert(block.number, block);
         }
 
-        Self { state, block_transitions, blocks: block_num_hash }
-    }
-
-    /// Merge two chains by appending the given chain into the current one.
-    ///
-    /// The state of accounts for this chain is set to the state of the newest chain.
-    pub fn append_chain(&mut self, chain: Chain) -> Result<(), Error> {
-        let chain_tip = self.tip();
-        if chain_tip.hash != chain.fork_block_hash() {
-            return Err(ExecError::AppendChainDoesntConnect {
-                chain_tip: chain_tip.num_hash(),
-                other_chain_fork: chain.fork_block().into_components(),
-            }
-            .into())
-        }
-
-        // Insert blocks from other chain
-        self.blocks.extend(chain.blocks.into_iter());
-        let current_transition_count = self.state.transitions_count();
-        self.state.extend(chain.state);
-
-        // Update the block transition mapping, shifting the transition ID by the current number of
-        // transitions in *this* chain
-        for (block_number, transition_id) in chain.block_transitions.iter() {
-            self.block_transitions.insert(*block_number, transition_id + current_transition_count);
-        }
-        Ok(())
+        Self { state, blocks: block_num_hash }
     }
 
     /// Get all receipts with attachment.
@@ -167,6 +127,26 @@ impl Chain {
             receipt_attch.push(BlockReceipts { block: block_num_hash, tx_receipts });
         }
         receipt_attch
+    }
+
+    /// Merge two chains by appending the given chain into the current one.
+    ///
+    /// The state of accounts for this chain is set to the state of the newest chain.
+    pub fn append_chain(&mut self, chain: Chain) -> Result<(), Error> {
+        let chain_tip = self.tip();
+        if chain_tip.hash != chain.fork_block_hash() {
+            return Err(ExecError::AppendChainDoesntConnect {
+                chain_tip: chain_tip.num_hash(),
+                other_chain_fork: chain.fork_block().into_components(),
+            }
+            .into())
+        }
+
+        // Insert blocks from other chain
+        self.blocks.extend(chain.blocks.into_iter());
+        self.state.extend(chain.state);
+
+        Ok(())
     }
 
     /// Split this chain at the given block.
@@ -210,22 +190,12 @@ impl Chain {
         let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
 
         let mut canonical_state = std::mem::take(&mut self.state);
-        let new_state = canonical_state.split_at(
-            *self.block_transitions.get(&block_number).expect("Unknown block transition ID"),
-        );
+        let new_state = canonical_state.split_at(block_number);
         self.state = new_state;
 
         ChainSplit::Split {
-            canonical: Chain {
-                state: canonical_state,
-                block_transitions: BTreeMap::new(),
-                blocks: self.blocks,
-            },
-            pending: Chain {
-                state: self.state,
-                block_transitions: self.block_transitions,
-                blocks: higher_number_blocks,
-            },
+            canonical: Chain { state: canonical_state, blocks: self.blocks },
+            pending: Chain { state: self.state, blocks: higher_number_blocks },
         }
     }
 }
@@ -349,16 +319,13 @@ mod tests {
     fn test_number_split() {
         let mut base_state = PostState::default();
         let account = Account { nonce: 10, ..Default::default() };
-        base_state.create_account(H160([1; 20]), account);
-        base_state.finish_transition();
+        base_state.create_account(1, H160([1; 20]), account);
 
         let mut block_state1 = PostState::default();
-        block_state1.create_account(H160([2; 20]), Account::default());
-        block_state1.finish_transition();
+        block_state1.create_account(2, H160([2; 20]), Account::default());
 
         let mut block_state2 = PostState::default();
-        block_state2.create_account(H160([3; 20]), Account::default());
-        block_state2.finish_transition();
+        block_state2.create_account(3, H160([3; 20]), Account::default());
 
         let mut block1 = SealedBlockWithSenders::default();
         let block1_hash = H256([15; 32]);
@@ -378,19 +345,13 @@ mod tests {
         ]);
 
         let mut split1_state = chain.state.clone();
-        let split2_state = split1_state.split_at(*chain.block_transitions.get(&1).unwrap());
+        let split2_state = split1_state.split_at(1);
 
-        let chain_split1 = Chain {
-            state: split1_state,
-            block_transitions: BTreeMap::new(),
-            blocks: BTreeMap::from([(1, block1.clone())]),
-        };
+        let chain_split1 =
+            Chain { state: split1_state, blocks: BTreeMap::from([(1, block1.clone())]) };
 
-        let chain_split2 = Chain {
-            state: split2_state,
-            block_transitions: chain.block_transitions.clone(),
-            blocks: BTreeMap::from([(2, block2.clone())]),
-        };
+        let chain_split2 =
+            Chain { state: split2_state, blocks: BTreeMap::from([(2, block2.clone())]) };
 
         // return tip state
         assert_eq!(chain.state_at_block(block2.number), Some(chain.state.clone()));

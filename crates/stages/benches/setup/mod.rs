@@ -109,7 +109,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         .into_iter()
         .collect();
 
-        let mut blocks = random_block_range(0..num_blocks + 1, H256::zero(), txs_range);
+        let mut blocks = random_block_range(0..=num_blocks, H256::zero(), txs_range);
 
         let (transitions, start_state) = random_transition_range(
             blocks.iter().take(2),

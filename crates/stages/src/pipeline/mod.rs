@@ -371,7 +371,7 @@ where
                 Err(err) => {
                     self.listeners.notify(PipelineEvent::Error { stage_id });
 
-                    return if let StageError::Validation { block, error } = err {
+                    let out = if let StageError::Validation { block, error } = err {
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,
@@ -402,7 +402,8 @@ where
                             "Stage encountered a non-fatal error: {err}. Retrying"
                         );
                         continue
-                    }
+                    };
+                    return out
                 }
             }
         }

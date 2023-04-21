@@ -1,12 +1,14 @@
 //! Account related models and types.
 
+use std::ops::{Range, RangeInclusive};
+
 use crate::{
     impl_fixed_arbitrary,
     table::{Decode, Encode},
     Error,
 };
 use reth_codecs::Compact;
-use reth_primitives::{Account, Address, TransitionId};
+use reth_primitives::{Account, Address, BlockNumber};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
@@ -43,16 +45,23 @@ impl Compact for AccountBeforeTx {
     }
 }
 
-/// [`TransitionId`] concatenated with [`Address`]. Used as the key for
+/// [`BlockNumber`] concatenated with [`Address`]. Used as the key for
 /// [`StorageChangeSet`](crate::tables::StorageChangeSet)
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd)]
-pub struct TransitionIdAddress(pub (TransitionId, Address));
+pub struct BlockNumberAddress(pub (BlockNumber, Address));
 
-impl TransitionIdAddress {
+impl BlockNumberAddress {
+    /// Create a new Range from `start` to `end`
+    ///
+    /// Note: End is inclusive
+    pub fn range(range: RangeInclusive<BlockNumber>) -> Range<Self> {
+        (*range.start(), Address::zero()).into()..(*range.end() + 1, Address::zero()).into()
+    }
+
     /// Return the transition id
-    pub fn transition_id(&self) -> TransitionId {
+    pub fn block_number(&self) -> BlockNumber {
         self.0 .0
     }
 
@@ -61,19 +70,19 @@ impl TransitionIdAddress {
         self.0 .1
     }
 
-    /// Consumes `Self` and returns [`TransitionId`], [`Address`]
-    pub fn take(self) -> (TransitionId, Address) {
+    /// Consumes `Self` and returns [`BlockNumber`], [`Address`]
+    pub fn take(self) -> (BlockNumber, Address) {
         (self.0 .0, self.0 .1)
     }
 }
 
-impl From<(u64, Address)> for TransitionIdAddress {
+impl From<(BlockNumber, Address)> for BlockNumberAddress {
     fn from(tpl: (u64, Address)) -> Self {
-        TransitionIdAddress(tpl)
+        BlockNumberAddress(tpl)
     }
 }
 
-impl Encode for TransitionIdAddress {
+impl Encode for BlockNumberAddress {
     type Encoded = [u8; 28];
 
     fn encode(self) -> Self::Encoded {
@@ -88,17 +97,17 @@ impl Encode for TransitionIdAddress {
     }
 }
 
-impl Decode for TransitionIdAddress {
+impl Decode for BlockNumberAddress {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
         let value = value.as_ref();
         let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| Error::DecodeError)?);
         let hash = Address::from_slice(&value[8..]);
 
-        Ok(TransitionIdAddress((num, hash)))
+        Ok(BlockNumberAddress((num, hash)))
     }
 }
 
-impl_fixed_arbitrary!(TransitionIdAddress, 28);
+impl_fixed_arbitrary!(BlockNumberAddress, 28);
 
 #[cfg(test)]
 mod test {
@@ -110,7 +119,7 @@ mod test {
     fn test_tx_number_address() {
         let num = 1u64;
         let hash = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
-        let key = TransitionIdAddress((num, hash));
+        let key = BlockNumberAddress((num, hash));
 
         let mut bytes = [0u8; 28];
         bytes[..8].copy_from_slice(&num.to_be_bytes());
@@ -119,7 +128,7 @@ mod test {
         let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
-        let decoded: TransitionIdAddress = Decode::decode(encoded).unwrap();
+        let decoded: BlockNumberAddress = Decode::decode(encoded).unwrap();
         assert_eq!(decoded, key);
     }
 
@@ -127,7 +136,7 @@ mod test {
     fn test_tx_number_address_rand() {
         let mut bytes = [0u8; 28];
         thread_rng().fill(bytes.as_mut_slice());
-        let key = TransitionIdAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
+        let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }
 }

@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn payload_body_roundtrip() {
-        for block in random_block_range(0..100, H256::default(), 0..2) {
+        for block in random_block_range(0..=99, H256::default(), 0..2) {
             let unsealed = block.clone().unseal();
             let payload_body: ExecutionPayloadBody = unsealed.into();
 
