@@ -286,7 +286,7 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                     trie_updates.extend(walker_updates.into_iter());
                     trie_updates.extend_with_account_updates(hash_builder_updates);
 
-                    return Ok(StateRootProgress::Progress(state, trie_updates))
+                    return Ok(StateRootProgress::Progress(Box::new(state), trie_updates))
                 }
 
                 // Move the next account entry
@@ -662,11 +662,11 @@ mod tests {
                 let threshold = 10;
                 let mut got = None;
 
-                let mut intermediate_state = None;
+                let mut intermediate_state: Option<Box<IntermediateStateRootState>> = None;
                 while got.is_none() {
                     let calculator = StateRoot::new(tx.deref_mut())
                         .with_threshold(threshold)
-                        .with_intermediate_state(intermediate_state.take());
+                        .with_intermediate_state(intermediate_state.take().map(|state| *state));
                     match calculator.root_with_progress().unwrap() {
                         StateRootProgress::Progress(state, _updates) => intermediate_state = Some(state),
                         StateRootProgress::Complete(root, _updates) => got = Some(root),
@@ -845,13 +845,14 @@ mod tests {
         assert_eq!(root, computed_expected_root);
 
         // Check account trie
-        let account_updates = trie_updates
+        let mut account_updates = trie_updates
             .iter()
             .filter_map(|(k, v)| match (k, v) {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
                 _ => None,
             })
             .collect::<Vec<_>>();
+        account_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
         assert_eq!(account_updates.len(), 2);
 
         let (nibbles1a, node1a) = account_updates.first().unwrap();
@@ -911,13 +912,14 @@ mod tests {
             .unwrap();
         assert_eq!(root, expected_state_root);
 
-        let account_updates = trie_updates
+        let mut account_updates = trie_updates
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
                 _ => None,
             })
             .collect::<Vec<_>>();
+        account_updates.sort_by(|a, b| a.0.cmp(b.0));
         assert_eq!(account_updates.len(), 2);
 
         let (nibbles1b, node1b) = account_updates.first().unwrap();
