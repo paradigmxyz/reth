@@ -6,15 +6,15 @@ use reth_db::{
 };
 use reth_primitives::{Account, StorageEntry, H256};
 
-impl<'a, TX: DbTx<'a>> HashedCursorFactory<'a> for TX {
-    type AccountCursor<'tx> = <TX as DbTxGAT<'tx>>::Cursor<tables::HashedAccount> where Self: 'tx;
-    type StorageCursor<'tx> = <TX as DbTxGAT<'tx>>::DupCursor<tables::HashedStorage> where Self: 'tx;
+impl<'a, 'tx, TX: DbTx<'tx>> HashedCursorFactory<'a> for TX {
+    type AccountCursor = <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount> where Self: 'a;
+    type StorageCursor = <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage> where Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, reth_db::Error> {
+    fn hashed_account_cursor(&'a self) -> Result<Self::AccountCursor, reth_db::Error> {
         self.cursor_read::<tables::HashedAccount>()
     }
 
-    fn hashed_storage_cursor(&self) -> Result<Self::StorageCursor<'_>, reth_db::Error> {
+    fn hashed_storage_cursor(&'a self) -> Result<Self::StorageCursor, reth_db::Error> {
         self.cursor_dup_read::<tables::HashedStorage>()
     }
 }

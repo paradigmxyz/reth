@@ -206,10 +206,16 @@ impl PostState {
     }
 
     /// Calculate the state root for this [PostState].
-    pub fn state_root_slow<'a, TX: DbTx<'a>>(&self, tx: &TX) -> Result<H256, StateRootError> {
+    pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
+        &self,
+        tx: &'a TX,
+    ) -> Result<H256, StateRootError>
+    where
+        'a: 'tx,
+    {
         let hashed_post_state = self.hash_state_slow();
         let (account_prefixset, storage_prefixset) = hashed_post_state.construct_prefix_sets();
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(&tx, &hashed_post_state);
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
         StateRoot::new(tx)
             .with_hashed_cursor_factory(&hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefixset)

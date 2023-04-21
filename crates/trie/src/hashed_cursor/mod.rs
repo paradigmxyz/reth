@@ -10,19 +10,19 @@ pub use post_state::*;
 /// The factory trait for creating cursors over the hashed state.
 pub trait HashedCursorFactory<'a> {
     /// The hashed account cursor type.
-    type AccountCursor<'tx>: HashedAccountCursor
+    type AccountCursor: HashedAccountCursor
     where
-        Self: 'tx;
+        Self: 'a;
     /// The hashed storage cursor type.
-    type StorageCursor<'tx>: HashedStorageCursor
+    type StorageCursor: HashedStorageCursor
     where
-        Self: 'tx;
+        Self: 'a;
 
     /// Returns a cursor for iterating over all hashed accounts in the state.
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, reth_db::Error>;
+    fn hashed_account_cursor(&'a self) -> Result<Self::AccountCursor, reth_db::Error>;
 
     /// Returns a cursor for iterating over all hashed storage entries in the state.
-    fn hashed_storage_cursor(&self) -> Result<Self::StorageCursor<'_>, reth_db::Error>;
+    fn hashed_storage_cursor(&'a self) -> Result<Self::StorageCursor, reth_db::Error>;
 }
 
 /// The cursor for iterating over hashed accounts.

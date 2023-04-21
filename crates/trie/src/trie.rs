@@ -20,11 +20,11 @@ use reth_rlp::Encodable;
 use std::{collections::HashMap, ops::RangeInclusive};
 
 /// StateRoot is used to compute the root node of a state trie.
-pub struct StateRoot<'a, TX, H> {
+pub struct StateRoot<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     pub tx: &'a TX,
     /// The factory for hashed cursors.
-    pub hashed_cursor_factory: &'a H,
+    pub hashed_cursor_factory: &'b H,
     /// A set of account prefixes that have changed.
     pub changed_account_prefixes: PrefixSet,
     /// A map containing storage changes with the hashed address as key and a set of storage key
@@ -36,7 +36,7 @@ pub struct StateRoot<'a, TX, H> {
     threshold: u64,
 }
 
-impl<'a, TX, H> StateRoot<'a, TX, H> {
+impl<'a, 'b, TX, H> StateRoot<'a, 'b, TX, H> {
     /// Set the changed account prefixes.
     pub fn with_changed_account_prefixes(mut self, prefixes: PrefixSet) -> Self {
         self.changed_account_prefixes = prefixes;
@@ -68,10 +68,10 @@ impl<'a, TX, H> StateRoot<'a, TX, H> {
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(
+    pub fn with_hashed_cursor_factory<'c, HF>(
         self,
-        hashed_cursor_factory: &'a HF,
-    ) -> StateRoot<'a, TX, HF> {
+        hashed_cursor_factory: &'c HF,
+    ) -> StateRoot<'a, 'c, TX, HF> {
         StateRoot {
             tx: self.tx,
             changed_account_prefixes: self.changed_account_prefixes,
@@ -83,9 +83,9 @@ impl<'a, TX, H> StateRoot<'a, TX, H> {
     }
 }
 
-impl<'a, 'tx, TX> StateRoot<'a, TX, TX>
+impl<'a, 'tx, TX> StateRoot<'a, 'a, TX, TX>
 where
-    TX: DbTx<'tx> + HashedCursorFactory<'tx>,
+    TX: DbTx<'tx> + HashedCursorFactory<'a>,
 {
     /// Create a new [StateRoot] instance.
     pub fn new(tx: &'a TX) -> Self {
@@ -160,10 +160,10 @@ where
     }
 }
 
-impl<'a, 'tx, TX, H> StateRoot<'a, TX, H>
+impl<'a, 'b, 'tx, TX, H> StateRoot<'a, 'b, TX, H>
 where
     TX: DbTx<'tx>,
-    H: HashedCursorFactory<'tx>,
+    H: HashedCursorFactory<'b>,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
     /// nodes into the hash builder. Collects the updates in the process.
@@ -336,20 +336,20 @@ where
 }
 
 /// StorageRoot is used to compute the root node of an account storage trie.
-pub struct StorageRoot<'a, TX, H> {
+pub struct StorageRoot<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     pub tx: &'a TX,
     /// The factory for hashed cursors.
-    pub hashed_cursor_factory: &'a H,
+    pub hashed_cursor_factory: &'b H,
     /// The hashed address of an account.
     pub hashed_address: H256,
     /// The set of storage slot prefixes that have changed.
     pub changed_prefixes: PrefixSet,
 }
 
-impl<'a, 'tx, TX> StorageRoot<'a, TX, TX>
+impl<'a, 'tx, TX> StorageRoot<'a, 'a, TX, TX>
 where
-    TX: DbTx<'tx> + HashedCursorFactory<'tx>,
+    TX: DbTx<'tx> + HashedCursorFactory<'a>,
 {
     /// Creates a new storage root calculator given an raw address.
     pub fn new(tx: &'a TX, address: Address) -> Self {
@@ -367,16 +367,16 @@ where
     }
 }
 
-impl<'a, TX, H> StorageRoot<'a, TX, H> {
+impl<'a, 'b, TX, H> StorageRoot<'a, 'b, TX, H> {
     /// Creates a new storage root calculator given an raw address.
-    pub fn new_with_factory(tx: &'a TX, hashed_cursor_factory: &'a H, address: Address) -> Self {
+    pub fn new_with_factory(tx: &'a TX, hashed_cursor_factory: &'b H, address: Address) -> Self {
         Self::new_hashed_with_factory(tx, hashed_cursor_factory, keccak256(address))
     }
 
     /// Creates a new storage root calculator given a hashed address.
     pub fn new_hashed_with_factory(
         tx: &'a TX,
-        hashed_cursor_factory: &'a H,
+        hashed_cursor_factory: &'b H,
         hashed_address: H256,
     ) -> Self {
         Self { tx, hashed_address, changed_prefixes: PrefixSet::default(), hashed_cursor_factory }
@@ -389,10 +389,10 @@ impl<'a, TX, H> StorageRoot<'a, TX, H> {
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(
+    pub fn with_hashed_cursor_factory<'c, HF>(
         self,
-        hashed_cursor_factory: &'a HF,
-    ) -> StorageRoot<'a, TX, HF> {
+        hashed_cursor_factory: &'c HF,
+    ) -> StorageRoot<'a, 'c, TX, HF> {
         StorageRoot {
             tx: self.tx,
             hashed_address: self.hashed_address,
@@ -402,10 +402,10 @@ impl<'a, TX, H> StorageRoot<'a, TX, H> {
     }
 }
 
-impl<'a, 'tx, TX, H> StorageRoot<'a, TX, H>
+impl<'a, 'b, 'tx, TX, H> StorageRoot<'a, 'b, TX, H>
 where
     TX: DbTx<'tx>,
-    H: HashedCursorFactory<'tx>,
+    H: HashedCursorFactory<'b>,
 {
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
     ///

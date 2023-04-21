@@ -53,28 +53,32 @@ impl HashedPostState {
 }
 
 /// The hashed cursor factory for the post state.
-pub struct HashedPostStateCursorFactory<'a, TX> {
+pub struct HashedPostStateCursorFactory<'a, 'b, TX> {
     tx: &'a TX,
-    post_state: &'a HashedPostState,
+    post_state: &'b HashedPostState,
 }
 
-impl<'a, TX> HashedPostStateCursorFactory<'a, TX> {
+impl<'a, 'b, TX> HashedPostStateCursorFactory<'a, 'b, TX> {
     /// Create a new factory.
-    pub fn new(tx: &'a TX, post_state: &'a HashedPostState) -> Self {
+    pub fn new(tx: &'a TX, post_state: &'b HashedPostState) -> Self {
         Self { tx, post_state }
     }
 }
 
-impl<'a, TX: DbTx<'a>> HashedCursorFactory<'a> for HashedPostStateCursorFactory<'a, TX> {
-    type AccountCursor<'tx> = HashedPostStateAccountCursor<'a, <TX as DbTxGAT<'tx>>::Cursor<tables::HashedAccount>> where Self: 'tx;
-    type StorageCursor<'tx> = HashedPostStateStorageCursor<'a, <TX as DbTxGAT<'tx>>::DupCursor<tables::HashedStorage>> where Self: 'tx;
+impl<'a, 'b, 'tx, TX: DbTx<'tx>> HashedCursorFactory<'a>
+    for HashedPostStateCursorFactory<'a, 'b, TX>
+where
+    'a: 'b,
+{
+    type AccountCursor = HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>> where Self: 'a ;
+    type StorageCursor = HashedPostStateStorageCursor<'b, <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>> where Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, reth_db::Error> {
+    fn hashed_account_cursor(&'a self) -> Result<Self::AccountCursor, reth_db::Error> {
         let cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
         Ok(HashedPostStateAccountCursor { post_state: self.post_state, cursor, last_account: None })
     }
 
-    fn hashed_storage_cursor(&self) -> Result<Self::StorageCursor<'_>, reth_db::Error> {
+    fn hashed_storage_cursor(&'a self) -> Result<Self::StorageCursor, reth_db::Error> {
         let cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
         Ok(HashedPostStateStorageCursor {
             post_state: self.post_state,
@@ -88,13 +92,13 @@ impl<'a, TX: DbTx<'a>> HashedCursorFactory<'a> for HashedPostStateCursorFactory<
 /// The cursor to iterate over post state hashed accounts and corresponding database entries.
 /// It will always give precedence to the data from the post state.
 #[derive(Debug, Clone)]
-pub struct HashedPostStateAccountCursor<'a, C> {
-    post_state: &'a HashedPostState,
+pub struct HashedPostStateAccountCursor<'b, C> {
     cursor: C,
+    post_state: &'b HashedPostState,
     last_account: Option<H256>,
 }
 
-impl<'a, 'tx, C> HashedPostStateAccountCursor<'a, C>
+impl<'b, 'tx, C> HashedPostStateAccountCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedAccount>,
 {
@@ -129,7 +133,7 @@ where
     }
 }
 
-impl<'a, 'tx, C> HashedAccountCursor for HashedPostStateAccountCursor<'a, C>
+impl<'b, 'tx, C> HashedAccountCursor for HashedPostStateAccountCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedAccount>,
 {
@@ -201,14 +205,14 @@ where
 /// The cursor to iterate over post state hashed storages and corresponding database entries.
 /// It will always give precedence to the data from the post state.
 #[derive(Debug, Clone)]
-pub struct HashedPostStateStorageCursor<'a, C> {
-    post_state: &'a HashedPostState,
+pub struct HashedPostStateStorageCursor<'b, C> {
+    post_state: &'b HashedPostState,
     cursor: C,
     account: Option<H256>,
     last_slot: Option<H256>,
 }
 
-impl<'a, C> HashedPostStateStorageCursor<'a, C> {
+impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     fn was_storage_wiped(&self, account: &H256) -> bool {
         match self.post_state.storages.get(account) {
             Some(storage) => storage.wiped,
@@ -243,7 +247,7 @@ impl<'a, C> HashedPostStateStorageCursor<'a, C> {
     }
 }
 
-impl<'a, 'tx, C> HashedStorageCursor for HashedPostStateStorageCursor<'a, C>
+impl<'b, 'tx, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedStorage> + DbDupCursorRO<'tx, tables::HashedStorage>,
 {
