@@ -103,7 +103,9 @@ impl TrieUpdates {
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
         let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
-        for (key, operation) in self.trie_operations {
+        let mut trie_operations = Vec::from_iter(self.trie_operations.into_iter());
+        trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (key, operation) in trie_operations {
             match key {
                 TrieKey::AccountNode(nibbles) => match operation {
                     TrieOp::Delete => {
