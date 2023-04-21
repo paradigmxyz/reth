@@ -195,7 +195,7 @@ where
                             &mut all_logs,
                             &filter,
                             (block_hash, block.number).into(),
-                            block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
                             false,
                         );
                     }
@@ -269,7 +269,7 @@ where
                             &mut all_logs,
                             &filter_params,
                             (block_number, block_hash).into(),
-                            block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
                             false,
                         );
 

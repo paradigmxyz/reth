@@ -7,7 +7,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable, RawValue,
 };
-use reth_primitives::{TransactionSigned, TxNumber, H160};
+use reth_primitives::{keccak256, TransactionSignedNoHash, TxNumber, H160};
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -100,16 +100,20 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
             // closure that would recover signer. Used as utility to wrap result
             let recover = |entry: Result<
-                (RawKey<TxNumber>, RawValue<TransactionSigned>),
+                (RawKey<TxNumber>, RawValue<TransactionSignedNoHash>),
                 reth_db::Error,
-            >|
+            >,
+                           rlp_buf: &mut Vec<u8>|
              -> Result<(u64, H160), Box<StageError>> {
                 let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
                 let tx_id = tx_id.key().expect("key to be formated");
-                let transaction = transaction.value().expect("value to be formated");
-                let sender = transaction.recover_signer().ok_or(StageError::from(
-                    SenderRecoveryStageError::SenderRecovery { tx: tx_id },
-                ))?;
+
+                let tx = transaction.value().expect("value to be formated");
+                tx.transaction.encode_without_signature(rlp_buf);
+
+                let sender = tx.signature.recover_signer(keccak256(rlp_buf)).ok_or(
+                    StageError::from(SenderRecoveryStageError::SenderRecovery { tx: tx_id }),
+                )?;
 
                 Ok((tx_id, sender))
             };
@@ -117,8 +121,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             // Spawn the sender recovery task onto the global rayon pool
             // This task will send the results through the channel after it recovered the senders.
             rayon::spawn(move || {
+                let mut rlp_buf = Vec::with_capacity(128);
                 for entry in chunk {
-                    let _ = tx.send(recover(entry));
+                    rlp_buf.truncate(0);
+                    let _ = tx.send(recover(entry, &mut rlp_buf));
                 }
             });
         }
@@ -165,7 +171,7 @@ impl From<SenderRecoveryStageError> for StageError {
 mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
-    use reth_primitives::{BlockNumber, SealedBlock, H256};
+    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, H256};
 
     use super::*;
     use crate::test_utils::{
@@ -330,9 +336,10 @@ mod tests {
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
-                            let transaction = tx
+                            let transaction: TransactionSigned = tx
                                 .get::<tables::Transactions>(tx_id)?
-                                .expect("no transaction entry");
+                                .expect("no transaction entry")
+                                .into();
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");
                             assert_eq!(Some(signer), tx.get::<tables::TxSenders>(tx_id)?);

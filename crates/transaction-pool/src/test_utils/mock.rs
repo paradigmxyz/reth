@@ -367,7 +367,7 @@ impl FromRecoveredTransaction for MockTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         let sender = tx.signer();
         let transaction = tx.into_signed();
-        let hash = transaction.hash;
+        let hash = transaction.hash();
         match transaction.transaction {
             Transaction::Legacy(TxLegacy {
                 chain_id,

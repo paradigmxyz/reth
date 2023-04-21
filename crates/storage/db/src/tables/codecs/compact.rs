@@ -48,7 +48,7 @@ impl_compression_for_compact!(
     Bytecode,
     ProofCheckpoint
 );
-impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);
+impl_compression_for_compact!(AccountBeforeTx, TransactionSignedNoHash);
 impl_compression_for_compact!(CompactU256);
 
 macro_rules! impl_compression_fixed_compact {

@@ -20,7 +20,8 @@ use reth_db::{
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered, TxNumber, H256, U256,
+    SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered,
+    TxNumber, H256, U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{
@@ -637,8 +638,12 @@ where
         }
 
         // Get transactions and senders
-        let transactions =
-            self.get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?;
+        let transactions = self
+            .get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?
+            .into_iter()
+            .map(|(id, tx)| (id, tx.into()))
+            .collect::<Vec<(u64, TransactionSigned)>>();
+
         let senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
@@ -1454,8 +1459,8 @@ mod test {
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
         let get_block = get[0].0.clone();
         let get_state = get[0].1.clone();
-        assert_eq!(get_block, block1.clone());
-        assert_eq!(get_state, exec_res1.clone());
+        assert_eq!(get_block, block1);
+        assert_eq!(get_state, exec_res1);
 
         // take one block
         let take = tx.take_block_and_execution_range(&chain_spec, 1..=1).unwrap();
@@ -1492,10 +1497,10 @@ mod test {
 
         // get two blocks
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=2).unwrap();
-        assert_eq!(get[0].0, block1.clone());
-        assert_eq!(get[1].0, block2.clone());
-        assert_eq!(get[0].1, exec_res1.clone());
-        assert_eq!(get[1].1, exec_res2.clone());
+        assert_eq!(get[0].0, block1);
+        assert_eq!(get[1].0, block2);
+        assert_eq!(get[0].1, exec_res1);
+        assert_eq!(get[1].1, exec_res2);
 
         // take two blocks
         let get = tx.take_block_and_execution_range(&chain_spec, 1..=2).unwrap();
