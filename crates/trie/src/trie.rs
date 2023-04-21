@@ -256,8 +256,8 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                     );
 
                 let storage_root = if retain_updates {
-                    let (root, mut updates) = storage_root_calculator.root_with_updates()?;
-                    trie_updates.append(&mut updates);
+                    let (root, updates) = storage_root_calculator.root_with_updates()?;
+                    trie_updates.extend(updates.into_iter());
                     root
                 } else {
                     storage_root_calculator.root()?
@@ -273,7 +273,7 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                 let total_updates_len =
                     trie_updates.len() + walker.updates_len() + hash_builder.updates_len();
                 if retain_updates && total_updates_len as u64 >= self.threshold {
-                    let (walker_stack, mut walker_updates) = walker.split();
+                    let (walker_stack, walker_updates) = walker.split();
                     let (hash_builder, hash_builder_updates) = hash_builder.split();
 
                     let state = IntermediateStateRootState {
@@ -283,10 +283,10 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                         last_account_key: hashed_address,
                     };
 
-                    trie_updates.append(&mut walker_updates);
+                    trie_updates.extend(walker_updates.into_iter());
                     trie_updates.extend_with_account_updates(hash_builder_updates);
 
-                    return Ok(StateRootProgress::Progress(state, trie_updates))
+                    return Ok(StateRootProgress::Progress(Box::new(state), trie_updates))
                 }
 
                 // Move the next account entry
@@ -296,10 +296,10 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
 
         let root = hash_builder.root();
 
-        let (_, mut walker_updates) = walker.split();
+        let (_, walker_updates) = walker.split();
         let (_, hash_builder_updates) = hash_builder.split();
 
-        trie_updates.append(&mut walker_updates);
+        trie_updates.extend(walker_updates.into_iter());
         trie_updates.extend_with_account_updates(hash_builder_updates);
 
         Ok(StateRootProgress::Complete(root, trie_updates))
@@ -406,10 +406,10 @@ impl<'a, 'tx, TX: DbTx<'tx>> StorageRoot<'a, TX> {
         let root = hash_builder.root();
 
         let (_, hash_builder_updates) = hash_builder.split();
-        let (_, mut walker_updates) = walker.split();
+        let (_, walker_updates) = walker.split();
 
         let mut trie_updates = TrieUpdates::default();
-        trie_updates.append(&mut walker_updates);
+        trie_updates.extend(walker_updates.into_iter());
         trie_updates.extend_with_storage_updates(self.hashed_address, hash_builder_updates);
 
         tracing::debug!(target: "trie::storage_root", ?root, hashed_address = ?self.hashed_address, "calculated storage root");
@@ -662,11 +662,11 @@ mod tests {
                 let threshold = 10;
                 let mut got = None;
 
-                let mut intermediate_state = None;
+                let mut intermediate_state: Option<Box<IntermediateStateRootState>> = None;
                 while got.is_none() {
                     let calculator = StateRoot::new(tx.deref_mut())
                         .with_threshold(threshold)
-                        .with_intermediate_state(intermediate_state.take());
+                        .with_intermediate_state(intermediate_state.take().map(|state| *state));
                     match calculator.root_with_progress().unwrap() {
                         StateRootProgress::Progress(state, _updates) => intermediate_state = Some(state),
                         StateRootProgress::Complete(root, _updates) => got = Some(root),
@@ -845,13 +845,14 @@ mod tests {
         assert_eq!(root, computed_expected_root);
 
         // Check account trie
-        let account_updates = trie_updates
+        let mut account_updates = trie_updates
             .iter()
             .filter_map(|(k, v)| match (k, v) {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
                 _ => None,
             })
             .collect::<Vec<_>>();
+        account_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
         assert_eq!(account_updates.len(), 2);
 
         let (nibbles1a, node1a) = account_updates.first().unwrap();
@@ -911,13 +912,14 @@ mod tests {
             .unwrap();
         assert_eq!(root, expected_state_root);
 
-        let account_updates = trie_updates
+        let mut account_updates = trie_updates
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
                 _ => None,
             })
             .collect::<Vec<_>>();
+        account_updates.sort_by(|a, b| a.0.cmp(b.0));
         assert_eq!(account_updates.len(), 2);
 
         let (nibbles1b, node1b) = account_updates.first().unwrap();
@@ -1060,7 +1062,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .collect::<BTreeMap<_, _>>();
+            .collect::<HashMap<_, _>>();
 
         assert_trie_updates(&account_updates);
     }
@@ -1080,7 +1082,7 @@ mod tests {
         // read the account updates from the db
         let mut accounts_trie = tx.cursor_read::<tables::AccountsTrie>().unwrap();
         let walker = accounts_trie.walk(None).unwrap();
-        let mut account_updates = BTreeMap::new();
+        let mut account_updates = HashMap::new();
         for item in walker {
             let (key, node) = item.unwrap();
             account_updates.insert(key.inner[..].into(), node);
@@ -1148,7 +1150,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .collect::<BTreeMap<_, _>>();
+            .collect::<HashMap<_, _>>();
         assert_eq!(expected_updates, storage_updates);
 
         assert_trie_updates(&storage_updates);
@@ -1157,7 +1159,7 @@ mod tests {
     fn extension_node_storage_trie(
         tx: &mut Transaction<'_, Env<WriteMap>>,
         hashed_address: H256,
-    ) -> (H256, BTreeMap<Nibbles, BranchNodeCompact>) {
+    ) -> (H256, HashMap<Nibbles, BranchNodeCompact>) {
         let value = U256::from(1);
 
         let mut hashed_storage = tx.cursor_write::<tables::HashedStorage>().unwrap();
@@ -1208,7 +1210,7 @@ mod tests {
         hb.root()
     }
 
-    fn assert_trie_updates(account_updates: &BTreeMap<Nibbles, BranchNodeCompact>) {
+    fn assert_trie_updates(account_updates: &HashMap<Nibbles, BranchNodeCompact>) {
         assert_eq!(account_updates.len(), 2);
 
         let node = account_updates.get(&vec![0x3].into()).unwrap();

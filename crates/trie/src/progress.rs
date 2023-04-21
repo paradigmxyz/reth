@@ -8,7 +8,7 @@ pub enum StateRootProgress {
     Complete(H256, TrieUpdates),
     /// The intermediate progress of state root computation.
     /// Contains the walker stack, the hash builder and the trie updates.
-    Progress(IntermediateStateRootState, TrieUpdates),
+    Progress(Box<IntermediateStateRootState>, TrieUpdates),
 }
 
 /// The intermediate state of the state root computation.
