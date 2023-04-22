@@ -27,6 +27,7 @@ use reth_rpc_types::{
     BlockError, CallRequest, RichBlock,
 };
 use revm::primitives::Env;
+use reth_rpc_types::trace::geth::GethDebugTracerConfig;
 
 /// `debug` API implementation.
 ///
@@ -148,8 +149,49 @@ where
         // TODO(mattsse) apply block overrides
         let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides: _ } =
             opts;
-        let GethDebugTracingOptions { config, .. } = tracing_options;
+        let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
         // TODO(mattsse) support non default tracers
+        if let Some(tracer) = tracer {
+            // valid matching config
+            if let Some(ref config) = tracer_config {
+                if !config.matches_tracer(&tracer) {
+                    return Err(EthApiError::InvalidTracerConfig)
+                }
+            }
+
+            return match tracer {
+                GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
+                    GethDebugBuiltInTracerType::FourByteTracer => {
+                        let mut inspector = FourByteInspector::default();
+                        let (res, _) =
+                            self.eth_api.inspect_call_at(call, at, state_overrides, &mut inspector).await?;
+                        return Ok(FourByteFrame::from(inspector).into())
+                    }
+                    GethDebugBuiltInTracerType::CallTracer => {
+                        let call_config = tracer_config.unwrap().into_call_config().unwrap_or_default();
+
+                        let inspector_config = TracingInspectorConfig::from_geth_config(&config);
+
+                        let mut inspector = TracingInspector::new(inspector_config);
+
+                        let (res, _) =
+                            self.eth_api.inspect_call_at(call, at, state_overrides, &mut inspector).await?;
+                        let gas_used = res.result.gas_used();
+
+                        let frame = inspector.into_geth_builder().geth_call_traces(U256::from(gas_used), call_config);
+
+                        return Ok(frame.into())
+                    }
+                    GethDebugBuiltInTracerType::PreStateTracer => {
+                        todo!()
+                    }
+                    GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
+                },
+                GethDebugTracerType::JsTracer(_) => {
+                    Err(EthApiError::Unsupported("javascript tracers are unsupported."))
+                }
+            }
+        }
 
         // default structlog tracer
         let inspector_config = TracingInspectorConfig::from_geth_config(&config);
@@ -329,7 +371,18 @@ fn trace_transaction(
                     return Ok(FourByteFrame::from(inspector).into())
                 }
                 GethDebugBuiltInTracerType::CallTracer => {
-                    todo!()
+                    let call_config = tracer_config.unwrap().into_call_config().unwrap_or_default();
+
+                    let inspector_config = TracingInspectorConfig::from_geth_config(&config);
+
+                    let mut inspector = TracingInspector::new(inspector_config);
+
+                    let (res, _) = inspect(db, env, &mut inspector)?;
+                    let gas_used = res.result.gas_used();
+
+                    let frame = inspector.into_geth_builder().geth_call_traces(U256::from(gas_used), call_config);
+
+                    return Ok(frame.into())
                 }
                 GethDebugBuiltInTracerType::PreStateTracer => {
                     todo!()

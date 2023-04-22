@@ -1,7 +1,7 @@
 //! Types for representing call trace items.
 
 use crate::tracing::utils::convert_memory;
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
+use reth_primitives::{bytes::Bytes, Address, H256, U256, TxHash};
 use reth_rpc_types::trace::{
     geth::StructLog,
     parity::{
@@ -13,6 +13,8 @@ use revm::interpreter::{
     CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
+use reth_rpc_types::trace::geth::CallFrame;
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -26,6 +28,31 @@ pub enum CallKind {
     DelegateCall,
     Create,
     Create2,
+}
+
+impl Display for CallKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallKind::Call => {
+                write!(f, "CALL")
+            }
+            CallKind::StaticCall => {
+                write!(f, "STATICCALL")
+            }
+            CallKind::CallCode => {
+                write!(f, "CALLCODE")
+            }
+            CallKind::DelegateCall => {
+                write!(f, "DELEGATECALL")
+            }
+            CallKind::Create => {
+                write!(f, "CREATE")
+            }
+            CallKind::Create2 => {
+                write!(f, "CREATE2")
+            }
+        }
+    }
 }
 
 impl From<CallScheme> for CallKind {
@@ -109,6 +136,18 @@ pub(crate) struct CallTrace {
     pub(crate) call_context: Option<CallContext>,
     /// Opcode-level execution steps
     pub(crate) steps: Vec<CallTraceStep>,
+}
+
+impl CallTrace {
+    // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
+    pub fn is_error(&self) -> bool {
+        self.status as u8 >= InstructionResult::Revert as u8
+    }
+
+    /// Returns the error message if it is an erroneous result.
+    pub fn as_error(&self) -> Option<String> {
+        self.is_error().then(|| format!("{:?}", self.status))
+    }
 }
 
 impl Default for CallTrace {
@@ -221,7 +260,7 @@ pub(crate) enum LogCallOrder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RawLog {
     /// Indexed event params are represented as log topics.
-    pub(crate) topics: Vec<H256>,
+    pub(crate) topics: Vec<TxHash>,
     /// Others are just plain data.
     pub(crate) data: Bytes,
 }

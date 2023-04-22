@@ -5176,6 +5176,7 @@ dependencies = [
 name = "reth-revm-inspectors"
 version = "0.1.0"
 dependencies = [
+ "ethers-core",
  "hashbrown 0.13.2",
  "reth-primitives",
  "reth-rpc-types",
@@ -5325,6 +5326,7 @@ name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "ethers-core",
  "jsonrpsee-types",
  "lru 0.9.0",
  "rand 0.8.5",
