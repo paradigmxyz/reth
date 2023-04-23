@@ -71,6 +71,7 @@ impl Command {
                     tx.clear::<tables::PlainStorageState>()?;
                     tx.clear::<tables::AccountChangeSet>()?;
                     tx.clear::<tables::StorageChangeSet>()?;
+                    tx.clear::<tables::Receipts>()?;
                     tx.clear::<tables::Bytecodes>()?;
                     tx.put::<tables::SyncStage>(EXECUTION.0.to_string(), 0)?;
                     insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;

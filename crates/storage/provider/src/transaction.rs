@@ -961,7 +961,7 @@ where
         for (block_number, block_body) in block_bodies.into_iter() {
             for _ in block_body.tx_num_range() {
                 if let Some((_, receipt)) = receipt_iter.next() {
-                    block_states.entry(block_number).or_default().add_receipt(receipt);
+                    block_states.entry(block_number).or_default().add_receipt(receipt.value()?);
                 }
             }
         }
