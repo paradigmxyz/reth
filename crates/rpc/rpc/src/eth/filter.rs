@@ -1,3 +1,4 @@
+use super::cache::EthStateCache;
 use crate::{
     eth::{error::EthApiError, logs_utils},
     result::{internal_rpc_err, rpc_error_with_code, ToRpcResult},
@@ -13,8 +14,6 @@ use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tracing::trace;
-
-use super::cache::EthStateCache;
 
 /// The default maximum of logs in a single response.
 const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 2_000;
