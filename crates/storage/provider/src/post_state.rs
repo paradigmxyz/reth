@@ -207,10 +207,7 @@ impl PostState {
     pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
         &self,
         tx: &'a TX,
-    ) -> Result<H256, StateRootError>
-    where
-        'a: 'tx,
-    {
+    ) -> Result<H256, StateRootError> {
         let hashed_post_state = self.hash_state_slow();
         let (account_prefixset, storage_prefixset) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
@@ -530,6 +527,7 @@ mod tests {
         mdbx::{test_utils, Env, EnvKind, WriteMap},
         transaction::DbTx,
     };
+    use reth_primitives::proofs::EMPTY_ROOT;
     use std::sync::Arc;
 
     // Ensure that the transition id is not incremented if postate is extended by another empty
@@ -1126,5 +1124,15 @@ mod tests {
             )]),
             "The latest state of the storage is incorrect in the merged state"
         );
+    }
+
+    #[test]
+    fn empty_post_state_state_root() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx().expect("Could not get database tx");
+
+        let post_state = PostState::new();
+        let state_root = post_state.state_root_slow(&tx).expect("Could not get state root");
+        assert_eq!(state_root, EMPTY_ROOT);
     }
 }
