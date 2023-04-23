@@ -9,9 +9,10 @@ use std::sync::Arc;
 ///
 /// This type is a Stream that yields better payloads.
 ///
-/// Note: PaylodJob need to be cancel safe.
+/// A PayloadJob must always be prepared to return the best payload built so far to make there's a
+/// valid payload to deliver to the CL, so it does not miss a slot, even if the payload is empty.
 ///
-/// TODO convert this into a future?
+/// Note: A PayloadJob need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1`, See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
 pub trait PayloadJob:
     TryStream<Ok = Arc<BuiltPayload>, Error = PayloadBuilderError> + Send + Sync
 {
@@ -19,7 +20,7 @@ pub trait PayloadJob:
     ///
     /// Note: this is expected to be an empty block without transaction if nothing has been built
     /// yet.
-    fn best_payload(&self) -> Arc<BuiltPayload>;
+    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError>;
 }
 
 /// A type that knows how to create new jobs for creating payloads.
@@ -30,6 +31,8 @@ pub trait PayloadJobGenerator: Send + Sync {
     type Job: PayloadJob;
 
     /// Creates the initial payload and a new [PayloadJob] that yields better payloads.
+    ///
+    /// This is called when the CL requests a new payload job via a fork choice update.
     ///
     /// Note: this is expected to build a new (empty) payload without transactions, so it can be
     /// returned directly. when asked for

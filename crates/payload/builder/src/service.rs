@@ -29,7 +29,10 @@ pub struct PayloadStore {
 
 impl PayloadStore {
     /// Returns the best payload for the given identifier.
-    pub async fn get_payload(&self, id: PayloadId) -> Option<Arc<BuiltPayload>> {
+    pub async fn get_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.inner.get_payload(id).await
     }
 }
@@ -53,7 +56,10 @@ pub struct PayloadBuilderHandle {
 
 impl PayloadBuilderHandle {
     /// Returns the best payload for the given identifier.
-    pub async fn get_payload(&self, id: PayloadId) -> Option<Arc<BuiltPayload>> {
+    pub async fn get_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::GetPayload(id, tx)).ok()?;
         rx.await.ok()?
@@ -136,7 +142,7 @@ where
     }
 
     /// Returns the best payload for the given identifier.
-    fn get_payload(&self, id: PayloadId) -> Option<Arc<BuiltPayload>> {
+    fn get_payload(&self, id: PayloadId) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
     }
 }
@@ -238,5 +244,5 @@ enum PayloadServiceCommand {
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
     /// Get the current payload.
-    GetPayload(PayloadId, oneshot::Sender<Option<Arc<BuiltPayload>>>),
+    GetPayload(PayloadId, oneshot::Sender<Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>>),
 }
