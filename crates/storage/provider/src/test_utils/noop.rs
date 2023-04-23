@@ -33,6 +33,10 @@ impl BlockIdProvider for NoopProvider {
         Ok(ChainInfo::default())
     }
 
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        Ok(0)
+    }
+
     fn block_number(&self, _hash: H256) -> Result<Option<BlockNumber>> {
         Ok(None)
     }

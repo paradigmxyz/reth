@@ -235,6 +235,15 @@ impl BlockIdProvider for MockEthProvider {
             .expect("provider is empty"))
     }
 
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        let lock = self.headers.lock();
+        Ok(lock
+            .iter()
+            .max_by_key(|h| h.1.number)
+            .map(|(_, header)| header.number)
+            .expect("provider is empty"))
+    }
+
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
         let lock = self.blocks.lock();
         let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number));

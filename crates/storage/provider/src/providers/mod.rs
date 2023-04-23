@@ -121,6 +121,14 @@ impl<DB: Database> BlockIdProvider for ShareableDatabase<DB> {
         Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
     }
 
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        Ok(self
+            .db
+            .view(|tx| tx.get::<tables::SyncStage>("Finish".to_string()))?
+            .map_err(Into::<reth_interfaces::db::Error>::into)?
+            .unwrap_or_default())
+    }
+
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))?.map_err(Into::into)
     }
