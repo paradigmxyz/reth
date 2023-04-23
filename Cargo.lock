@@ -5448,6 +5448,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
+ "reth-rpc-types",
  "ruint",
  "serde",
  "thiserror",

@@ -101,6 +101,7 @@ use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 
+pub mod cache;
 mod config;
 pub mod error;
 mod identifier;

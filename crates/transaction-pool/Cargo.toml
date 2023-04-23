@@ -21,6 +21,7 @@ normal = [
 reth-primitives = { path  = "../primitives" }
 reth-provider = { path = "../storage/provider" }
 reth-rlp = { path = "../rlp" }
+reth-rpc-types = {path = "../rpc/rpc-types"}
 
 # async/futures
 async-trait = "0.1"
