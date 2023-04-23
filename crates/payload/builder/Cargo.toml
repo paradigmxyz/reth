@@ -19,6 +19,10 @@ reth-revm-primitives = { path = "../../revm/revm-primitives" }
 ## ethereum
 revm-primitives = "1.1"
 
+# metrics
+metrics = "0.20.1"
+reth-metrics-derive = { path = "../../metrics/metrics-derive" }
+
 ## async
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"
