@@ -1,5 +1,4 @@
 //! Implementation of [`BlockchainTree`]
-use chain::BlockChainId;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::BlockStatus, consensus::Consensus, executor::Error as ExecError, Error,
@@ -18,23 +17,10 @@ use std::{
     sync::Arc,
 };
 
-pub mod block_indices;
-use block_indices::BlockIndices;
-
-pub mod chain;
-pub use chain::AppendableChain;
-
-pub mod config;
-use config::BlockchainTreeConfig;
-
-pub mod externals;
-use externals::TreeExternals;
-
-pub mod shareable;
-pub use shareable::ShareableBlockchainTree;
-
-pub mod post_state_data;
-pub use post_state_data::{PostStateData, PostStateDataRef};
+use crate::{
+    chain::BlockChainId, AppendableChain, BlockIndices, BlockchainTreeConfig, PostStateData,
+    TreeExternals,
+};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Tree of chains and its identifications.
@@ -696,7 +682,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestExecutorFactory;
     use assert_matches::assert_matches;
     use reth_db::{
         mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
@@ -705,7 +690,9 @@ mod tests {
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        insert_block, post_state::PostState, test_utils::blocks::BlockChainTestData,
+        insert_block,
+        post_state::PostState,
+        test_utils::{blocks::BlockChainTestData, TestExecutorFactory},
     };
     use std::{collections::HashSet, sync::Arc};
 
