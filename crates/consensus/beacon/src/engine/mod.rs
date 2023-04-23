@@ -631,18 +631,14 @@ mod tests {
     use crate::engine::error::BeaconForkChoiceUpdateError;
     use assert_matches::assert_matches;
     use reth_blockchain_tree::{
-        blockchain_tree::{
-            config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
-            ShareableBlockchainTree,
-        },
-        post_state::PostState,
-        test_utils::TestExecutorFactory,
+        config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
+        BlockchainTree, ShareableBlockchainTree,
     };
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
     use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
-    use reth_provider::Transaction;
+    use reth_provider::{test_utils::TestExecutorFactory, Transaction};
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, time::Duration};

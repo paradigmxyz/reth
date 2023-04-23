@@ -5160,7 +5160,6 @@ dependencies = [
 name = "reth-revm"
 version = "0.1.0"
 dependencies = [
- "reth-blockchain-tree",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
