@@ -15,9 +15,11 @@
 pub mod codecs;
 pub mod models;
 mod raw;
+mod compressed;
 pub(crate) mod utils;
 
 pub use raw::{RawDubSort, RawKey, RawTable, RawValue};
+pub use compressed::{CompressedTable,CompressedValue};
 
 /// Declaration of all Database tables.
 use crate::{
@@ -186,7 +188,7 @@ table!(
 
 table!(
     /// (Canonical only) Stores transaction receipts.
-    ( Receipts ) TxNumber | Receipt
+    ( Receipts ) TxNumber | CompressedValue<Receipt>
 );
 
 table!(

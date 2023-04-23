@@ -406,7 +406,7 @@ mod tests {
 
         // Vec doesn't return a total length
         assert_eq!(list.clone().to_compact(&mut buf), 0);
-
+        println!("buf: {:x?}", buf.as_slice());
         // Add some noise data in the end that should be returned by `from_compact`.
         buf.extend([1u8, 2]);
 

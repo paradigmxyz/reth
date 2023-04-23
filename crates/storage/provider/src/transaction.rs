@@ -961,7 +961,7 @@ where
         for (block_number, block_body) in block_bodies.into_iter() {
             for tx_num in block_body.tx_num_range() {
                 if let Some((receipt_tx_num, receipt)) = receipt_iter.next() {
-                    if tx_num != receipt_tx_num {
+                    if tx_num == receipt_tx_num {
                         block_states.entry(block_number).or_default().add_receipt(receipt);
                     }
                 }

@@ -4,7 +4,7 @@ use reth_db::{
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::{DbTx, DbTxMut},
-    Error as DbError,
+    Error as DbError, CompressedValue,
 };
 use reth_primitives::{
     bloom::logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, BlockNumber, Bloom,
@@ -470,6 +470,7 @@ impl PostState {
                 0
             };
         for receipt in self.receipts.into_iter() {
+            let receipt = CompressedValue::<Receipt>::new(receipt);
             receipts_cursor.append(next_tx_num, receipt)?;
             next_tx_num += 1;
         }
