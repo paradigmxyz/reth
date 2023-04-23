@@ -56,11 +56,11 @@ impl Stream for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
-    fn best_payload(&self) -> Arc<BuiltPayload> {
-        Arc::new(BuiltPayload::new(
+    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
+        Ok(Arc::new(BuiltPayload::new(
             self.attr.payload_id(),
             Block::default().seal_slow(),
             U256::ZERO,
-        ))
+        )))
     }
 }
