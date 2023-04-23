@@ -339,8 +339,8 @@ where
         if let Some(ref payload) = self.best_payload {
             return Ok(payload.clone())
         }
-        // No payload has been built yet, but we are committed to bringing back a payload to give CL
-        // something to deliver, so we need to return an empty payload.
+        // No payload has been built yet, but we need to return something that the CL then can
+        // deliver, so we need to return an empty payload.
         //
         // Note: it is assumed that this is unlikely to happen, as the payload job is started right
         // away and the first full block should have been built by the time CL is requesting the
