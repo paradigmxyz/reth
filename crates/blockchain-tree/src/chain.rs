@@ -2,7 +2,7 @@
 //!
 //! A [`Chain`] contains the state of accounts for the chain after execution of its constituent
 //! blocks, as well as a list of the blocks the chain is composed of.
-use crate::{blockchain_tree::PostStateDataRef, post_state::PostState};
+use crate::{post_state::PostState, PostStateDataRef};
 use reth_db::database::Database;
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
 use reth_primitives::{
