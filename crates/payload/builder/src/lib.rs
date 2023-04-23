@@ -18,6 +18,7 @@
 //!   - [PayloadJob]: a type that can yields (better) payloads over time.
 
 pub mod error;
+mod metrics;
 mod payload;
 mod service;
 mod traits;
