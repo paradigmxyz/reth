@@ -1,5 +1,5 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use metrics_core::Counter;
+use metrics_core::Gauge;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -23,7 +23,7 @@ pub const EXECUTION: StageId = StageId("Execution");
 #[metrics(scope = "sync.execution")]
 pub struct ExecutionStageMetrics {
     /// The total amount of gas processed (in millions)
-    mgas_processed_total: Counter,
+    mgas_processed_total: Gauge,
 }
 
 /// The execution stage executes all transactions and
@@ -127,7 +127,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             if let Some(last_receipt) = block_state.receipts().last() {
                 self.metrics
                     .mgas_processed_total
-                    .increment(last_receipt.cumulative_gas_used / 1_000_000);
+                    .increment(last_receipt.cumulative_gas_used as f64 / 1_000_000.);
             }
             state.extend(block_state);
         }
