@@ -146,8 +146,7 @@ where
             .post_state
             .accounts
             .iter()
-            .find(|(k, v)| k >= &&key && v.is_some())
-            .map(|(address, info)| (*address, info.unwrap()));
+            .find_map(|(k, v)| v.filter(|_| k >= &key).map(|v| (*k, v)));
         if let Some((address, account)) = post_state_item {
             // It's an exact match, return the account from post state without looking up in the
             // database.
