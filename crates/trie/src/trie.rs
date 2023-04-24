@@ -206,6 +206,8 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
         walker.set_updates(retain_updates);
         hash_builder.set_updates(retain_updates);
 
+        let mut account_rlp = Vec::with_capacity(128);
+
         while let Some(key) = last_walker_key.take().or_else(|| walker.key()) {
             // Take the last account key to make sure we take it into consideration only once.
             let (next_key, mut next_account_entry) = match last_account_key.take() {
@@ -264,7 +266,8 @@ impl<'a, 'tx, TX: DbTx<'tx>> StateRoot<'a, TX> {
                 };
 
                 let account = EthAccount::from(account).with_storage_root(storage_root);
-                let mut account_rlp = Vec::with_capacity(account.length());
+
+                account_rlp.clear();
                 account.encode(&mut &mut account_rlp);
 
                 hash_builder.add_leaf(account_nibbles, &account_rlp);
