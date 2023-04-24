@@ -27,7 +27,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "9.3.6"
+      "version": "9.4.7"
     },
     {
       "type": "panel",
@@ -46,6 +46,12 @@
       "id": "prometheus",
       "name": "Prometheus",
       "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
     },
     {
       "type": "panel",
@@ -139,7 +145,7 @@
         "showThresholdLabels": false,
         "showThresholdMarkers": true
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "9.4.7",
       "targets": [
         {
           "datasource": {
@@ -205,7 +211,7 @@
         },
         "showUnfilled": true
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "9.4.7",
       "targets": [
         {
           "datasource": {
@@ -415,7 +421,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(reth_tx_commit_sum[$__interval]) / rate(reth_tx_commit_count[$__interval])",
+          "expr": "rate(reth_tx_commit_sum[$__rate_interval]) / rate(reth_tx_commit_count[$__rate_interval])",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Commit time",
@@ -495,7 +501,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "9.4.7",
       "targets": [
         {
           "datasource": {
@@ -751,6 +757,167 @@
       "type": "piechart"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "__name__"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "instance"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "type"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "displayName",
+                "value": "Overflow pages"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "table"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Table"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "id": 58,
+      "options": {
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "9.4.7",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sort_desc(reth_db_table_pages{type=\"overflow\"} != 0)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Overflow pages by table",
+      "type": "table"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -820,11 +987,11 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 34
       },
-      "id": 44,
+      "id": 56,
       "options": {
         "legend": {
           "calcs": [],
@@ -843,11 +1010,47 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[$__rate_interval])",
-          "legendFormat": "Gas/s",
+          "editorMode": "code",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[30s])",
+          "legendFormat": "Gas/s (30s)",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[1m])",
+          "hide": false,
+          "legendFormat": "Gas/s (1m)",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[5m])",
+          "hide": false,
+          "legendFormat": "Gas/s (5m)",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[10m])",
+          "hide": false,
+          "legendFormat": "Gas/s (10m)",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Gas processed",
@@ -1144,6 +1347,7 @@
       "id": 8,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
@@ -1215,7 +1419,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 51
       },
@@ -1381,7 +1585,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 59
       },
       "id": 24,
       "panels": [],
@@ -1474,7 +1678,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "id": 26,
       "options": {
@@ -1604,7 +1808,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 60
       },
       "id": 33,
       "options": {
@@ -1721,7 +1925,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 68
       },
       "id": 36,
       "options": {
@@ -1770,7 +1974,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 76
       },
       "id": 32,
       "panels": [],
@@ -1864,7 +2068,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 69
+        "y": 77
       },
       "id": 30,
       "options": {
@@ -2002,7 +2206,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 69
+        "y": 77
       },
       "id": 28,
       "options": {
@@ -2098,7 +2302,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 77
+        "y": 85
       },
       "id": 35,
       "options": {
@@ -2143,7 +2347,8 @@
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 37,
+  "revision": 1,
+  "schemaVersion": 38,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -2156,7 +2361,7 @@
   "timepicker": {},
   "timezone": "",
   "title": "reth",
-  "uid": "2k8BXz24k",
-  "version": 5,
+  "uid": "2k8BXz24x",
+  "version": 4,
   "weekStart": ""
 }
