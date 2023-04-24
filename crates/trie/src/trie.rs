@@ -432,7 +432,7 @@ where
             self.hashed_address,
         );
 
-        // // do not add a branch node on empty storage
+        // short circuit on empty storage
         if hashed_storage_cursor.is_empty(self.hashed_address)? {
             return Ok((
                 EMPTY_ROOT,

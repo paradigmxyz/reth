@@ -503,6 +503,113 @@ mod tests {
     }
 
     #[test]
+    fn fuzz_hashed_account_cursor() {
+        proptest!(ProptestConfig::with_cases(10), |(db_accounts: BTreeMap<H256, Account>, post_state_accounts: BTreeMap<H256, Option<Account>>)| {
+                let db = create_test_rw_db();
+                db.update(|tx| {
+                    for (key, account) in db_accounts.iter() {
+                        tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+                    }
+                })
+                .unwrap();
+
+                let post_state = HashedPostState {
+                    accounts: BTreeMap::from_iter(
+                        post_state_accounts.iter().map(|(key, account)| (*key, *account)),
+                    ),
+                    storages: Default::default(),
+                };
+
+                let mut expected = db_accounts;
+                // overwrite or remove accounts from the expected result
+                for (key, account) in post_state_accounts.iter() {
+                    if let Some(account) = account {
+                        expected.insert(*key, *account);
+                    } else {
+                        expected.remove(key);
+                    }
+                }
+
+                let tx = db.tx().unwrap();
+                let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+                assert_account_cursor_order(&factory, expected.into_iter());
+            }
+        );
+    }
+
+    #[test]
+    fn storage_is_empty() {
+        let address = H256::random();
+        let db = create_test_rw_db();
+
+        // empty from the get go
+        {
+            let post_state = HashedPostState::default();
+            let tx = db.tx().unwrap();
+            let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+            let mut cursor = factory.hashed_storage_cursor().unwrap();
+            assert!(cursor.is_empty(address).unwrap());
+        }
+
+        let db_storage = BTreeMap::from_iter(
+            (0..10).into_iter().map(|key| (H256::from_low_u64_be(key), U256::from(key))),
+        );
+        db.update(|tx| {
+            for (slot, value) in db_storage.iter() {
+                // insert zero value accounts to the database
+                tx.put::<tables::HashedStorage>(
+                    address,
+                    StorageEntry { key: *slot, value: *value },
+                )
+                .unwrap();
+            }
+        })
+        .unwrap();
+
+        // not empty
+        {
+            let post_state = HashedPostState::default();
+            let tx = db.tx().unwrap();
+            let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+            let mut cursor = factory.hashed_storage_cursor().unwrap();
+            assert!(!cursor.is_empty(address).unwrap());
+        }
+
+        // wiped storage, must be empty
+        {
+            let post_state = HashedPostState {
+                accounts: BTreeMap::default(),
+                storages: BTreeMap::from_iter([(
+                    address,
+                    HashedStorage { wiped: true, ..Default::default() },
+                )]),
+            };
+            let tx = db.tx().unwrap();
+            let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+            let mut cursor = factory.hashed_storage_cursor().unwrap();
+            assert!(cursor.is_empty(address).unwrap());
+        }
+
+        // wiped storage, but post state has entries
+        {
+            let post_state = HashedPostState {
+                accounts: BTreeMap::default(),
+                storages: BTreeMap::from_iter([(
+                    address,
+                    HashedStorage {
+                        wiped: true,
+                        storage: BTreeMap::from_iter([(H256::random(), U256::ZERO)]),
+                    },
+                )]),
+            };
+            let tx = db.tx().unwrap();
+            let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+            let mut cursor = factory.hashed_storage_cursor().unwrap();
+            assert!(!cursor.is_empty(address).unwrap());
+        }
+    }
+
+    #[test]
     fn storage_cursor_correct_order() {
         let address = H256::random();
         let db_storage = BTreeMap::from_iter(
@@ -610,41 +717,6 @@ mod tests {
         let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
         let expected = [(address, storage)].into_iter();
         assert_storage_cursor_order(&factory, expected);
-    }
-
-    #[test]
-    fn fuzz_hashed_account_cursor() {
-        proptest!(ProptestConfig::with_cases(10), |(db_accounts: BTreeMap<H256, Account>, post_state_accounts: BTreeMap<H256, Option<Account>>)| {
-                let db = create_test_rw_db();
-                db.update(|tx| {
-                    for (key, account) in db_accounts.iter() {
-                        tx.put::<tables::HashedAccount>(*key, *account).unwrap();
-                    }
-                })
-                .unwrap();
-
-                let post_state = HashedPostState {
-                    accounts: BTreeMap::from_iter(
-                        post_state_accounts.iter().map(|(key, account)| (*key, *account)),
-                    ),
-                    storages: Default::default(),
-                };
-
-                let mut expected = db_accounts;
-                // overwrite or remove accounts from the expected result
-                for (key, account) in post_state_accounts.iter() {
-                    if let Some(account) = account {
-                        expected.insert(*key, *account);
-                    } else {
-                        expected.remove(key);
-                    }
-                }
-
-                let tx = db.tx().unwrap();
-                let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
-                assert_account_cursor_order(&factory, expected.into_iter());
-            }
-        );
     }
 
     #[test]
