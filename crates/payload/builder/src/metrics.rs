@@ -1,9 +1,9 @@
-//! Payloadbuild service metrics.
+//! Payload builder service metrics.
 
 use metrics::{Counter, Gauge};
 use reth_metrics_derive::Metrics;
 
-/// Transaction pool metrics
+/// Payload builder service metrics
 #[derive(Metrics)]
 #[metrics(scope = "payloads")]
 pub(crate) struct PayloadBuilderServiceMetrics {
