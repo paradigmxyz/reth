@@ -222,10 +222,12 @@ impl BlockHashProvider for MockEthProvider {
 
 impl BlockIdProvider for MockEthProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
+        let best_block_number = self.best_block_number()?;
         let lock = self.headers.lock();
+
         Ok(lock
             .iter()
-            .max_by_key(|h| h.1.number)
+            .find(|(_, header)| header.number == best_block_number)
             .map(|(hash, header)| ChainInfo {
                 best_hash: *hash,
                 best_number: header.number,
