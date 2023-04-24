@@ -1,6 +1,5 @@
 use super::rlp_node;
 use crate::Nibbles;
-use reth_primitives::bytes::BytesMut;
 use reth_rlp::{BufMut, Encodable};
 
 /// A leaf node represents the endpoint or terminal node in the trie. In other words, a leaf node is
@@ -26,10 +25,9 @@ impl<'a> LeafNode<'a> {
 
     /// RLP encodes the node and returns either RLP(Node) or RLP(keccak(RLP(node)))
     /// depending on if the serialized node was longer than a keccak).
-    pub fn rlp(&self) -> Vec<u8> {
-        let mut out = BytesMut::new();
-        self.encode(&mut out);
-        rlp_node(&out)
+    pub fn rlp(&self, out: &mut Vec<u8>) -> Vec<u8> {
+        self.encode(out);
+        rlp_node(out)
     }
 }
 
@@ -73,7 +71,7 @@ mod tests {
         let nibble = Nibbles { hex_data: hex!("0604060f").to_vec() };
         let val = hex!("76657262").to_vec();
         let leaf = LeafNode::new(&nibble, &val);
-        let rlp = leaf.rlp();
+        let rlp = leaf.rlp(&mut vec![]);
 
         let expected = hex!("c98320646f8476657262").to_vec();
         assert_eq!(rlp, expected);

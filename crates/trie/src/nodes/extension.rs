@@ -1,6 +1,5 @@
 use super::rlp_node;
 use crate::Nibbles;
-use reth_primitives::bytes::BytesMut;
 use reth_rlp::{BufMut, Encodable};
 
 /// An intermediate node that exists solely to compress the trie's paths. It contains a path segment
@@ -24,10 +23,9 @@ impl<'a> ExtensionNode<'a> {
     }
 
     /// RLP encodes the node and returns either RLP(Node) or RLP(keccak(RLP(node))).
-    pub fn rlp(&self) -> Vec<u8> {
-        let mut buf = BytesMut::new();
-        self.encode(&mut buf);
-        rlp_node(&buf)
+    pub fn rlp(&self, buf: &mut Vec<u8>) -> Vec<u8> {
+        self.encode(buf);
+        rlp_node(buf)
     }
 }
 
