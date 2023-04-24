@@ -336,7 +336,7 @@ where
     DB: Send + Sync,
     Tree: CanonStateSubscriptions,
 {
-    fn subscribe_canon_state(&self) -> CanonStateNotifications {
-        self.tree.subscribe_canon_state()
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+        self.tree.subscribe_to_canonical_state()
     }
 }

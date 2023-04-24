@@ -118,7 +118,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> CanonStateSubscriptions
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn subscribe_canon_state(&self) -> reth_provider::CanonStateNotifications {
+    fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {
         self.tree.read().subscribe_canon_state()
     }
 }
