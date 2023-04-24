@@ -12,7 +12,7 @@
     * This allows for [out-of-the-box benchmarking](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/db/benches/encoding_iai.rs#L5) (using [Criterion](https://github.com/bheisler/criterion.rs) and [Iai](https://github.com/bheisler/iai))
     * It also enables [out-of-the-box fuzzing](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/interfaces/src/db/codecs/fuzz/mod.rs) using [trailofbits/test-fuzz](https://github.com/trailofbits/test-fuzz).
 * We implemented that trait for the following encoding formats:
-    * [Ethereum-specific Compact Encoding](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/compact/mod.rs): A lot of Ethereum datatypes have unnecessary zeros when serialized, or optional (e.g. on empty hashes) which would be nice not to pay in storage costs. 
+    * [Ethereum-specific Compact Encoding](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/compact/mod.rs): A lot of Ethereum datatypes have unnecessary zeros when serialized, or optional (e.g. on empty hashes) which would be nice not to pay in storage costs.
         * [Erigon](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) achieves that by having a `bitfield` set on  Table "PlainState which adds a bitfield to Accounts.
         * Akula expanded it for other tables and datatypes manually. It also saved some more space by storing the length of certain types (U256, u64) using the modular_bitfield crate, which compacts this information.
         * We generalized it for all types, by writing a derive macro that autogenerates code for implementing the trait. It, also generates the interfaces required for fuzzing using ToB/test-fuzz:
@@ -25,61 +25,77 @@
 
 # Table design
 
-Historical state changes are indexed by autoincrementing enumeration called `TransitionId`. This means that `reth` stores the state for every account after every transaction that touched it, and it provides indexes for accessing that data quickly. While this may make the database size bigger (needs benchmark once `reth` is closer to prod), it also enables blazing-fast historical tracing and simulations because there is no need to re-execute all transactions inside a block.
-
-State transitions differ from transaction level enumeration in order to account for block rewards.
-e.g. If block #1 contains transactions from id 0 to 5 (inclusive) and has a reward, the reward will be assigned transition id 6 and transition ids in block #2 will start block index 7.
-
-Two additional tables `TxTransitionIdIndex` and `BlockTransitionIdIndex` are introduced to enable reverse lookup of transition by transaction id and block number respectively. The transition id at block number denotes the final state transition of the block. If block has a reward, the state transition at block number `x` points at data about the state transition for the reward distribution. Otherwise, it points to the state transition at the last transaction in block number `x`.
+Historical state changes are indexed by `BlockNumber`. This means that `reth` stores the state for every account after every block that touched it, and it provides indexes for accessing that data quickly. While this may make the database size bigger (needs benchmark once `reth` is closer to prod).
 
 Below, you can see the table design that implements this scheme:
 
 ```mermaid
 erDiagram
+CanonicalHeaders {
+    u64 BlockNumber "PK"
+    H256 HeaderHash "Value for CanonicalHeaders"
+}
+HeaderNumbers {
+    H256 BlockHash "PK"
+    u64 BlockNumber
+}
+Headers {
+    u64 BlockNumber "PK"
+    Header Data
+}
+BlockBodyIndices {
+    u64 BlockNumber "PK"
+    u64 first_tx_num
+    u64 tx_count
+}
+Receipts {
+    u64 TxNumber "PK"
+    Receipt Data
+}
 Transactions {
     u64 TxNumber "PK"
-    Transaction Data
+    TransactionSignedNoHash Data
 }
 TransactionHash {
     H256 TxHash "PK"
     u64 TxNumber
 }
-TxTransitionIdIndex {
+TransactionBlock {
     u64 TxNumber "PK"
-    u64 TransitionId 
-}
-BlockTransitionIdIndex {
-    u64 BlockNumber "PK"
-    u64 TransitionId
+    u64 BlockNumber
 }
 AccountHistory {
     H256 Account "PK"
-    BlockNumberList TransitionIdList "List of transitions where account was changed"
+    BlockNumberList BlockNumberList "List of transitions where account was changed"
 }
 StorageHistory {
     H256 Account "PK"
     H256 StorageKey "PK"
-    BlockNumberList TransitionIdList "List of transitions where account storage entry was changed"
+    BlockNumberList BlockNumberList "List of transitions where account storage entry was changed"
 }
 AccountChangeSet {
-    u64 TransitionId "PK"
+    u64 BlockNumber "PK"
     H256 Account "PK"
     ChangeSet AccountChangeSet "Account before transition"
 }
 StorageChangeSet {
-    u64 TransitionId "PK"
+    u64 BlockNumber "PK"
     H256 Account "PK"
     H256 StorageKey "PK"
     ChangeSet StorageChangeSet "Storage entry before transition"
 }
-EVM ||--o{ AccountHistory: "Load Account by first greater TransitionId"
-EVM ||--o{ StorageHistory: "Load Storage Entry by first greater TransitionId"
+EVM ||--o{ AccountHistory: "Load Account by first greater BlockNumber"
+EVM ||--o{ StorageHistory: "Load Storage Entry by first greater BlockNumber"
 TransactionHash ||--o{ Transactions : index
-Transactions ||--o{ TxTransitionIdIndex : index
+Transactions ||--o{ TransactionBlock : index
+BlockBodyIndices ||--o{ TransactionBlock : "index"
+TransactionBlock ||--o{ BlockBodyIndices : "index"
+Headers ||--o{ AccountChangeSet : "unique index"
 AccountHistory ||--o{ AccountChangeSet : index
-BlockTransitionIdIndex ||--o{ AccountChangeSet : "unique index"
-TxTransitionIdIndex ||--o{ AccountChangeSet : "unique index"
 StorageHistory ||--o{ StorageChangeSet : index
-BlockTransitionIdIndex ||--o{ StorageChangeSet : "unique index"
-TxTransitionIdIndex ||--o{ StorageChangeSet : "unique index"
+Headers ||--o{ StorageChangeSet : "unique index"
+BlockBodyIndices ||--o{ Headers : "index"
+Headers ||--o{ HeaderNumbers : "Calculate hash from header"
+CanonicalHeaders ||--o{ Headers : "index"
+Transactions ||--o{ Receipts : index
 ```

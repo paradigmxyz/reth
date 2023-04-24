@@ -386,7 +386,6 @@ where
                     self.network.send_transactions_hashes(peer_id, msg);
                 }
             }
-            // TODO Add remaining events
             _ => {}
         }
     }
@@ -421,11 +420,11 @@ where
                 // If we received the transactions as the response to our GetPooledTransactions
                 // requests (based on received `NewPooledTransactionHashes`) then we already
                 // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`]
-                if source.is_broadcast() && !peer.transactions.insert(tx.hash) {
+                if source.is_broadcast() && !peer.transactions.insert(tx.hash()) {
                     num_already_seen += 1;
                 }
 
-                match self.transactions_by_peers.entry(tx.hash) {
+                match self.transactions_by_peers.entry(tx.hash()) {
                     Entry::Occupied(mut entry) => {
                         // transaction was already inserted
                         entry.get_mut().push(peer_id);
@@ -454,6 +453,7 @@ where
 
     fn report_bad_message(&self, peer_id: PeerId) {
         trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
+        self.metrics.reported_bad_transactions.increment(1);
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
     }
 
@@ -463,7 +463,6 @@ where
     }
 
     /// Penalize the peers that sent the bad transaction
-    #[allow(unused)]
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
@@ -534,7 +533,6 @@ where
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
-                        this.metrics.reported_bad_transactions.increment(1);
                         continue
                     }
                     this.on_good_import(*err.hash());
@@ -568,7 +566,7 @@ struct PropagateTransaction {
 
 impl PropagateTransaction {
     fn hash(&self) -> TxHash {
-        self.transaction.hash
+        self.transaction.hash()
     }
 
     fn new(transaction: Arc<TransactionSigned>) -> Self {

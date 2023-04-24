@@ -60,7 +60,7 @@ impl Consensus for AutoSealConsensus {
 
     fn validate_header(
         &self,
-        _header: &SealedHeader,
+        _header: &Header,
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         Ok(())

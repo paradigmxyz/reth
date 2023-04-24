@@ -11,7 +11,7 @@ use reth_db::{
 use reth_primitives::{keccak256, BlockNumber, StorageEntry, H256};
 use std::{collections::HashMap, ops::RangeInclusive};
 
-/// A wrapper around a database transaction that loads prefix sets within a given transition range.
+/// A wrapper around a database transaction that loads prefix sets within a given block range.
 #[derive(Deref)]
 pub struct PrefixSetLoader<'a, TX>(&'a TX);
 
@@ -26,7 +26,7 @@ impl<'a, 'b, TX> PrefixSetLoader<'a, TX>
 where
     TX: DbTx<'b>,
 {
-    /// Load all account and storage changes for the given transition id range.
+    /// Load all account and storage changes for the given block range.
     pub fn load(
         self,
         range: RangeInclusive<BlockNumber>,

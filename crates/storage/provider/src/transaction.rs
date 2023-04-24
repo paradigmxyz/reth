@@ -20,7 +20,8 @@ use reth_db::{
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered, TxNumber, H256, U256,
+    SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered,
+    TxNumber, H256, U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{
@@ -580,7 +581,8 @@ where
 
         // merkle tree
         {
-            let state_root = StateRoot::incremental_root(self.deref_mut(), range.clone(), None)?;
+            let (state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(self.deref_mut(), range.clone())?;
             if state_root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: state_root,
@@ -589,6 +591,7 @@ where
                     block_hash: end_block_hash,
                 })
             }
+            trie_updates.flush(self.deref_mut())?;
         }
         Ok(())
     }
@@ -637,8 +640,12 @@ where
         }
 
         // Get transactions and senders
-        let transactions =
-            self.get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?;
+        let transactions = self
+            .get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?
+            .into_iter()
+            .map(|(id, tx)| (id, tx.into()))
+            .collect::<Vec<(u64, TransactionSigned)>>();
+
         let senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
@@ -952,11 +959,9 @@ where
 
         // loop break if we are at the end of the blocks.
         for (block_number, block_body) in block_bodies.into_iter() {
-            for tx_num in block_body.tx_num_range() {
-                if let Some((receipt_tx_num, receipt)) = receipt_iter.next() {
-                    if tx_num != receipt_tx_num {
-                        block_states.entry(block_number).or_default().add_receipt(receipt);
-                    }
+            for _ in block_body.tx_num_range() {
+                if let Some((_, receipt)) = receipt_iter.next() {
+                    block_states.entry(block_number).or_default().add_receipt(receipt);
                 }
             }
         }
@@ -978,7 +983,8 @@ where
             self.unwind_storage_history_indices(storage_range)?;
 
             // merkle tree
-            let new_state_root = StateRoot::incremental_root(self.deref(), range.clone(), None)?;
+            let (new_state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(self.deref(), range.clone())?;
 
             let parent_number = range.start().saturating_sub(1);
             let parent_state_root = self.get_header(parent_number)?.state_root;
@@ -994,6 +1000,7 @@ where
                     block_hash: parent_hash,
                 })
             }
+            trie_updates.flush(self.deref())?;
         }
         // get blocks
         let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
@@ -1454,8 +1461,8 @@ mod test {
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
         let get_block = get[0].0.clone();
         let get_state = get[0].1.clone();
-        assert_eq!(get_block, block1.clone());
-        assert_eq!(get_state, exec_res1.clone());
+        assert_eq!(get_block, block1);
+        assert_eq!(get_state, exec_res1);
 
         // take one block
         let take = tx.take_block_and_execution_range(&chain_spec, 1..=1).unwrap();
@@ -1492,10 +1499,10 @@ mod test {
 
         // get two blocks
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=2).unwrap();
-        assert_eq!(get[0].0, block1.clone());
-        assert_eq!(get[1].0, block2.clone());
-        assert_eq!(get[0].1, exec_res1.clone());
-        assert_eq!(get[1].1, exec_res2.clone());
+        assert_eq!(get[0].0, block1);
+        assert_eq!(get[1].0, block2);
+        assert_eq!(get[0].1, exec_res1);
+        assert_eq!(get[1].1, exec_res2);
 
         // take two blocks
         let get = tx.take_block_and_execution_range(&chain_spec, 1..=2).unwrap();

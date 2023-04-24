@@ -1,10 +1,11 @@
 use super::TrieCursor;
+use crate::updates::TrieKey;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbDupCursorRO},
     tables, Error,
 };
 use reth_primitives::{
-    trie::{BranchNodeCompact, StorageTrieEntry, StoredNibblesSubKey},
+    trie::{BranchNodeCompact, StoredNibblesSubKey},
     H256,
 };
 
@@ -24,10 +25,7 @@ impl<C> StorageTrieCursor<C> {
 
 impl<'a, C> TrieCursor<StoredNibblesSubKey> for StorageTrieCursor<C>
 where
-    C: DbDupCursorRO<'a, tables::StoragesTrie>
-        + DbDupCursorRW<'a, tables::StoragesTrie>
-        + DbCursorRO<'a, tables::StoragesTrie>
-        + DbCursorRW<'a, tables::StoragesTrie>,
+    C: DbDupCursorRO<'a, tables::StoragesTrie> + DbCursorRO<'a, tables::StoragesTrie>,
 {
     fn seek_exact(
         &mut self,
@@ -50,28 +48,18 @@ where
             .map(|value| (value.nibbles.inner.to_vec(), value.node)))
     }
 
-    fn upsert(&mut self, key: StoredNibblesSubKey, value: BranchNodeCompact) -> Result<(), Error> {
-        if let Some(entry) = self.cursor.seek_by_key_subkey(self.hashed_address, key.clone())? {
-            // "seek exact"
-            if entry.nibbles == key {
-                self.cursor.delete_current()?;
-            }
-        }
-
-        self.cursor.upsert(self.hashed_address, StorageTrieEntry { nibbles: key, node: value })?;
-        Ok(())
-    }
-
-    fn delete_current(&mut self) -> Result<(), Error> {
-        self.cursor.delete_current()
+    fn current(&mut self) -> Result<Option<TrieKey>, Error> {
+        Ok(self.cursor.current()?.map(|(k, v)| TrieKey::StorageNode(k, v.nibbles)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
-    use reth_primitives::trie::BranchNodeCompact;
+    use reth_db::{
+        cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
+    };
+    use reth_primitives::trie::{BranchNodeCompact, StorageTrieEntry};
     use reth_provider::Transaction;
 
     // tests that upsert and seek match on the storagetrie cursor
@@ -79,14 +67,20 @@ mod tests {
     fn test_storage_cursor_abstraction() {
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
-        let cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
-        let mut cursor = StorageTrieCursor::new(cursor, H256::random());
-
+        let hashed_address = H256::random();
         let key = vec![0x2, 0x3];
         let value = BranchNodeCompact::new(1, 1, 1, vec![H256::random()], None);
 
-        cursor.upsert(key.clone().into(), value.clone()).unwrap();
-        assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
+        cursor
+            .upsert(
+                hashed_address,
+                StorageTrieEntry { nibbles: key.clone().into(), node: value.clone() },
+            )
+            .unwrap();
+
+        let mut cursor = StorageTrieCursor::new(cursor, hashed_address);
+        assert_eq!(cursor.seek(key.clone().into()).unwrap().unwrap().1, value);
     }
 }

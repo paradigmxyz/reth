@@ -40,6 +40,9 @@ impl StoredBlockBodyIndices {
     }
 
     /// First transaction index.
+    ///
+    /// Caution: If the block is empty, this is the number of the first transaction
+    /// in the next non-empty block.
     pub fn first_tx_num(&self) -> TxNumber {
         self.first_tx_num
     }

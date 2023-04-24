@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use reth_primitives::{
-    BlockHash, BlockNumber, InvalidTransactionError, SealedBlock, SealedHeader, H256, U256,
+    BlockHash, BlockNumber, Header, InvalidTransactionError, SealedBlock, SealedHeader, H256, U256,
 };
 use std::fmt::Debug;
 
@@ -29,7 +29,7 @@ pub trait Consensus: Debug + Send + Sync {
     /// Some consensus engines may want to do additional checks here.
     fn validate_header(
         &self,
-        header: &SealedHeader,
+        header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError>;
 

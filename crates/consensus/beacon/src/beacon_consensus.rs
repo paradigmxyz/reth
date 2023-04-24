@@ -2,7 +2,7 @@
 use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
-    Chain, ChainSpec, Hardfork, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256,
+    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256,
 };
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ impl Consensus for BeaconConsensus {
 
     fn validate_header(
         &self,
-        header: &SealedHeader,
+        header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
@@ -85,7 +85,7 @@ impl Consensus for BeaconConsensus {
 ///
 /// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
 /// This must be 32 bytes or fewer; formally Hx.
-fn validate_header_extradata(header: &SealedHeader) -> Result<(), ConsensusError> {
+fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
     if header.extra_data.len() > 32 {
         Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
     } else {

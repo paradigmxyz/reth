@@ -337,7 +337,9 @@ where
         //    updated successfully. The build process is specified in the Payload
         //    building section.
         let attributes = PayloadBuilderAttributes::new(header.parent_hash, attrs);
-        // TODO(mattsse) this needs to be handled asynchronously
+
+        // send the payload to the builder and return the receiver for the pending payload id,
+        // initiating payload job is handled asynchronously
         let pending_payload_id = self.payload_builder.send_new_payload(attributes);
 
         // Client software MUST respond to this method call in the following way:
@@ -366,10 +368,7 @@ where
     ///
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
-    fn on_new_payload(
-        &mut self,
-        payload: ExecutionPayload,
-    ) -> Result<PayloadStatus, reth_interfaces::Error> {
+    fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
         let block_number = payload.block_number.as_u64();
         let block_hash = payload.block_hash;
         trace!(target: "consensus::engine", ?block_hash, block_number, "Received new payload");
@@ -377,7 +376,7 @@ where
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
-                return Ok(error.into())
+                return error.into()
             }
         };
 
@@ -411,7 +410,7 @@ where
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
         trace!(target: "consensus::engine", ?block_hash, block_number, ?status, "Returning payload status");
-        Ok(status)
+        status
     }
 
     /// Returns the next pipeline state depending on the current value of the next action.
@@ -536,14 +535,8 @@ where
                     }
                     BeaconEngineMessage::NewPayload { payload, tx } => {
                         this.metrics.new_payload_messages.increment(1);
-                        let response = match this.on_new_payload(payload) {
-                            Ok(response) => response,
-                            Err(error) => {
-                                error!(target: "consensus::engine", ?error, "Error getting new payload response");
-                                return Poll::Ready(Err(error.into()))
-                            }
-                        };
-                        let _ = tx.send(Ok(response));
+                        let status = this.on_new_payload(payload);
+                        let _ = tx.send(Ok(status));
                     }
                 }
             }
@@ -638,18 +631,14 @@ mod tests {
     use crate::engine::error::BeaconForkChoiceUpdateError;
     use assert_matches::assert_matches;
     use reth_blockchain_tree::{
-        blockchain_tree::{
-            config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
-            ShareableBlockchainTree,
-        },
-        post_state::PostState,
-        test_utils::TestExecutorFactory,
+        config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
+        BlockchainTree, ShareableBlockchainTree,
     };
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
     use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
-    use reth_provider::Transaction;
+    use reth_provider::{test_utils::TestExecutorFactory, Transaction};
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, time::Duration};

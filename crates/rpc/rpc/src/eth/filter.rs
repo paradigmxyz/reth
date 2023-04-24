@@ -1,3 +1,4 @@
+use super::cache::EthStateCache;
 use crate::{
     eth::{error::EthApiError, logs_utils},
     result::{internal_rpc_err, rpc_error_with_code, ToRpcResult},
@@ -26,13 +27,14 @@ pub struct EthFilter<Client, Pool> {
 
 impl<Client, Pool> EthFilter<Client, Pool> {
     /// Creates a new, shareable instance.
-    pub fn new(client: Client, pool: Pool) -> Self {
+    pub fn new(client: Client, pool: Pool, eth_cache: EthStateCache) -> Self {
         let inner = EthFilterInner {
             client,
             active_filters: Default::default(),
             pool,
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
             max_logs_in_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
+            eth_cache,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -51,21 +53,25 @@ where
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
+        trace!(target: "rpc::eth", "Serving eth_newFilter");
         self.inner.install_filter(FilterKind::Log(Box::new(filter))).await
     }
 
     /// Handler for `eth_newBlockFilter`
     async fn new_block_filter(&self) -> RpcResult<FilterId> {
+        trace!(target: "rpc::eth", "Serving eth_newBlockFilter");
         self.inner.install_filter(FilterKind::Block).await
     }
 
     /// Handler for `eth_newPendingTransactionFilter`
     async fn new_pending_transaction_filter(&self) -> RpcResult<FilterId> {
+        trace!(target: "rpc::eth", "Serving eth_newPendingTransactionFilter");
         self.inner.install_filter(FilterKind::PendingTransaction).await
     }
 
     /// Handler for `eth_getFilterChanges`
     async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges> {
+        trace!(target: "rpc::eth", "Serving eth_getFilterChanges");
         let info = self.inner.client.chain_info().to_rpc_result()?;
         let best_number = info.best_number;
 
@@ -125,6 +131,7 @@ where
     ///
     /// Handler for `eth_getFilterLogs`
     async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
+        trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
         let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
             if let FilterKind::Log(ref filter) =
@@ -142,6 +149,7 @@ where
 
     /// Handler for `eth_uninstallFilter`
     async fn uninstall_filter(&self, id: FilterId) -> RpcResult<bool> {
+        trace!(target: "rpc::eth", "Serving eth_uninstallFilter");
         let mut filters = self.inner.active_filters.inner.lock().await;
         if filters.remove(&id).is_some() {
             trace!(target: "rpc::eth::filter", ?id, "uninstalled filter");
@@ -155,6 +163,7 @@ where
     ///
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
+        trace!(target: "rpc::eth", "Serving eth_getLogs");
         self.inner.logs_for_filter(filter).await
     }
 }
@@ -172,6 +181,8 @@ struct EthFilterInner<Client, Pool> {
     id_provider: Arc<dyn IdProvider>,
     /// Maximum number of logs that can be returned in a response
     max_logs_in_response: usize,
+    /// The async cache frontend for eth related data
+    eth_cache: EthStateCache,
 }
 
 impl<Client, Pool> EthFilterInner<Client, Pool>
@@ -185,17 +196,17 @@ where
             FilterBlockOption::AtBlockHash(block_hash) => {
                 let mut all_logs = Vec::new();
                 // all matching logs in the block, if it exists
-                if let Some(block) = self.client.block(block_hash.into()).to_rpc_result()? {
+                if let Some(block) = self.eth_cache.get_block(block_hash).await.to_rpc_result()? {
                     // get receipts for the block
                     if let Some(receipts) =
-                        self.client.receipts_by_block(block.number.into()).to_rpc_result()?
+                        self.eth_cache.get_receipts(block_hash).await.to_rpc_result()?
                     {
                         let filter = FilteredParams::new(Some(filter));
                         logs_utils::append_matching_block_logs(
                             &mut all_logs,
                             &filter,
                             (block_hash, block.number).into(),
-                            block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
                             false,
                         );
                     }
@@ -269,7 +280,7 @@ where
                             &mut all_logs,
                             &filter_params,
                             (block_number, block_hash).into(),
-                            block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
                             false,
                         );
 
