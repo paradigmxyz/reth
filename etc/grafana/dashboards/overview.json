@@ -820,11 +820,11 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 34
       },
-      "id": 44,
+      "id": 56,
       "options": {
         "legend": {
           "calcs": [],
@@ -843,11 +843,47 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[$__rate_interval])",
-          "legendFormat": "Gas/s",
+          "editorMode": "code",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[30s])",
+          "legendFormat": "Gas/s (30s)",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[1m])",
+          "hide": false,
+          "legendFormat": "Gas/s (1m)",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[5m])",
+          "hide": false,
+          "legendFormat": "Gas/s (5m)",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[10m])",
+          "hide": false,
+          "legendFormat": "Gas/s (10m)",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Gas processed",
@@ -1216,7 +1252,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 51
       },
@@ -2159,6 +2195,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
