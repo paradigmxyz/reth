@@ -1,33 +1,34 @@
-mod database;
-mod state;
-pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
-    latest::{LatestStateProvider, LatestStateProviderRef},
-};
-mod post_state_provider;
 use crate::{
     BlockHashProvider, BlockIdProvider, BlockProvider, BlockchainTreePendingStateProvider,
     CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
     PostStateDataProvider, ReceiptProvider, StateProviderBox, StateProviderFactory,
     TransactionsProvider, WithdrawalsProvider,
 };
-pub use database::*;
-pub use post_state_provider::PostStateProvider;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
     Result,
 };
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256,
-    U256,
+    Block, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, ChainInfo, Header,
+    Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash,
+    TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+pub use state::{
+    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    latest::{LatestStateProvider, LatestStateProviderRef},
+};
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
 };
+
+mod database;
+mod post_state_provider;
+mod state;
+pub use database::*;
+pub use post_state_provider::PostStateProvider;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -92,10 +93,37 @@ where
 impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
 where
     DB: Database,
-    Tree: Send + Sync,
+    Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn chain_info(&self) -> Result<ChainInfo> {
         self.database.chain_info()
+    }
+
+    fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<BlockNumber>> {
+        let num = match num {
+            BlockNumberOrTag::Latest => self.chain_info()?.best_number,
+            BlockNumberOrTag::Number(num) => num,
+            BlockNumberOrTag::Pending => return Ok(self.tree.pending_block().map(|b| b.number)),
+            BlockNumberOrTag::Finalized => return Ok(self.chain_info()?.last_finalized),
+            BlockNumberOrTag::Safe => return Ok(self.chain_info()?.safe_finalized),
+            BlockNumberOrTag::Earliest => 0,
+        };
+        Ok(Some(num))
+    }
+
+    fn block_hash_for_id(&self, block_id: BlockId) -> Result<Option<H256>> {
+        match block_id {
+            BlockId::Hash(hash) => Ok(Some(hash.into())),
+            BlockId::Number(num) => match num {
+                BlockNumberOrTag::Latest => Ok(Some(self.chain_info()?.best_hash)),
+                BlockNumberOrTag::Pending => Ok(self.tree.pending_block().map(|b| b.hash)),
+                _ => self
+                    .convert_block_number(num)?
+                    .map(|num| self.block_hash(num))
+                    .transpose()
+                    .map(|maybe_hash| maybe_hash.flatten()),
+            },
+        }
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
@@ -106,7 +134,7 @@ where
 impl<DB, Tree> BlockProvider for BlockchainProvider<DB, Tree>
 where
     DB: Database,
-    Tree: Send + Sync,
+    Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         self.database.block(id)
@@ -120,7 +148,7 @@ where
 impl<DB, Tree> TransactionsProvider for BlockchainProvider<DB, Tree>
 where
     DB: Database,
-    Tree: Send + Sync,
+    Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
         self.database.transaction_id(tx_hash)
