@@ -1,6 +1,6 @@
 //! Metrics for the payload builder impl
 
-use metrics::{Counter};
+use metrics::Counter;
 use reth_metrics_derive::Metrics;
 
 /// Transaction pool metrics
