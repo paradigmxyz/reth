@@ -10,7 +10,6 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::PostStateProvider, BlockExecutor, Chain, ExecutorFactory, PostStateDataProvider,
-    StateProviderFactory,
 };
 use std::{
     collections::BTreeMap,
@@ -163,7 +162,7 @@ impl AppendableChain {
         let history_provider = db.history_by_block_number(canonical_fork.number)?;
         let state_provider = history_provider;
 
-        let provider = PostStateProvider { state_provider, post_state_data_provider };
+        let provider = PostStateProvider::new(state_provider, post_state_data_provider);
 
         let mut executor = externals.executor_factory.with_sp(&provider);
         executor.execute_and_verify_receipt(&unseal, U256::MAX, Some(senders)).map_err(Into::into)

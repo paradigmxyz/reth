@@ -1,4 +1,5 @@
 //! Wrapper around BlockchainTree that allows for it to be shared.
+use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -16,8 +17,6 @@ use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
 };
-
-use super::BlockchainTree;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
 #[derive(Clone)]
@@ -119,7 +118,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> CanonStateSubscriptions
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn subscribe_canon_state(&self) -> reth_provider::CanonStateNotifications {
+    fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {
         self.tree.read().subscribe_canon_state()
     }
 }

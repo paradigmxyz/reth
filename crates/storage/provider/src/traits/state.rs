@@ -3,8 +3,8 @@ use crate::{post_state::PostState, BlockHashProvider};
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Address, BlockHash, BlockNumHash, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
-    KECCAK_EMPTY, U256,
+    Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, Bytes,
+    StorageKey, StorageValue, H256, KECCAK_EMPTY, U256,
 };
 
 /// Type alias of boxed [StateProvider].
@@ -77,15 +77,47 @@ pub trait StateProviderFactory: Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> Result<StateProviderBox<'_>>;
 
+    /// Returns a [StateProvider] indexed by the given [BlockId].
+    fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox<'_>> {
+        match block_id {
+            BlockId::Number(block_number) => self.history_by_block_number_or_tag(block_number),
+            BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
+        }
+    }
+
+    /// Returns a [StateProvider] indexed by the given block number or tag
+    fn history_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> Result<StateProviderBox<'_>> {
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                todo!()
+            }
+            BlockNumberOrTag::Safe => {
+                todo!()
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
+        }
+    }
+
     /// Returns a [StateProvider] indexed by the given block number.
     fn history_by_block_number(&self, block: BlockNumber) -> Result<StateProviderBox<'_>>;
 
     /// Returns a [StateProvider] indexed by the given block hash.
     fn history_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
 
+    /// Storage provider for pending state.
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
-    fn pending(
+    fn pending_with_provider(
         &self,
         post_state_data: Box<dyn PostStateDataProvider>,
     ) -> Result<StateProviderBox<'_>>;
@@ -105,7 +137,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 }
 
 /// Post state data needs for execution on it.
-/// This trait is used to create state provider over pending state.
+/// This trait is used to create a state provider over pending state.
 ///
 /// Pending state contains:
 /// * [`PostState`] contains all changed of accounts and storage of pending chain
