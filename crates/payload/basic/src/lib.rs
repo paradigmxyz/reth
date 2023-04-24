@@ -7,6 +7,7 @@
 
 //! reth basic payload job generator
 
+use crate::metrics::PayloadBuilderMetrics;
 use futures_core::{ready, Stream};
 use futures_util::FutureExt;
 use reth_payload_builder::{
@@ -46,6 +47,8 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::trace;
+
+mod metrics;
 
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
@@ -143,6 +146,7 @@ where
             best_payload: None,
             pending_block: None,
             payload_task_guard: self.payload_task_guard.clone(),
+            metrics: Default::default(),
         })
     }
 }
@@ -252,6 +256,8 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     pending_block: Option<PendingPayload>,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
+    /// metrics for this type
+    metrics: PayloadBuilderMetrics,
 }
 
 impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
@@ -283,6 +289,7 @@ where
             let guard = this.payload_task_guard.clone();
             let payload_config = this.config.clone();
             let best_payload = this.best_payload.clone();
+            this.metrics.inc_initiated_payload_builds();
             this.executor.spawn_blocking(Box::pin(async move {
                 // acquire the permit for executing the task
                 let _permit = guard.0.acquire().await;
@@ -311,6 +318,7 @@ where
                     }
                 }
                 Poll::Ready(Err(err)) => {
+                    this.metrics.inc_failed_payload_builds();
                     this.interval.reset();
                     return Poll::Ready(Some(Err(err)))
                 }
@@ -345,6 +353,7 @@ where
         // Note: it is assumed that this is unlikely to happen, as the payload job is started right
         // away and the first full block should have been built by the time CL is requesting the
         // payload.
+        self.metrics.inc_requested_empty_payload();
         build_empty_payload(&self.client, self.config.clone()).map(Arc::new)
     }
 }
