@@ -403,8 +403,15 @@ mod tests {
             .tx()
             .commit(|tx| {
                 let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
-                tx_cursor.last()?.expect("Could not read last transaction");
+                let (_, transaction) = tx_cursor.last()?.expect("Could not read last transaction");
                 tx_cursor.delete_current()?;
+
+                let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+                txhash_cursor
+                    .seek_exact(transaction.hash())?
+                    .expect("Could not read last transaction lookup");
+                txhash_cursor.delete_current()?;
+
                 Ok(())
             })
             .expect("Could not delete a transaction");
