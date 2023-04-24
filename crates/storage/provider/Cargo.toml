@@ -34,6 +34,7 @@ parking_lot = { version = "0.12", optional = true }
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { path = "../../primitives", features = ["arbitrary", "test-utils"] }
 reth-rlp = { path = "../../rlp" }
+reth-trie = { path = "../../trie", features = ["test-utils"] }
 parking_lot = "0.12"
 
 [features]
