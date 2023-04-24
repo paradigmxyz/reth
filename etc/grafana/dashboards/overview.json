@@ -27,7 +27,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "9.3.6"
+      "version": "9.4.7"
     },
     {
       "type": "panel",
@@ -139,7 +139,7 @@
         "showThresholdLabels": false,
         "showThresholdMarkers": true
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "9.4.7",
       "targets": [
         {
           "datasource": {
@@ -205,7 +205,7 @@
         },
         "showUnfilled": true
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "9.4.7",
       "targets": [
         {
           "datasource": {
@@ -415,7 +415,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(reth_tx_commit_sum[$__interval]) / rate(reth_tx_commit_count[$__interval])",
+          "expr": "rate(reth_tx_commit_sum[$__rate_interval]) / rate(reth_tx_commit_count[$__rate_interval])",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Commit time",
@@ -495,7 +495,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "9.4.7",
       "targets": [
         {
           "datasource": {
@@ -1144,6 +1144,7 @@
       "id": 8,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
@@ -1381,7 +1382,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 59
       },
       "id": 24,
       "panels": [],
@@ -1474,7 +1475,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "id": 26,
       "options": {
@@ -1604,7 +1605,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 60
       },
       "id": 33,
       "options": {
@@ -1721,7 +1722,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 68
       },
       "id": 36,
       "options": {
@@ -1770,7 +1771,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 76
       },
       "id": 32,
       "panels": [],
@@ -1864,7 +1865,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 69
+        "y": 77
       },
       "id": 30,
       "options": {
@@ -2002,7 +2003,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 69
+        "y": 77
       },
       "id": 28,
       "options": {
@@ -2098,7 +2099,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 77
+        "y": 85
       },
       "id": 35,
       "options": {
@@ -2143,7 +2144,8 @@
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 37,
+  "revision": 1,
+  "schemaVersion": 38,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -2156,7 +2158,7 @@
   "timepicker": {},
   "timezone": "",
   "title": "reth",
-  "uid": "2k8BXz24k",
-  "version": 5,
+  "uid": "2k8BXz24x",
+  "version": 2,
   "weekStart": ""
 }
