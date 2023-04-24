@@ -545,6 +545,7 @@ mod tests {
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx();
+                            tx.put::<tables::TxHashNumber>(transaction.hash(), tx_num)?;
                             tx.put::<tables::Transactions>(tx_num, transaction.into())
                         })?;
 
@@ -604,6 +605,10 @@ mod tests {
                         last_tx_id,
                         |key| key,
                     )?;
+                    self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
+                        last_tx_id,
+                        |key| key,
+                    )?
                 }
                 Ok(())
             }
@@ -637,6 +642,7 @@ mod tests {
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;
+                    let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
                         Some((key, _)) => key,
@@ -681,6 +687,12 @@ mod tests {
                         for tx_id in body.tx_num_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
                             assert!(tx_entry.is_some(), "Transaction is missing.");
+                            let (_id, tx) = tx_entry.unwrap();
+                            let tx_hash = tx.hash();
+
+                            let tx_lookup = txhash_cursor.seek_exact(tx_hash)?;
+                            assert!(tx_lookup.is_some(), "TransactionHash lookup is missing.");
+                            assert_eq!(tx_lookup, Some((tx_hash, tx_id)), "Transaction lookup does not match.");
                         }
 
 
