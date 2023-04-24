@@ -181,7 +181,11 @@ impl PostState {
         calculate_receipt_root_ref(self.receipts().iter().map(Into::into))
     }
 
-    /// Returns the hashed post state.
+    /// Hash all changed accounts and storage entries that are currently stored in the post state.
+    ///
+    /// # Returns
+    ///
+    /// The hashed post state.
     pub fn hash_state_slow(&self) -> HashedPostState {
         let mut accounts = BTreeMap::default();
         for (address, account) in self.accounts() {
@@ -204,6 +208,36 @@ impl PostState {
     }
 
     /// Calculate the state root for this [PostState].
+    /// Internally, function calls [Self::hash_state_slow] to obtain the [HashedPostState].
+    /// Afterwards, it retrieves the prefixsets from the [HashedPostState] and uses them to
+    /// calculate the incremental state root.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use reth_primitives::{Address, Account};
+    /// use reth_provider::PostState;
+    /// use reth_db::{mdbx::{EnvKind, WriteMap, test_utils::create_test_db}, database::Database};
+    ///
+    /// // Initialize the database
+    /// let db = create_test_db::<WriteMap>(EnvKind::RW);
+    ///
+    /// // Initialize the post state
+    /// let mut post_state = PostState::new();
+    ///
+    /// // Create an account
+    /// let block_number = 1;
+    /// let address = Address::random();
+    /// post_state.create_account(1, address, Account { nonce: 1, ..Default::default() });
+    ///
+    /// // Calculate the state root
+    /// let tx = db.tx().expect("failed to create transaction");
+    /// let state_root = post_state.state_root_slow(&tx);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The state root for this [PostState].
     pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
         &self,
         tx: &'a TX,
