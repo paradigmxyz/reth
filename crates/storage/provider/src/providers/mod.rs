@@ -1,364 +1,201 @@
-use crate::{
-    BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    PostStateDataProvider, ProviderError, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
-};
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
-use reth_interfaces::Result;
-use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
-    TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
-};
-use reth_revm_primitives::{
-    config::revm_spec,
-    env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
-    primitives::{BlockEnv, CfgEnv, SpecId},
-};
-use std::{ops::RangeBounds, sync::Arc};
-
+mod database;
 mod state;
-use crate::traits::ReceiptProvider;
 pub use state::{
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
-
 mod post_state_provider;
+use crate::{
+    BlockHashProvider, BlockIdProvider, BlockProvider, BlockchainTreePendingStateProvider,
+    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
+    PostStateDataProvider, ReceiptProvider, StateProviderBox, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
+};
+pub use database::*;
 pub use post_state_provider::PostStateProvider;
+use reth_db::database::Database;
+use reth_interfaces::{
+    blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
+    Result,
+};
+use reth_primitives::{
+    Block, BlockHash, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256,
+    U256,
+};
+use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+use std::{
+    collections::{BTreeMap, HashSet},
+    ops::RangeBounds,
+};
 
-/// A common provider that fetches data from a database.
+/// The main type for interacting with the blockchain.
 ///
-/// This provider implements most provider or provider factory traits.
-pub struct ShareableDatabase<DB> {
-    /// Database
-    db: DB,
-    /// Chain spec
-    chain_spec: Arc<ChainSpec>,
+/// This type serves as the main entry point for interacting with the blockchain and provides data
+/// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
+/// type that holds an instance of the database and the blockchain tree.
+#[derive(Clone)]
+pub struct BlockchainProvider<DB, Tree> {
+    /// Provider type used to access the database.
+    database: ShareableDatabase<DB>,
+    /// The blockchain tree instance.
+    tree: Tree,
 }
 
-impl<DB> ShareableDatabase<DB> {
-    /// create new database provider
-    pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { db, chain_spec }
+impl<DB, Tree> BlockchainProvider<DB, Tree> {
+    /// Create new  provider instance that wraps the database and the blockchain tree.
+    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Self {
+        Self { database, tree }
     }
 }
 
-impl<DB: Clone> Clone for ShareableDatabase<DB> {
-    fn clone(&self) -> Self {
-        Self { db: self.db.clone(), chain_spec: Arc::clone(&self.chain_spec) }
-    }
-}
-
-impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
+impl<DB, Tree> HeaderProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
-        self.db.view(|tx| {
-            if let Some(num) = tx.get::<tables::HeaderNumbers>(*block_hash)? {
-                Ok(tx.get::<tables::Headers>(num)?)
-            } else {
-                Ok(None)
-            }
-        })?
+        self.database.header(block_hash)
     }
 
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
-        Ok(self.db.view(|tx| tx.get::<tables::Headers>(num))??)
+        self.database.header_by_number(num)
     }
 
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
-        self.db.view(|tx| {
-            if let Some(num) = tx.get::<tables::HeaderNumbers>(*hash)? {
-                Ok(tx.get::<tables::HeaderTD>(num)?.map(|td| td.0))
-            } else {
-                Ok(None)
-            }
-        })?
+        self.database.header_td(hash)
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
-        self.db.view(|tx| Ok(tx.get::<tables::HeaderTD>(number)?.map(|td| td.0)))?
+        self.database.header_td_by_number(number)
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
-        self.db
-            .view(|tx| {
-                let mut cursor = tx.cursor_read::<tables::Headers>()?;
-                cursor
-                    .walk_range(range)?
-                    .map(|result| result.map(|(_, header)| header).map_err(Into::into))
-                    .collect::<Result<Vec<_>>>()
-            })?
-            .map_err(Into::into)
+        self.database.headers_range(range)
     }
 }
 
-impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
+impl<DB, Tree> BlockHashProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
-        self.db.view(|tx| tx.get::<tables::CanonicalHeaders>(number))?.map_err(Into::into)
+        self.database.block_hash(number)
     }
 
     fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>> {
-        let range = start..end;
-        self.db
-            .view(|tx| {
-                let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-                cursor
-                    .walk_range(range)?
-                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<Result<Vec<_>>>()
-            })?
-            .map_err(Into::into)
+        self.database.canonical_hashes_range(start, end)
     }
 }
 
-impl<DB: Database> BlockIdProvider for ShareableDatabase<DB> {
+impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn chain_info(&self) -> Result<ChainInfo> {
-        let best_number = self
-            .db
-            .view(|tx| tx.get::<tables::SyncStage>("Finish".to_string()))?
-            .map_err(Into::<reth_interfaces::db::Error>::into)?
-            .unwrap_or_default();
-        let best_hash = self.block_hash(best_number)?.unwrap_or_default();
-        Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
+        self.database.chain_info()
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
-        self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))?.map_err(Into::into)
+        self.database.block_number(hash)
     }
 }
 
-impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
+impl<DB, Tree> BlockProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
-        if let Some(number) = self.block_number_for_id(id)? {
-            if let Some(header) = self.header_by_number(number)? {
-                let id = BlockId::Number(number.into());
-                let tx = self.db.tx()?;
-                let transactions = self
-                    .transactions_by_block(id)?
-                    .ok_or(ProviderError::BlockBodyIndices { number })?;
-
-                let ommers = tx.get::<tables::BlockOmmers>(header.number)?.map(|o| o.ommers);
-                let withdrawals = self.withdrawals_by_block(id, header.timestamp)?;
-
-                return Ok(Some(Block {
-                    header,
-                    body: transactions,
-                    ommers: ommers.unwrap_or_default(),
-                    withdrawals,
-                }))
-            }
-        }
-
-        Ok(None)
+        self.database.block(id)
     }
 
     fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
-        if let Some(number) = self.block_number_for_id(id)? {
-            let tx = self.db.tx()?;
-            // TODO: this can be optimized to return empty Vec post-merge
-            let ommers = tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
-        }
-
-        Ok(None)
+        self.database.ommers(id)
     }
 }
 
-impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
+impl<DB, Tree> TransactionsProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
-        self.db.view(|tx| tx.get::<tables::TxHashNumber>(tx_hash))?.map_err(Into::into)
+        self.database.transaction_id(tx_hash)
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
-        self.db
-            .view(|tx| tx.get::<tables::Transactions>(id))?
-            .map_err(Into::into)
-            .map(|tx| tx.map(Into::into))
+        self.database.transaction_by_id(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
-        self.db
-            .view(|tx| {
-                if let Some(id) = tx.get::<tables::TxHashNumber>(hash)? {
-                    tx.get::<tables::Transactions>(id)
-                } else {
-                    Ok(None)
-                }
-            })?
-            .map_err(Into::into)
-            .map(|tx| tx.map(Into::into))
+        self.database.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
-        self.db
-            .view(|tx| -> Result<_> {
-                if let Some(transaction_id) = tx.get::<tables::TxHashNumber>(tx_hash)? {
-                    if let Some(transaction) = tx.get::<tables::Transactions>(transaction_id)? {
-                        let mut transaction_cursor =
-                            tx.cursor_read::<tables::TransactionBlock>()?;
-                        if let Some(block_number) =
-                            transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
-                        {
-                            if let Some(block_hash) =
-                                tx.get::<tables::CanonicalHeaders>(block_number)?
-                            {
-                                if let Some(block_body) =
-                                    tx.get::<tables::BlockBodyIndices>(block_number)?
-                                {
-                                    // the index of the tx in the block is the offset:
-                                    // len([start..tx_id])
-                                    // SAFETY: `transaction_id` is always `>=` the block's first
-                                    // index
-                                    let index = transaction_id - block_body.first_tx_num();
-
-                                    let meta = TransactionMeta {
-                                        tx_hash,
-                                        index,
-                                        block_hash,
-                                        block_number,
-                                    };
-
-                                    return Ok(Some((transaction.into(), meta)))
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Ok(None)
-            })?
-            .map_err(Into::into)
+        self.database.transaction_by_hash_with_meta(tx_hash)
     }
 
     fn transaction_block(&self, id: TxNumber) -> Result<Option<BlockNumber>> {
-        self.db
-            .view(|tx| {
-                let mut cursor = tx.cursor_read::<tables::TransactionBlock>()?;
-                cursor.seek(id).map(|b| b.map(|(_, bn)| bn))
-            })?
-            .map_err(Into::into)
+        self.database.transaction_block(id)
     }
 
     fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
-        if let Some(number) = self.block_number_for_id(id)? {
-            let tx = self.db.tx()?;
-            if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
-                let tx_range = body.tx_num_range();
-                return if tx_range.is_empty() {
-                    Ok(Some(Vec::new()))
-                } else {
-                    let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-                    let transactions = tx_cursor
-                        .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<std::result::Result<Vec<_>, _>>()?;
-                    Ok(Some(transactions))
-                }
-            }
-        }
-        Ok(None)
+        self.database.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
-        let tx = self.db.tx()?;
-        let mut results = Vec::default();
-        let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-        for entry in body_cursor.walk_range(range)? {
-            let (_, body) = entry?;
-            let tx_num_range = body.tx_num_range();
-            if tx_num_range.is_empty() {
-                results.push(Vec::default());
-            } else {
-                results.push(
-                    tx_cursor
-                        .walk_range(tx_num_range)?
-                        .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<std::result::Result<Vec<_>, _>>()?,
-                );
-            }
-        }
-        Ok(results)
+        self.database.transactions_by_block_range(range)
     }
 }
 
-impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
+impl<DB, Tree> ReceiptProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>> {
-        self.db.view(|tx| tx.get::<tables::Receipts>(id))?.map_err(Into::into)
+        self.database.receipt(id)
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> Result<Option<Receipt>> {
-        self.db
-            .view(|tx| {
-                if let Some(id) = tx.get::<tables::TxHashNumber>(hash)? {
-                    tx.get::<tables::Receipts>(id)
-                } else {
-                    Ok(None)
-                }
-            })?
-            .map_err(Into::into)
+        self.database.receipt_by_hash(hash)
     }
 
     fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
-        if let Some(number) = self.block_number_for_id(block)? {
-            let tx = self.db.tx()?;
-            if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
-                let tx_range = body.tx_num_range();
-                return if tx_range.is_empty() {
-                    Ok(Some(Vec::new()))
-                } else {
-                    let mut tx_cursor = tx.cursor_read::<tables::Receipts>()?;
-                    let transactions = tx_cursor
-                        .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, tx)| tx))
-                        .collect::<std::result::Result<Vec<_>, _>>()?;
-                    Ok(Some(transactions))
-                }
-            }
-        }
-        Ok(None)
+        self.database.receipts_by_block(block)
     }
 }
 
-impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
+impl<DB, Tree> WithdrawalsProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
-        if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp) {
-            if let Some(number) = self.block_number_for_id(id)? {
-                // If we are past shanghai, then all blocks should have a withdrawal list, even if
-                // empty
-                return Ok(Some(
-                    self.db
-                        .view(|tx| tx.get::<tables::BlockWithdrawals>(number))??
-                        .map(|w| w.withdrawals)
-                        .unwrap_or_default(),
-                ))
-            }
-        }
-        Ok(None)
+        self.database.withdrawals_by_block(id, timestamp)
     }
 
     fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
-        let latest_block_withdrawal =
-            self.db.view(|tx| tx.cursor_read::<tables::BlockWithdrawals>()?.last())?;
-        latest_block_withdrawal
-            .map(|block_withdrawal_pair| {
-                block_withdrawal_pair
-                    .and_then(|(_, block_withdrawal)| block_withdrawal.withdrawals.last().cloned())
-            })
-            .map_err(Into::into)
+        self.database.latest_withdrawal()
     }
 }
 
-impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
+impl<DB, Tree> EvmEnvProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
     fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
-        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
-        self.fill_env_with_header(cfg, block_env, &header)
+        self.database.fill_env_at(cfg, block_env, at)
     }
 
     fn fill_env_with_header(
@@ -367,123 +204,139 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
         block_env: &mut BlockEnv,
         header: &Header,
     ) -> Result<()> {
-        let total_difficulty =
-            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
-        fill_cfg_and_block_env(cfg, block_env, &self.chain_spec, header, total_difficulty);
-        Ok(())
+        self.database.fill_env_with_header(cfg, block_env, header)
     }
 
     fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
-        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
-
-        self.fill_block_env_with_header(block_env, &header)
+        self.database.fill_block_env_at(block_env, at)
     }
 
     fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> Result<()> {
-        let total_difficulty =
-            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
-        let spec_id = revm_spec(
-            &self.chain_spec,
-            Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                // Not required
-                hash: Default::default(),
-            },
-        );
-        let after_merge = spec_id >= SpecId::MERGE;
-        fill_block_env(block_env, header, after_merge);
-        Ok(())
+        self.database.fill_block_env_with_header(block_env, header)
     }
 
     fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockId) -> Result<()> {
-        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
-        self.fill_cfg_env_with_header(cfg, &header)
+        self.database.fill_cfg_env_at(cfg, at)
     }
 
     fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
-        let total_difficulty =
-            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
-        fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
-        Ok(())
+        self.database.fill_cfg_env_with_header(cfg, header)
     }
 }
 
-impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
+impl<DB, Tree> StateProviderFactory for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: BlockchainTreePendingStateProvider + BlockchainTreeViewer,
+{
     /// Storage provider for latest block
     fn latest(&self) -> Result<StateProviderBox<'_>> {
-        Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
+        self.database.latest()
     }
 
-    fn history_by_block_number(
-        &self,
-        mut block_number: BlockNumber,
-    ) -> Result<StateProviderBox<'_>> {
-        let tx = self.db.tx()?;
-
-        // +1 as the changeset that we want is the one that was applied after this block.
-        block_number += 1;
-
-        Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
+    fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
+        self.database.history_by_block_number(block_number)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<StateProviderBox<'_>> {
-        let tx = self.db.tx()?;
-        // get block number
-        let mut block_number = tx
-            .get::<tables::HeaderNumbers>(block_hash)?
-            .ok_or(ProviderError::BlockHash { block_hash })?;
-
-        // +1 as the changeset that we want is the one that was applied after this block.
-        // as the  changeset contains old values.
-        block_number += 1;
-
-        Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
+        self.database.history_by_block_hash(block_hash)
     }
 
-    fn pending(
+    /// Storage provider for pending state.
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
+        if let Some(block) = self.tree.pending_block() {
+            let pending = self.tree.pending_state_provider(block.hash)?;
+            return self.pending_with_provider(pending)
+        }
+        self.latest()
+    }
+
+    fn pending_with_provider(
         &self,
         post_state_data: Box<dyn PostStateDataProvider>,
     ) -> Result<StateProviderBox<'_>> {
         let canonical_fork = post_state_data.canonical_fork();
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let post_state_provider =
-            PostStateProvider { state_provider, post_state_data_provider: post_state_data };
+        let post_state_provider = PostStateProvider::new(state_provider, post_state_data);
         Ok(Box::new(post_state_provider))
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::ShareableDatabase;
-    use crate::{BlockIdProvider, StateProviderFactory};
-    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_primitives::{ChainSpecBuilder, H256};
-
-    #[test]
-    fn common_history_provider() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db, Arc::new(chain_spec));
-        let _ = provider.latest();
+impl<DB, Tree> BlockchainTreeEngine for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: BlockchainTreeEngine,
+{
+    fn insert_block_with_senders(&self, block: SealedBlockWithSenders) -> Result<BlockStatus> {
+        self.tree.insert_block_with_senders(block)
     }
 
-    #[test]
-    fn default_chain_info() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db, Arc::new(chain_spec));
+    fn finalize_block(&self, finalized_block: BlockNumber) {
+        self.tree.finalize_block(finalized_block)
+    }
 
-        let chain_info = provider.chain_info().expect("should be ok");
-        assert_eq!(chain_info.best_number, 0);
-        assert_eq!(chain_info.best_hash, H256::zero());
-        assert_eq!(chain_info.last_finalized, None);
-        assert_eq!(chain_info.safe_finalized, None);
+    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<()> {
+        self.tree.restore_canonical_hashes(last_finalized_block)
+    }
+
+    fn make_canonical(&self, block_hash: &BlockHash) -> Result<()> {
+        self.tree.make_canonical(block_hash)
+    }
+
+    fn unwind(&self, unwind_to: BlockNumber) -> Result<()> {
+        self.tree.unwind(unwind_to)
+    }
+}
+
+impl<DB, Tree> BlockchainTreeViewer for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: BlockchainTreeViewer,
+{
+    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
+        self.tree.blocks()
+    }
+
+    fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
+        self.tree.block_by_hash(block_hash)
+    }
+
+    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
+        self.tree.canonical_blocks()
+    }
+
+    fn canonical_tip(&self) -> BlockNumHash {
+        self.tree.canonical_tip()
+    }
+
+    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
+        self.tree.pending_blocks()
+    }
+
+    fn pending_block(&self) -> Option<BlockNumHash> {
+        self.tree.pending_block()
+    }
+}
+
+impl<DB, Tree> BlockchainTreePendingStateProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: BlockchainTreePendingStateProvider,
+{
+    fn pending_state_provider(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<Box<dyn PostStateDataProvider>> {
+        self.tree.pending_state_provider(block_hash)
+    }
+}
+
+impl<DB, Tree> CanonStateSubscriptions for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: CanonStateSubscriptions,
+{
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+        self.tree.subscribe_to_canonical_state()
     }
 }

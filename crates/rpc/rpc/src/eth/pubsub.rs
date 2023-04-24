@@ -130,7 +130,8 @@ async fn handle_accepted<Client, Pool, Events, Network>(
         }
         SubscriptionKind::Syncing => {
             // get new block subscription
-            let mut canon_state = BroadcastStream::new(pubsub.chain_events.subscribe_canon_state());
+            let mut canon_state =
+                BroadcastStream::new(pubsub.chain_events.subscribe_to_canonical_state());
             // get current sync status
             let mut initial_sync_status = pubsub.network.is_syncing();
             let current_sub_res = pubsub.sync_status(initial_sync_status).await;
@@ -217,7 +218,7 @@ where
 {
     /// Returns a stream that yields all new RPC blocks.
     fn into_new_headers_stream(self) -> impl Stream<Item = Header> {
-        BroadcastStream::new(self.chain_events.subscribe_canon_state())
+        BroadcastStream::new(self.chain_events.subscribe_to_canonical_state())
             .map(|new_block| {
                 let new_chain = new_block.expect("new block subscription never ends; qed");
                 new_chain
@@ -237,7 +238,7 @@ where
 
     /// Returns a stream that yields all logs that match the given filter.
     fn into_log_stream(self, filter: FilteredParams) -> impl Stream<Item = Log> {
-        BroadcastStream::new(self.chain_events.subscribe_canon_state())
+        BroadcastStream::new(self.chain_events.subscribe_to_canonical_state())
             .map(move |canon_state| {
                 canon_state.expect("new block subscription never ends; qed").block_receipts()
             })
