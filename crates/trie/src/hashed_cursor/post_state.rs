@@ -113,8 +113,9 @@ where
     ) -> Result<Option<(H256, Account)>, reth_db::Error> {
         let result = match (post_state_item, db_item) {
             // If both are not empty, return the smallest of the two
+            // Post state is given precedence if keys are equal
             (Some((post_state_address, post_state_account)), Some((db_address, db_account))) => {
-                if post_state_address < db_address {
+                if post_state_address <= db_address {
                     Some((post_state_address, post_state_account))
                 } else {
                     Some((db_address, db_account))
@@ -167,6 +168,7 @@ where
             db_item = self.cursor.next()?;
         }
 
+        println!("SEEKING. POSTSTATE: {post_state_item:?}. DB: {db_item:?}");
         let result = self.next_account(post_state_item, db_item)?;
         self.last_account = result.as_ref().map(|(address, _)| *address);
         Ok(result)
@@ -225,8 +227,9 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     ) -> Result<Option<StorageEntry>, reth_db::Error> {
         let result = match (post_state_item, db_item) {
             // If both are not empty, return the smallest of the two
+            // Post state is given precedence if keys are equal
             (Some((post_state_slot, post_state_value)), Some(db_entry)) => {
-                if post_state_slot < &db_entry.key {
+                if post_state_slot <= &db_entry.key {
                     Some(StorageEntry { key: *post_state_slot, value: *post_state_value })
                 } else {
                     Some(db_entry)
@@ -320,5 +323,195 @@ where
         let result = self.next_slot(post_state_item, db_item)?;
         self.last_slot = result.as_ref().map(|entry| entry.key);
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use reth_db::{database::Database, mdbx::test_utils::create_test_rw_db, transaction::DbTxMut};
+
+    fn assert_account_cursor_order<'a, 'b>(
+        factory: &'a impl HashedCursorFactory<'b>,
+        mut expected: impl Iterator<Item = (H256, Account)>,
+    ) where
+        'a: 'b,
+    {
+        let mut cursor = factory.hashed_account_cursor().unwrap();
+
+        let first_account = cursor.seek(H256::default()).unwrap();
+        assert_eq!(first_account, expected.next());
+
+        while let Some(expected) = expected.next() {
+            let next_cursor_account = cursor.next().unwrap();
+            assert_eq!(next_cursor_account, Some(expected));
+        }
+
+        assert!(cursor.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn post_state_only_accounts() {
+        let accounts = Vec::from_iter(
+            (1..11).into_iter().map(|key| (H256::from_low_u64_be(key), Account::default())),
+        );
+        let post_state = HashedPostState {
+            accounts: BTreeMap::from_iter(
+                accounts.iter().map(|(key, account)| (*key, Some(*account))),
+            ),
+            storages: Default::default(),
+        };
+
+        let db = create_test_rw_db();
+        let tx = db.tx().unwrap();
+
+        let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+        assert_account_cursor_order(&factory, accounts.into_iter());
+    }
+
+    #[test]
+    fn db_only_accounts() {
+        let accounts = Vec::from_iter(
+            (1..11).into_iter().map(|key| (H256::from_low_u64_be(key), Account::default())),
+        );
+
+        let db = create_test_rw_db();
+        db.update(|tx| {
+            for (key, account) in accounts.iter() {
+                tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+            }
+        })
+        .unwrap();
+
+        let tx = db.tx().unwrap();
+        let post_state = HashedPostState::default();
+        let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+        assert_account_cursor_order(&factory, accounts.into_iter());
+    }
+
+    #[test]
+    fn hashed_cursor_correct_order() {
+        // odd keys are in post state, even keys are in db
+        let accounts = Vec::from_iter(
+            (1..111).into_iter().map(|key| (H256::from_low_u64_be(key), Account::default())),
+        );
+
+        let db = create_test_rw_db();
+        db.update(|tx| {
+            for (key, account) in accounts.iter().filter(|x| x.0.to_low_u64_be() % 2 == 0) {
+                tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+            }
+        })
+        .unwrap();
+
+        let post_state = HashedPostState {
+            accounts: BTreeMap::from_iter(
+                accounts
+                    .iter()
+                    .filter(|x| x.0.to_low_u64_be() % 2 != 0)
+                    .map(|(key, account)| (*key, Some(*account))),
+            ),
+            storages: Default::default(),
+        };
+
+        let tx = db.tx().unwrap();
+        let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+        assert_account_cursor_order(&factory, accounts.into_iter());
+    }
+
+    #[test]
+    fn removed_accounts_are_omitted() {
+        // odd keys are in post state, even keys are in db
+        let accounts = Vec::from_iter(
+            (1..111).into_iter().map(|key| (H256::from_low_u64_be(key), Account::default())),
+        );
+        // accounts 5, 9, 11 should be considered removed from post state
+        let removed_keys = Vec::from_iter([5, 9, 11].into_iter().map(H256::from_low_u64_be));
+
+        let db = create_test_rw_db();
+        db.update(|tx| {
+            for (key, account) in accounts.iter().filter(|x| x.0.to_low_u64_be() % 2 == 0) {
+                tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+            }
+        })
+        .unwrap();
+
+        let post_state = HashedPostState {
+            accounts: BTreeMap::from_iter(
+                accounts.iter().filter(|x| x.0.to_low_u64_be() % 2 != 0).map(|(key, account)| {
+                    (*key, if removed_keys.contains(key) { None } else { Some(*account) })
+                }),
+            ),
+            storages: Default::default(),
+        };
+
+        let tx = db.tx().unwrap();
+        let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+        let expected = accounts.into_iter().filter(|x| !removed_keys.contains(&x.0));
+        assert_account_cursor_order(&factory, expected);
+    }
+
+    #[test]
+    fn post_state_accounts_take_precedence() {
+        let accounts =
+            Vec::from_iter((1..10).into_iter().map(|key| {
+                (H256::from_low_u64_be(key), Account { nonce: key, ..Default::default() })
+            }));
+
+        let db = create_test_rw_db();
+        db.update(|tx| {
+            for (key, _) in accounts.iter() {
+                // insert zero value accounts to the database
+                tx.put::<tables::HashedAccount>(*key, Account::default()).unwrap();
+            }
+        })
+        .unwrap();
+
+        let post_state = HashedPostState {
+            accounts: BTreeMap::from_iter(
+                accounts.iter().map(|(key, account)| (*key, Some(*account))),
+            ),
+            storages: Default::default(),
+        };
+
+        let tx = db.tx().unwrap();
+        let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+        assert_account_cursor_order(&factory, accounts.into_iter());
+    }
+
+    proptest! {
+        #[test]
+        fn fuzz_hashed_account_cursor(db_accounts: BTreeMap<H256, Account>, post_state_accounts: BTreeMap<H256, Option<Account>>) {
+            let db = create_test_rw_db();
+            db.update(|tx| {
+                for (key, account) in db_accounts.iter() {
+                    // insert zero value accounts to the database
+                    tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+                }
+            })
+            .unwrap();
+
+            let post_state = HashedPostState {
+                accounts: BTreeMap::from_iter(
+                    post_state_accounts.iter().map(|(key, account)| (*key, *account)),
+                ),
+                storages: Default::default(),
+            };
+
+            let mut expected = db_accounts;
+            // overwrite or remove accounts from the expected result
+            for (key, account) in post_state_accounts.iter() {
+                if let Some(account) = account {
+                    expected.insert(*key, *account);
+                } else {
+                    expected.remove(key);
+                }
+            }
+
+            let tx = db.tx().unwrap();
+            let factory = HashedPostStateCursorFactory::new(&tx, &post_state);
+            assert_account_cursor_order(&factory, expected.into_iter());
+        }
     }
 }
