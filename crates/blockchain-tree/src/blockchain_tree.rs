@@ -18,8 +18,8 @@ use std::{
 };
 
 use crate::{
-    chain::BlockChainId, AppendableChain, BlockIndices, BlockchainTreeConfig, PostStateData,
-    TreeExternals,
+    chain::BlockChainId, AppendableChain, BlockBuffer, BlockIndices, BlockchainTreeConfig,
+    PostStateData, TreeExternals,
 };
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -66,6 +66,8 @@ use crate::{
 pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// The tracked chains and their current data.
     chains: HashMap<BlockChainId, AppendableChain>,
+    /// Unconnected block buffer.
+    unconnected_blocks_buffer: BlockBuffer,
     /// Static blockchain ID generator
     block_chain_id_generator: u64,
     /// Indices to block and their connection to the canonical chain.
@@ -117,6 +119,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         Ok(Self {
             externals,
+            unconnected_blocks_buffer: BlockBuffer::default(),
             block_chain_id_generator: 0,
             chains: Default::default(),
             block_indices: BlockIndices::new(

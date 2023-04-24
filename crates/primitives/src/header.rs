@@ -1,7 +1,7 @@
 use crate::{
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
+    BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use ethers_core::types::{Block, H256 as EthersH256, H64};
@@ -301,8 +301,8 @@ impl SealedHeader {
     }
 
     /// Return the number hash tuple.
-    pub fn num_hash(&self) -> (BlockNumber, BlockHash) {
-        (self.number, self.hash)
+    pub fn num_hash(&self) -> BlockNumHash {
+        BlockNumHash::new(self.number, self.hash)
     }
 }
 
