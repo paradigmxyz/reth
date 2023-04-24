@@ -205,6 +205,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
+        let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+
         // Cursors to unwind transitions
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
 
@@ -233,8 +235,12 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
             // Delete all transactions that belong to this block
             for tx_id in block_meta.tx_num_range() {
-                // First delete the transaction
-                if transaction_cursor.seek_exact(tx_id)?.is_some() {
+                if let Some((_, tx)) = transaction_cursor.seek_exact(tx_id)? {
+                    // Delete the transaction hash to transaction id lookup
+                    if txhash_cursor.seek_exact(tx.hash())?.is_some() {
+                        txhash_cursor.delete_current()?;
+                    }
+                    // Delete the transaction
                     transaction_cursor.delete_current()?;
                 }
             }
