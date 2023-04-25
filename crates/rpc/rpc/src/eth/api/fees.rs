@@ -4,12 +4,14 @@ use crate::{
     eth::error::{EthApiError, EthResult, InvalidTransactionError},
     EthApi,
 };
+use futures::{Stream, StreamExt};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, U256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_primitives::{BlockId, SealedBlockWithSenders, U256};
+use reth_provider::{BlockProvider, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 use std::collections::BTreeMap;
+use tracing::warn;
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
@@ -184,5 +186,89 @@ where
             oldest_block: U256::from(start_block),
             reward: Some(rewards),
         })
+    }
+
+    async fn populate_fee_history_cache_on_new_block<St>(
+        &mut self,
+        reward_percentiles: Option<Vec<f64>>,
+        mut events: St,
+    ) where
+        St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+    {
+        while let Some(event) = events.next().await {
+            match event {
+                CanonStateNotification::Reorg { old: _, new } => {
+                    let (new_blocks, _) = new.inner();
+                    match self.add_cache_for_block(&new_blocks.tip(), &reward_percentiles).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            warn!("Error adding block to fee history cache: {:?}", e);
+                        }
+                    }
+                }
+                CanonStateNotification::Commit { new } => {
+                    let (new_blocks, _) = new.inner();
+                    match self.add_cache_for_block(&new_blocks.tip(), &reward_percentiles).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            warn!("Error adding block to fee history cache: {:?}", e);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn add_cache_for_block(
+        &mut self,
+        block: &SealedBlockWithSenders,
+        reward_percentiles: &Option<Vec<f64>>,
+    ) -> Result<(), InvalidTransactionError> {
+        let header = &block.header.header;
+        let txs = &block.body;
+        let base_fee_per_gas: U256 =
+            header.base_fee_per_gas.unwrap_or_default().try_into().unwrap();
+
+        let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
+
+        let mut sorter = Vec::with_capacity(txs.len());
+
+        for transaction in txs.iter() {
+            let reward = transaction
+                .effective_gas_price(header.base_fee_per_gas)
+                .ok_or(InvalidTransactionError::FeeCapTooLow)?;
+
+            sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward });
+        }
+
+        sorter.sort();
+        let reward_percentiles = reward_percentiles.as_ref().unwrap();
+        let mut rewards = Vec::with_capacity(reward_percentiles.len());
+
+        let mut sum_gas_used = sorter[0].gas_used;
+        let mut tx_index = 0;
+
+        for percentile in reward_percentiles.iter() {
+            let threshhold_gas_used = (header.gas_used as f64) * percentile / 100_f64;
+
+            while sum_gas_used < threshhold_gas_used as u128 && tx_index < txs.len() {
+                sum_gas_used += sorter[tx_index].gas_used;
+                tx_index += 1;
+            }
+            rewards.push(U256::from(sorter[tx_index].reward));
+        }
+
+        let fee_history_cache_item = FeeHistoryCacheItem {
+            hash: None,
+            base_fee_per_gas,
+            gas_used_ratio,
+            reward: Some(rewards),
+        };
+
+        let mut fee_history_cache = self.fee_history_cache.0.lock().await;
+
+        fee_history_cache.push(header.number, fee_history_cache_item);
+        Ok(())
     }
 }
