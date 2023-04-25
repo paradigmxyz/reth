@@ -64,6 +64,7 @@ impl Command {
             let mut first = true;
             let mut keys_to_delete = Vec::new();
             let mut keys_walked = 0;
+            let entry_instant = Instant::now();
             for next_entry in storage_changesets_cursor.walk_range(key..)? {
                 if first {
                     first = false;
@@ -73,8 +74,11 @@ impl Command {
                 keys_walked += 1;
                 if keys_walked % 100_000_000 == 0 {
                     println!(
-                        "Walked {} keys for {:?} at slot {:?}",
-                        keys_walked, key.0 .1, entry.key
+                        "Walked {} keys for {:?} at slot {:?} in {} seconds",
+                        keys_walked,
+                        key.0 .1,
+                        entry.key,
+                        entry_instant.elapsed().as_secs()
                     );
                 }
 
