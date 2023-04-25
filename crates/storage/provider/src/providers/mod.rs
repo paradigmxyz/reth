@@ -1,8 +1,8 @@
 use crate::{
     BlockHashProvider, BlockIdProvider, BlockProvider, BlockchainTreePendingStateProvider,
-    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
+    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostState,
     PostStateDataProvider, ReceiptProvider, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    StateRootProvider, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -287,6 +287,16 @@ where
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
         let post_state_provider = PostStateProvider::new(state_provider, post_state_data);
         Ok(Box::new(post_state_provider))
+    }
+}
+
+impl<DB, Tree> StateRootProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
+    fn state_root(&self, post_state: &PostState) -> Result<H256> {
+        self.database.state_root(post_state)
     }
 }
 
