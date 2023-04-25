@@ -125,7 +125,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         BlockInfo {
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
-            pending_base_fee: self.all_transactions.pending_basefee,
+            pending_basefee: self.all_transactions.pending_basefee,
         }
     }
 

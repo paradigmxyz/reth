@@ -531,5 +531,5 @@ pub struct BlockInfo {
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
     /// currently tracking.
-    pub pending_base_fee: u128,
+    pub pending_basefee: u128,
 }
