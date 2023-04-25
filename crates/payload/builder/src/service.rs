@@ -4,8 +4,8 @@
 //! Once a new payload is created, it is continuously updated.
 
 use crate::{
-    error::PayloadBuilderError, traits::PayloadJobGenerator, BuiltPayload,
-    PayloadBuilderAttributes, PayloadJob,
+    error::PayloadBuilderError, metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator,
+    BuiltPayload, PayloadBuilderAttributes, PayloadJob,
 };
 use futures_util::stream::{StreamExt, TryStreamExt};
 use reth_rpc_types::engine::PayloadId;
@@ -29,7 +29,10 @@ pub struct PayloadStore {
 
 impl PayloadStore {
     /// Returns the best payload for the given identifier.
-    pub async fn get_payload(&self, id: PayloadId) -> Option<Arc<BuiltPayload>> {
+    pub async fn get_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.inner.get_payload(id).await
     }
 }
@@ -53,7 +56,10 @@ pub struct PayloadBuilderHandle {
 
 impl PayloadBuilderHandle {
     /// Returns the best payload for the given identifier.
-    pub async fn get_payload(&self, id: PayloadId) -> Option<Arc<BuiltPayload>> {
+    pub async fn get_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::GetPayload(id, tx)).ok()?;
         rx.await.ok()?
@@ -106,6 +112,8 @@ where
     _service_tx: mpsc::UnboundedSender<PayloadServiceCommand>,
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<PayloadServiceCommand>,
+    /// metrics for the payload builder service
+    metrics: PayloadBuilderServiceMetrics,
 }
 
 // === impl PayloadBuilderService ===
@@ -122,6 +130,7 @@ where
             payload_jobs: Vec::new(),
             _service_tx: service_tx.clone(),
             command_rx: UnboundedReceiverStream::new(command_rx),
+            metrics: Default::default(),
         };
         let handle = PayloadBuilderHandle { to_service: service_tx };
         (service, handle)
@@ -133,7 +142,7 @@ where
     }
 
     /// Returns the best payload for the given identifier.
-    fn get_payload(&self, id: PayloadId) -> Option<Arc<BuiltPayload>> {
+    fn get_payload(&self, id: PayloadId) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
     }
 }
@@ -159,15 +168,19 @@ where
                 loop {
                     match job.try_poll_next_unpin(cx) {
                         Poll::Ready(Some(Ok(payload))) => {
+                            this.metrics.set_active_jobs(this.payload_jobs.len());
                             trace!(?payload, %id, "new payload");
                         }
                         Poll::Ready(Some(Err(err))) => {
                             warn!(?err, %id, "payload job failed; resolving payload");
+                            this.metrics.set_active_jobs(this.payload_jobs.len());
+                            this.metrics.inc_failed_jobs();
                             continue 'jobs
                         }
                         Poll::Ready(None) => {
                             // job is done
                             trace!(?id, "payload job finished");
+                            this.metrics.set_active_jobs(this.payload_jobs.len());
                             continue 'jobs
                         }
                         Poll::Pending => {
@@ -194,10 +207,12 @@ where
                             // no job for this payload yet, create one
                             match this.generator.new_payload_job(attr) {
                                 Ok(job) => {
+                                    this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
                                 }
                                 Err(err) => {
+                                    this.metrics.inc_failed_jobs();
                                     warn!(?err, %id, "failed to create payload job");
                                     res = Err(err);
                                 }
@@ -229,5 +244,5 @@ enum PayloadServiceCommand {
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
     /// Get the current payload.
-    GetPayload(PayloadId, oneshot::Sender<Option<Arc<BuiltPayload>>>),
+    GetPayload(PayloadId, oneshot::Sender<Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>>),
 }

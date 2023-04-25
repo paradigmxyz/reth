@@ -6,9 +6,9 @@ use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256, U256
 /// underlying state provider.
 pub struct PostStateProvider<SP: StateProvider, PSDP: PostStateDataProvider> {
     /// The inner state provider.
-    pub state_provider: SP,
+    pub(crate) state_provider: SP,
     /// Post state data,
-    pub post_state_data_provider: PSDP,
+    pub(crate) post_state_data_provider: PSDP,
 }
 
 impl<SP: StateProvider, PSDP: PostStateDataProvider> PostStateProvider<SP, PSDP> {

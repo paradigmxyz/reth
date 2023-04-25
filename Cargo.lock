@@ -4641,6 +4641,8 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
+ "metrics",
+ "reth-metrics-derive",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -5083,8 +5085,10 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
+ "metrics",
  "reth-consensus-common",
  "reth-interfaces",
+ "reth-metrics-derive",
  "reth-primitives",
  "reth-revm-primitives",
  "reth-rlp",
@@ -5160,7 +5164,6 @@ dependencies = [
 name = "reth-revm"
 version = "0.1.0"
 dependencies = [
- "reth-blockchain-tree",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",

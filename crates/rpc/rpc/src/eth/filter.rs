@@ -53,21 +53,25 @@ where
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
+        trace!(target: "rpc::eth", "Serving eth_newFilter");
         self.inner.install_filter(FilterKind::Log(Box::new(filter))).await
     }
 
     /// Handler for `eth_newBlockFilter`
     async fn new_block_filter(&self) -> RpcResult<FilterId> {
+        trace!(target: "rpc::eth", "Serving eth_newBlockFilter");
         self.inner.install_filter(FilterKind::Block).await
     }
 
     /// Handler for `eth_newPendingTransactionFilter`
     async fn new_pending_transaction_filter(&self) -> RpcResult<FilterId> {
+        trace!(target: "rpc::eth", "Serving eth_newPendingTransactionFilter");
         self.inner.install_filter(FilterKind::PendingTransaction).await
     }
 
     /// Handler for `eth_getFilterChanges`
     async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges> {
+        trace!(target: "rpc::eth", "Serving eth_getFilterChanges");
         let info = self.inner.client.chain_info().to_rpc_result()?;
         let best_number = info.best_number;
 
@@ -127,6 +131,7 @@ where
     ///
     /// Handler for `eth_getFilterLogs`
     async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
+        trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
         let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
             if let FilterKind::Log(ref filter) =
@@ -144,6 +149,7 @@ where
 
     /// Handler for `eth_uninstallFilter`
     async fn uninstall_filter(&self, id: FilterId) -> RpcResult<bool> {
+        trace!(target: "rpc::eth", "Serving eth_uninstallFilter");
         let mut filters = self.inner.active_filters.inner.lock().await;
         if filters.remove(&id).is_some() {
             trace!(target: "rpc::eth::filter", ?id, "uninstalled filter");
@@ -157,6 +163,7 @@ where
     ///
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
+        trace!(target: "rpc::eth", "Serving eth_getLogs");
         self.inner.logs_for_filter(filter).await
     }
 }
