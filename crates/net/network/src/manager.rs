@@ -637,6 +637,7 @@ where
                         SwarmEvent::SessionEstablished {
                             peer_id,
                             remote_addr,
+                            client_version,
                             capabilities,
                             version,
                             messages,
@@ -649,6 +650,7 @@ where
                             info!(
                                 target : "net",
                                 ?remote_addr,
+                                client_version,
                                 ?peer_id,
                                 ?total_active,
                                 "Session established"
@@ -664,6 +666,7 @@ where
                             this.event_listeners.send(NetworkEvent::SessionEstablished {
                                 peer_id,
                                 remote_addr,
+                                client_version,
                                 capabilities,
                                 version,
                                 status,
@@ -858,6 +861,8 @@ pub enum NetworkEvent {
         peer_id: PeerId,
         /// The remote addr of the peer to which a session was established.
         remote_addr: SocketAddr,
+        /// The client version of the peer to which a session was established.
+        client_version: String,
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
