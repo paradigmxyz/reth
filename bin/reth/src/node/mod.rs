@@ -78,6 +78,10 @@ pub mod events;
 /// Start the node
 #[derive(Debug, Parser)]
 pub struct Command {
+    /// The path to the data dir for all reth files and subdirectories.
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    data_dir: MaybePlatformPath<PathBuf>,
+
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
     config: MaybePlatformPath<ConfigPath>,

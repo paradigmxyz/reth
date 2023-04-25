@@ -77,6 +77,20 @@ pub fn p2p_secret_key_dir() -> Option<PathBuf> {
     data_dir().map(|root| root.join("p2p"))
 }
 
+/// Returns the path to the reth data dir.
+#[derive(Default, Debug, Clone)]
+#[non_exhaustive]
+pub struct DataDirPath;
+
+impl XdgPath for DataDirPath {
+    fn resolve() -> Option<PathBuf> {
+        data_dir()
+    }
+}
+
+/// Data dirs will contain a subdirectory for each chain, and those chain directories will include
+/// all information for that chain, such as the p2p secret.
+
 /// Returns the path to the reth database.
 ///
 /// Refer to [dirs_next::data_dir] for cross-platform behavior.
