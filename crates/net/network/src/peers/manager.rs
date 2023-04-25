@@ -325,7 +325,12 @@ impl PeersManager {
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
         let reputation_change = self.reputation_weights.change(rep);
         let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
-            peer.apply_reputation(reputation_change.as_i32())
+            // If reputation change is 0, reset reputation to default
+            if reputation_change.as_i32() == 0 {
+                peer.reset_reputation()
+            } else {
+                peer.apply_reputation(reputation_change.as_i32())
+            }
         } else {
             return
         };
@@ -844,13 +849,21 @@ impl Peer {
         Self { kind, ..Self::new(addr) }
     }
 
+    /// Resets the reputation of the peer to the default value. This always returns
+    /// [`ReputationChangeOutcome::None`].
+    fn reset_reputation(&mut self) -> ReputationChangeOutcome {
+        self.reputation = DEFAULT_REPUTATION;
+
+        ReputationChangeOutcome::None
+    }
+
     /// Applies a reputation change to the peer and returns what action should be taken.
     fn apply_reputation(&mut self, reputation: i32) -> ReputationChangeOutcome {
         let previous = self.reputation;
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);
 
-        trace!(target: "net::peers", repuation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
+        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();
