@@ -5,7 +5,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
-    SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
+    SealedBlock, SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_revm::{
@@ -157,7 +157,8 @@ where
                     };
 
                     let block =
-                        Block { header, body: transactions, ommers: vec![], withdrawals: None };
+                        Block { header, body: transactions, ommers: vec![], withdrawals: None }
+                            .seal_slow();
 
                     // execute the new block
                     let substate = SubState::new(State::new(client.latest().unwrap()));
@@ -173,7 +174,8 @@ where
 
                     match executor.execute_transactions(&block, U256::ZERO, Some(senders.clone())) {
                         Ok((post_state, gas_used)) => {
-                            let Block { mut header, body, .. } = block;
+                            let SealedBlock { header, body, .. } = block;
+                            let mut header = header.unseal();
 
                             // clear all transactions from pool
                             pool.remove_transactions(body.iter().map(|tx| tx.hash()));

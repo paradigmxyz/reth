@@ -123,7 +123,7 @@ impl Signature {
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
-        secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
+        secp256k1::recover_signer(&sig, hash.as_fixed_bytes()).ok()
     }
 
     /// Turn this signature into its byte

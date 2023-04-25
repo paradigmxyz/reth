@@ -1,7 +1,7 @@
 use crate::{post_state::PostState, BlockExecutor, ExecutorFactory, StateProvider};
 use parking_lot::Mutex;
 use reth_interfaces::executor::Error as ExecutionError;
-use reth_primitives::{Address, Block, ChainSpec, U256};
+use reth_primitives::{Address, ChainSpec, SealedBlock, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
 pub struct TestExecutor(pub Option<PostState>);
@@ -9,7 +9,7 @@ pub struct TestExecutor(pub Option<PostState>);
 impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
     fn execute(
         &mut self,
-        _block: &Block,
+        _block: &SealedBlock,
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
     ) -> Result<PostState, ExecutionError> {
@@ -18,7 +18,7 @@ impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
 
     fn execute_and_verify_receipt(
         &mut self,
-        _block: &Block,
+        _block: &SealedBlock,
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
     ) -> Result<PostState, ExecutionError> {

@@ -6,8 +6,8 @@ use crate::{
 use reth_interfaces::Result;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytecode, Bytes, ChainInfo, Header,
-    Receipt, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256,
-    KECCAK_EMPTY, U256,
+    Receipt, SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash,
+    TxNumber, H256, KECCAK_EMPTY, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
@@ -158,7 +158,7 @@ impl EvmEnvProvider for NoopProvider {
         &self,
         _cfg: &mut CfgEnv,
         _block_env: &mut BlockEnv,
-        _header: &Header,
+        _header: &SealedHeader,
     ) -> Result<()> {
         Ok(())
     }
@@ -170,7 +170,7 @@ impl EvmEnvProvider for NoopProvider {
     fn fill_block_env_with_header(
         &self,
         _block_env: &mut BlockEnv,
-        _header: &Header,
+        _header: &SealedHeader,
     ) -> Result<()> {
         Ok(())
     }
@@ -179,7 +179,7 @@ impl EvmEnvProvider for NoopProvider {
         Ok(())
     }
 
-    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> Result<()> {
+    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &SealedHeader) -> Result<()> {
         Ok(())
     }
 }

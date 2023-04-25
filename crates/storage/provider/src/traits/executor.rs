@@ -2,7 +2,7 @@
 
 use crate::{post_state::PostState, StateProvider};
 use reth_interfaces::executor::Error;
-use reth_primitives::{Address, Block, ChainSpec, U256};
+use reth_primitives::{Address, ChainSpec, SealedBlock, U256};
 
 /// Executor factory that would create the EVM with particular state provider.
 ///
@@ -30,7 +30,7 @@ pub trait BlockExecutor<SP: StateProvider> {
     /// recovery costs.
     fn execute(
         &mut self,
-        block: &Block,
+        block: &SealedBlock,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, Error>;
@@ -38,7 +38,7 @@ pub trait BlockExecutor<SP: StateProvider> {
     /// Executes the block and checks receipts
     fn execute_and_verify_receipt(
         &mut self,
-        block: &Block,
+        block: &SealedBlock,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, Error>;

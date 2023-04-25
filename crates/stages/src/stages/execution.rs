@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_metrics_derive::Metrics;
-use reth_primitives::{Block, BlockNumber, BlockWithSenders, U256};
+use reth_primitives::{BlockNumber, SealedBlock, SealedBlockWithSenders, H256, U256};
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
@@ -86,8 +86,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     fn read_block_with_senders<DB: Database>(
         tx: &Transaction<'_, DB>,
         block_number: BlockNumber,
-    ) -> Result<(BlockWithSenders, U256), StageError> {
-        let header = tx.get_header(block_number)?;
+    ) -> Result<(SealedBlockWithSenders, U256), StageError> {
+        let hash = tx.get_block_hash(block_number)?;
+        let header = tx.get_header(block_number)?.seal(hash);
         let td = tx.get_td(block_number)?;
         let ommers = tx.get::<tables::BlockOmmers>(block_number)?.unwrap_or_default().ommers;
         let withdrawals = tx.get::<tables::BlockWithdrawals>(block_number)?.map(|v| v.withdrawals);
@@ -99,7 +100,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             .map(|tx| tx.to_components())
             .unzip();
 
-        Ok((Block { header, body: transactions, ommers, withdrawals }.with_senders(senders), td))
+        // TODO: The ommers are sealed with empty hashes to avoid larger changes in this PR.
+        // This is fine because ommer hashes don't matter. Will be fixed with [SealedBlock]
+        // simplification
+        let ommers = ommers.into_iter().map(|o| o.seal(H256::default())).collect();
+        let block = SealedBlock { header, body: transactions, ommers, withdrawals };
+        Ok((SealedBlockWithSenders { block, senders }, td))
     }
 
     /// Execute the stage.

@@ -7,8 +7,8 @@ use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TxHash, TxNumber, H256, U256,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedHeader, StorageKey, StorageValue,
+    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -308,7 +308,7 @@ impl EvmEnvProvider for MockEthProvider {
         &self,
         _cfg: &mut CfgEnv,
         _block_env: &mut BlockEnv,
-        _header: &Header,
+        _header: &SealedHeader,
     ) -> Result<()> {
         unimplemented!()
     }
@@ -320,7 +320,7 @@ impl EvmEnvProvider for MockEthProvider {
     fn fill_block_env_with_header(
         &self,
         _block_env: &mut BlockEnv,
-        _header: &Header,
+        _header: &SealedHeader,
     ) -> Result<()> {
         unimplemented!()
     }
@@ -329,7 +329,7 @@ impl EvmEnvProvider for MockEthProvider {
         unimplemented!()
     }
 
-    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> Result<()> {
+    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &SealedHeader) -> Result<()> {
         unimplemented!()
     }
 }

@@ -8,7 +8,7 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
-    TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -384,7 +384,7 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
 impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
     fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
         let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?.seal(hash);
         self.fill_env_with_header(cfg, block_env, &header)
     }
 
@@ -392,7 +392,7 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
-        header: &Header,
+        header: &SealedHeader,
     ) -> Result<()> {
         let total_difficulty =
             self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
@@ -402,12 +402,15 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
 
     fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
         let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
-
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?.seal(hash);
         self.fill_block_env_with_header(block_env, &header)
     }
 
-    fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> Result<()> {
+    fn fill_block_env_with_header(
+        &self,
+        block_env: &mut BlockEnv,
+        header: &SealedHeader,
+    ) -> Result<()> {
         let total_difficulty =
             self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
         let spec_id = revm_spec(
@@ -422,17 +425,17 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
             },
         );
         let after_merge = spec_id >= SpecId::MERGE;
-        fill_block_env(block_env, header, after_merge);
+        fill_block_env(block_env, &self.chain_spec, header, after_merge);
         Ok(())
     }
 
     fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockId) -> Result<()> {
         let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?.seal(hash);
         self.fill_cfg_env_with_header(cfg, &header)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
+    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &SealedHeader) -> Result<()> {
         let total_difficulty =
             self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);

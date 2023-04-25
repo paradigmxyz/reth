@@ -20,8 +20,8 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Block, BlockHash, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256,
-    U256,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber,
+    Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -202,7 +202,7 @@ where
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
-        header: &Header,
+        header: &SealedHeader,
     ) -> Result<()> {
         self.database.fill_env_with_header(cfg, block_env, header)
     }
@@ -211,7 +211,11 @@ where
         self.database.fill_block_env_at(block_env, at)
     }
 
-    fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> Result<()> {
+    fn fill_block_env_with_header(
+        &self,
+        block_env: &mut BlockEnv,
+        header: &SealedHeader,
+    ) -> Result<()> {
         self.database.fill_block_env_with_header(block_env, header)
     }
 
@@ -219,7 +223,7 @@ where
         self.database.fill_cfg_env_at(cfg, at)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
+    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &SealedHeader) -> Result<()> {
         self.database.fill_cfg_env_with_header(cfg, header)
     }
 }

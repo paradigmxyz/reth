@@ -153,8 +153,7 @@ impl AppendableChain {
         externals.consensus.pre_validate_header(&block, parent_block)?;
         externals.consensus.pre_validate_block(&block)?;
 
-        let (unseal, senders) = block.into_components();
-        let unseal = unseal.unseal();
+        let (block, senders) = block.into_components();
 
         //get state provider.
         let db = externals.shareable_db();
@@ -165,7 +164,7 @@ impl AppendableChain {
         let provider = PostStateProvider::new(state_provider, post_state_data_provider);
 
         let mut executor = externals.executor_factory.with_sp(&provider);
-        executor.execute_and_verify_receipt(&unseal, U256::MAX, Some(senders)).map_err(Into::into)
+        executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders)).map_err(Into::into)
     }
 
     /// Validate and execute the given block, and append it to this chain.

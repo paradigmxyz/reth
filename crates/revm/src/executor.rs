@@ -9,8 +9,8 @@ use crate::{
 use reth_consensus_common::calc;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
-    ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
+    Account, Address, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
+    ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
 use revm::{
@@ -89,7 +89,7 @@ where
     }
 
     /// Initializes the config and block env.
-    fn init_env(&mut self, header: &Header, total_difficulty: U256) {
+    fn init_env(&mut self, header: &SealedHeader, total_difficulty: U256) {
         fill_cfg_and_block_env(
             &mut self.evm.env.cfg,
             &mut self.evm.env.block,
@@ -116,7 +116,13 @@ where
     ///
     /// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
     /// state changes (DAO fork).
-    fn post_block_balance_increments(&self, block: &Block, td: U256) -> HashMap<Address, U256> {
+    fn post_block_balance_increments(
+        &self,
+        block: &SealedBlock,
+        td: U256,
+    ) -> HashMap<Address, U256> {
+        // TODO: This will be fixed with simplification of [SealedBlock]
+        let ommers = block.ommers.iter().map(|o| &o.header).collect::<Vec<_>>();
         post_block_balance_increments(
             &self.chain_spec,
             block.number,
@@ -124,7 +130,7 @@ where
             block.beneficiary,
             block.timestamp,
             td,
-            &block.ommers,
+            &ommers,
             block.withdrawals.as_deref(),
         )
     }
@@ -210,7 +216,7 @@ where
     /// The second returned value represents the total gas used by this block of transactions.
     pub fn execute_transactions(
         &mut self,
-        block: &Block,
+        block: &SealedBlock,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<(PostState, u64), Error> {
@@ -270,7 +276,7 @@ where
 {
     fn execute(
         &mut self,
-        block: &Block,
+        block: &SealedBlock,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, Error> {
@@ -297,7 +303,7 @@ where
 
     fn execute_and_verify_receipt(
         &mut self,
-        block: &Block,
+        block: &SealedBlock,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, Error> {
@@ -522,7 +528,7 @@ pub fn post_block_balance_increments(
     beneficiary: Address,
     block_timestamp: u64,
     total_difficulty: U256,
-    ommers: &[Header],
+    ommers: &[&Header],
     withdrawals: Option<&[Withdrawal]>,
 ) -> HashMap<Address, U256> {
     let mut balance_increments = HashMap::new();
@@ -597,7 +603,7 @@ mod tests {
     use crate::database::State;
     use reth_consensus_common::calc;
     use reth_primitives::{
-        constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
+        constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, Block, BlockNumber,
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{post_state::Storage, AccountProvider, BlockHashProvider, StateProvider};
@@ -685,14 +691,14 @@ mod tests {
         // Got rlp block from: src/GeneralStateTestsFiller/stChainId/chainIdGasCostFiller.json
 
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
-        let mut block = Block::decode(&mut block_rlp).unwrap();
+        let mut block = Block::decode(&mut block_rlp).unwrap().seal_slow();
 
         let mut ommer = Header::default();
         let ommer_beneficiary =
             Address::from_str("3000000000000000000000000000000000000000").unwrap();
         ommer.beneficiary = ommer_beneficiary;
         ommer.number = block.number;
-        block.ommers = vec![ommer];
+        block.ommers = vec![ommer.seal_slow()];
 
         let mut db = StateProviderTest::default();
 
@@ -857,7 +863,7 @@ mod tests {
 
     #[test]
     fn dao_hardfork_irregular_state_change() {
-        let header = Header { number: 1, ..Header::default() };
+        let header = Header { number: 1, ..Header::default() }.seal_slow();
 
         let mut db = StateProviderTest::default();
 
@@ -884,7 +890,7 @@ mod tests {
         let mut executor = Executor::new(chain_spec, db);
         let out = executor
             .execute_and_verify_receipt(
-                &Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                &SealedBlock { header, body: vec![], ommers: vec![], withdrawals: None },
                 U256::ZERO,
                 None,
             )
@@ -920,7 +926,7 @@ mod tests {
         // Got rlp block from: src/GeneralStateTestsFiller/stArgsZeroOneBalance/suicideNonConst.json
 
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
-        let block = Block::decode(&mut block_rlp).unwrap();
+        let block = Block::decode(&mut block_rlp).unwrap().seal_slow();
         let mut db = StateProviderTest::default();
 
         let address_caller = Address::from_str("a94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap();
@@ -993,7 +999,7 @@ mod tests {
     #[test]
     fn test_withdrawals() {
         let block_rlp = hex!("f9028cf90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa048cd9a5957e45beebf80278a5208b0cbe975ab4b4adb0da1509c67b26f2be3ffa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a04a220ebe55034d51f8a58175bb504b6ebf883105010a1f6d42e557c18bbd5d69c0c0f86cda808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da018094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da020194c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710");
-        let block = Block::decode(&mut block_rlp.as_slice()).unwrap();
+        let block = Block::decode(&mut block_rlp.as_slice()).unwrap().seal_slow();
         let withdrawals = block.withdrawals.as_ref().unwrap();
         assert_eq!(withdrawals.len(), 4);
 
