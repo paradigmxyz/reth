@@ -218,7 +218,7 @@ impl Peers for NetworkHandle {
     async fn reputation_by_id(&self, peer_id: PeerId) -> Result<Option<Reputation>, NetworkError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetReputationById(peer_id, tx));
-        rx.await.map_err(|e| e.into())
+        Ok(rx.await?)
     }
 }
 

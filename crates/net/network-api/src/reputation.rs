@@ -25,3 +25,9 @@ pub enum ReputationChangeKind {
     /// Apply a reputation change by value
     Other(Reputation),
 }
+
+impl ReputationChangeKind {
+    pub fn is_reset(&self) -> bool {
+        matches!(self, Self::Reset)
+    }
+}
