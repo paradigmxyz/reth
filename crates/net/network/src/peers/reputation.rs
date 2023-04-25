@@ -70,6 +70,7 @@ impl ReputationChangeWeights {
             ReputationChangeKind::BadProtocol => self.bad_protocol.into(),
             ReputationChangeKind::FailedToConnect => self.failed_to_connect.into(),
             ReputationChangeKind::Dropped => self.dropped.into(),
+            ReputationChangeKind::Reset => DEFAULT_REPUTATION.into(),
             ReputationChangeKind::Other(val) => val.into(),
         }
     }

@@ -11,7 +11,7 @@ use reth_interfaces::{
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
-    NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, ReputationChangeKind,
+    NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
 use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
 use reth_rpc_types::NetworkStatus;
@@ -184,6 +184,7 @@ impl PeersInfo for NetworkHandle {
     }
 }
 
+#[async_trait]
 impl Peers for NetworkHandle {
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
@@ -212,6 +213,12 @@ impl Peers for NetworkHandle {
     /// Send a reputation change for the given peer.
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
+    }
+
+    async fn reputation_by_id(&self, peer_id: PeerId) -> Result<Option<Reputation>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetReputationById(peer_id, tx));
+        Ok(rx.await?)
     }
 }
 
@@ -314,6 +321,8 @@ pub(crate) enum NetworkHandleMessage {
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
+    /// Get the reputation for a specific peer
+    GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Gracefully shutdown network
     Shutdown(oneshot::Sender<()>),
 }

@@ -321,11 +321,20 @@ impl PeersManager {
         }
     }
 
+    pub(crate) fn get_reputation(&self, peer_id: &PeerId) -> Option<i32> {
+        self.peers.get(peer_id).map(|peer| peer.reputation)
+    }
+
     /// Apply the corresponding reputation change to the given peer
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
-        let reputation_change = self.reputation_weights.change(rep);
         let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
-            peer.apply_reputation(reputation_change.as_i32())
+            // First check if we should reset the reputation
+            if rep.is_reset() {
+                peer.reset_reputation()
+            } else {
+                let reputation_change = self.reputation_weights.change(rep);
+                peer.apply_reputation(reputation_change.as_i32())
+            }
         } else {
             return
         };
@@ -844,13 +853,21 @@ impl Peer {
         Self { kind, ..Self::new(addr) }
     }
 
+    /// Resets the reputation of the peer to the default value. This always returns
+    /// [`ReputationChangeOutcome::None`].
+    fn reset_reputation(&mut self) -> ReputationChangeOutcome {
+        self.reputation = DEFAULT_REPUTATION;
+
+        ReputationChangeOutcome::None
+    }
+
     /// Applies a reputation change to the peer and returns what action should be taken.
     fn apply_reputation(&mut self, reputation: i32) -> ReputationChangeOutcome {
         let previous = self.reputation;
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);
 
-        trace!(target: "net::peers", repuation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
+        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();
@@ -1693,6 +1710,21 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_reputation_management() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_peer(peer, socket_addr, None);
+        assert_eq!(peers.get_reputation(&peer), Some(0));
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::Other(1024));
+        assert_eq!(peers.get_reputation(&peer), Some(1024));
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::Reset);
+        assert_eq!(peers.get_reputation(&peer), Some(0));
     }
 
     #[tokio::test]
