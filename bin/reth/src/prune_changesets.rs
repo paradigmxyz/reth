@@ -63,11 +63,21 @@ impl Command {
             // Seek all next changesets with the same value
             let mut first = true;
             let mut keys_to_delete = Vec::new();
+            let mut keys_walked = 0;
             for next_entry in storage_changesets_cursor.walk_range(key..)? {
                 if first {
                     first = false;
                     continue
                 }
+
+                keys_walked += 1;
+                if keys_walked % 100_000 == 0 {
+                    println!(
+                        "Walked {} keys for {:?} at slot {:?}",
+                        keys_walked, key.0 .1, entry.key
+                    );
+                }
+
                 let (next_key, next_entry) = next_entry?;
                 if key.0 .1 == next_key.0 .1 && entry.key == next_entry.key {
                     // Found the next changeset for the same address/slot
