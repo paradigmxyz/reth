@@ -139,13 +139,17 @@ impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
 
 impl<DB: Database> BlockIdProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
-        let best_number = self
+        let best_number = self.best_block_number()?;
+        let best_hash = self.block_hash(best_number)?.unwrap_or_default();
+        Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
+    }
+
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        Ok(self
             .db
             .view(|tx| tx.get::<tables::SyncStage>("Finish".to_string()))?
             .map_err(Into::<reth_interfaces::db::Error>::into)?
-            .unwrap_or_default();
-        let best_hash = self.block_hash(best_number)?.unwrap_or_default();
-        Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
+            .unwrap_or_default())
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
