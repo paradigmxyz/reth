@@ -422,7 +422,7 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
             },
         );
         let after_merge = spec_id >= SpecId::MERGE;
-        fill_block_env(block_env, header, after_merge);
+        fill_block_env(block_env, &self.chain_spec, header, after_merge);
         Ok(())
     }
 
