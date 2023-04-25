@@ -49,7 +49,7 @@ pub fn fill_block_env(
     after_merge: bool,
 ) {
     block_env.number = U256::from(header.number);
-    block_env.coinbase = dbg!(block_coinbase(chain_spec, header, after_merge));
+    block_env.coinbase = block_coinbase(chain_spec, header, after_merge);
     block_env.timestamp = U256::from(header.timestamp);
     if after_merge {
         block_env.prevrandao = Some(header.mix_hash);
