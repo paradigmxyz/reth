@@ -27,6 +27,7 @@ pub enum ReputationChangeKind {
 }
 
 impl ReputationChangeKind {
+    /// Returns true if the reputation change is a reset.
     pub fn is_reset(&self) -> bool {
         matches!(self, Self::Reset)
     }
