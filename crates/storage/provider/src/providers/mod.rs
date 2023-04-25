@@ -99,6 +99,10 @@ where
         self.database.chain_info()
     }
 
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        self.database.best_block_number()
+    }
+
     fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<BlockNumber>> {
         let num = match num {
             BlockNumberOrTag::Latest => self.chain_info()?.best_number,
