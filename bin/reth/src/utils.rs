@@ -1,5 +1,5 @@
 //! Common CLI utility functions.
-use crate::dirs::{DbPath, PlatformPath};
+
 use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
@@ -9,23 +9,24 @@ use reth_db::{
 };
 use reth_interfaces::{
     p2p::{
-        download::DownloadClient,
         headers::client::{HeadersClient, HeadersRequest},
         priority::Priority,
     },
     test_utils::generators::random_block_range,
 };
-use reth_network::FetchClient;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
 use reth_provider::insert_canonical_block;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
 /// Get a single header from network
-pub async fn get_single_header(
-    client: FetchClient,
+pub async fn get_single_header<Client>(
+    client: Client,
     id: BlockHashOrNumber,
-) -> eyre::Result<SealedHeader> {
+) -> eyre::Result<SealedHeader>
+where
+    Client: HeadersClient,
+{
     let request = HeadersRequest { direction: HeadersDirection::Rising, limit: 1, start: id };
 
     let (peer_id, response) =
@@ -69,11 +70,11 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Seeds the database with some random data, only used for testing
     pub fn seed(&mut self, len: u64) -> Result<()> {
         info!(target: "reth::cli", "Generating random block range from 0 to {len}");
-        let chain = random_block_range(0..len, Default::default(), 0..64);
+        let chain = random_block_range(0..=len - 1, Default::default(), 0..64);
 
         self.db.update(|tx| {
             chain.into_iter().try_for_each(|block| {
-                insert_canonical_block(tx, block, None, true)?;
+                insert_canonical_block(tx, block, None)?;
                 Ok::<_, eyre::Error>(())
             })
         })??;
@@ -105,8 +106,9 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     }
 
     /// Drops the database at the given path.
-    pub fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
-        info!(target: "reth::cli", "Dropping db at {}", path);
+    pub fn drop(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        info!(target: "reth::cli", "Dropping db at {:?}", path);
         std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
     }

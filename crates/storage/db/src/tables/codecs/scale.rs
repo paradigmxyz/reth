@@ -2,7 +2,6 @@ use crate::{
     table::{Compress, Decompress},
     Error,
 };
-use parity_scale_codec::decode_from_bytes;
 use reth_primitives::*;
 
 mod sealed {
@@ -18,6 +17,10 @@ where
 {
     type Compressed = Vec<u8>;
 
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+        buf.put_slice(&parity_scale_codec::Encode::encode(&self))
+    }
+
     fn compress(self) -> Self::Compressed {
         parity_scale_codec::Encode::encode(&self)
     }
@@ -27,8 +30,8 @@ impl<T> Decompress for T
 where
     T: ScaleValue + parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
 {
-    fn decompress<B: Into<bytes::Bytes>>(value: B) -> Result<T, Error> {
-        decode_from_bytes(value.into()).map_err(|_| Error::DecodeError)
+    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<T, Error> {
+        parity_scale_codec::Decode::decode(&mut value.as_ref()).map_err(|_| Error::DecodeError)
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostState, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -8,7 +9,7 @@ use reth_primitives::{
     Receipt, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256,
     KECCAK_EMPTY, U256,
 };
-use revm_primitives::{BlockEnv, CfgEnv};
+use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
 
 /// Supports various api interfaces for testing purposes.
@@ -48,6 +49,10 @@ impl BlockProvider for NoopProvider {
 }
 
 impl TransactionsProvider for NoopProvider {
+    fn transaction_id(&self, _tx_hash: TxHash) -> Result<Option<TxNumber>> {
+        Ok(None)
+    }
+
     fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
         Ok(None)
     }
@@ -121,6 +126,12 @@ impl AccountProvider for NoopProvider {
     }
 }
 
+impl StateRootProvider for NoopProvider {
+    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+        todo!()
+    }
+}
+
 impl StateProvider for NoopProvider {
     fn storage(&self, _account: Address, _storage_key: StorageKey) -> Result<Option<StorageValue>> {
         Ok(None)
@@ -180,18 +191,30 @@ impl EvmEnvProvider for NoopProvider {
 }
 
 impl StateProviderFactory for NoopProvider {
-    type HistorySP<'a> = NoopProvider where Self: 'a;
-    type LatestSP<'a> = NoopProvider where Self: 'a;
-
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(*self)
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
     }
 
-    fn history_by_block_number(&self, _block: BlockNumber) -> Result<Self::HistorySP<'_>> {
-        Ok(*self)
+    fn history_by_block_number(&self, _block: BlockNumber) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
-        Ok(*self)
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn pending_with_provider<'a>(
+        &'a self,
+        _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
+    ) -> Result<StateProviderBox<'a>> {
+        Ok(Box::new(*self))
     }
 }

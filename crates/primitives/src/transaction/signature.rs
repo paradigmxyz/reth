@@ -1,12 +1,14 @@
 use crate::{transaction::util::secp256k1, Address, H256, U256};
-use reth_codecs::{main_codec, Compact};
+use bytes::Buf;
+use reth_codecs::{derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
+use serde::{Deserialize, Serialize};
 
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
-#[main_codec]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+#[derive_arbitrary(compact)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
     pub r: U256,
@@ -14,6 +16,27 @@ pub struct Signature {
     pub s: U256,
     /// yParity: Signature Y parity; formally Ty
     pub odd_y_parity: bool,
+}
+
+impl Compact for Signature {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        buf.put_slice(self.r.as_le_bytes().as_ref());
+        buf.put_slice(self.s.as_le_bytes().as_ref());
+        self.odd_y_parity as usize
+    }
+
+    fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        let r = U256::try_from_le_slice(&buf[..32]).expect("qed");
+        buf.advance(32);
+
+        let s = U256::try_from_le_slice(&buf[..32]).expect("qed");
+        buf.advance(32);
+
+        (Signature { r, s, odd_y_parity: identifier != 0 }, buf)
+    }
 }
 
 impl Signature {
@@ -47,7 +70,7 @@ impl Signature {
     }
 
     /// Decodes the `v`, `r`, `s` values without a RLP header.
-    /// This will return a chain ID if the `v` value is EIP-155 compatible.
+    /// This will return a chain ID if the `v` value is [EIP-155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) compatible.
     pub(crate) fn decode_with_eip155_chain_id(
         buf: &mut &[u8],
     ) -> Result<(Self, Option<u64>), DecodeError> {
@@ -60,8 +83,11 @@ impl Signature {
             let chain_id = (v - 35) >> 1;
             Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
         } else {
-            // non-EIP-155 legacy scheme
-            let odd_y_parity = (v - 27) != 0;
+            // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
+            if v != 27 && v != 28 {
+                return Err(DecodeError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
+            }
+            let odd_y_parity = v == 28;
             Ok((Signature { r, s, odd_y_parity }, None))
         }
     }
@@ -88,7 +114,7 @@ impl Signature {
     }
 
     /// Recover signature from hash.
-    pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
+    pub fn recover_signer(&self, hash: H256) -> Option<Address> {
         let mut sig: [u8; 65] = [0; 65];
 
         sig[0..32].copy_from_slice(&self.r.to_be_bytes::<32>());
@@ -97,7 +123,7 @@ impl Signature {
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
-        secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
+        secp256k1::recover_signer(&sig, hash.as_fixed_bytes()).ok()
     }
 
     /// Turn this signature into its byte

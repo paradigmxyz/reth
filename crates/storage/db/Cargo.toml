@@ -12,7 +12,7 @@ description = "Staged syncing primitives used in reth."
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-codecs = { path = "../codecs" }
-reth-libmdbx = { path = "../libmdbx-rs", optional = true }
+reth-libmdbx = { path = "../libmdbx-rs", optional = true , features = ["return-borrowed"] }
 
 # codecs
 serde = { version = "1.0.*", default-features = false }
@@ -37,6 +37,7 @@ bytes = "1.4"
 page_size = "0.4.2"
 thiserror = "1.0.37"
 tempfile = { version = "3.3.0", optional = true }
+parking_lot = "0.12"
 
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }

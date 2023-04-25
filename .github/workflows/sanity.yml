@@ -16,12 +16,15 @@ name: sanity
 jobs:
   dep-version-constraints:
     runs-on: ubuntu-latest
-    name: dep version constraints
+    name: dep version constraints test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
+    strategy:
+      matrix:
+        partition: [1, 2, 3]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
@@ -46,7 +49,10 @@ jobs:
         run: cargo update
 
       - name: Run tests
-        run: cargo nextest run --locked --workspace --all-features
+        run: |
+          cargo nextest run --locked --workspace --all-features \
+            --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
+            -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
       - uses: JasonEtco/create-an-issue@v2
         if: ${{ failure() }}

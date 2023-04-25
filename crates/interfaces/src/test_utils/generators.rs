@@ -1,10 +1,14 @@
 use rand::{distributions::uniform::SampleRange, seq::SliceRandom, thread_rng, Rng};
 use reth_primitives::{
-    proofs, sign_message, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature,
-    StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
+    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, SealedBlock, SealedHeader,
+    Signature, StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256,
+    U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
-use std::{collections::BTreeMap, ops::Sub};
+use std::{
+    collections::BTreeMap,
+    ops::{Range, RangeInclusive, Sub},
+};
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
 // relevant crates?
@@ -121,7 +125,7 @@ pub fn random_block(
         }
         .seal_slow(),
         body: transactions,
-        ommers: ommers.into_iter().map(Header::seal_slow).collect(),
+        ommers,
         withdrawals: None,
     }
 }
@@ -133,13 +137,13 @@ pub fn random_block(
 ///
 /// See [random_block] for considerations when validating the generated blocks.
 pub fn random_block_range(
-    block_numbers: std::ops::Range<u64>,
+    block_numbers: RangeInclusive<BlockNumber>,
     head: H256,
-    tx_count: std::ops::Range<u8>,
+    tx_count: Range<u8>,
 ) -> Vec<SealedBlock> {
     let mut rng = rand::thread_rng();
     let mut blocks =
-        Vec::with_capacity(block_numbers.end.saturating_sub(block_numbers.start) as usize);
+        Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
         blocks.push(random_block(
             idx,
@@ -177,10 +181,9 @@ where
 
     let valid_addresses = state.keys().copied().collect();
 
-    let num_transitions: usize = blocks.into_iter().map(|block| block.body.len()).sum();
-    let mut transitions = Vec::with_capacity(num_transitions);
+    let mut transitions = Vec::new();
 
-    (0..num_transitions).for_each(|i| {
+    blocks.into_iter().for_each(|block| {
         let mut transition = Vec::new();
         let (from, to, mut transfer, new_entries) =
             random_account_change(&valid_addresses, n_changes.clone(), key_range.clone());
@@ -260,7 +263,7 @@ pub fn random_storage_entry(key_range: std::ops::Range<u64>) -> StorageEntry {
     StorageEntry { key, value }
 }
 
-/// Generate random Externaly Owned Account (EOA account without contract).
+/// Generate random Externally Owned Account (EOA account without contract).
 pub fn random_eoa_account() -> (Address, Account) {
     let nonce: u64 = rand::random();
     let balance = U256::from(rand::random::<u32>());
@@ -269,7 +272,7 @@ pub fn random_eoa_account() -> (Address, Account) {
     (addr, Account { nonce, balance, bytecode_hash: None })
 }
 
-/// Generate random Externaly Owned Accounts
+/// Generate random Externally Owned Accounts
 pub fn random_eoa_account_range(acc_range: std::ops::Range<u64>) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {

@@ -14,7 +14,7 @@ pub struct JwtAuthValidator {
 
 impl JwtAuthValidator {
     /// Creates a new instance of [`JwtAuthValidator`].
-    /// Validation logics are implemnted by the `secret`
+    /// Validation logics are implemented by the `secret`
     /// argument (see [`JwtSecret`]).
     pub fn new(secret: JwtSecret) -> Self {
         Self { secret }
@@ -68,9 +68,8 @@ fn err_response(err: JwtError) -> Response<hyper::Body> {
 
 #[cfg(test)]
 mod tests {
-    use http::{header, HeaderMap};
-
     use crate::layers::jwt_validator::get_bearer;
+    use http::{header, HeaderMap};
 
     #[test]
     fn auth_header_available() {

@@ -20,9 +20,6 @@ pub mod executor;
 mod error;
 pub use error::{Error, Result};
 
-/// Traits for subscribing to events.
-pub mod events;
-
 /// P2P traits.
 pub mod p2p;
 
@@ -31,6 +28,9 @@ pub mod provider;
 
 /// Syncing related traits.
 pub mod sync;
+
+/// BlockchainTree related traits.
+pub mod blockchain_tree;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.

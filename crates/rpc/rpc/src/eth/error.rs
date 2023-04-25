@@ -25,6 +25,8 @@ pub enum EthApiError {
     PoolError(RpcPoolError),
     #[error("Unknown block number")]
     UnknownBlockNumber,
+    #[error("Unknown block or tx index")]
+    UnknownBlockOrTxIndex,
     #[error("Invalid block range")]
     InvalidBlockRange,
     /// An internal error where prevrandao is not set in the evm's environment
@@ -58,6 +60,9 @@ pub enum EthApiError {
     /// When tracer config does not match the tracer
     #[error("invalid tracer config")]
     InvalidTracerConfig,
+    /// Percentile array is invalid
+    #[error("invalid reward percentile")]
+    InvalidRewardPercentile(f64),
 }
 
 impl From<EthApiError> for RpcError {
@@ -77,10 +82,11 @@ impl From<EthApiError> for RpcError {
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockNumber => {
+            EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
+            EthApiError::InvalidRewardPercentile(msg) => internal_rpc_err(msg.to_string()),
         }
     }
 }
@@ -339,11 +345,12 @@ impl From<PoolError> for RpcPoolError {
     fn from(err: PoolError) -> RpcPoolError {
         match err {
             PoolError::ReplacementUnderpriced(_) => RpcPoolError::ReplaceUnderpriced,
-            PoolError::ProtocolFeeCapTooLow(_, _) => RpcPoolError::Underpriced,
+            PoolError::FeeCapBelowMinimumProtocolFeeCap(_, _) => RpcPoolError::Underpriced,
             PoolError::SpammerExceededCapacity(_, _) => RpcPoolError::TxPoolOverflow,
             PoolError::DiscardedOnInsert(_) => RpcPoolError::TxPoolOverflow,
             PoolError::InvalidTransaction(_, err) => err.into(),
             PoolError::Other(_, err) => RpcPoolError::Other(err),
+            PoolError::AlreadyImported(_) => RpcPoolError::AlreadyKnown,
         }
     }
 }

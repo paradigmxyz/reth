@@ -3,7 +3,7 @@ use crate::{
     table::{Decode, Decompress, Table},
     Error,
 };
-use reth_primitives::bytes::Bytes;
+
 use std::borrow::Cow;
 
 #[macro_export]
@@ -49,10 +49,15 @@ where
     T::Key: Decode,
     T::Value: Decompress,
 {
-    Ok((
-        Decode::decode(Bytes::from(kv.0.into_owned()))?,
-        Decompress::decompress(Bytes::from(kv.1.into_owned()))?,
-    ))
+    let key = match kv.0 {
+        Cow::Borrowed(k) => Decode::decode(k)?,
+        Cow::Owned(k) => Decode::decode(k)?,
+    };
+    let value = match kv.1 {
+        Cow::Borrowed(v) => Decompress::decompress(v)?,
+        Cow::Owned(v) => Decompress::decompress(v)?,
+    };
+    Ok((key, value))
 }
 
 /// Helper function to decode only a value from a `(key, value)` pair.
@@ -60,7 +65,10 @@ pub(crate) fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> Result<
 where
     T: Table,
 {
-    Decompress::decompress(Bytes::from(kv.1.into_owned()))
+    Ok(match kv.1 {
+        Cow::Borrowed(v) => Decompress::decompress(v)?,
+        Cow::Owned(v) => Decompress::decompress(v)?,
+    })
 }
 
 /// Helper function to decode a value. It can be a key or subkey.
@@ -68,5 +76,8 @@ pub(crate) fn decode_one<T>(value: Cow<'_, [u8]>) -> Result<T::Value, Error>
 where
     T: Table,
 {
-    Decompress::decompress(Bytes::from(value.into_owned()))
+    Ok(match value {
+        Cow::Borrowed(v) => Decompress::decompress(v)?,
+        Cow::Owned(v) => Decompress::decompress(v)?,
+    })
 }

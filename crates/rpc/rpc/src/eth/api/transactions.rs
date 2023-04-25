@@ -2,11 +2,13 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, SignError},
+        revm_utils::{inspect, prepare_call_env, transact},
         utils::recover_raw_transaction,
     },
-    EthApi,
+    EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
     Receipt, Transaction as PrimitiveTransaction,
@@ -14,31 +16,46 @@ use reth_primitives::{
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
     TxLegacy, H256, U128, U256, U64,
 };
-use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_revm::{
+    database::{State, SubState},
+    env::tx_env_with_recovered,
+    tracing::{TracingInspector, TracingInspectorConfig},
+};
 use reth_rpc_types::{
-    Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
-    TypedTransactionRequest,
+    state::StateOverride, CallRequest, Index, Log, Transaction, TransactionInfo,
+    TransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
-use revm::primitives::{BlockEnv, CfgEnv};
-use revm_primitives::utilities::create_address;
+use revm::{
+    db::CacheDB,
+    primitives::{BlockEnv, CfgEnv},
+    Inspector,
+};
+use revm_primitives::{utilities::create_address, Env, ResultAndState};
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
     /// Returns the state at the given [BlockId]
-    fn state_at(&self, at: BlockId) -> EthResult<ChainState<'_>>;
+    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
 
     /// Executes the closure with the state that corresponds to the given [BlockId].
-    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(ChainState<'_>) -> EthResult<T>;
+        F: FnOnce(StateProviderBox<'_>) -> EthResult<T>;
 
     /// Returns the revm evm env for the requested [BlockId]
     ///
     /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
     /// for.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
+
+    /// Get all transactions in the block with the given hash.
+    ///
+    /// Returns `None` if block does not exist.
+    async fn transactions_by_block(&self, block: H256)
+        -> EthResult<Option<Vec<TransactionSigned>>>;
 
     /// Returns the transaction by hash.
     ///
@@ -67,6 +84,60 @@ pub trait EthTransactions: Send + Sync {
     /// Signs transaction with a matching signer, if any and submits the transaction to the pool.
     /// Returns the hash of the signed transaction.
     async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256>;
+
+    /// Prepares the state and env for the given [CallRequest] at the given [BlockId] and executes
+    /// the closure.
+    async fn with_call_at<F, R>(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send;
+
+    /// Executes the call request at the given [BlockId].
+    async fn transact_call_at(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+    ) -> EthResult<(ResultAndState, Env)>;
+
+    /// Executes the call request at the given [BlockId]
+    async fn inspect_call_at<I>(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+        inspector: I,
+    ) -> EthResult<(ResultAndState, Env)>
+    where
+        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send;
+
+    /// Executes the transaction at the given [BlockId] with a tracer configured by the config.
+    /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
+    /// configured [Env] was inspected.
+    fn trace_at<F, R>(
+        &self,
+        env: Env,
+        config: TracingInspectorConfig,
+        at: BlockId,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>;
+
+    /// Retrieves the transaction if it exists and returns its trace
+    async fn trace_transaction<F, R>(
+        &self,
+        hash: H256,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send;
 }
 
 #[async_trait]
@@ -74,15 +145,15 @@ impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
-    fn state_at(&self, at: BlockId) -> EthResult<ChainState<'_>> {
+    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         self.state_at_block_id(at)
     }
 
     fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(ChainState<'_>) -> EthResult<T>,
+        F: FnOnce(StateProviderBox<'_>) -> EthResult<T>,
     {
         let state = self.state_at(at)?;
         f(state)
@@ -105,6 +176,13 @@ where
                 Ok((cfg, env, block_hash.into()))
             }
         }
+    }
+
+    async fn transactions_by_block(
+        &self,
+        block: H256,
+    ) -> EthResult<Option<Vec<TransactionSigned>>> {
+        Ok(self.cache().get_block_transactions(block).await?)
     }
 
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
@@ -173,7 +251,7 @@ where
             None => return Ok(None),
         };
 
-        Self::build_transaction_receipt(tx, meta, receipt).map(Some)
+        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
@@ -187,18 +265,68 @@ where
         Ok(hash)
     }
 
-    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
+    async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<H256> {
         let from = match request.from {
             Some(from) => from,
             None => return Err(SignError::NoAccount.into()),
         };
+
+        // set nonce if not already set before
+        if request.nonce.is_none() {
+            let nonce =
+                self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
+            request.nonce = Some(nonce);
+        }
+
+        let chain_id = self.chain_id();
+        // TODO: we need an oracle to fetch the gas price of the current chain
+        let gas_price = request.gas_price.unwrap_or_default();
+        let max_fee_per_gas = request.max_fee_per_gas.unwrap_or_default();
+
+        let estimated_gas = self
+            .estimate_gas_at(
+                CallRequest {
+                    from: Some(from),
+                    to: request.to,
+                    gas: request.gas,
+                    gas_price: Some(U256::from(gas_price)),
+                    max_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                    value: request.value,
+                    data: request.data.clone(),
+                    nonce: request.nonce,
+                    chain_id: Some(chain_id),
+                    access_list: request.access_list.clone(),
+                    max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                },
+                BlockId::Number(BlockNumberOrTag::Pending),
+            )
+            .await?;
+        let gas_limit = estimated_gas;
+
         let transaction = match request.into_typed_request() {
-            Some(tx) => tx,
+            Some(TypedTransactionRequest::Legacy(mut m)) => {
+                m.chain_id = Some(chain_id.as_u64());
+                m.gas_limit = gas_limit;
+                m.gas_price = gas_price;
+
+                TypedTransactionRequest::Legacy(m)
+            }
+            Some(TypedTransactionRequest::EIP2930(mut m)) => {
+                m.chain_id = chain_id.as_u64();
+                m.gas_limit = gas_limit;
+                m.gas_price = gas_price;
+
+                TypedTransactionRequest::EIP2930(m)
+            }
+            Some(TypedTransactionRequest::EIP1559(mut m)) => {
+                m.chain_id = chain_id.as_u64();
+                m.gas_limit = gas_limit;
+                m.max_fee_per_gas = max_fee_per_gas;
+
+                TypedTransactionRequest::EIP1559(m)
+            }
             None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
-
-        // TODO we need to update additional settings in the transaction: nonce, gaslimit, chainid,
-        // gasprice
 
         let signed_tx = self.sign_request(&from, transaction)?;
 
@@ -211,6 +339,89 @@ where
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
 
         Ok(hash)
+    }
+
+    async fn with_call_at<F, R>(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send,
+    {
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
+        let state = self.state_at(at)?;
+        let mut db = SubState::new(State::new(state));
+
+        let env = prepare_call_env(cfg, block_env, request, &mut db, state_overrides)?;
+        f(db, env)
+    }
+
+    async fn transact_call_at(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+    ) -> EthResult<(ResultAndState, Env)> {
+        self.with_call_at(request, at, state_overrides, |mut db, env| transact(&mut db, env)).await
+    }
+
+    async fn inspect_call_at<I>(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+        inspector: I,
+    ) -> EthResult<(ResultAndState, Env)>
+    where
+        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send,
+    {
+        self.with_call_at(request, at, state_overrides, |db, env| inspect(db, env, inspector)).await
+    }
+
+    fn trace_at<F, R>(
+        &self,
+        env: Env,
+        config: TracingInspectorConfig,
+        at: BlockId,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
+    {
+        self.with_state_at(at, |state| {
+            let db = SubState::new(State::new(state));
+
+            let mut inspector = TracingInspector::new(config);
+            let (res, _) = inspect(db, env, &mut inspector)?;
+
+            f(inspector, res)
+        })
+    }
+
+    async fn trace_transaction<F, R>(
+        &self,
+        hash: H256,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
+    {
+        let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+
+        let (cfg, block, at) = self.evm_env_at(at).await?;
+        let (tx, tx_info) = transaction.split();
+        let tx = tx_env_with_recovered(&tx);
+        let env = Env { cfg, block, tx };
+
+        // execute the trace
+        self.trace_at(env, config, at, move |insp, res| f(tx_info, insp, res)).map(Some)
     }
 }
 
@@ -270,13 +481,20 @@ where
     /// Helper function for `eth_getTransactionReceipt`
     ///
     /// Returns the receipt
-    pub(crate) fn build_transaction_receipt(
+    pub(crate) async fn build_transaction_receipt(
+        &self,
         tx: TransactionSigned,
         meta: TransactionMeta,
-        mut receipt: Receipt,
+        receipt: Receipt,
     ) -> EthResult<TransactionReceipt> {
         let transaction =
             tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+
+        // get all receipts for the block
+        let all_receipts = match self.client().receipts_by_block((meta.block_number).into())? {
+            Some(recpts) => recpts,
+            None => return Err(EthApiError::UnknownBlockNumber),
+        };
 
         let mut res_receipt = TransactionReceipt {
             transaction_hash: Some(meta.tx_hash),
@@ -286,9 +504,9 @@ where
             from: transaction.signer(),
             to: None,
             cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
-            gas_used: Some(U256::from(0)),
+            gas_used: None,
             contract_address: None,
-            logs: std::mem::take(&mut receipt.logs).into_iter().map(Log::from_primitive).collect(),
+            logs: vec![],
             effective_gas_price: U128::from(0),
             transaction_type: U256::from(0),
             // TODO: set state root after the block
@@ -297,13 +515,22 @@ where
             status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         };
 
+        // get the previous transaction cumulative gas used
+        let gas_used = if meta.index == 0 {
+            receipt.cumulative_gas_used
+        } else {
+            let prev_tx_idx = (meta.index - 1) as usize;
+            all_receipts
+                .get(prev_tx_idx)
+                .map(|prev_receipt| receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used)
+                .unwrap_or_default()
+        };
+        res_receipt.gas_used = Some(U256::from(gas_used));
+
         match tx.transaction.kind() {
             Create => {
-                // set contract address if creation was successful
-                if receipt.success {
-                    res_receipt.contract_address =
-                        Some(create_address(transaction.signer(), tx.transaction.nonce()));
-                }
+                res_receipt.contract_address =
+                    Some(create_address(transaction.signer(), tx.transaction.nonce()));
             }
             Call(addr) => {
                 res_receipt.to = Some(*addr);
@@ -311,31 +538,47 @@ where
         }
 
         match tx.transaction {
-            PrimitiveTransaction::Legacy(TxLegacy { gas_limit, gas_price, .. }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
+            PrimitiveTransaction::Legacy(TxLegacy { gas_price, .. }) => {
                 res_receipt.transaction_type = U256::from(0);
                 res_receipt.effective_gas_price = U128::from(gas_price);
             }
-            PrimitiveTransaction::Eip2930(TxEip2930 { gas_limit, gas_price, .. }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
+            PrimitiveTransaction::Eip2930(TxEip2930 { gas_price, .. }) => {
                 res_receipt.transaction_type = U256::from(1);
                 res_receipt.effective_gas_price = U128::from(gas_price);
             }
             PrimitiveTransaction::Eip1559(TxEip1559 {
-                gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 ..
             }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
                 res_receipt.transaction_type = U256::from(2);
                 res_receipt.effective_gas_price =
                     U128::from(max_fee_per_gas + max_priority_fee_per_gas)
             }
         }
+
+        // get number of logs in the block
+        let mut num_logs = 0;
+        for prev_receipt in all_receipts.iter().take(meta.index as usize) {
+            num_logs += prev_receipt.logs.len();
+        }
+
+        for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
+            let rpclog = Log {
+                address: log.address,
+                topics: log.topics,
+                data: log.data,
+                block_hash: Some(meta.block_hash),
+                block_number: Some(U256::from(meta.block_number)),
+                transaction_hash: Some(meta.tx_hash),
+                transaction_index: Some(U256::from(meta.index)),
+                transaction_log_index: Some(U256::from(tx_log_idx)),
+                log_index: Some(U256::from(num_logs + tx_log_idx)),
+                removed: false,
+            };
+            res_receipt.logs.push(rpclog);
+        }
+
         Ok(res_receipt)
     }
 }
@@ -425,6 +668,7 @@ impl From<TransactionSource> for Transaction {
 mod tests {
     use super::*;
     use crate::{eth::cache::EthStateCache, EthApi};
+    use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
@@ -432,13 +676,14 @@ mod tests {
     #[tokio::test]
     async fn send_raw_transaction() {
         let noop_provider = NoopProvider::default();
+        let noop_network_provider = NoopNetwork::default();
 
         let pool = testing_pool();
 
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),
-            (),
+            noop_network_provider,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 

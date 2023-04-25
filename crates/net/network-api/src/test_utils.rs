@@ -1,10 +1,10 @@
 use crate::{
-    EthProtocolInfo, NetworkError, NetworkInfo, NetworkStatus, PeerKind, Peers, PeersInfo,
-    ReputationChangeKind,
+    NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
 use async_trait::async_trait;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
 use reth_primitives::{rpc::Chain::Mainnet, NodeRecord, PeerId};
+use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 
 /// A type that implements all network trait that does nothing.
@@ -51,6 +51,7 @@ impl PeersInfo for NoopNetwork {
     }
 }
 
+#[async_trait]
 impl Peers for NoopNetwork {
     fn add_peer_kind(&self, _peer: PeerId, _kind: PeerKind, _addr: SocketAddr) {}
 
@@ -61,4 +62,8 @@ impl Peers for NoopNetwork {
     fn disconnect_peer_with_reason(&self, _peer: PeerId, _reason: DisconnectReason) {}
 
     fn reputation_change(&self, _peer_id: PeerId, _kind: ReputationChangeKind) {}
+
+    async fn reputation_by_id(&self, _peer_id: PeerId) -> Result<Option<Reputation>, NetworkError> {
+        Ok(None)
+    }
 }

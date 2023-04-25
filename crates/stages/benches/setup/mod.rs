@@ -10,12 +10,12 @@ use reth_interfaces::test_utils::generators::{
     random_transition_range,
 };
 use reth_primitives::{Account, Address, SealedBlock, H256};
-use reth_provider::trie::DBTrieLoader;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::TestTransaction,
     ExecInput, Stage, UnwindInput,
 };
+use reth_trie::StateRoot;
 use std::{
     collections::BTreeMap,
     ops::Deref,
@@ -70,9 +70,6 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
         StorageHashingStage::default().unwind(&mut db_tx, unwind).await.unwrap();
         AccountHashingStage::default().unwind(&mut db_tx, unwind).await.unwrap();
 
-        let target_root = db_tx.get_header(unwind.unwind_to).unwrap().state_root;
-        let _ = db_tx.delete::<tables::AccountsTrie>(target_root, None);
-
         // Clear previous run
         stage.unwind(&mut db_tx, unwind).await.unwrap();
 
@@ -112,7 +109,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         .into_iter()
         .collect();
 
-        let mut blocks = random_block_range(0..num_blocks + 1, H256::zero(), txs_range);
+        let mut blocks = random_block_range(0..=num_blocks, H256::zero(), txs_range);
 
         let (transitions, start_state) = random_transition_range(
             blocks.iter().take(2),
@@ -124,8 +121,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         tx.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let root =
-            DBTrieLoader::new(tx.inner().deref()).calculate_root().and_then(|e| e.root()).unwrap();
+        let (root, updates) = StateRoot::new(tx.inner().deref()).root_with_updates().unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -135,6 +131,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         let offset = transitions.len() as u64;
 
         tx.insert_transitions(transitions, None).unwrap();
+        tx.commit(|tx| updates.flush(tx)).unwrap();
 
         let (transitions, final_state) =
             random_transition_range(blocks.iter().skip(2), start_state, n_changes, key_range);
@@ -146,17 +143,10 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         // make last block have valid state root
         let root = {
             let mut tx_mut = tx.inner();
-            let root =
-                DBTrieLoader::new(tx_mut.deref()).calculate_root().and_then(|e| e.root()).unwrap();
+            let root = StateRoot::new(tx_mut.deref()).root().unwrap();
             tx_mut.commit().unwrap();
             root
         };
-
-        tx.query(|tx| {
-            assert!(tx.get::<tables::AccountsTrie>(root)?.is_some());
-            Ok(())
-        })
-        .unwrap();
 
         let last_block = blocks.last_mut().unwrap();
         let cloned_last = last_block.clone();

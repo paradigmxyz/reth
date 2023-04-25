@@ -30,6 +30,11 @@ tracing = "0.1.37"
 
 # crypto
 rand = { version = "0.8", optional = true }
+secp256k1 = { version = "0.26.0", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # errors
 thiserror = "1"

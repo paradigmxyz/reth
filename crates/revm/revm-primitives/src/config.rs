@@ -2,12 +2,20 @@
 
 use reth_primitives::{ChainSpec, Hardfork, Head};
 
-/// Two ethereum worth of wei
-pub const WEI_2ETH: u128 = 2000000000000000000u128;
-/// Three ethereum worth of wei
-pub const WEI_3ETH: u128 = 3000000000000000000u128;
-/// Five ethereum worth of wei
-pub const WEI_5ETH: u128 = 5000000000000000000u128;
+/// Returns the spec id at the given timestamp.
+///
+/// Note: This is only intended to be used after the merge, when hardforks are activated by
+/// timestamp.
+pub fn revm_spec_by_timestamp_after_merge(
+    chain_spec: &ChainSpec,
+    timestamp: u64,
+) -> revm::primitives::SpecId {
+    if chain_spec.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp) {
+        revm::primitives::SHANGHAI
+    } else {
+        revm::primitives::MERGE
+    }
+}
 
 /// return revm_spec from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm::primitives::SpecId {

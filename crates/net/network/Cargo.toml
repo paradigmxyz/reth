@@ -31,6 +31,7 @@ reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-provider = { path = "../../storage/provider"}
 reth-metrics-common = { path = "../../metrics/common" }
+reth-rpc-types = { path = "../../rpc/rpc-types" }
 
 # async/futures
 futures = "0.3"

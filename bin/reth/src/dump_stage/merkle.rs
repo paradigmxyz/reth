@@ -4,8 +4,8 @@ use crate::{
     utils::DbTool,
 };
 use eyre::Result;
-use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
-use reth_primitives::MAINNET;
+use reth_db::{database::Database, table::TableImporter, tables};
+use reth_primitives::{BlockNumber, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{
     stages::{AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage},
@@ -16,8 +16,8 @@ use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
-    from: u64,
-    to: u64,
+    from: BlockNumber,
+    to: BlockNumber,
     output_db: &PlatformPath<DbPath>,
     should_run: bool,
 ) -> Result<()> {
@@ -27,18 +27,8 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
         tx.import_table_with_range::<tables::Headers, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
 
-    let tx = db_tool.db.tx()?;
-    let from_transition_rev =
-        tx.get::<tables::BlockTransitionIndex>(from)?.expect("there should be at least one.");
-    let to_transition_rev =
-        tx.get::<tables::BlockTransitionIndex>(to)?.expect("there should be at least one.");
-
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::AccountChangeSet, _>(
-            &db_tool.db.tx()?,
-            Some(from_transition_rev),
-            to_transition_rev,
-        )
+        tx.import_table_with_range::<tables::AccountChangeSet, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
 
     unwind_and_copy::<DB>(db_tool, (from, to), tip_block_number, &output_db).await?;
@@ -73,7 +63,7 @@ async fn unwind_and_copy<DB: Database>(
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage =
-        ExecutionStage::new(reth_executor::Factory::new(Arc::new(MAINNET.clone())), u64::MAX);
+        ExecutionStage::new(reth_revm::Factory::new(Arc::new(MAINNET.clone())), u64::MAX);
 
     exec_stage
         .unwind(

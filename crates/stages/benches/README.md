@@ -1,6 +1,6 @@
 # Stage Benchmarks
 
-Test vectors are automatically generated if they cannot be found. Futhermore, for certain stages you can link an external database to run the benchmarks.
+Test vectors are automatically generated if they cannot be found. Furthermore, for certain stages you can link an external database to run the benchmarks.
 
 ## Usage
 

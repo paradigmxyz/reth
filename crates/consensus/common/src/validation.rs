@@ -33,12 +33,6 @@ pub fn validate_header_standalone(
         })
     }
 
-    // From yellow paper: extraData: An arbitrary byte array containing data
-    // relevant to this block. This must be 32 bytes or fewer; formally Hx.
-    if header.extra_data.len() > 32 {
-        return Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
-    }
-
     // Check if base fee is set.
     if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
         header.base_fee_per_gas.is_none()
@@ -188,8 +182,7 @@ pub fn validate_block_standalone(
 ) -> Result<(), ConsensusError> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
-    let ommers_hash =
-        reth_primitives::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
+    let ommers_hash = reth_primitives::proofs::calculate_ommers_root(block.ommers.iter());
     if block.header.ommers_hash != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff {
             got: ommers_hash,
@@ -346,7 +339,7 @@ pub fn validate_header_regarding_parent(
 /// Checks:
 ///  If we already know the block.
 ///  If parent is known
-///  If withdarwals are valid
+///  If withdrawals are valid
 ///
 /// Returns parent block header
 pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider>(

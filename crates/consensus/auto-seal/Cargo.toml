@@ -1,0 +1,27 @@
+[package]
+name = "reth-auto-seal-consensus"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "A consensus impl for local testing purposes"
+
+[dependencies]
+# reth
+reth-beacon-consensus = { path = "../beacon" }
+reth-primitives = { path = "../../primitives" }
+reth-interfaces = { path = "../../interfaces" }
+reth-provider = { path = "../../storage/provider" }
+reth-stages = { path = "../../stages" }
+reth-revm = { path = "../../revm" }
+reth-transaction-pool = { path = "../../transaction-pool" }
+
+# async
+futures-util = "0.3"
+tokio = { version = "1", features = ["sync", "time"] }
+tokio-stream = "0.1"
+tracing = "0.1"
+
+[dev-dependencies]
+reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }

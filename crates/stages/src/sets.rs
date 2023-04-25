@@ -14,7 +14,7 @@
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
-//! # use reth_executor::Factory;
+//! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
 //! # use std::sync::Arc;
 //!
@@ -27,7 +27,7 @@
 //! ```ignore
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::{StageSet, sets::OfflineStages};
-//! # use reth_executor::Factory;
+//! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
 //! # use std::sync::Arc;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
@@ -213,7 +213,7 @@ pub struct OfflineStages<EF: ExecutorFactory> {
 }
 
 impl<EF: ExecutorFactory> OfflineStages<EF> {
-    /// Create a new set of ofline stages with default values.
+    /// Create a new set of offline stages with default values.
     pub fn new(executor_factory: EF) -> Self {
         Self { executor_factory }
     }

@@ -4,7 +4,7 @@ use crate::{
     table::{Compress, Decompress},
     Error,
 };
-use reth_primitives::{bytes::Bytes, IntegerList};
+use reth_primitives::IntegerList;
 
 impl Compress for IntegerList {
     type Compressed = Vec<u8>;
@@ -12,10 +12,13 @@ impl Compress for IntegerList {
     fn compress(self) -> Self::Compressed {
         self.to_bytes()
     }
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+        self.to_mut_bytes(buf)
+    }
 }
 
 impl Decompress for IntegerList {
-    fn decompress<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        IntegerList::from_bytes(&value.into()).map_err(|_| Error::DecodeError)
+    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+        IntegerList::from_bytes(value.as_ref()).map_err(|_| Error::DecodeError)
     }
 }

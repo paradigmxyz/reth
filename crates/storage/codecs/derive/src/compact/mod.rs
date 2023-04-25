@@ -144,7 +144,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["H256", "H160", "Address", "Bloom"]
+                    if ["H256", "H160", "Address", "Bloom", "TxHash"]
                         .contains(&path.ident.to_string().as_str())
                     {
                         return true
@@ -160,11 +160,11 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
 /// length.
 pub fn get_bit_size(ftype: &str) -> u8 {
     match ftype {
-        "bool" | "Option" => 1,
+        "TransactionKind" | "bool" | "Option" | "Signature" => 1,
         "TxType" => 2,
-        "u64" | "BlockNumber" | "TxNumber" | "ChainId" => 4,
+        "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
-        "U256" | "TxHash" => 6,
+        "U256" => 6,
         _ => 0,
     }
 }
@@ -249,7 +249,7 @@ mod tests {
                 fuzz_test_test_struct(TestStruct::default())
             }
             impl Compact for TestStruct {
-                fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
                     let mut total_len = 0;
                     let mut buffer = bytes::BytesMut::new();

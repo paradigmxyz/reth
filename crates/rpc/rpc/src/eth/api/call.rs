@@ -12,24 +12,20 @@ use crate::{
     EthApi,
 };
 use ethers_core::utils::get_contract_address;
-use reth_primitives::{AccessList, Address, BlockId, BlockNumberOrTag, U256};
+use reth_network_api::NetworkInfo;
+use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, U256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::{
     access_list::AccessListInspector,
     database::{State, SubState},
 };
-use reth_rpc_types::{
-    state::{AccountOverride, StateOverride},
-    CallRequest,
-};
+use reth_rpc_types::CallRequest;
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{
-        BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState, TransactTo,
-    },
-    Database,
+    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, TransactTo},
 };
+use tracing::trace;
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
@@ -39,61 +35,8 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
-    /// Executes the call request at the given [BlockId]
-    pub(crate) async fn execute_call_at(
-        &self,
-        request: CallRequest,
-        at: BlockId,
-        state_overrides: Option<StateOverride>,
-    ) -> EthResult<(ResultAndState, Env)> {
-        let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at(at)?;
-        self.call_with(cfg, block_env, request, state, state_overrides)
-    }
-
-    /// Executes the call request using the given environment against the state provider
-    ///
-    /// Does not commit any changes to the database
-    fn call_with<S>(
-        &self,
-        mut cfg: CfgEnv,
-        block: BlockEnv,
-        request: CallRequest,
-        state: S,
-        state_overrides: Option<StateOverride>,
-    ) -> EthResult<(ResultAndState, Env)>
-    where
-        S: StateProvider,
-    {
-        // we want to disable this in eth_call, since this is common practice used by other node
-        // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        cfg.disable_block_gas_limit = true;
-
-        // Disabled because eth_call is sometimes used with eoa senders
-        // See <htps://github.com/paradigmxyz/reth/issues/1959>
-        cfg.disable_eip3607 = true;
-
-        let request_gas = request.gas;
-
-        let mut env = build_call_evm_env(cfg, block, request)?;
-
-        let mut db = SubState::new(State::new(state));
-
-        // apply state overrides
-        if let Some(state_overrides) = state_overrides {
-            apply_state_overrides(state_overrides, &mut db)?;
-        }
-
-        if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
-            // no gas limit was provided in the request, so we need to cap the request's gas limit
-            cap_tx_gas_limit_with_caller_allowance(&mut db, &mut env.tx)?;
-        }
-
-        transact(&mut db, env)
-    }
-
     /// Estimate gas needed for execution of the `request` at the [BlockId].
     pub(crate) async fn estimate_gas_at(
         &self,
@@ -121,6 +64,11 @@ where
         // Disabled because eth_estimateGas is sometimes used with eoa senders
         // See <htps://github.com/paradigmxyz/reth/issues/1959>
         cfg.disable_eip3607 = true;
+
+        // The basefee should be ignored for eth_createAccessList
+        // See:
+        // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
+        cfg.disable_base_fee = true;
 
         // keep a copy of gas related request values
         let request_gas = request.gas;
@@ -178,8 +126,22 @@ where
         let gas_limit = std::cmp::min(U256::from(env.tx.gas_limit), highest_gas_limit);
         env.block.gas_limit = gas_limit;
 
+        trace!(target: "rpc::eth::estimate", ?env, "Starting gas estimation");
+
         // execute the call without writing to db
-        let (res, mut env) = transact(&mut db, env)?;
+        let ethres = transact(&mut db, env.clone());
+
+        // Exceptional case: init used too much gas, we need to increase the gas limit and try
+        // again
+        if let Err(EthApiError::InvalidTransaction(InvalidTransactionError::GasTooHigh)) = ethres {
+            // if price or limit was included in the request then we can execute the request
+            // again with the block's gas limit to check if revert is gas related or not
+            if request_gas.is_some() || request_gas_price.is_some() {
+                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
+            }
+        }
+
+        let (res, env) = ethres?;
         match res.result {
             ExecutionResult::Success { .. } => {
                 // succeeded
@@ -191,24 +153,7 @@ where
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
                 return if request_gas.is_some() || request_gas_price.is_some() {
-                    let req_gas_limit = env.tx.gas_limit;
-                    env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
-                    let (res, _) = transact(&mut db, env)?;
-                    match res.result {
-                        ExecutionResult::Success { .. } => {
-                            // transaction succeeded by manually increasing the gas limit to
-                            // highest, which means the caller lacks funds to pay for the tx
-                            Err(InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit))
-                                .into())
-                        }
-                        ExecutionResult::Revert { .. } => {
-                            // reverted again after bumping the limit
-                            Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
-                        }
-                        ExecutionResult::Halt { reason, .. } => {
-                            Err(InvalidTransactionError::EvmHalt(reason).into())
-                        }
-                    }
+                    Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
                 } else {
                     // the transaction did revert
                     Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
@@ -231,27 +176,34 @@ where
             ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
         );
 
-        let mut last_highest_gas_limit = highest_gas_limit;
+        let _last_highest_gas_limit = highest_gas_limit;
+
+        trace!(target: "rpc::eth::estimate", ?env, ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
 
         // binary search
         while (highest_gas_limit - lowest_gas_limit) > 1 {
             let mut env = env.clone();
             env.tx.gas_limit = mid_gas_limit;
-            let (res, _) = transact(&mut db, env)?;
+            let ethres = transact(&mut db, env);
+
+            // Exceptional case: init used too much gas, we need to increase the gas limit and try
+            // again
+            if let Err(EthApiError::InvalidTransaction(InvalidTransactionError::GasTooHigh)) =
+                ethres
+            {
+                // increase the lowest gas limit
+                lowest_gas_limit = mid_gas_limit;
+
+                // new midpoint
+                mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
+                continue
+            }
+
+            let (res, _) = ethres?;
             match res.result {
                 ExecutionResult::Success { .. } => {
                     // cap the highest gas limit with succeeding gas limit
                     highest_gas_limit = mid_gas_limit;
-                    // if last two successful estimations only vary by 10%, we consider this to be
-                    // sufficiently accurate
-                    const ACCURACY: u128 = 10;
-                    if (last_highest_gas_limit - highest_gas_limit) as u128 * ACCURACY /
-                        (last_highest_gas_limit as u128) <
-                        1u128
-                    {
-                        return Ok(U256::from(highest_gas_limit))
-                    }
-                    last_highest_gas_limit = highest_gas_limit;
                 }
                 ExecutionResult::Revert { .. } => {
                     // increase the lowest gas limit
@@ -284,14 +236,19 @@ where
         at: Option<BlockId>,
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let (mut cfg, block, at) = self.evm_env_at(block_id).await?;
+        let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
 
-        // we want to disable this in eth_call, since this is common practice used by other node
-        // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        cfg.disable_block_gas_limit = true;
-
         let mut env = build_call_evm_env(cfg, block, request.clone())?;
+
+        // we want to disable this in eth_createAccessList, since this is common practice used by
+        // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
+        env.cfg.disable_block_gas_limit = true;
+
+        // The basefee should be ignored for eth_createAccessList
+        // See:
+        // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
+        env.cfg.disable_base_fee = true;
 
         let mut db = SubState::new(State::new(state));
 
@@ -328,71 +285,33 @@ where
     }
 }
 
-/// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
-fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
+/// Executes the requests again after an out of gas error to check if the error is gas related or
+/// not
+#[inline]
+fn map_out_of_gas_err<S>(
+    env_gas_limit: U256,
+    mut env: Env,
+    mut db: &mut CacheDB<State<S>>,
+) -> EthApiError
 where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
+    S: StateProvider,
 {
-    for (account, account_overrides) in overrides {
-        apply_account_override(account, account_overrides, db)?;
-    }
-    Ok(())
-}
-
-/// Applies a single [AccountOverride] to the [CacheDB].
-fn apply_account_override<DB>(
-    account: Address,
-    account_override: AccountOverride,
-    db: &mut CacheDB<DB>,
-) -> EthResult<()>
-where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
-{
-    let mut account_info = db.basic(account)?.unwrap_or_default();
-
-    if let Some(nonce) = account_override.nonce {
-        account_info.nonce = nonce.as_u64();
-    }
-    if let Some(code) = account_override.code {
-        account_info.code = Some(Bytecode::new_raw(code.0));
-    }
-    if let Some(balance) = account_override.balance {
-        account_info.balance = balance;
-    }
-
-    db.insert_account_info(account, account_info);
-
-    // We ensure that not both state and state_diff are set.
-    // If state is set, we must mark the account as "NewlyCreated", so that the old storage
-    // isn't read from
-    match (account_override.state, account_override.state_diff) {
-        (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
-        (None, None) => {
-            // nothing to do
-        }
-        (Some(new_account_state), None) => {
-            db.replace_account_storage(
-                account,
-                new_account_state
-                    .into_iter()
-                    .map(|(slot, value)| {
-                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
-                    })
-                    .collect(),
-            )?;
-        }
-        (None, Some(account_state_diff)) => {
-            for (slot, value) in account_state_diff {
-                db.insert_account_storage(
-                    account,
-                    U256::from_be_bytes(slot.0),
-                    U256::from_be_bytes(value.0),
-                )?;
-            }
-        }
+    let req_gas_limit = env.tx.gas_limit;
+    env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
+    let (res, _) = match transact(&mut db, env) {
+        Ok(res) => res,
+        Err(err) => return err,
     };
-
-    Ok(())
+    match res.result {
+        ExecutionResult::Success { .. } => {
+            // transaction succeeded by manually increasing the gas limit to
+            // highest, which means the caller lacks funds to pay for the tx
+            InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit)).into()
+        }
+        ExecutionResult::Revert { output, .. } => {
+            // reverted again after bumping the limit
+            InvalidTransactionError::Revert(RevertError::new(output)).into()
+        }
+        ExecutionResult::Halt { reason, .. } => InvalidTransactionError::EvmHalt(reason).into(),
+    }
 }

@@ -1,6 +1,6 @@
 //! Discovery support for the network.
 
-use crate::error::NetworkError;
+use crate::error::{NetworkError, ServiceKind};
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_dns_discovery::{
@@ -58,9 +58,9 @@ impl Discovery {
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
         let (discv4, discv4_updates, _discv4_service) = if let Some(disc_config) = discv4_config {
             let (discv4, mut discv4_service) =
-                Discv4::bind(discovery_addr, local_enr, sk, disc_config)
-                    .await
-                    .map_err(NetworkError::Discovery)?;
+                Discv4::bind(discovery_addr, local_enr, sk, disc_config).await.map_err(|err| {
+                    NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_addr))
+                })?;
             let discv4_updates = discv4_service.update_stream();
             // spawn the service
             let _discv4_service = discv4_service.spawn();
@@ -123,6 +123,13 @@ impl Discovery {
         self.local_enr.id
     }
 
+    /// Add a node to the discv4 table.
+    pub(crate) fn add_discv4_node(&self, node: NodeRecord) {
+        if let Some(discv4) = &self.discv4 {
+            discv4.add_node(node);
+        }
+    }
+
     /// Processes an incoming [NodeRecord] update from a discovery service
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
@@ -179,6 +186,7 @@ impl Discovery {
             while let Some(Poll::Ready(Some(update))) =
                 self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
+                self.add_discv4_node(update.node_record);
                 self.on_node_record_update(update.node_record, update.fork_id);
             }
 

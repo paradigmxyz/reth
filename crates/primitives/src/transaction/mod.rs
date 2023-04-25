@@ -4,10 +4,11 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
+use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
@@ -167,8 +168,8 @@ pub struct TxEip1559 {
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive_arbitrary(compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
     /// Legacy transaction.
     Legacy(TxLegacy),
@@ -176,6 +177,90 @@ pub enum Transaction {
     Eip2930(TxEip2930),
     /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
     Eip1559(TxEip1559),
+}
+
+impl Transaction {
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
+        Encodable::encode(self, out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+                // do nothing w/ with_header
+                let payload_length =
+                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode_with_eip155_chain_id(out, *chain_id);
+            }
+            _ => {
+                let payload_length = self.fields_len() + signature.payload_len();
+                if with_header {
+                    Header {
+                        list: false,
+                        payload_length: 1 + length_of_length(payload_length) + payload_length,
+                    }
+                    .encode(out);
+                }
+                out.put_u8(self.tx_type() as u8);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode(out);
+            }
+        }
+    }
+}
+
+impl Compact for Transaction {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            Transaction::Legacy(tx) => {
+                tx.to_compact(buf);
+                0
+            }
+            Transaction::Eip2930(tx) => {
+                tx.to_compact(buf);
+                1
+            }
+            Transaction::Eip1559(tx) => {
+                tx.to_compact(buf);
+                2
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => {
+                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
+                (Transaction::Legacy(tx), buf)
+            }
+            1 => {
+                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
+                (Transaction::Eip2930(tx), buf)
+            }
+            2 => {
+                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
+                (Transaction::Eip1559(tx), buf)
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 // === impl Transaction ===
@@ -253,7 +338,9 @@ impl Transaction {
         }
     }
 
-    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price
+    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
+    ///
+    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     pub fn max_fee_per_gas(&self) -> u128 {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
@@ -264,6 +351,8 @@ impl Transaction {
 
     /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
     /// is `None`
+    ///
+    /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
     pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             Transaction::Legacy(_) => None,
@@ -272,6 +361,67 @@ impl Transaction {
                 Some(*max_priority_fee_per_gas)
             }
         }
+    }
+
+    // TODO: dedup with effective_tip_per_gas
+    /// Determine the effective gas limit for the given transaction and base fee.
+    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
+    /// transactions is returned.
+    ///
+    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> Option<u128> {
+        if let Some(base_fee) = base_fee {
+            let max_fee_per_gas = self.max_fee_per_gas();
+            if max_fee_per_gas < base_fee as u128 {
+                None
+            } else {
+                let effective_max_fee = max_fee_per_gas - base_fee as u128;
+                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
+            }
+        } else {
+            Some(self.priority_fee_or_price())
+        }
+    }
+
+    /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
+    /// otherwise return the gas price.
+    ///
+    /// # Warning
+    ///
+    /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
+    /// non-EIP-1559 transactions.
+    pub(crate) fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            Transaction::Legacy(TxLegacy { gas_price, .. }) |
+            Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+                *max_priority_fee_per_gas
+            }
+        }
+    }
+
+    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
+    ///
+    /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
+    pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        let base_fee = base_fee as u128;
+        let max_fee_per_gas = self.max_fee_per_gas();
+
+        if max_fee_per_gas < base_fee {
+            return None
+        }
+
+        // the miner tip is the difference between the max fee and the base fee or the
+        // max_priority_fee_per_gas, whatever is lower
+
+        // SAFETY: max_fee_per_gas >= base_fee
+        let fee = max_fee_per_gas - base_fee;
+
+        if let Some(priority_fee) = self.max_priority_fee_per_gas() {
+            return Some(fee.min(priority_fee))
+        }
+
+        Some(fee)
     }
 
     /// Get the transaction's input field.
@@ -484,14 +634,40 @@ impl Encodable for Transaction {
 }
 
 /// Whether or not the transaction is a contract creation.
-#[main_codec]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive_arbitrary(compact, rlp)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum TransactionKind {
     /// A transaction that creates a contract.
     #[default]
     Create,
     /// A transaction that calls a contract or transfer.
     Call(Address),
+}
+
+impl Compact for TransactionKind {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            TransactionKind::Create => 0,
+            TransactionKind::Call(address) => {
+                address.to_compact(buf);
+                1
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => (TransactionKind::Create, buf),
+            1 => {
+                let (addr, buf) = Address::from_compact(buf, buf.len());
+                (TransactionKind::Call(addr), buf)
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Encodable for TransactionKind {
@@ -525,10 +701,77 @@ impl Decodable for TransactionKind {
     }
 }
 
+/// Signed transaction without its Hash. Used type for inserting into the DB.
+#[derive_arbitrary(compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
+pub struct TransactionSignedNoHash {
+    /// The transaction signature values
+    pub signature: Signature,
+    /// Raw transaction info
+    #[deref]
+    #[as_ref]
+    pub transaction: Transaction,
+}
+
+impl TransactionSignedNoHash {
+    /// Calculates the transaction hash. If used more than once, it's better to convert it to
+    /// [`TransactionSigned`] first.
+    pub fn hash(&self) -> H256 {
+        let mut buf = Vec::new();
+        self.transaction.encode_with_signature(&self.signature, &mut buf, false);
+        keccak256(&buf)
+    }
+
+    /// Converts into a transaction type with its hash: [`TransactionSigned`].
+    pub fn with_hash(self) -> TransactionSigned {
+        self.into()
+    }
+}
+
+impl Compact for TransactionSignedNoHash {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let before = buf.as_mut().len();
+
+        // placeholder for bitflags
+        buf.put_u8(0);
+
+        let sig_bit = self.signature.to_compact(buf) as u8;
+        let tx_bit = self.transaction.to_compact(buf) as u8;
+
+        // replace with actual flags
+        buf.as_mut()[before] = sig_bit | (tx_bit << 1);
+
+        buf.as_mut().len() - before
+    }
+
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
+        let prefix = buf.get_u8() as usize;
+
+        let (signature, buf) = Signature::from_compact(buf, prefix & 1);
+        let (transaction, buf) = Transaction::from_compact(buf, prefix >> 1);
+
+        (TransactionSignedNoHash { signature, transaction }, buf)
+    }
+}
+
+impl From<TransactionSignedNoHash> for TransactionSigned {
+    fn from(tx: TransactionSignedNoHash) -> Self {
+        TransactionSigned::from_transaction_and_signature(tx.transaction, tx.signature)
+    }
+}
+
+impl From<TransactionSigned> for TransactionSignedNoHash {
+    fn from(tx: TransactionSigned) -> Self {
+        TransactionSignedNoHash { signature: tx.signature, transaction: tx.transaction }
+    }
+}
+
 /// Signed transaction.
-#[main_codec(no_arbitrary)]
-#[add_arbitrary_tests(rlp, compact)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
+#[add_arbitrary_tests(rlp)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
@@ -538,6 +781,12 @@ pub struct TransactionSigned {
     #[deref]
     #[as_ref]
     pub transaction: Transaction,
+}
+
+impl AsRef<Self> for TransactionSigned {
+    fn as_ref(&self) -> &Self {
+        self
+    }
 }
 
 // === impl TransactionSigned ===
@@ -551,6 +800,11 @@ impl TransactionSigned {
     /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
         self.hash
+    }
+
+    /// Reference to transaction hash. Used to identify transaction.
+    pub fn hash_ref(&self) -> &TxHash {
+        &self.hash
     }
 
     /// Recover signer from signature and hash.
@@ -597,32 +851,7 @@ impl TransactionSigned {
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2718 does not require rlp header
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
-        match self.transaction {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                // do nothing w/ with_header
-                let payload_length = self.transaction.fields_len() +
-                    self.signature.payload_len_with_eip155_chain_id(chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                self.signature.encode_with_eip155_chain_id(out, chain_id);
-            }
-            _ => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.transaction.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                self.signature.encode(out);
-            }
-        }
+        self.transaction.encode_with_signature(&self.signature, out, with_header);
     }
 
     /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
@@ -849,7 +1078,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 }
 
 /// Signed transaction with recovered signer.
-#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction

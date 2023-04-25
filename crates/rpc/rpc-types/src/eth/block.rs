@@ -1,8 +1,8 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as PrimitiveHeader, Withdrawal, H256,
-    H64, U256,
+    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader,
+    Withdrawal, H256, H64, U256, U64,
 };
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -55,6 +55,9 @@ pub enum BlockError {
     /// A transaction failed sender recovery
     #[error("transaction failed sender recovery")]
     InvalidSignature,
+    /// A raw block failed to decode
+    #[error("failed to decode raw block {0}")]
+    RlpDecodeRawBlock(reth_rlp::DecodeError),
 }
 
 /// Block representation
@@ -75,12 +78,9 @@ pub struct Block {
     pub transactions: BlockTransactions,
     /// Integer the size of this block in bytes.
     pub size: Option<U256>,
-    /// Base Fee for post-EIP1559 blocks.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_fee_per_gas: Option<U256>,
     /// Withdrawals in the block
-    #[serde(default)]
-    pub withdrawals: Vec<Withdrawal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl Block {
@@ -115,7 +115,7 @@ impl Block {
         block_hash: Option<H256>,
     ) -> Self {
         let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-        let transactions = block.body.iter().map(|tx| tx.hash).collect();
+        let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
         Self::from_block_with_transactions(
             block_hash,
@@ -164,18 +164,15 @@ impl Block {
     ) -> Self {
         let block_length = block.length();
         let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
-        let base_fee_per_gas = block.header.base_fee_per_gas;
-
-        let header = Header::from_primitive_with_hash(block.header, block_hash);
-
+        let header = Header::from_primitive_with_hash(block.header.seal(block_hash));
+        let withdrawals = if header.withdrawals_root.is_some() { block.withdrawals } else { None };
         Self {
             header,
             uncles,
             transactions,
-            base_fee_per_gas: base_fee_per_gas.map(U256::from),
             total_difficulty: Some(total_difficulty),
             size: Some(U256::from(block_length)),
-            withdrawals: block.withdrawals.unwrap_or_default(),
+            withdrawals,
         }
     }
 
@@ -183,15 +180,14 @@ impl Block {
     /// an Uncle from its header.
     pub fn uncle_block_from_header(header: PrimitiveHeader) -> Self {
         let hash = header.hash_slow();
-        let rpc_header = Header::from_primitive_with_hash(header.clone(), hash);
+        let rpc_header = Header::from_primitive_with_hash(header.clone().seal(hash));
         let uncle_block = PrimitiveBlock { header, ..Default::default() };
         let size = Some(U256::from(uncle_block.length()));
         Self {
             uncles: vec![],
             header: rpc_header,
             transactions: BlockTransactions::Uncle,
-            base_fee_per_gas: None,
-            withdrawals: vec![],
+            withdrawals: Some(vec![]),
             size,
             total_difficulty: None,
         }
@@ -217,27 +213,30 @@ pub struct Header {
     pub transactions_root: H256,
     /// Transactions receipts root hash
     pub receipts_root: H256,
-    /// Withdrawals root hash
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub withdrawals_root: Option<H256>,
-    /// Block number
-    pub number: Option<U256>,
-    /// Gas Used
-    pub gas_used: U256,
-    /// Gas Limit
-    pub gas_limit: U256,
-    /// Extra data
-    pub extra_data: Bytes,
     /// Logs bloom
     pub logs_bloom: Bloom,
-    /// Timestamp
-    pub timestamp: U256,
     /// Difficulty
     pub difficulty: U256,
+    /// Block number
+    pub number: Option<U256>,
+    /// Gas Limit
+    pub gas_limit: U256,
+    /// Gas Used
+    pub gas_used: U256,
+    /// Timestamp
+    pub timestamp: U256,
+    /// Extra data
+    pub extra_data: Bytes,
     /// Mix Hash
     pub mix_hash: H256,
     /// Nonce
     pub nonce: Option<H64>,
+    /// Base fee per unit of gas (if past London)
+    #[serde(rename = "baseFeePerGas", skip_serializing_if = "Option::is_none")]
+    pub base_fee_per_gas: Option<U256>,
+    /// Withdrawals root hash added by EIP-4895 and is ignored in legacy headers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub withdrawals_root: Option<H256>,
 }
 
 // === impl Header ===
@@ -246,29 +245,33 @@ impl Header {
     /// Converts the primitive header type to this RPC type
     ///
     /// CAUTION: this takes the header's hash as is and does _not_ calculate the hash.
-    pub fn from_primitive_with_hash(primitive_header: PrimitiveHeader, block_hash: H256) -> Self {
-        let PrimitiveHeader {
-            parent_hash,
-            ommers_hash,
-            beneficiary,
-            state_root,
-            transactions_root,
-            receipts_root,
-            logs_bloom,
-            difficulty,
-            number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            mix_hash,
-            nonce,
-            base_fee_per_gas: _,
-            extra_data,
-            withdrawals_root,
+    pub fn from_primitive_with_hash(primitive_header: SealedHeader) -> Self {
+        let SealedHeader {
+            header:
+                PrimitiveHeader {
+                    parent_hash,
+                    ommers_hash,
+                    beneficiary,
+                    state_root,
+                    transactions_root,
+                    receipts_root,
+                    logs_bloom,
+                    difficulty,
+                    number,
+                    gas_limit,
+                    gas_used,
+                    timestamp,
+                    mix_hash,
+                    nonce,
+                    base_fee_per_gas,
+                    extra_data,
+                    withdrawals_root,
+                },
+            hash,
         } = primitive_header;
 
         Header {
-            hash: Some(block_hash),
+            hash: Some(hash),
             parent_hash,
             uncles_hash: ommers_hash,
             miner: beneficiary,
@@ -285,6 +288,7 @@ impl Header {
             difficulty,
             mix_hash,
             nonce: Some(nonce.to_be_bytes().into()),
+            base_fee_per_gas: base_fee_per_gas.map(U256::from),
         }
     }
 }
@@ -347,9 +351,31 @@ impl<T: Serialize> Serialize for Rich<T> {
     }
 }
 
+/// BlockOverrides is a set of header fields to override.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub struct BlockOverrides {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<U256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub difficulty: Option<U256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<U64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_limit: Option<U64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coinbase: Option<Address>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub random: Option<H256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_fee: Option<U256>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonrpsee_types::SubscriptionResponse;
 
     #[test]
     fn test_full_conversion() {
@@ -358,6 +384,15 @@ mod tests {
 
         let full = false;
         assert_eq!(BlockTransactionsKind::Hashes, full.into());
+    }
+
+    #[test]
+    fn serde_header() {
+        let resp = r#"{"jsonrpc":"2.0","method":"eth_subscribe","params":{"subscription":"0x7eef37ff35d471f8825b1c8f67a5d3c0","result":{"hash":"0x7a7ada12e140961a32395059597764416499f4178daf1917193fad7bd2cc6386","parentHash":"0xdedbd831f496e705e7f2ec3c8dcb79051040a360bf1455dbd7eb8ea6ad03b751","sha3Uncles":"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347","miner":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","transactionsRoot":"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421","receiptsRoot":"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421","number":"0x8","gasUsed":"0x0","gasLimit":"0x1c9c380","extraData":"0x","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","timestamp":"0x642aa48f","difficulty":"0x0","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","nonce":"0x0000000000000000"}}}"#;
+        let _header: SubscriptionResponse<'_, Header> = serde_json::from_str(resp).unwrap();
+
+        let resp = r#"{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0x1a14b6bdcf4542fabf71c4abee244e47","result":{"author":"0x000000568b9b5a365eaa767d42e74ed88915c204","difficulty":"0x1","extraData":"0x4e65746865726d696e6420312e392e32322d302d6463373666616366612d32308639ad8ff3d850a261f3b26bc2a55e0f3a718de0dd040a19a4ce37e7b473f2d7481448a1e1fd8fb69260825377c0478393e6055f471a5cf839467ce919a6ad2700","gasLimit":"0x7a1200","gasUsed":"0x0","hash":"0xa4856602944fdfd18c528ef93cc52a681b38d766a7e39c27a47488c8461adcb0","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","miner":"0x0000000000000000000000000000000000000000","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","nonce":"0x0000000000000000","number":"0x434822","parentHash":"0x1a9bdc31fc785f8a95efeeb7ae58f40f6366b8e805f47447a52335c95f4ceb49","receiptsRoot":"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421","sha3Uncles":"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347","size":"0x261","stateRoot":"0xf38c4bf2958e541ec6df148e54ce073dc6b610f8613147ede568cb7b5c2d81ee","totalDifficulty":"0x633ebd","timestamp":"0x604726b0","transactions":[],"transactionsRoot":"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421","uncles":[]}}}"#;
+        let _header: SubscriptionResponse<'_, Header> = serde_json::from_str(resp).unwrap();
     }
 
     #[test]
@@ -381,18 +416,56 @@ mod tests {
                 difficulty: U256::from(13),
                 mix_hash: H256::from_low_u64_be(14),
                 nonce: Some(H64::from_low_u64_be(15)),
+                base_fee_per_gas: Some(U256::from(20)),
             },
             total_difficulty: Some(U256::from(100000)),
             uncles: vec![H256::from_low_u64_be(17)],
             transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
             size: Some(U256::from(19)),
-            base_fee_per_gas: Some(U256::from(20)),
-            withdrawals: vec![],
+            withdrawals: Some(vec![]),
         };
         let serialized = serde_json::to_string(&block).unwrap();
         assert_eq!(
             serialized,
-            r#"{"hash":"0x0000000000000000000000000000000000000000000000000000000000000001","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000002","sha3Uncles":"0x0000000000000000000000000000000000000000000000000000000000000003","miner":"0x0000000000000000000000000000000000000004","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000005","transactionsRoot":"0x0000000000000000000000000000000000000000000000000000000000000006","receiptsRoot":"0x0000000000000000000000000000000000000000000000000000000000000007","withdrawalsRoot":"0x0000000000000000000000000000000000000000000000000000000000000008","number":"0x9","gasUsed":"0xa","gasLimit":"0xb","extraData":"0x010203","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","timestamp":"0xc","difficulty":"0xd","mixHash":"0x000000000000000000000000000000000000000000000000000000000000000e","nonce":"0x000000000000000f","totalDifficulty":"0x186a0","uncles":["0x0000000000000000000000000000000000000000000000000000000000000011"],"transactions":["0x0000000000000000000000000000000000000000000000000000000000000012"],"size":"0x13","baseFeePerGas":"0x14","withdrawals":[]}"#
+            r#"{"hash":"0x0000000000000000000000000000000000000000000000000000000000000001","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000002","sha3Uncles":"0x0000000000000000000000000000000000000000000000000000000000000003","miner":"0x0000000000000000000000000000000000000004","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000005","transactionsRoot":"0x0000000000000000000000000000000000000000000000000000000000000006","receiptsRoot":"0x0000000000000000000000000000000000000000000000000000000000000007","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","difficulty":"0xd","number":"0x9","gasLimit":"0xb","gasUsed":"0xa","timestamp":"0xc","extraData":"0x010203","mixHash":"0x000000000000000000000000000000000000000000000000000000000000000e","nonce":"0x000000000000000f","baseFeePerGas":"0x14","withdrawalsRoot":"0x0000000000000000000000000000000000000000000000000000000000000008","totalDifficulty":"0x186a0","uncles":["0x0000000000000000000000000000000000000000000000000000000000000011"],"transactions":["0x0000000000000000000000000000000000000000000000000000000000000012"],"size":"0x13","withdrawals":[]}"#
+        );
+        let deserialized: Block = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(block, deserialized);
+    }
+
+    #[test]
+    fn serde_block_with_withdrawals_set_as_none() {
+        let block = Block {
+            header: Header {
+                hash: Some(H256::from_low_u64_be(1)),
+                parent_hash: H256::from_low_u64_be(2),
+                uncles_hash: H256::from_low_u64_be(3),
+                miner: Address::from_low_u64_be(4),
+                state_root: H256::from_low_u64_be(5),
+                transactions_root: H256::from_low_u64_be(6),
+                receipts_root: H256::from_low_u64_be(7),
+                withdrawals_root: None,
+                number: Some(U256::from(9)),
+                gas_used: U256::from(10),
+                gas_limit: U256::from(11),
+                extra_data: Bytes::from(vec![1, 2, 3]),
+                logs_bloom: Bloom::default(),
+                timestamp: U256::from(12),
+                difficulty: U256::from(13),
+                mix_hash: H256::from_low_u64_be(14),
+                nonce: Some(H64::from_low_u64_be(15)),
+                base_fee_per_gas: Some(U256::from(20)),
+            },
+            total_difficulty: Some(U256::from(100000)),
+            uncles: vec![H256::from_low_u64_be(17)],
+            transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
+            size: Some(U256::from(19)),
+            withdrawals: None,
+        };
+        let serialized = serde_json::to_string(&block).unwrap();
+        assert_eq!(
+            serialized,
+            r#"{"hash":"0x0000000000000000000000000000000000000000000000000000000000000001","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000002","sha3Uncles":"0x0000000000000000000000000000000000000000000000000000000000000003","miner":"0x0000000000000000000000000000000000000004","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000005","transactionsRoot":"0x0000000000000000000000000000000000000000000000000000000000000006","receiptsRoot":"0x0000000000000000000000000000000000000000000000000000000000000007","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","difficulty":"0xd","number":"0x9","gasLimit":"0xb","gasUsed":"0xa","timestamp":"0xc","extraData":"0x010203","mixHash":"0x000000000000000000000000000000000000000000000000000000000000000e","nonce":"0x000000000000000f","baseFeePerGas":"0x14","totalDifficulty":"0x186a0","uncles":["0x0000000000000000000000000000000000000000000000000000000000000011"],"transactions":["0x0000000000000000000000000000000000000000000000000000000000000012"],"size":"0x13"}"#
         );
         let deserialized: Block = serde_json::from_str(&serialized).unwrap();
         assert_eq!(block, deserialized);

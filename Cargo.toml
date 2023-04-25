@@ -1,10 +1,12 @@
 [workspace]
 members = [
     "bin/reth",
+    "crates/consensus/auto-seal",
     "crates/consensus/beacon",
     "crates/consensus/common",
-    "crates/executor",
+    "crates/blockchain-tree",
     "crates/interfaces",
+    "crates/payload/builder",
     "crates/metrics/metrics-derive",
     "crates/metrics/common",
     "crates/net/common",
@@ -16,6 +18,7 @@ members = [
     "crates/net/network-api",
     "crates/net/network",
     "crates/net/downloaders",
+    "crates/payload/basic",
     "crates/primitives",
     "crates/revm",
     "crates/revm/revm-primitives",
@@ -38,6 +41,7 @@ members = [
     "crates/tracing",
     "crates/tasks",
     "crates/transaction-pool",
+    "crates/trie",
 ]
 exclude = ["crate-template"]
 default-members = ["bin/reth"]
@@ -48,7 +52,5 @@ inherits = "release"
 debug = true
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm" }
-revm-primitives = { git = "https://github.com/bluealloy/revm" }
 # patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
 ruint = { git = "https://github.com/paradigmxyz/uint" }

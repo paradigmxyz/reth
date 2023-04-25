@@ -1,10 +1,8 @@
 //! CLI definition and entrypoint to executable
-use std::str::FromStr;
-
 use crate::{
-    chain, db,
+    chain, config, db,
     dirs::{LogsDir, PlatformPath},
-    drop_stage, dump_stage, node, p2p,
+    drop_stage, dump_stage, merkle_debug, node, p2p,
     runner::CliRunner,
     stage, test_eth_chain, test_vectors,
 };
@@ -14,27 +12,37 @@ use reth_tracing::{
     tracing_subscriber::{filter::Directive, registry::LookupSpan},
     BoxedLayer, FileWorkerGuard,
 };
+use std::str::FromStr;
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
-    let (layer, _guard) = opt.logs.layer();
-    reth_tracing::init(vec![layer, reth_tracing::stdout(opt.verbosity.directive())]);
+    let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
+    if let Some((layer, _guard)) = opt.logs.layer() {
+        layers.push(layer);
+    }
+    reth_tracing::init(layers);
 
     let runner = CliRunner::default();
 
     match opt.command {
         Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-        Commands::Init(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Import(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Stage(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::DumpStage(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::DropStage(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::DumpStage(command) => {
+            // TODO: This should be run_blocking_until_ctrl_c as well, but fails to compile due to
+            // weird compiler GAT issues.
+            runner.run_until_ctrl_c(command.execute())
+        }
+        Commands::DropStage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::MerkleDebug(command) => runner.run_until_ctrl_c(command.execute()),
     }
 }
 
@@ -76,6 +84,12 @@ pub enum Commands {
     /// Generate Test Vectors
     #[command(name = "test-vectors")]
     TestVectors(test_vectors::Command),
+    /// Write config to stdout
+    #[command(name = "config")]
+    Config(config::Command),
+    /// Debug state root calculation
+    #[command(name = "merkle-debug")]
+    MerkleDebug(merkle_debug::Command),
 }
 
 #[derive(Debug, Parser)]
@@ -96,6 +110,10 @@ struct Cli {
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
+    /// The flag to enable persistent logs.
+    #[arg(long = "log.persistent", global = true, conflicts_with = "journald")]
+    persistent: bool,
+
     /// The path to put log files in.
     #[arg(
         long = "log.directory",
@@ -117,7 +135,7 @@ pub struct Logs {
 
 impl Logs {
     /// Builds a tracing layer from the current log options.
-    pub fn layer<S>(&self) -> (BoxedLayer<S>, Option<FileWorkerGuard>)
+    pub fn layer<S>(&self) -> Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>
     where
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
@@ -126,10 +144,12 @@ impl Logs {
             .unwrap_or_else(|_| Directive::from_str("debug").unwrap());
 
         if self.journald {
-            (reth_tracing::journald(directive).expect("Could not connect to journald"), None)
-        } else {
+            Some((reth_tracing::journald(directive).expect("Could not connect to journald"), None))
+        } else if self.persistent {
             let (layer, guard) = reth_tracing::file(directive, &self.log_directory, "reth.log");
-            (layer, Some(guard))
+            Some((layer, Some(guard)))
+        } else {
+            None
         }
     }
 }

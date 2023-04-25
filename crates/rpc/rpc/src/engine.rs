@@ -1,225 +1,95 @@
-use std::sync::Arc;
+use jsonrpsee::core::RpcResult as Result;
+use reth_primitives::{filter::Filter, Address, BlockId, BlockNumberOrTag, Bytes, H256, U256, U64};
+use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
+/// Re-export for convenience
+pub use reth_rpc_engine_api::EngineApi;
+use reth_rpc_types::{state::StateOverride, CallRequest, Log, RichBlock, SyncStatus};
+use tracing_futures::Instrument;
 
-use crate::result::rpc_err;
-use async_trait::async_trait;
-use jsonrpsee::{
-    core::{Error, RpcResult as Result},
-    types::error::INVALID_PARAMS_CODE,
-};
-use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{BlockHash, BlockNumber, ChainSpec, Hardfork, H64};
-use reth_rpc_api::EngineApiServer;
-use reth_rpc_engine_api::{
-    EngineApiError, EngineApiHandle, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
-    REQUEST_TOO_LARGE_CODE, UNKNOWN_PAYLOAD_CODE,
-};
-use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    TransitionConfiguration, CAPABILITIES,
-};
-use tokio::sync::oneshot::{self, Receiver};
-
-fn to_rpc_error<E: Into<EngineApiError>>(error: E) -> Error {
-    let error = error.into();
-    let code = match error {
-        EngineApiError::InvalidParams => INVALID_PARAMS_CODE,
-        EngineApiError::PayloadUnknown => UNKNOWN_PAYLOAD_CODE,
-        EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
-        // Any other server error
-        _ => jsonrpsee::types::error::INTERNAL_ERROR_CODE,
+macro_rules! engine_span {
+    () => {
+        tracing::trace_span!(target: "rpc", "engine")
     };
-    rpc_err(code, error.to_string(), None)
 }
 
-/// The server implementation of Engine API
-pub struct EngineApi {
-    /// Chain spec
-    chain_spec: Arc<ChainSpec>,
-    /// Handle to the engine API implementation.
-    engine_tx: EngineApiHandle,
+/// A wrapper type for the `EthApi` and `EthFilter` implementations that only expose the required
+/// subset for the `eth_` namespace used in auth server alongside the `engine_` namespace.
+#[derive(Debug, Clone)]
+pub struct EngineEthApi<Eth, EthFilter> {
+    eth: Eth,
+    eth_filter: EthFilter,
 }
 
-impl EngineApi {
-    /// Creates a new instance of [EngineApi].
-    pub fn new(chain_spec: Arc<ChainSpec>, engine_tx: EngineApiHandle) -> Self {
-        Self { chain_spec, engine_tx }
-    }
-}
-
-impl std::fmt::Debug for EngineApi {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EngineApi").finish_non_exhaustive()
+impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
+    /// Create a new `EngineEthApi` instance.
+    pub fn new(eth: Eth, eth_filter: EthFilter) -> Self {
+        Self { eth, eth_filter }
     }
 }
 
-impl EngineApi {
-    /// Validates the presence of the `withdrawals` field according to the payload timestamp.
-    /// After Shanghai, withdrawals field must be [Some].
-    /// Before Shanghai, withdrawals field must be [None];
-    fn validate_withdrawals_presence(
+#[async_trait::async_trait]
+impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
+where
+    Eth: EthApiServer,
+    EthFilter: EthFilterApiServer,
+{
+    /// Handler for: `eth_syncing`
+    fn syncing(&self) -> Result<SyncStatus> {
+        let span = engine_span!();
+        let _enter = span.enter();
+        self.eth.syncing()
+    }
+
+    /// Handler for: `eth_chainId`
+    async fn chain_id(&self) -> Result<Option<U64>> {
+        let span = engine_span!();
+        let _enter = span.enter();
+        self.eth.chain_id().await
+    }
+
+    /// Handler for: `eth_blockNumber`
+    fn block_number(&self) -> Result<U256> {
+        let span = engine_span!();
+        let _enter = span.enter();
+        self.eth.block_number()
+    }
+
+    /// Handler for: `eth_call`
+    async fn call(
         &self,
-        version: EngineApiMessageVersion,
-        timestamp: u64,
-        has_withdrawals: bool,
-    ) -> EngineApiResult<()> {
-        let is_shanghai = self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp);
-
-        match version {
-            EngineApiMessageVersion::V1 => {
-                if is_shanghai || has_withdrawals {
-                    return Err(EngineApiError::InvalidParams)
-                }
-            }
-            EngineApiMessageVersion::V2 => {
-                let shanghai_with_no_withdrawals = is_shanghai && !has_withdrawals;
-                let not_shanghai_with_withdrawals = !is_shanghai && has_withdrawals;
-                if shanghai_with_no_withdrawals || not_shanghai_with_withdrawals {
-                    return Err(EngineApiError::InvalidParams)
-                }
-            }
-        };
-
-        Ok(())
+        request: CallRequest,
+        block_number: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+    ) -> Result<Bytes> {
+        self.eth.call(request, block_number, state_overrides).instrument(engine_span!()).await
     }
 
-    async fn delegate_request<T, E: Into<EngineApiError>>(
+    /// Handler for: `eth_getCode`
+    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
+        self.eth.get_code(address, block_number).instrument(engine_span!()).await
+    }
+
+    /// Handler for: `eth_getBlockByHash`
+    async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
+        self.eth.block_by_hash(hash, full).instrument(engine_span!()).await
+    }
+
+    /// Handler for: `eth_getBlockByNumber`
+    async fn block_by_number(
         &self,
-        msg: EngineApiMessage,
-        rx: Receiver<std::result::Result<T, E>>,
-    ) -> Result<T> {
-        let _ = self.engine_tx.send(msg);
-        rx.await.map_err(|err| Error::Custom(err.to_string()))?.map_err(|err| to_rpc_error(err))
-    }
-}
-
-#[async_trait]
-impl EngineApiServer for EngineApi {
-    /// Handler for `engine_getPayloadV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
-    /// Caution: This should not accept the `withdrawals` field
-    async fn new_payload_v1(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
-        self.validate_withdrawals_presence(
-            EngineApiMessageVersion::V1,
-            payload.timestamp.as_u64(),
-            payload.withdrawals.is_some(),
-        )
-        .map_err(to_rpc_error)?;
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::NewPayload(payload, tx), rx).await
+        number: BlockNumberOrTag,
+        full: bool,
+    ) -> Result<Option<RichBlock>> {
+        self.eth.block_by_number(number, full).instrument(engine_span!()).await
     }
 
-    /// Handler for `engine_getPayloadV2`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
-    async fn new_payload_v2(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
-        self.validate_withdrawals_presence(
-            EngineApiMessageVersion::V2,
-            payload.timestamp.as_u64(),
-            payload.withdrawals.is_some(),
-        )
-        .map_err(to_rpc_error)?;
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::NewPayload(payload, tx), rx).await
+    /// Handler for: `eth_sendRawTransaction`
+    async fn send_raw_transaction(&self, bytes: Bytes) -> Result<H256> {
+        self.eth.send_raw_transaction(bytes).instrument(engine_span!()).await
     }
 
-    /// Handler for `engine_forkchoiceUpdatedV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
-    ///
-    /// Caution: This should not accept the `withdrawals` field
-    async fn fork_choice_updated_v1(
-        &self,
-        fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attributes {
-            self.validate_withdrawals_presence(
-                EngineApiMessageVersion::V1,
-                attrs.timestamp.as_u64(),
-                attrs.withdrawals.is_some(),
-            )
-            .map_err(to_rpc_error)?;
-        }
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(
-            EngineApiMessage::ForkchoiceUpdated(fork_choice_state, payload_attributes, tx),
-            rx,
-        )
-        .await
-    }
-
-    /// Handler for `engine_forkchoiceUpdatedV2`
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
-    async fn fork_choice_updated_v2(
-        &self,
-        fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated> {
-        if let Some(ref attrs) = payload_attributes {
-            self.validate_withdrawals_presence(
-                EngineApiMessageVersion::V2,
-                attrs.timestamp.as_u64(),
-                attrs.withdrawals.is_some(),
-            )
-            .map_err(to_rpc_error)?;
-        }
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(
-            EngineApiMessage::ForkchoiceUpdated(fork_choice_state, payload_attributes, tx),
-            rx,
-        )
-        .await
-    }
-
-    /// Handler for `engine_getPayloadV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
-    ///
-    /// Caution: This should not return the `withdrawals` field
-    async fn get_payload_v1(&self, payload_id: H64) -> Result<ExecutionPayload> {
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx).await
-    }
-
-    /// Handler for `engine_getPayloadV2`
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
-    async fn get_payload_v2(&self, payload_id: H64) -> Result<ExecutionPayload> {
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx).await
-    }
-
-    /// Handler for `engine_getPayloadBodiesByHashV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
-    async fn get_payload_bodies_by_hash_v1(
-        &self,
-        block_hashes: Vec<BlockHash>,
-    ) -> Result<ExecutionPayloadBodies> {
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::GetPayloadBodiesByHash(block_hashes, tx), rx).await
-    }
-
-    /// Handler for `engine_getPayloadBodiesByRangeV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
-    async fn get_payload_bodies_by_range_v1(
-        &self,
-        start: BlockNumber,
-        count: u64,
-    ) -> Result<ExecutionPayloadBodies> {
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::GetPayloadBodiesByRange(start, count, tx), rx).await
-    }
-
-    /// Handler for `engine_exchangeTransitionConfigurationV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_exchangeTransitionConfigurationV1>
-    async fn exchange_transition_configuration(
-        &self,
-        config: TransitionConfiguration,
-    ) -> Result<TransitionConfiguration> {
-        let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::ExchangeTransitionConfiguration(config, tx), rx)
-            .await
-    }
-
-    /// Handler for `engine_exchangeCapabilitiesV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
-    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> Result<Vec<String>> {
-        Ok(CAPABILITIES.into_iter().map(str::to_owned).collect())
+    /// Handler for `eth_getLogs`
+    async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
+        self.eth_filter.logs(filter).instrument(engine_span!()).await
     }
 }

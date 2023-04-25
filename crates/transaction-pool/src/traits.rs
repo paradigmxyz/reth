@@ -1,7 +1,7 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, H256, U256,
 };
 use reth_rlp::Encodable;
 use std::{collections::HashMap, fmt, sync::Arc};
@@ -79,12 +79,25 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: P2P
     fn pooled_transaction_hashes(&self) -> Vec<TxHash>;
 
+    /// Returns only the first `max` hashes of transactions in the pool.
+    ///
+    /// Consumer: P2P
+    fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash>;
+
     /// Returns the _full_ transaction objects all transactions in the pool.
     ///
     /// Note: This returns a `Vec` but should guarantee that all transactions are unique.
     ///
     /// Consumer: P2P
     fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns only the first `max` transactions in the pool.
+    ///
+    /// Consumer: P2P
+    fn pooled_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -98,7 +111,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Also removes all dependent transactions.
     ///
     /// Consumer: Block production
-    fn remove_invalid(
+    fn remove_transactions(
         &self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -132,6 +145,12 @@ pub trait TransactionPool: Send + Sync + Clone {
     ///
     /// Consumer: P2P
     fn on_propagated(&self, txs: PropagatedTransactions);
+
+    /// Returns all transactions sent by a given user
+    fn get_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 }
 
 /// Represents a transaction that was propagated over the network.
@@ -295,6 +314,11 @@ pub trait PoolTransaction:
     /// Returns the transaction type
     fn tx_type(&self) -> u8;
 
+    /// Returns true if the transaction is an EIP-1559 transaction.
+    fn is_eip1559(&self) -> bool {
+        self.tx_type() == EIP1559_TX_TYPE_ID
+    }
+
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize;
 
@@ -328,7 +352,7 @@ impl PooledTransaction {
 impl PoolTransaction for PooledTransaction {
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
-        &self.transaction.hash
+        self.transaction.hash_ref()
     }
 
     /// Returns the Sender of the transaction.

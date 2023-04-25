@@ -12,6 +12,7 @@
 //! Provides the implementation of all RPC interfaces.
 
 mod admin;
+mod call_guard;
 mod debug;
 mod engine;
 pub mod eth;
@@ -21,10 +22,11 @@ mod trace;
 mod web3;
 
 pub use admin::AdminApi;
+pub use call_guard::TracingCallGuard;
 pub use debug::DebugApi;
-pub use engine::EngineApi;
+pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
-pub use layers::{AuthLayer, AuthValidator, JwtAuthValidator, JwtError, JwtSecret};
+pub use layers::{AuthLayer, AuthValidator, Claims, JwtAuthValidator, JwtError, JwtSecret};
 pub use net::NetApi;
 pub use trace::TraceApi;
 pub use web3::Web3Api;

@@ -1,7 +1,6 @@
 use crate::{
     insert_canonical_block,
-    post_state::{Change, PostState, StorageChangeset},
-    trie::{DBTrieLoader, TrieError},
+    post_state::{PostState, StorageChangeset},
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -11,23 +10,24 @@ use reth_db::{
     models::{
         sharded_key,
         storage_sharded_key::{self, StorageShardedKey},
-        AccountBeforeTx, ShardedKey, StoredBlockBody, TransitionIdAddress,
+        AccountBeforeTx, BlockNumberAddress, ShardedKey, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
-    TransitionList,
+    BlockNumberList,
 };
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, proofs::EMPTY_ROOT, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork,
-    Header, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
-    TransitionId, TxNumber, H256, U256,
+    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
+    SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered,
+    TxNumber, H256, U256,
 };
+use reth_trie::{StateRoot, StateRootError};
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Bound, Deref, DerefMut, Range, RangeBounds},
+    ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
 };
 
 /// A container for any DB transaction that will open a new inner transaction when the current
@@ -97,6 +97,11 @@ where
         self.db
     }
 
+    /// Get lastest block number.
+    pub fn tip_number(&self) -> Result<u64, DbError> {
+        Ok(self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
+    }
+
     /// Commit the current inner transaction and open a new one.
     ///
     /// # Panics
@@ -140,36 +145,26 @@ where
     }
 
     /// Query the block body by number.
-    pub fn get_block_body(&self, number: BlockNumber) -> Result<StoredBlockBody, TransactionError> {
-        let body =
-            self.get::<tables::BlockBodies>(number)?.ok_or(ProviderError::BlockBody { number })?;
+    pub fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> Result<StoredBlockBodyIndices, TransactionError> {
+        let body = self
+            .get::<tables::BlockBodyIndices>(number)?
+            .ok_or(ProviderError::BlockBodyIndices { number })?;
         Ok(body)
-    }
-
-    /// Query the last transition of the block by [BlockNumber] key
-    pub fn get_block_transition(&self, key: BlockNumber) -> Result<TransitionId, TransactionError> {
-        let last_transition_id = self
-            .get::<tables::BlockTransitionIndex>(key)?
-            .ok_or(ProviderError::BlockTransition { block_number: key })?;
-        Ok(last_transition_id)
     }
 
     /// Get the next start transaction id and transition for the `block` by looking at the previous
     /// block. Returns Zero/Zero for Genesis.
-    pub fn get_next_block_ids(
-        &self,
-        block: BlockNumber,
-    ) -> Result<(TxNumber, TransitionId), TransactionError> {
+    pub fn first_block_number(&self, block: BlockNumber) -> Result<TxNumber, TransactionError> {
         if block == 0 {
-            return Ok((0, 0))
+            return Ok(0)
         }
 
         let prev_number = block - 1;
-        let prev_body = self.get_block_body(prev_number)?;
-        let last_transition = self
-            .get::<tables::BlockTransitionIndex>(prev_number)?
-            .ok_or(ProviderError::BlockTransition { block_number: prev_number })?;
-        Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
+        let prev_body = self.block_body_indices(prev_number)?;
+        Ok(prev_body.first_tx_num + prev_body.tx_count)
     }
 
     /// Query the block header by number
@@ -198,24 +193,22 @@ where
     }
 
     /// Unwind the table to a provided block
-    pub(crate) fn unwind_table<T, F>(
-        &self,
-        block: BlockNumber,
-        mut selector: F,
-    ) -> Result<(), DbError>
+    ///
+    /// Note: Key is not inclusive and specified key would stay in db.
+    pub(crate) fn unwind_table<T, F>(&self, key: u64, mut selector: F) -> Result<(), DbError>
     where
         DB: Database,
         T: Table,
-        F: FnMut(T::Key) -> BlockNumber,
+        F: FnMut(T::Key) -> u64,
     {
         let mut cursor = self.cursor_write::<T>()?;
         let mut reverse_walker = cursor.walk_back(None)?;
 
-        while let Some(Ok((key, _))) = reverse_walker.next() {
-            if selector(key.clone()) <= block {
+        while let Some(Ok((entry_key, _))) = reverse_walker.next() {
+            if selector(entry_key.clone()) <= key {
                 break
             }
-            self.delete::<T>(key, None)?;
+            self.delete::<T>(entry_key, None)?;
         }
         Ok(())
     }
@@ -307,31 +300,11 @@ where
         self.get_take_block_range::<true>(chain_spec, range)
     }
 
-    /// Transverse over changesets and plain state and recreated the execution results.
-    ///
-    /// Return results from database.
-    pub fn get_block_execution_result_range(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<PostState>, TransactionError> {
-        self.get_take_block_execution_result_range::<false>(range)
-    }
-
-    /// Transverse over changesets and plain state and recreated the execution results.
-    ///
-    /// Get results and remove them from database
-    pub fn take_block_execution_result_range(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<PostState>, TransactionError> {
-        self.get_take_block_execution_result_range::<true>(range)
-    }
-
     /// Get range of blocks and its execution result
     pub fn get_block_and_execution_range(
         &self,
         chain_spec: &ChainSpec,
-        range: impl RangeBounds<BlockNumber> + Clone,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<(SealedBlockWithSenders, PostState)>, TransactionError> {
         self.get_take_block_and_execution_range::<false>(chain_spec, range)
     }
@@ -340,7 +313,7 @@ where
     pub fn take_block_and_execution_range(
         &self,
         chain_spec: &ChainSpec,
-        range: impl RangeBounds<BlockNumber> + Clone,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<(SealedBlockWithSenders, PostState)>, TransactionError> {
         self.get_take_block_and_execution_range::<true>(chain_spec, range)
     }
@@ -348,7 +321,7 @@ where
     /// Unwind and clear account hashing
     pub fn unwind_account_hashing(
         &self,
-        range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<(), TransactionError> {
         let mut hashed_accounts = self.cursor_write::<tables::HashedAccount>()?;
 
@@ -387,7 +360,7 @@ where
     /// Unwind and clear storage hashing
     pub fn unwind_storage_hashing(
         &self,
-        range: Range<TransitionIdAddress>,
+        range: Range<BlockNumberAddress>,
     ) -> Result<(), TransactionError> {
         let mut hashed_storage = self.cursor_dup_write::<tables::HashedStorage>()?;
 
@@ -401,7 +374,7 @@ where
             .fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<(Address, H256), U256>,
-                 (TransitionIdAddress((_, address)), storage_entry)| {
+                 (BlockNumberAddress((_, address)), storage_entry)| {
                     accounts.insert((address, storage_entry.key), storage_entry.value);
                     accounts
                 },
@@ -433,7 +406,7 @@ where
     /// Unwind and clear account history indices
     pub fn unwind_account_history_indices(
         &self,
-        range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<(), TransactionError> {
         let mut cursor = self.cursor_write::<tables::AccountHistory>()?;
 
@@ -461,7 +434,7 @@ where
                 // there are items in list
                 self.put::<tables::AccountHistory>(
                     ShardedKey::new(address, u64::MAX),
-                    TransitionList::new(shard_part)
+                    BlockNumberList::new(shard_part)
                         .expect("There is at least one element in list and it is sorted."),
                 )?;
             }
@@ -472,7 +445,7 @@ where
     /// Unwind and clear storage history indices
     pub fn unwind_storage_history_indices(
         &self,
-        range: Range<TransitionIdAddress>,
+        range: Range<BlockNumberAddress>,
     ) -> Result<(), TransactionError> {
         let mut cursor = self.cursor_write::<tables::StorageHistory>()?;
 
@@ -489,7 +462,7 @@ where
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
                     // we just need address and lowest transition id.
-                    accounts.insert((index.address(), storage.key), index.transition_id());
+                    accounts.insert((index.address(), storage.key), index.block_number());
                     accounts
                 },
             );
@@ -502,7 +475,7 @@ where
                 // there are items in list
                 self.put::<tables::StorageHistory>(
                     StorageShardedKey::new(address, storage_key, u64::MAX),
-                    TransitionList::new(shard_part)
+                    BlockNumberList::new(shard_part)
                         .expect("There is at least one element in list and it is sorted."),
                 )?;
             }
@@ -520,32 +493,25 @@ where
         if blocks.is_empty() {
             return Ok(())
         }
-        let tip = blocks.last().unwrap();
-        let new_tip_number = tip.number;
-        let new_tip_hash = tip.hash;
-        let expected_state_root = tip.state_root;
-
-        let fork_block_number = blocks.first().unwrap().number.saturating_sub(1);
-
-        let first_transition_id = self.get_block_transition(fork_block_number)?;
-
-        let num_transitions = state.transitions_count();
+        let new_tip = blocks.last().unwrap();
+        let new_tip_number = new_tip.number;
 
         // Write state and changesets to the database
-        state.write_to_db(self.deref_mut(), first_transition_id)?;
+        state.write_to_db(self.deref_mut())?;
+
+        let first_number = blocks.first().unwrap().number;
+
+        let last = blocks.last().unwrap();
+        let last_block_number = last.number;
+        let last_block_hash = last.hash();
+        let expected_state_root = last.state_root;
 
         // Insert the blocks
         for block in blocks {
             self.insert_block(block)?;
         }
-        self.insert_hashes(
-            fork_block_number,
-            first_transition_id,
-            first_transition_id + num_transitions as u64,
-            new_tip_number,
-            new_tip_hash,
-            expected_state_root,
-        )?;
+
+        self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(new_tip_number)?;
@@ -563,22 +529,23 @@ where
     ///
     /// This assumes that we are using beacon consensus and that the block is post-merge, which
     /// means that the block will have no block reward.
+    /// TODO do multi block insertion.
     pub fn insert_block(&mut self, block: SealedBlockWithSenders) -> Result<(), TransactionError> {
         // Header, Body, SenderRecovery, TD, TxLookup stages
         let (block, senders) = block.into_components();
+        let range = block.number..=block.number;
 
-        let (from, to) =
-            insert_canonical_block(self.deref_mut(), block, Some(senders), false).unwrap();
+        insert_canonical_block(self.deref_mut(), block, Some(senders)).unwrap();
 
         // account history stage
         {
-            let indices = self.get_account_transition_ids_from_changeset(from, to)?;
+            let indices = self.get_account_transition_ids_from_changeset(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
         // storage history stage
         {
-            let indices = self.get_storage_transition_ids_from_changeset(from, to)?;
+            let indices = self.get_storage_transition_ids_from_changeset(range)?;
             self.insert_storage_history_index(indices)?;
         }
 
@@ -594,46 +561,38 @@ where
     /// The resulting state root is compared with `expected_state_root`.
     pub fn insert_hashes(
         &mut self,
-        fork_block_number: BlockNumber,
-        from_transition_id: TransitionId,
-        to_transition_id: TransitionId,
-        current_block_number: BlockNumber,
-        current_block_hash: H256,
+        range: RangeInclusive<BlockNumber>,
+        end_block_hash: H256,
         expected_state_root: H256,
     ) -> Result<(), TransactionError> {
         // storage hashing stage
         {
-            let lists = self
-                .get_addresses_and_keys_of_changed_storages(from_transition_id, to_transition_id)?;
+            let lists = self.get_addresses_and_keys_of_changed_storages(range.clone())?;
             let storages = self.get_plainstate_storages(lists.into_iter())?;
             self.insert_storage_for_hashing(storages.into_iter())?;
         }
 
         // account hashing stage
         {
-            let lists =
-                self.get_addresses_of_changed_accounts(from_transition_id, to_transition_id)?;
+            let lists = self.get_addresses_of_changed_accounts(range.clone())?;
             let accounts = self.get_plainstate_accounts(lists.into_iter())?;
             self.insert_account_for_hashing(accounts.into_iter())?;
         }
 
         // merkle tree
         {
-            let current_root = self.get_header(fork_block_number)?.state_root;
-            let mut loader = DBTrieLoader::new(self.deref_mut());
-            let root = loader
-                .update_root(current_root, from_transition_id..to_transition_id)
-                .and_then(|e| e.root())?;
-            if root != expected_state_root {
+            let (state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(self.deref_mut(), range.clone())?;
+            if state_root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
-                    got: root,
+                    got: state_root,
                     expected: expected_state_root,
-                    block_number: current_block_number,
-                    block_hash: current_block_hash,
+                    block_number: *range.end(),
+                    block_hash: end_block_hash,
                 })
             }
+            trie_updates.flush(self.deref_mut())?;
         }
-
         Ok(())
     }
 
@@ -664,37 +623,42 @@ where
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
-        // Just read block tx id from table. as it is needed to get execution results.
-        let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
+        // Raad range of block bodies to get all transactions id's of this range.
+        let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
 
         if block_bodies.is_empty() {
             return Ok(Vec::new())
         }
 
-        // iterate over and get all transaction and signers
-        let first_transaction =
-            block_bodies.first().expect("If we have headers").1.first_tx_index();
-        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_index();
+        // Compute the first and last tx ID in the range
+        let first_transaction = block_bodies.first().expect("If we have headers").1.first_tx_num();
+        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_num();
 
-        let transactions =
-            self.get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?;
+        // If this is the case then all of the blocks in the range are empty
+        if last_transaction < first_transaction {
+            return Ok(Vec::new())
+        }
+
+        // Get transactions and senders
+        let transactions = self
+            .get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?
+            .into_iter()
+            .map(|(id, tx)| (id, tx.into()))
+            .collect::<Vec<(u64, TransactionSigned)>>();
+
         let senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
         if TAKE {
-            // rm TxHashNumber
+            // Remove TxHashNumber
             let mut tx_hash_cursor = self.cursor_write::<tables::TxHashNumber>()?;
             for (_, tx) in transactions.iter() {
                 if tx_hash_cursor.seek_exact(tx.hash())?.is_some() {
                     tx_hash_cursor.delete_current()?;
                 }
             }
-            // rm TxTransitionId
-            self.get_or_take::<tables::TxTransitionIndex, TAKE>(
-                first_transaction..=last_transaction,
-            )?;
 
-            // rm Transaction block index if there are transaction present
+            // Remove TransactionBlock index if there are transaction present
             if !transactions.is_empty() {
                 let tx_id_range = transactions.first().unwrap().0..=transactions.last().unwrap().0;
                 self.get_or_take::<tables::TransactionBlock, TAKE>(tx_id_range)?;
@@ -702,12 +666,12 @@ where
         }
 
         // Merge transaction into blocks
-        let mut block_tx = Vec::new();
+        let mut block_tx = Vec::with_capacity(block_bodies.len());
         let mut senders = senders.into_iter();
         let mut transactions = transactions.into_iter();
         for (block_number, block_body) in block_bodies {
-            let mut one_block_tx = Vec::new();
-            for _ in block_body.tx_id_range() {
+            let mut one_block_tx = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
                 let tx = transactions.next();
                 let sender = senders.next();
 
@@ -790,15 +754,7 @@ where
             let mut ommers = Vec::new();
             if let Some((block_number, _)) = block_ommers.as_ref() {
                 if *block_number == main_block_number {
-                    // Seal ommers as they dont have hash.
-                    ommers = block_ommers
-                        .take()
-                        .unwrap()
-                        .1
-                        .ommers
-                        .into_iter()
-                        .map(|h| h.seal_slow())
-                        .collect();
+                    ommers = block_ommers.take().unwrap().1.ommers;
                     block_ommers = block_ommers_iter.next();
                 }
             };
@@ -830,8 +786,8 @@ where
     /// Traverse over changesets and plain state and recreate the [`PostState`]s for the given range
     /// of blocks.
     ///
-    /// 1. Iterate over the [BlockTransitionIndex][tables::BlockTransitionIndex] table to get all
-    /// the transitions
+    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
+    /// the transition indices.
     /// 2. Iterate over the [StorageChangeSet][tables::StorageChangeSet] table
     /// and the [AccountChangeSet][tables::AccountChangeSet] tables in reverse order to reconstruct
     /// the changesets.
@@ -852,60 +808,46 @@ where
     /// 5. Get all receipts from table
     fn get_take_block_execution_result_range<const TAKE: bool>(
         &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<PostState>, TransactionError> {
-        let block_transition =
-            self.get_or_take::<tables::BlockTransitionIndex, TAKE>(range.clone())?;
-
-        if block_transition.is_empty() {
+        if range.is_empty() {
             return Ok(Vec::new())
         }
-        // get block transitions
-        let first_block_number =
-            block_transition.first().expect("Check for empty is already done").0;
 
-        // get block transition of parent block.
-        let from = self.get_block_transition(first_block_number.saturating_sub(1))?;
-        let to = block_transition.last().expect("Check for empty is already done").1;
-
-        // NOTE: Just get block bodies dont remove them
-        // it is connection point for bodies getter and execution result getter.
-        let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
+        // We are not removing block meta as it is used to get block transitions.
+        let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range.clone())?;
 
         // get transaction receipts
         let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").1.first_tx_index();
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
         let to_transaction_num =
-            block_bodies.last().expect("already checked if there are blocks").1.last_tx_index();
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
         let receipts =
             self.get_or_take::<tables::Receipts, TAKE>(from_transaction_num..=to_transaction_num)?;
 
-        // get saved previous values
-        let from_storage: TransitionIdAddress = (from, Address::zero()).into();
-        let to_storage: TransitionIdAddress = (to, Address::zero()).into();
+        let storage_range = BlockNumberAddress::range(range.clone());
 
         let storage_changeset =
-            self.get_or_take::<tables::StorageChangeSet, TAKE>(from_storage..to_storage)?;
-        let account_changeset = self.get_or_take::<tables::AccountChangeSet, TAKE>(from..to)?;
+            self.get_or_take::<tables::StorageChangeSet, TAKE>(storage_range)?;
+        let account_changeset = self.get_or_take::<tables::AccountChangeSet, TAKE>(range)?;
 
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
         type LocalPlainState = BTreeMap<Address, (Option<Option<Account>>, BTreeMap<H256, U256>)>;
-        type Changesets = BTreeMap<TransitionId, Vec<Change>>;
 
         let mut local_plain_state: LocalPlainState = BTreeMap::new();
 
         // iterate in reverse and get plain state.
 
         // Bundle execution changeset to its particular transaction and block
-        let mut all_changesets: Changesets = BTreeMap::new();
+        let mut block_states: BTreeMap<BlockNumber, PostState> = BTreeMap::new();
 
         let mut plain_accounts_cursor = self.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.cursor_dup_write::<tables::PlainStorageState>()?;
 
         // add account changeset changes
-        for (transition_id, account_before) in account_changeset.into_iter().rev() {
+        for (block_number, account_before) in account_changeset.into_iter().rev() {
             let AccountBeforeTx { info: old_info, address } = account_before;
             let new_info = match local_plain_state.entry(address) {
                 Entry::Vacant(entry) => {
@@ -919,38 +861,26 @@ where
                 }
             };
 
-            let change = match (old_info, new_info) {
+            let post_state = block_states.entry(block_number).or_default();
+            match (old_info, new_info) {
                 (Some(old), Some(new)) => {
                     if new != old {
-                        Change::AccountChanged {
-                            id: transition_id,
-                            address,
-                            old,
-                            new,
-                        }
+                        post_state.change_account(block_number, address, old, new);
                     } else {
                         unreachable!("Junk data in database: an account changeset did not represent any change");
                     }
                 }
-                (None, Some(account)) => Change::AccountCreated {
-                    id: transition_id,
-                    address,
-                    account
-                },
-                (Some(old), None) => Change::AccountDestroyed {
-                    id: transition_id,
-                    address,
-                    old
-                },
+                (None, Some(account)) =>  post_state.create_account(block_number, address, account),
+                (Some(old), None) =>
+                    post_state.destroy_account(block_number, address, old),
                 (None, None) => unreachable!("Junk data in database: an account changeset transitioned from no account to no account"),
             };
-            all_changesets.entry(transition_id).or_default().push(change);
         }
 
         // add storage changeset changes
-        let mut storage_changes: BTreeMap<TransitionIdAddress, StorageChangeset> = BTreeMap::new();
-        for (transition_and_address, storage_entry) in storage_changeset.into_iter().rev() {
-            let TransitionIdAddress((_, address)) = transition_and_address;
+        let mut storage_changes: BTreeMap<BlockNumberAddress, StorageChangeset> = BTreeMap::new();
+        for (block_and_address, storage_entry) in storage_changeset.into_iter().rev() {
+            let BlockNumberAddress((_, address)) = block_and_address;
             let new_storage =
                 match local_plain_state.entry(address).or_default().1.entry(storage_entry.key) {
                     Entry::Vacant(entry) => {
@@ -965,20 +895,20 @@ where
                         std::mem::replace(entry.get_mut(), storage_entry.value)
                     }
                 };
-            storage_changes.entry(transition_and_address).or_default().insert(
+            storage_changes.entry(block_and_address).or_default().insert(
                 U256::from_be_bytes(storage_entry.key.0),
                 (storage_entry.value, new_storage),
             );
         }
 
-        for (TransitionIdAddress((transition_id, address)), storage_changeset) in
+        for (BlockNumberAddress((block_number, address)), storage_changeset) in
             storage_changes.into_iter()
         {
-            all_changesets.entry(transition_id).or_default().push(Change::StorageChanged {
-                id: transition_id,
+            block_states.entry(block_number).or_default().change_storage(
+                block_number,
                 address,
-                changeset: storage_changeset,
-            });
+                storage_changeset,
+            );
         }
 
         if TAKE {
@@ -1017,98 +947,40 @@ where
         }
 
         // iterate over block body and create ExecutionResult
-        let mut block_exec_results = Vec::new();
-        let mut block_transition_iter = block_transition.into_iter();
-        let mut next_transition_id = from;
-
         let mut receipt_iter = receipts.into_iter();
 
         // loop break if we are at the end of the blocks.
-        for (_, block_body) in block_bodies.into_iter() {
-            let mut block_post_state = PostState::new();
-            for tx_num in block_body.tx_id_range() {
-                if let Some(changes) = all_changesets.remove(&next_transition_id) {
-                    for mut change in changes.into_iter() {
-                        change
-                            .set_transition_id(block_post_state.transitions_count() as TransitionId);
-                        block_post_state.add_and_apply(change);
-                    }
-                }
-                if let Some((receipt_tx_num, receipt)) = receipt_iter.next() {
-                    if tx_num != receipt_tx_num {
-                        block_post_state.add_receipt(receipt)
-                    }
-                }
-                block_post_state.finish_transition();
-                next_transition_id += 1;
-            }
-
-            let Some((_,block_transition)) = block_transition_iter.next() else { break};
-            // if block transition points to 1+next transition id it means that there is block
-            // changeset.
-            if block_transition == next_transition_id + 1 {
-                if let Some(changes) = all_changesets.remove(&next_transition_id) {
-                    for mut change in changes.into_iter() {
-                        change
-                            .set_transition_id(block_post_state.transitions_count() as TransitionId);
-                        block_post_state.add_and_apply(change);
-                    }
-                    block_post_state.finish_transition();
-                    next_transition_id += 1;
+        for (block_number, block_body) in block_bodies.into_iter() {
+            for _ in block_body.tx_num_range() {
+                if let Some((_, receipt)) = receipt_iter.next() {
+                    block_states.entry(block_number).or_default().add_receipt(receipt);
                 }
             }
-            block_exec_results.push(block_post_state)
         }
-        Ok(block_exec_results)
+        Ok(block_states.into_values().collect())
     }
 
     /// Return range of blocks and its execution result
     pub fn get_take_block_and_execution_range<const TAKE: bool>(
         &self,
         chain_spec: &ChainSpec,
-        range: impl RangeBounds<BlockNumber> + Clone,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<(SealedBlockWithSenders, PostState)>, TransactionError> {
         if TAKE {
-            let (from_transition, parent_number, parent_state_root) = match range.start_bound() {
-                Bound::Included(n) => {
-                    let parent_number = n.saturating_sub(1);
-                    let transition = self.get_block_transition(parent_number)?;
-                    let parent = self.get_header(parent_number)?;
-                    (transition, parent_number, parent.state_root)
-                }
-                Bound::Excluded(n) => {
-                    let transition = self.get_block_transition(*n)?;
-                    let parent = self.get_header(*n)?;
-                    (transition, *n, parent.state_root)
-                }
-                Bound::Unbounded => (0, 0, EMPTY_ROOT),
-            };
-            let to_transition = match range.end_bound() {
-                Bound::Included(n) => self.get_block_transition(*n)?,
-                Bound::Excluded(n) => self.get_block_transition(n.saturating_sub(1))?,
-                Bound::Unbounded => TransitionId::MAX,
-            };
+            let storage_range = BlockNumberAddress::range(range.clone());
 
-            let transition_range = from_transition..to_transition;
-            let zero = Address::zero();
-            let transition_storage_range =
-                (from_transition, zero).into()..(to_transition, zero).into();
-
-            self.unwind_account_hashing(transition_range.clone())?;
-            self.unwind_account_history_indices(transition_range.clone())?;
-            self.unwind_storage_hashing(transition_storage_range.clone())?;
-            self.unwind_storage_history_indices(transition_storage_range)?;
+            self.unwind_account_hashing(range.clone())?;
+            self.unwind_account_history_indices(range.clone())?;
+            self.unwind_storage_hashing(storage_range.clone())?;
+            self.unwind_storage_history_indices(storage_range)?;
 
             // merkle tree
-            let new_state_root;
-            {
-                let (tip_number, _) =
-                    self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
-                let current_root = self.get_header(tip_number)?.state_root;
-                let mut loader = DBTrieLoader::new(self.deref());
-                new_state_root =
-                    loader.update_root(current_root, transition_range).and_then(|e| e.root())?;
-            }
+            let (new_state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(self.deref(), range.clone())?;
+
+            let parent_number = range.start().saturating_sub(1);
+            let parent_state_root = self.get_header(parent_number)?.state_root;
+
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
@@ -1120,6 +992,7 @@ where
                     block_hash: parent_hash,
                 })
             }
+            trie_updates.flush(self.deref())?;
         }
         // get blocks
         let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
@@ -1134,7 +1007,7 @@ where
         // that is why it is deleted afterwards.
         if TAKE {
             // rm block bodies
-            self.get_or_take::<tables::BlockBodies, TAKE>(range)?;
+            self.get_or_take::<tables::BlockBodyIndices, TAKE>(range)?;
 
             // Update pipeline progress
             if let Some(fork_number) = unwind_to {
@@ -1163,15 +1036,11 @@ where
     /// Iterate over account changesets and return all account address that were changed.
     pub fn get_addresses_and_keys_of_changed_storages(
         &self,
-        from: TransitionId,
-        to: TransitionId,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<Address, BTreeSet<H256>>, TransactionError> {
         Ok(self
             .cursor_read::<tables::StorageChangeSet>()?
-            .walk_range(
-                TransitionIdAddress((from, Address::zero()))..
-                    TransitionIdAddress((to, Address::zero())),
-            )?
+            .walk_range(BlockNumberAddress::range(range))?
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             // fold all storages and save its old state so we can remove it from HashedStorage
@@ -1179,14 +1048,14 @@ where
             .fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<Address, BTreeSet<H256>>,
-                 (TransitionIdAddress((_, address)), storage_entry)| {
+                 (BlockNumberAddress((_, address)), storage_entry)| {
                     accounts.entry(address).or_default().insert(storage_entry.key);
                     accounts
                 },
             ))
     }
 
-    ///  Get plainstate storages
+    /// Get plainstate storages
     #[allow(clippy::type_complexity)]
     pub fn get_plainstate_storages(
         &self,
@@ -1251,12 +1120,11 @@ where
     /// Iterate over account changesets and return all account address that were changed.
     pub fn get_addresses_of_changed_accounts(
         &self,
-        from: TransitionId,
-        to: TransitionId,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeSet<Address>, TransactionError> {
         Ok(self
             .cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(from..to)?
+            .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             // fold all account to one set of changed accounts
@@ -1307,15 +1175,15 @@ where
     }
 
     /// Get all transaction ids where account got changed.
+    ///
+    /// NOTE: Get inclusive range of blocks.
     pub fn get_storage_transition_ids_from_changeset(
         &self,
-        from: TransitionId,
-        to: TransitionId,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<(Address, H256), Vec<u64>>, TransactionError> {
         let storage_changeset = self
             .cursor_read::<tables::StorageChangeSet>()?
-            .walk(Some((from, Address::zero()).into()))?
-            .take_while(|res| res.as_ref().map(|(k, _)| k.transition_id() < to).unwrap_or_default())
+            .walk_range(BlockNumberAddress::range(range))?
             .collect::<Result<Vec<_>, _>>()?;
 
         // fold all storages to one set of changes
@@ -1325,7 +1193,7 @@ where
                 storages
                     .entry((index.address(), storage.key))
                     .or_default()
-                    .push(index.transition_id());
+                    .push(index.block_number());
                 storages
             },
         );
@@ -1334,15 +1202,15 @@ where
     }
 
     /// Get all transaction ids where account got changed.
+    ///
+    /// NOTE: Get inclusive range of blocks.
     pub fn get_account_transition_ids_from_changeset(
         &self,
-        from: TransitionId,
-        to: TransitionId,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
         let account_changesets = self
             .cursor_read::<tables::AccountChangeSet>()?
-            .walk(Some(from))?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k < to).unwrap_or_default())
+            .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
 
         let account_transtions = account_changesets
@@ -1383,16 +1251,16 @@ where
                     StorageShardedKey::new(
                         address,
                         storage_key,
-                        *list.last().expect("Chuck does not return empty list") as TransitionId,
+                        *list.last().expect("Chuck does not return empty list") as BlockNumber,
                     ),
-                    TransitionList::new(list).expect("Indices are presorted and not empty"),
+                    BlockNumberList::new(list).expect("Indices are presorted and not empty"),
                 )
             })?;
             // Insert last list with u64::MAX
             if let Some(last_list) = last_chunk {
                 self.put::<tables::StorageHistory>(
                     StorageShardedKey::new(address, storage_key, u64::MAX),
-                    TransitionList::new(last_list).expect("Indices are presorted and not empty"),
+                    BlockNumberList::new(last_list).expect("Indices are presorted and not empty"),
                 )?;
             }
         }
@@ -1421,16 +1289,16 @@ where
                 self.put::<tables::AccountHistory>(
                     ShardedKey::new(
                         address,
-                        *list.last().expect("Chuck does not return empty list") as TransitionId,
+                        *list.last().expect("Chuck does not return empty list") as BlockNumber,
                     ),
-                    TransitionList::new(list).expect("Indices are presorted and not empty"),
+                    BlockNumberList::new(list).expect("Indices are presorted and not empty"),
                 )
             })?;
             // Insert last list with u64::MAX
             if let Some(last_list) = last_chunk {
                 self.put::<tables::AccountHistory>(
                     ShardedKey::new(address, u64::MAX),
-                    TransitionList::new(last_list).expect("Indices are presorted and not empty"),
+                    BlockNumberList::new(last_list).expect("Indices are presorted and not empty"),
                 )?
             }
         }
@@ -1454,7 +1322,7 @@ fn unwind_account_history_shards<DB: Database>(
         tables::AccountHistory,
     >,
     address: Address,
-    transition_id: TransitionId,
+    block_number: BlockNumber,
 ) -> Result<Vec<usize>, TransactionError> {
     let mut item = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
 
@@ -1467,13 +1335,13 @@ fn unwind_account_history_shards<DB: Database>(
         // check first item and if it is more and eq than `transition_id` delete current
         // item.
         let first = list.iter(0).next().expect("List can't empty");
-        if first >= transition_id as usize {
+        if first >= block_number as usize {
             item = cursor.prev()?;
             continue
-        } else if transition_id <= sharded_key.highest_transition_id {
+        } else if block_number <= sharded_key.highest_block_number {
             // if first element is in scope whole list would be removed.
             // so at least this first element is present.
-            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>())
+            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
         } else {
             let new_list = list.iter(0).collect::<Vec<_>>();
             return Ok(new_list)
@@ -1485,14 +1353,14 @@ fn unwind_account_history_shards<DB: Database>(
 /// Unwind all history shards. For boundary shard, remove it from database and
 /// return last part of shard with still valid items. If all full shard were removed, return list
 /// would be empty but this does not mean that there is none shard left but that there is no
-/// splitted shards.
+/// split shards.
 fn unwind_storage_history_shards<DB: Database>(
     cursor: &mut <<DB as DatabaseGAT<'_>>::TXMut as DbTxMutGAT<'_>>::CursorMut<
         tables::StorageHistory,
     >,
     address: Address,
     storage_key: H256,
-    transition_id: TransitionId,
+    block_number: BlockNumber,
 ) -> Result<Vec<usize>, TransactionError> {
     let mut item = cursor.seek_exact(StorageShardedKey::new(address, storage_key, u64::MAX))?;
 
@@ -1508,13 +1376,13 @@ fn unwind_storage_history_shards<DB: Database>(
         // check first item and if it is more and eq than `transition_id` delete current
         // item.
         let first = list.iter(0).next().expect("List can't empty");
-        if first >= transition_id as usize {
+        if first >= block_number as usize {
             item = cursor.prev()?;
             continue
-        } else if transition_id <= storage_sharded_key.sharded_key.highest_transition_id {
+        } else if block_number <= storage_sharded_key.sharded_key.highest_block_number {
             // if first element is in scope whole list would be removed.
             // so at least this first element is present.
-            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>())
+            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
         } else {
             return Ok(list.iter(0).collect::<Vec<_>>())
         }
@@ -1526,14 +1394,14 @@ fn unwind_storage_history_shards<DB: Database>(
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionError {
     /// The transaction encountered a database error.
-    #[error("Database error: {0}")]
+    #[error(transparent)]
     Database(#[from] DbError),
     /// The transaction encountered a database integrity error.
-    #[error("A database integrity error occurred: {0}")]
+    #[error(transparent)]
     DatabaseIntegrity(#[from] ProviderError),
-    /// The transaction encountered merkle trie error.
-    #[error("Merkle trie calculation error: {0}")]
-    MerkleTrie(#[from] TrieError),
+    /// The trie error.
+    #[error(transparent)]
+    TrieError(#[from] StateRootError),
     /// Root mismatch
     #[error("Merkle trie root mismatch on block: #{block_number:?} {block_hash:?}. got: {got:?} expected:{expected:?}")]
     StateTrieRootMismatch {
@@ -1554,8 +1422,8 @@ mod test {
         insert_canonical_block, test_utils::blocks::*, ShareableDatabase, Transaction,
         TransactionsProvider,
     };
-    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, TransitionId, MAINNET};
+    use reth_db::mdbx::test_utils::create_test_rw_db;
+    use reth_primitives::{ChainSpecBuilder, MAINNET};
     use std::{ops::DerefMut, sync::Arc};
 
     #[test]
@@ -1575,59 +1443,26 @@ mod test {
         let (block1, exec_res1) = data.blocks[0].clone();
         let (block2, exec_res2) = data.blocks[1].clone();
 
-        insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
+        insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None).unwrap();
 
-        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
-        exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
-        tx.insert_block(block1.clone()).unwrap();
-        tx.insert_hashes(
-            genesis.number,
-            0,
-            exec_res1.transitions_count() as TransitionId,
-            block1.number,
-            block1.hash,
-            block1.state_root,
-        )
-        .unwrap();
+        tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
 
         // get one block
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
-        assert_eq!(get, vec![(block1.clone(), exec_res1.clone())]);
+        let get_block = get[0].0.clone();
+        let get_state = get[0].1.clone();
+        assert_eq!(get_block, block1);
+        assert_eq!(get_state, exec_res1);
 
         // take one block
         let take = tx.take_block_and_execution_range(&chain_spec, 1..=1).unwrap();
         assert_eq!(take, vec![(block1.clone(), exec_res1.clone())]);
         assert_genesis_block(&tx, genesis.clone());
 
-        exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
-        tx.insert_block(block1.clone()).unwrap();
-        tx.insert_hashes(
-            genesis.number,
-            0,
-            exec_res1.transitions_count() as TransitionId,
-            block1.number,
-            block1.hash,
-            block1.state_root,
-        )
-        .unwrap();
-
-        exec_res2
-            .clone()
-            .write_to_db(tx.deref_mut(), exec_res1.transitions_count() as TransitionId)
-            .unwrap();
-        tx.insert_block(block2.clone()).unwrap();
-        tx.insert_hashes(
-            block1.number,
-            exec_res1.transitions_count() as TransitionId,
-            exec_res2.transitions_count() as TransitionId,
-            2,
-            block2.hash,
-            block2.state_root,
-        )
-        .unwrap();
-
+        tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
+        tx.append_blocks_with_post_state(vec![block2.clone()], exec_res2.clone()).unwrap();
         tx.commit().unwrap();
 
         // Check that transactions map onto blocks correctly.
@@ -1656,10 +1491,10 @@ mod test {
 
         // get two blocks
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=2).unwrap();
-        assert_eq!(
-            get,
-            vec![(block1.clone(), exec_res1.clone()), (block2.clone(), exec_res2.clone())]
-        );
+        assert_eq!(get[0].0, block1);
+        assert_eq!(get[1].0, block2);
+        assert_eq!(get[0].1, exec_res1);
+        assert_eq!(get[1].1, exec_res2);
 
         // take two blocks
         let get = tx.take_block_and_execution_range(&chain_spec, 1..=2).unwrap();
@@ -1686,9 +1521,8 @@ mod test {
         let (block1, exec_res1) = data.blocks[0].clone();
         let (block2, exec_res2) = data.blocks[1].clone();
 
-        insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
+        insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None).unwrap();
 
-        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
         tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();

@@ -1,14 +1,22 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use itertools::Itertools;
+use rayon::slice::ParallelSliceMut;
 use reth_codecs::Compact;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable,
 };
 use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
-use std::{collections::BTreeMap, fmt::Debug, ops::Range};
+use std::{
+    cmp::max,
+    fmt::Debug,
+    ops::{Range, RangeInclusive},
+};
+use tokio::sync::mpsc;
 use tracing::*;
 
 /// The [`StageId`] of the account hashing stage.
@@ -21,7 +29,7 @@ pub struct AccountHashingStage {
     /// The threshold (in number of state transitions) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The maximum number of blocks to process before committing.
+    /// The maximum number of accounts to process before committing.
     pub commit_threshold: u64,
 }
 
@@ -68,27 +76,26 @@ impl AccountHashingStage {
     }
 }
 
-#[derive(Clone, Debug)]
+// TODO: Rewrite this
 /// `SeedOpts` provides configuration parameters for calling `AccountHashingStage::seed`
 /// in unit tests or benchmarks to generate an initial database state for running the
 /// stage.
 ///
 /// In order to check the "full hashing" mode of the stage you want to generate more
 /// transitions than `AccountHashingStage.clean_threshold`. This requires:
-/// 1. Creating enough blocks + transactions so there's enough transactions to generate
+/// 1. Creating enough blocks so there's enough transactions to generate
 /// the required transition keys in the `BlockTransitionIndex` (which depends on the
 /// `TxTransitionIndex` internally)
-/// 2. Setting `transitions > clean_threshold` so that there's enough diffs to actually
+/// 2. Setting `blocks.len() > clean_threshold` so that there's enough diffs to actually
 /// take the 2nd codepath
+#[derive(Clone, Debug)]
 pub struct SeedOpts {
     /// The range of blocks to be generated
-    pub blocks: Range<u64>,
+    pub blocks: RangeInclusive<u64>,
     /// The range of accounts to be generated
     pub accounts: Range<u64>,
     /// The range of transactions to be generated per block.
     pub txs: Range<u8>,
-    /// The number of transitions to go back, capped at the number of total txs
-    pub transitions: u64,
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -109,12 +116,10 @@ impl AccountHashingStage {
         use reth_primitives::{Account, H256, U256};
         use reth_provider::insert_canonical_block;
 
-        let blocks = random_block_range(opts.blocks, H256::zero(), opts.txs);
-        let num_transitions = blocks.iter().map(|b| b.body.len() as u64).sum();
-        let transitions = std::cmp::min(opts.transitions, num_transitions);
+        let blocks = random_block_range(opts.blocks.clone(), H256::zero(), opts.txs);
 
         for block in blocks {
-            insert_canonical_block(&**tx, block, None, true).unwrap();
+            insert_canonical_block(&**tx, block, None).unwrap();
         }
         let mut accounts = random_eoa_account_range(opts.accounts);
         {
@@ -125,14 +130,8 @@ impl AccountHashingStage {
                 account_cursor.append(*addr, *acc)?;
             }
 
-            // seed account changeset
-            let (_, last_transition) =
-                tx.cursor_read::<tables::BlockTransitionIndex>()?.last()?.unwrap();
-
-            let first_transition = last_transition.checked_sub(transitions).unwrap_or_default();
-
             let mut acc_changeset_cursor = tx.cursor_write::<tables::AccountChangeSet>()?;
-            for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
+            for (t, (addr, acc)) in (opts.blocks).zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
                     nonce: nonce - 1,
@@ -163,25 +162,24 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
-
-        // read account changeset, merge it into one changeset and calculate account hashes.
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        let to_transition = tx.get_block_transition(previous_stage_progress)?;
+        let range = input.next_block_range();
+        if range.is_empty() {
+            return Ok(ExecOutput::done(*range.end()))
+        }
+        let (from_block, to_block) = range.into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
-        if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
+        if to_block - from_block > self.clean_threshold || from_block == 1 {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
                 // Checkpoint is no longer valid if the range of transitions changed. 
                 // An already hashed account may have been changed with the new range, and therefore should be hashed again. 
-                checkpoint.to != to_transition ||
-                checkpoint.from != from_transition
+                checkpoint.from != from_block ||
+                checkpoint.to != to_block
             {
                 // clear table, load all accounts and hash it
                 tx.clear::<tables::HashedAccount>()?;
@@ -190,17 +188,47 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 self.save_checkpoint(tx, checkpoint)?;
             }
 
-            let start_address = checkpoint.address.take();
+            let start_address = checkpoint.address.take().map(RawKey::new);
             let next_address = {
-                let mut accounts = tx.cursor_read::<tables::PlainAccountState>()?;
+                let mut accounts_cursor =
+                    tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
 
-                let hashed_batch = accounts
-                    .walk(start_address)?
+                // channels used to return result of account hashing
+                let mut channels = Vec::new();
+                for chunk in &accounts_cursor
+                    .walk(start_address.clone())?
                     .take(self.commit_threshold as usize)
-                    .map(|res| res.map(|(address, account)| (keccak256(address), account)))
-                    .collect::<Result<BTreeMap<_, _>, _>>()?;
+                    .chunks(
+                        max(self.commit_threshold as usize, rayon::current_num_threads()) /
+                            rayon::current_num_threads(),
+                    )
+                {
+                    // An _unordered_ channel to receive results from a rayon job
+                    let (tx, rx) = mpsc::unbounded_channel();
+                    channels.push(rx);
 
-                let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>()?;
+                    let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+                    // Spawn the hashing task onto the global rayon pool
+                    rayon::spawn(move || {
+                        for (address, account) in chunk.into_iter() {
+                            let address = address.key().unwrap();
+                            let _ = tx.send((RawKey::new(keccak256(address)), account));
+                        }
+                    });
+                }
+                let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
+
+                // Iterate over channels and append the hashed accounts.
+                for mut channel in channels {
+                    while let Some(hashed) = channel.recv().await {
+                        hashed_batch.push(hashed);
+                    }
+                }
+                // sort it all in parallel
+                hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+                let mut hashed_account_cursor =
+                    tx.cursor_write::<RawTable<tables::HashedAccount>>()?;
 
                 // iterate and put presorted hashed accounts
                 if start_address.is_none() {
@@ -212,26 +240,27 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         .into_iter()
                         .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
                 }
-
                 // next key of iterator
-                accounts.next()?
+                accounts_cursor.next()?
             };
 
             if let Some((next_address, _)) = &next_address {
-                checkpoint.address = Some(*next_address);
-                checkpoint.from = from_transition;
-                checkpoint.to = to_transition;
+                checkpoint.address = Some(next_address.key().unwrap());
+                checkpoint.from = from_block;
+                checkpoint.to = to_block;
             }
 
             self.save_checkpoint(tx, checkpoint)?;
 
             if next_address.is_some() {
-                return Ok(ExecOutput { stage_progress, done: false })
+                // from block is correct here as were are iteration over state for this
+                // particular block
+                return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
             }
         } else {
             // Aggregate all transition changesets and and make list of account that have been
             // changed.
-            let lists = tx.get_addresses_of_changed_accounts(from_transition, to_transition)?;
+            let lists = tx.get_addresses_of_changed_accounts(from_block..=to_block)?;
             // iterate over plain state and get newest value.
             // Assumption we are okay to make is that plainstate represent
             // `previous_stage_progress` state.
@@ -253,11 +282,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // There is no threshold on account unwind, we will always take changesets and
         // apply past values to HashedAccount table.
 
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+        let range = input.unwind_block_range();
 
         // Aggregate all transition changesets and and make list of account that have been changed.
-        tx.unwind_account_hashing(from_transition_rev..to_transition_rev)?;
+        tx.unwind_account_hashing(range)?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -267,8 +295,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
-        PREV_STAGE_ID,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{Account, U256};
@@ -294,6 +322,58 @@ mod tests {
         let result = rx.await.unwrap();
 
         assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done && stage_progress == previous_stage);
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    #[tokio::test]
+    async fn execute_clean_account_hashing_with_commit_threshold() {
+        let (previous_stage, stage_progress) = (20, 10);
+        // Set up the runner
+        let mut runner = AccountHashingTestRunner::default();
+        runner.set_clean_threshold(1);
+        runner.set_commit_threshold(5);
+
+        let mut input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        // first run, hash first five account.
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if !done && stage_progress == 10);
+        assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 5);
+        let fifth_address = runner
+            .tx
+            .query(|tx| {
+                let (address, _) = tx
+                    .cursor_read::<tables::PlainAccountState>()?
+                    .walk(None)?
+                    .nth(5)
+                    .unwrap()
+                    .unwrap();
+                Ok(address)
+            })
+            .unwrap();
+
+        let stage_progress = runner.stage().get_checkpoint(&runner.tx.inner()).unwrap();
+        assert_eq!(
+            stage_progress,
+            AccountHashingCheckpoint { address: Some(fifth_address), from: 11, to: 20 }
+        );
+
+        // second run, hash next five account.
+        input.stage_progress = Some(result.unwrap().stage_progress);
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+
+        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done && stage_progress == 20);
+        assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 10);
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -403,10 +483,9 @@ mod tests {
                 Ok(AccountHashingStage::seed(
                     &mut self.tx.inner(),
                     SeedOpts {
-                        blocks: 0..input.previous_stage_progress() + 1,
-                        accounts: 0..2,
+                        blocks: 1..=input.previous_stage_progress(),
+                        accounts: 0..10,
                         txs: 0..3,
-                        transitions: 2,
                     },
                 )
                 .unwrap())

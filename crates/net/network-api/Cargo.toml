@@ -11,6 +11,7 @@ description = "Network interfaces"
 # reth
 reth-primitives = { path = "../../primitives" }
 reth-eth-wire = { path = "../eth-wire" }
+reth-rpc-types = { path = "../../rpc/rpc-types" }
 
 # io
 serde = { version = "1.0", features = ["derive"], optional = true }

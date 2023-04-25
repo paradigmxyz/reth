@@ -96,7 +96,7 @@ use crate::{
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
-use reth_primitives::{TxHash, U256};
+use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -184,9 +184,6 @@ where
         transaction: V::Transaction,
     ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
-
-        // TODO(mattsse): this is where additional validate checks would go, like banned senders
-        // etc...
 
         let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
 
@@ -279,8 +276,19 @@ where
         self.pool.pooled_transactions_hashes()
     }
 
+    fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash> {
+        self.pooled_transaction_hashes().into_iter().take(max).collect()
+    }
+
     fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.pooled_transactions()
+    }
+
+    fn pooled_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pooled_transactions().into_iter().take(max).collect()
     }
 
     fn best_transactions(
@@ -289,11 +297,11 @@ where
         Box::new(self.pool.best_transactions())
     }
 
-    fn remove_invalid(
+    fn remove_transactions(
         &self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.remove_invalid(hashes)
+        self.pool.remove_transactions(hashes)
     }
 
     fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
@@ -313,6 +321,13 @@ where
 
     fn on_propagated(&self, txs: PropagatedTransactions) {
         self.inner().on_propagated(txs)
+    }
+
+    fn get_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_transactions_by_sender(sender)
     }
 }
 

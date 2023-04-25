@@ -4,7 +4,7 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use reth_primitives::{bytes::Bytes, TransitionId, H160, H256};
+use reth_primitives::{BlockNumber, H160, H256};
 
 use super::ShardedKey;
 
@@ -27,8 +27,8 @@ pub struct StorageShardedKey {
 
 impl StorageShardedKey {
     /// Creates a new `StorageShardedKey`.
-    pub fn new(address: H160, storage_key: H256, highest_transition_id: TransitionId) -> Self {
-        Self { address, sharded_key: ShardedKey { key: storage_key, highest_transition_id } }
+    pub fn new(address: H160, storage_key: H256, highest_block_number: BlockNumber) -> Self {
+        Self { address, sharded_key: ShardedKey { key: storage_key, highest_block_number } }
     }
 }
 
@@ -38,21 +38,20 @@ impl Encode for StorageShardedKey {
     fn encode(self) -> Self::Encoded {
         let mut buf: Vec<u8> = Encode::encode(self.address).into();
         buf.extend_from_slice(&Encode::encode(self.sharded_key.key));
-        buf.extend_from_slice(&self.sharded_key.highest_transition_id.to_be_bytes());
+        buf.extend_from_slice(&self.sharded_key.highest_block_number.to_be_bytes());
         buf
     }
 }
 
 impl Decode for StorageShardedKey {
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        let value: Bytes = value.into();
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+        let value = value.as_ref();
         let tx_num_index = value.len() - 8;
 
-        let highest_tx_number = u64::from_be_bytes(
-            value.as_ref()[tx_num_index..].try_into().map_err(|_| Error::DecodeError)?,
-        );
-        let address = H160::decode(value.slice(..20))?;
-        let storage_key = H256::decode(value.slice(20..52))?;
+        let highest_tx_number =
+            u64::from_be_bytes(value[tx_num_index..].try_into().map_err(|_| Error::DecodeError)?);
+        let address = H160::decode(&value[..20])?;
+        let storage_key = H256::decode(&value[20..52])?;
 
         Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_tx_number) })
     }

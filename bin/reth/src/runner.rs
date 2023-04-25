@@ -60,6 +60,23 @@ impl CliRunner {
         tokio_runtime.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
+
+    /// Executes a regular future as a spawned blocking task until completion or until external
+    /// signal received.
+    ///
+    /// See [Runtime::spawn_blocking](tokio::runtime::Runtime::spawn_blocking) .
+    pub fn run_blocking_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
+    where
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Send + Sync + From<std::io::Error> + 'static,
+    {
+        let tokio_runtime = tokio_runtime()?;
+        let handle = tokio_runtime.handle().clone();
+        let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
+        tokio_runtime
+            .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
+        Ok(())
+    }
 }
 
 /// [CliRunner] configuration when executing commands asynchronously
@@ -112,21 +129,39 @@ where
     Ok(tasks)
 }
 
-/// Runs the future to completion or until a `ctrl-c` is received.
+/// Runs the future to completion or until:
+/// - `ctrl-c` is received.
+/// - `SIGTERM` is received (unix only).
 async fn run_until_ctrl_c<F, E>(fut: F) -> Result<(), E>
 where
     F: Future<Output = Result<(), E>>,
-    E: Send + Sync + 'static,
+    E: Send + Sync + 'static + From<std::io::Error>,
 {
     let ctrl_c = tokio::signal::ctrl_c();
 
-    pin_mut!(ctrl_c, fut);
+    if cfg!(unix) {
+        let mut stream = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let sigterm = stream.recv();
+        pin_mut!(sigterm, ctrl_c, fut);
 
-    tokio::select! {
-        _ = ctrl_c => {
-            trace!(target: "reth::cli",  "Received ctrl-c");
-        },
-        res = fut => res?,
+        tokio::select! {
+            _ = ctrl_c => {
+                trace!(target: "reth::cli",  "Received ctrl-c");
+            },
+            _ = sigterm => {
+                trace!(target: "reth::cli",  "Received SIGTERM");
+            },
+            res = fut => res?,
+        }
+    } else {
+        pin_mut!(ctrl_c, fut);
+
+        tokio::select! {
+            _ = ctrl_c => {
+                trace!(target: "reth::cli",  "Received ctrl-c");
+            },
+            res = fut => res?,
+        }
     }
 
     Ok(())

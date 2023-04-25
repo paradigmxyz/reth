@@ -18,7 +18,7 @@
 use crate::{
     config::NetworkConfig,
     discovery::Discovery,
-    error::NetworkError,
+    error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
@@ -39,9 +39,10 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{NodeRecord, PeerId, H256};
 use reth_provider::BlockProvider;
+use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -171,7 +172,9 @@ where
         let peers_manager = PeersManager::new(peers_config);
         let peers_handle = peers_manager.handle();
 
-        let incoming = ConnectionListener::bind(listener_addr).await?;
+        let incoming = ConnectionListener::bind(listener_addr).await.map_err(|err| {
+            NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
+        })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
         discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
@@ -534,6 +537,9 @@ where
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);
             }
+            NetworkHandleMessage::GetReputationById(peer_id, tx) => {
+                let _ = tx.send(self.swarm.state_mut().peers().get_reputation(&peer_id));
+            }
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
@@ -634,6 +640,7 @@ where
                         SwarmEvent::SessionEstablished {
                             peer_id,
                             remote_addr,
+                            client_version,
                             capabilities,
                             version,
                             messages,
@@ -646,20 +653,23 @@ where
                             info!(
                                 target : "net",
                                 ?remote_addr,
+                                client_version,
                                 ?peer_id,
                                 ?total_active,
                                 "Session established"
                             );
-                            debug!(target: "net", peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
+                            debug!(target: "net", kind=%direction, peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
 
                             if direction.is_incoming() {
                                 this.swarm
                                     .state_mut()
                                     .peers_mut()
-                                    .on_active_inbound_session(peer_id, remote_addr);
+                                    .on_incoming_session_established(peer_id, remote_addr);
                             }
                             this.event_listeners.send(NetworkEvent::SessionEstablished {
                                 peer_id,
+                                remote_addr,
+                                client_version,
                                 capabilities,
                                 version,
                                 status,
@@ -852,6 +862,10 @@ pub enum NetworkEvent {
     SessionEstablished {
         /// The identifier of the peer to which a session was established.
         peer_id: PeerId,
+        /// The remote addr of the peer to which a session was established.
+        remote_addr: SocketAddr,
+        /// The client version of the peer to which a session was established.
+        client_version: String,
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.

@@ -18,7 +18,7 @@ use std::{
 
 /// Body request implemented as a [Future].
 ///
-/// The future will poll the underlying request until fullfilled.
+/// The future will poll the underlying request until fulfilled.
 /// If the response arrived with insufficient number of bodies, the future
 /// will issue another request until all bodies are collected.
 ///
@@ -40,7 +40,7 @@ pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     consensus: Arc<dyn Consensus>,
     metrics: DownloaderMetrics,
     priority: Priority,
-    // Headers to download. The collection is shrinked as responses are buffered.
+    // Headers to download. The collection is shrunk as responses are buffered.
     headers: VecDeque<SealedHeader>,
     buffer: Vec<BlockResponse>,
     fut: Option<B::Output>,
@@ -165,7 +165,7 @@ where
                 let block = SealedBlock {
                     header: next_header,
                     body: next_body.transactions,
-                    ommers: next_body.ommers.into_iter().map(|h| h.seal_slow()).collect(),
+                    ommers: next_body.ommers,
                     withdrawals: next_body.withdrawals,
                 };
 
@@ -264,9 +264,9 @@ mod tests {
 
     /// Check that the request future
     #[tokio::test]
-    async fn request_submits_until_fullfilled() {
+    async fn request_submits_until_fulfilled() {
         // Generate some random blocks
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, mut bodies) = generate_bodies(0..=19);
 
         let batch_size = 2;
         let client = Arc::new(

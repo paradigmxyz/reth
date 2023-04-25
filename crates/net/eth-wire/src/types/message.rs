@@ -145,7 +145,7 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 
 /// Represents a message in the eth wire protocol, versions 66, 67 and 68.
 ///
-/// The ethereum wire protocol is a set of messages that are broadcasted to the network in two
+/// The ethereum wire protocol is a set of messages that are broadcast to the network in two
 /// styles:
 ///  * A request message sent by a peer (such as [`GetPooledTransactions`]), and an associated
 ///  response message (such as [`PooledTransactions`]).

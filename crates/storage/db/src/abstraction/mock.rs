@@ -102,7 +102,7 @@ impl<'a> DbTxMut<'a> for TxMock {
 
 impl<'a> TableImporter<'a> for TxMock {}
 
-/// CUrsor that iterates over table
+/// Cursor that iterates over table
 pub struct CursorMock {
     _cursor: u32,
 }

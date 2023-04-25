@@ -1,4 +1,4 @@
-/// Common return types
+/// Common types used throughout the abstraction.
 pub mod common;
 /// Cursor database traits.
 pub mod cursor;

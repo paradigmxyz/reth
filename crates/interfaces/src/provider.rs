@@ -1,4 +1,4 @@
-use reth_primitives::{Address, BlockHash, BlockNumber, TransitionId, TxNumber, H256};
+use reth_primitives::{Address, BlockHash, BlockNumber, TxNumber, H256};
 
 /// Bundled errors variants thrown by various providers.
 #[allow(missing_docs)]
@@ -17,27 +17,27 @@ pub enum ProviderError {
     #[error("Block hash {block_hash:?} does not exist in Headers table")]
     BlockHash { block_hash: BlockHash },
     /// A block body is missing.
-    #[error("Block body not found for block #{number}")]
-    BlockBody { number: BlockNumber },
+    #[error("Block meta not found for block #{number}")]
+    BlockBodyIndices { number: BlockNumber },
     /// The block transition id for a certain block number is missing.
     #[error("Block transition id does not exist for block #{block_number}")]
     BlockTransition { block_number: BlockNumber },
     /// The transition id was found for the given address and storage key, but the changeset was
     /// not found.
-    #[error("Storage ChangeSet address: ({address:?} key: {storage_key:?}) for transition:#{transition_id} does not exist")]
+    #[error("Storage ChangeSet address: ({address:?} key: {storage_key:?}) for block:#{block_number} does not exist")]
     StorageChangeset {
-        /// The transition id found for the address and storage key
-        transition_id: TransitionId,
+        /// The block number found for the address and storage key
+        block_number: BlockNumber,
         /// The account address
         address: Address,
         /// The storage key
         storage_key: H256,
     },
-    /// The transition id was found for the given address, but the changeset was not found.
-    #[error("Account {address:?} ChangeSet for transition #{transition_id} does not exist")]
+    /// The block number was found for the given address, but the changeset was not found.
+    #[error("Account {address:?} ChangeSet for block #{block_number} does not exist")]
     AccountChangeset {
-        /// Transition id found for the address
-        transition_id: TransitionId,
+        /// Block number found for the address
+        block_number: BlockNumber,
         /// The account address
         address: Address,
     },
@@ -88,4 +88,9 @@ pub enum ProviderError {
     /// Thrown when the cache service task dropped
     #[error("cache service task stopped")]
     CacheServiceUnavailable,
+    /// Thrown when we failed to lookup a block for the pending state
+    #[error("Unknown block hash: {0:}")]
+    UnknownBlockHash(H256),
+    #[error("Unable to compute state root on top of historical block")]
+    StateRootNotAvailableForHistoricalBlock,
 }
