@@ -3,14 +3,14 @@ use crate::dirs::{DbPath, MaybePlatformPath};
 use clap::Parser;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    models::storage_sharded_key::StorageShardedKey,
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, H256};
 use reth_provider::Transaction;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
-use std::{sync::Arc, time::Instant};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 /// `reth prune-changesets` command
 /// Ref <https://github.com/paradigmxyz/reth/pull/2355>
@@ -60,11 +60,17 @@ impl Command {
 
         let mut storage_changesets_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let mut deleted_count = 0;
+        // This might OOM
+        let mut all_keys_to_delete = HashSet::<(BlockNumberAddress, H256)>::with_capacity(100_000);
 
         let mut current_entry = storage_changesets_cursor.first()?;
         let instant = Instant::now();
         while let Some((key, entry)) = current_entry {
+            if all_keys_to_delete.contains(&(key, entry.key)) {
+                current_entry = storage_changesets_cursor.next()?;
+                continue
+            }
+
             // Seek all next changesets with the same value
             let entry_instant = Instant::now();
             let mut keys_to_delete = Vec::new();
@@ -104,26 +110,30 @@ impl Command {
                         .seek_by_key_subkey(key.0 .1, entry.key)?
                         .filter(|e| e.key == entry.key && e.value == entry.value);
                     if plain_state_entry.is_some() {
-                        // if value is the same we can delete ol changeset
+                        // if value is the same we can delete changeset
                         keys_to_delete.push(key);
                     }
                     next_block = None;
                 }
             }
 
-            println!(
-                "Found {} changesets to delete for {:?} at slot {:?} in {} seconds",
-                keys_to_delete.len(),
-                key.0 .1,
-                entry.key,
-                entry_instant.elapsed().as_secs()
-            );
-            deleted_count += keys_to_delete.len();
-            current_entry = None;
+            if !keys_to_delete.is_empty() {
+                println!(
+                    "Found {} changesets to delete for {:?} at slot {:?} in {} seconds",
+                    keys_to_delete.len(),
+                    key.0 .1,
+                    entry.key,
+                    entry_instant.elapsed().as_secs()
+                );
+                all_keys_to_delete.extend(keys_to_delete.into_iter().map(|key| (key, entry.key)));
+                println!("Total Len: {}", all_keys_to_delete.len());
+            }
+            current_entry = storage_changesets_cursor.next()?;
         }
 
         println!(
-            "Found {deleted_count} changesets to delete in {} seconds",
+            "Found {} changesets to delete in {} seconds",
+            all_keys_to_delete.len(),
             instant.elapsed().as_secs()
         );
 
