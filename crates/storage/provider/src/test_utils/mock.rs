@@ -339,14 +339,15 @@ impl StateProviderFactory for MockEthProvider {
         Ok(Box::new(self.clone()))
     }
 
-    fn history_by_block_number(
-        &self,
-        _block: reth_primitives::BlockNumber,
-    ) -> Result<StateProviderBox<'_>> {
+    fn history_by_block_number(&self, _block: BlockNumber) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
     fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
@@ -363,14 +364,15 @@ impl StateProviderFactory for Arc<MockEthProvider> {
         Ok(Box::new(self.clone()))
     }
 
-    fn history_by_block_number(
-        &self,
-        _block: reth_primitives::BlockNumber,
-    ) -> Result<StateProviderBox<'_>> {
+    fn history_by_block_number(&self, _block: BlockNumber) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
     fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
