@@ -19,6 +19,7 @@ pub mod merkle_debug;
 pub mod node;
 pub mod p2p;
 pub mod prometheus_exporter;
+pub mod prune_changesets;
 pub mod runner;
 pub mod stage;
 pub mod test_eth_chain;
