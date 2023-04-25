@@ -1,7 +1,7 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostState, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -123,6 +123,12 @@ impl HeaderProvider for NoopProvider {
 impl AccountProvider for NoopProvider {
     fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
         Ok(None)
+    }
+}
+
+impl StateRootProvider for NoopProvider {
+    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+        todo!()
     }
 }
 

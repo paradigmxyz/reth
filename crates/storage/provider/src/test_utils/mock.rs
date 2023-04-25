@@ -1,7 +1,7 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, PostStateDataProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
@@ -264,6 +264,12 @@ impl BlockProvider for MockEthProvider {
 impl AccountProvider for MockEthProvider {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         Ok(self.accounts.lock().get(&address).cloned().map(|a| a.account))
+    }
+}
+
+impl StateRootProvider for MockEthProvider {
+    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+        todo!()
     }
 }
 
