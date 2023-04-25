@@ -347,6 +347,10 @@ impl StateProviderFactory for MockEthProvider {
         todo!()
     }
 
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
     fn pending(&self) -> Result<StateProviderBox<'_>> {
         todo!()
     }
@@ -369,6 +373,10 @@ impl StateProviderFactory for Arc<MockEthProvider> {
     }
 
     fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
