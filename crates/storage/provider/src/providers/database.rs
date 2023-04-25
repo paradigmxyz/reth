@@ -1,11 +1,11 @@
 use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::ReceiptProvider,
-    BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider, PostState,
-    ProviderError, StateProviderBox, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
+    BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
+    ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
-use reth_interfaces::{Error, Result};
+use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
     TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
@@ -437,16 +437,6 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
             self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
-    }
-}
-
-impl<DB> StateRootProvider for ShareableDatabase<DB>
-where
-    DB: Database,
-{
-    fn state_root(&self, post_state: &PostState) -> Result<H256> {
-        let tx = self.db.tx()?;
-        post_state.state_root_slow(&tx).map_err(|err| Error::Database(err.into()))
     }
 }
 

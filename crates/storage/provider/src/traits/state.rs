@@ -12,7 +12,9 @@ pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
-pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
+pub trait StateProvider:
+    BlockHashProvider + AccountProvider + StateRootProvider + Send + Sync
+{
     /// Get storage of given account.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;
 
@@ -154,8 +156,8 @@ pub trait PostStateDataProvider: Send + Sync {
 }
 
 /// A type that can compute the state root of a given post state.
-#[auto_impl[Box,&]]
+#[auto_impl[Box,&, Arc]]
 pub trait StateRootProvider: Send + Sync {
-    /// Returns the state root of the given block.
-    fn state_root(&self, post_state: &PostState) -> Result<H256>;
+    /// Returns the state root of the PostState on top of the current state.
+    fn state_root(&self, post_state: PostState) -> Result<H256>;
 }
