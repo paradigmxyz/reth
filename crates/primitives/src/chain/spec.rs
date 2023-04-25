@@ -504,10 +504,12 @@ pub enum ForkCondition {
     Block(BlockNumber),
     /// The fork is activated after a total difficulty has been reached.
     TTD {
-        /// The block number at which TTD is reached, if it is known.
+        /// The fork block used as `merge_net_split_block` in Sepolia.
         ///
         /// This should **NOT** be set unless you want this block advertised as [EIP-2124][eip2124]
         /// `FORK_NEXT`. This is currently only the case for Sepolia.
+        ///
+        /// This should **NOT** be considered during fork activation
         ///
         /// [eip2124]: https://eips.ethereum.org/EIPS/eip-2124
         fork_block: Option<BlockNumber>,
