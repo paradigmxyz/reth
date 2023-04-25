@@ -42,10 +42,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
     // insert body ommers data
     if !block.ommers.is_empty() {
-        tx.put::<tables::BlockOmmers>(
-            block.number,
-            StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
-        )?;
+        tx.put::<tables::BlockOmmers>(block.number, StoredBlockOmmers { ommers: block.ommers })?;
     }
 
     let mut next_tx_num =
