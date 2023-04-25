@@ -335,14 +335,14 @@ impl Command {
             .await?;
 
         // Run consensus engine to completion
-        let (rx, tx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor.spawn_critical("consensus engine", async move {
             let res = beacon_consensus_engine.await;
-            let _ = rx.send(res);
+            let _ = tx.send(res);
         });
 
-        tx.await??;
+        rx.await??;
 
         info!(target: "reth::cli", "Consensus engine has exited.");
 
