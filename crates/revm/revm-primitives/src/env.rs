@@ -1,6 +1,6 @@
 use crate::config::revm_spec;
 use reth_primitives::{
-    recover_signer, Address, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
+    recover_signer, Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, U256,
 };
 use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, SpecId, TransactTo, TxEnv};
@@ -49,7 +49,7 @@ pub fn fill_block_env(
     after_merge: bool,
 ) {
     block_env.number = U256::from(header.number);
-    block_env.coinbase = block_coinbase(chain_spec, header, after_merge);
+    block_env.coinbase = dbg!(block_coinbase(chain_spec, header, after_merge));
     block_env.timestamp = U256::from(header.timestamp);
     if after_merge {
         block_env.prevrandao = Some(header.mix_hash);
@@ -74,13 +74,17 @@ pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool
 /// Recover the account from signed header per clique consensus rules.
 pub fn recover_header_signer(header: &Header) -> Option<Address> {
     let extra_data_len = header.extra_data.len();
-    let signature = extra_data_len
-        // Fixed number of extra-data suffix bytes reserved for signer signature.
-        // 65 bytes fixed as signatures are based on the standard secp256k1 curve.
-        // Filled with zeros on genesis block.
-        .checked_sub(65)
-        .and_then(|start| -> Option<[u8; 65]> { header.extra_data[start..].try_into().ok() })?;
-    recover_signer(&signature, header.hash_slow().as_fixed_bytes()).ok()
+    // Fixed number of extra-data suffix bytes reserved for signer signature.
+    // 65 bytes fixed as signatures are based on the standard secp256k1 curve.
+    // Filled with zeros on genesis block.
+    let signature_start_byte = extra_data_len - 65;
+    let signature: [u8; 65] = header.extra_data[signature_start_byte..].try_into().ok()?;
+    let seal_hash = {
+        let mut header_to_seal = header.clone();
+        header_to_seal.extra_data = Bytes::from(&header.extra_data[..signature_start_byte]);
+        header_to_seal.hash_slow()
+    };
+    recover_signer(&signature, seal_hash.as_fixed_bytes()).ok()
 }
 
 /// Returns a new [TxEnv] filled with the transaction's data.
