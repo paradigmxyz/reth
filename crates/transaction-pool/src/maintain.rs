@@ -66,7 +66,12 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                 // for these we need to fetch the nonce+balance from the db at the new tip
                 let mut changed_accounts =
                     match load_accounts(&client, new_tip.hash, missing_changed_acc) {
-                        Ok(missing_changed_acc) => missing_changed_acc,
+                        Ok(LoadedAccounts { accounts, failed_to_load }) => {
+                            // extend accounts we failed to load from database
+                            dirty.extend(failed_to_load);
+
+                            accounts
+                        }
                         Err(err) => {
                             let (addresses, err) = *err;
                             warn!(
@@ -215,6 +220,14 @@ impl Borrow<Address> for ChangedAccountEntry {
     }
 }
 
+#[derive(Default)]
+struct LoadedAccounts {
+    /// All accounts that were loaded
+    accounts: Vec<ChangedAccount>,
+    /// All accounts that failed to load
+    failed_to_load: Vec<Address>,
+}
+
 /// Loads all accounts at the given state
 ///
 /// Returns an error with all given addresses if the state is not available.
@@ -222,13 +235,13 @@ fn load_accounts<Client, I>(
     client: &Client,
     at: BlockHash,
     addresses: I,
-) -> Result<Vec<ChangedAccount>, Box<(HashSet<Address>, reth_interfaces::Error)>>
+) -> Result<LoadedAccounts, Box<(HashSet<Address>, reth_interfaces::Error)>>
 where
     I: Iterator<Item = Address>,
 
     Client: StateProviderFactory,
 {
-    let mut changed_accounts = Vec::new();
+    let mut res = LoadedAccounts::default();
     let state = match client.history_by_block_hash(at) {
         Ok(state) => state,
         Err(err) => return Err(Box::new((addresses.collect(), err))),
@@ -238,10 +251,13 @@ where
             let acc = maybe_acc
                 .map(|acc| ChangedAccount { address: addr, nonce: acc.nonce, balance: acc.balance })
                 .unwrap_or_else(|| ChangedAccount::empty(addr));
-            changed_accounts.push(acc)
+            res.accounts.push(acc)
+        } else {
+            // failed to load account.
+            res.failed_to_load.push(addr);
         }
     }
-    Ok(changed_accounts)
+    Ok(res)
 }
 
 fn changed_accounts_iter(state: &PostState) -> impl Iterator<Item = ChangedAccount> + '_ {
