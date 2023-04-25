@@ -111,9 +111,7 @@ pub trait StateProviderFactory: Send + Sync {
     fn history_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
 
     /// Storage provider for pending state.
-    fn pending(&self) -> Result<StateProviderBox<'_>> {
-        todo!()
-    }
+    fn pending(&self) -> Result<StateProviderBox<'_>>;
 
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
