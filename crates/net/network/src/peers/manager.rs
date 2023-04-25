@@ -321,6 +321,10 @@ impl PeersManager {
         }
     }
 
+    pub(crate) fn get_reputation(&self, peer_id: &PeerId) -> Option<i32> {
+        self.peers.get(peer_id).map(|peer| peer.reputation)
+    }
+
     /// Apply the corresponding reputation change to the given peer
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
         let reputation_change = self.reputation_weights.change(rep);
@@ -1706,6 +1710,21 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_reputation_management() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_peer(peer, socket_addr, None);
+        assert_eq!(peers.get_reputation(&peer), Some(0));
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::Other(1024));
+        assert_eq!(peers.get_reputation(&peer), Some(1024));
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::Reset);
+        assert_eq!(peers.get_reputation(&peer), Some(0));
     }
 
     #[tokio::test]

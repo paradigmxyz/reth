@@ -537,6 +537,9 @@ where
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);
             }
+            NetworkHandleMessage::GetReputationById(peer_id, tx) => {
+                let _ = tx.send(self.swarm.state_mut().peers().get_reputation(&peer_id));
+            }
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
