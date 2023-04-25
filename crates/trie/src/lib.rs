@@ -15,7 +15,7 @@ pub use nibbles::Nibbles;
 /// The Ethereum account as represented in the trie.
 pub mod account;
 
-/// Various branch nodes producde by the hash builder.
+/// Various branch nodes produced by the hash builder.
 pub mod nodes;
 
 /// The implementation of hash builder.

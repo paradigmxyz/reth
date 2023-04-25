@@ -11,6 +11,15 @@ pub enum StateRootError {
     StorageRootError(#[from] StorageRootError),
 }
 
+impl From<StateRootError> for reth_db::Error {
+    fn from(err: StateRootError) -> Self {
+        match err {
+            StateRootError::DB(err) => err,
+            StateRootError::StorageRootError(StorageRootError::DB(err)) => err,
+        }
+    }
+}
+
 /// Storage root error.
 #[derive(Error, Debug)]
 pub enum StorageRootError {
