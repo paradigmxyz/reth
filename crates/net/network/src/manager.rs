@@ -658,7 +658,7 @@ where
                                 ?total_active,
                                 "Session established"
                             );
-                            debug!(target: "net", peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
+                            debug!(target: "net", kind=%direction, peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
 
                             if direction.is_incoming() {
                                 this.swarm
