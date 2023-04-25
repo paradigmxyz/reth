@@ -15,7 +15,7 @@ pub fn fill_cfg_and_block_env(
 ) {
     fill_cfg_env(cfg, chain_spec, header, total_difficulty);
     let after_merge = cfg.spec_id >= SpecId::MERGE;
-    fill_block_env(block_env, header, after_merge);
+    fill_block_env(block_env, chain_spec, header, after_merge);
 }
 
 /// Fill [CfgEnv] fields according to the chain spec and given header
@@ -42,9 +42,14 @@ pub fn fill_cfg_env(
     cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 }
 /// Fill block environment from Block.
-pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bool) {
+pub fn fill_block_env(
+    block_env: &mut BlockEnv,
+    chain_spec: &ChainSpec,
+    header: &Header,
+    after_merge: bool,
+) {
     block_env.number = U256::from(header.number);
-    block_env.coinbase = header.beneficiary;
+    block_env.coinbase = block_coinbase(chain_spec, header, after_merge);
     block_env.timestamp = U256::from(header.timestamp);
     if after_merge {
         block_env.prevrandao = Some(header.mix_hash);
@@ -60,7 +65,7 @@ pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bo
 /// Return the coinbase address for the given header and chain spec.
 pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool) -> Address {
     if chain_spec.chain == Chain::goerli() && !after_merge {
-        recover_header_signer(&header).expect("failed to recover signer")
+        recover_header_signer(header).expect("failed to recover signer")
     } else {
         header.beneficiary
     }
