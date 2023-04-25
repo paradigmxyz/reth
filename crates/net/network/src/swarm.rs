@@ -221,6 +221,7 @@ where
 
                 match self.sessions.on_incoming(stream, remote_addr) {
                     Ok(session_id) => {
+                        trace!(target: "net", ?remote_addr, "Incoming connection");
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
