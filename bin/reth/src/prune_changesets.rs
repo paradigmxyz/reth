@@ -71,7 +71,7 @@ impl Command {
                 }
 
                 keys_walked += 1;
-                if keys_walked % 100_000 == 0 {
+                if keys_walked % 100_000_000 == 0 {
                     println!(
                         "Walked {} keys for {:?} at slot {:?}",
                         keys_walked, key.0 .1, entry.key
