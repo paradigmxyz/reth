@@ -327,17 +327,14 @@ impl PeersManager {
 
     /// Apply the corresponding reputation change to the given peer
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
-        // if the reputation change is a reset, reset the reputation and return
-        if rep.is_reset() {
-            if let Some(peer) = self.peers.get_mut(peer_id) {
-                peer.reset_reputation();
-            }
-            return
-        }
-
-        let reputation_change = self.reputation_weights.change(rep);
         let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
-            peer.apply_reputation(reputation_change.as_i32())
+            // First check if we should reset the reputation
+            if rep.is_reset() {
+                peer.reset_reputation()
+            } else {
+                let reputation_change = self.reputation_weights.change(rep);
+                peer.apply_reputation(reputation_change.as_i32())
+            }
         } else {
             return
         };
