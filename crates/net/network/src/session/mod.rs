@@ -462,7 +462,7 @@ impl SessionManager {
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
                     commands_to_session,
-                    client_version: client_id,
+                    client_version: client_id.clone(),
                     remote_addr,
                 };
 
@@ -472,6 +472,7 @@ impl SessionManager {
                 Poll::Ready(SessionEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
+                    client_version: client_id,
                     version,
                     capabilities,
                     status,
@@ -588,6 +589,7 @@ pub(crate) enum SessionEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
+        client_version: String,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,

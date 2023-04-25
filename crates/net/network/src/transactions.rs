@@ -796,6 +796,7 @@ mod tests {
                 NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,
@@ -805,6 +806,7 @@ mod tests {
                     transactions.on_network_event(NetworkEvent::SessionEstablished {
                         peer_id,
                         remote_addr,
+                        client_version,
                         capabilities,
                         messages,
                         status,
@@ -873,6 +875,7 @@ mod tests {
                 NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,
@@ -880,6 +883,7 @@ mod tests {
                 } => transactions.on_network_event(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,
