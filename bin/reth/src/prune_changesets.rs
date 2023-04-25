@@ -61,7 +61,8 @@ impl Command {
         let mut storage_changesets_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
         // This might OOM
-        let mut all_keys_to_delete = HashSet::<(BlockNumberAddress, H256)>::with_capacity(100_000);
+        let mut all_keys_to_delete =
+            HashSet::<(BlockNumberAddress, H256)>::with_capacity(1_000_000);
 
         let mut current_entry = storage_changesets_cursor.first()?;
         let instant = Instant::now();
@@ -119,7 +120,8 @@ impl Command {
 
             if !keys_to_delete.is_empty() {
                 println!(
-                    "Found {} changesets to delete for {:?} at slot {:?} in {} seconds",
+                    "Block #{}: Found {} changesets to delete for {:?} at slot {:?} in {} seconds",
+                    key.0 .0,
                     keys_to_delete.len(),
                     key.0 .1,
                     entry.key,
