@@ -15,7 +15,7 @@ pub use traits::{
     BlockchainTreePendingStateProvider, CanonStateNotification, CanonStateNotificationSender,
     CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, ExecutorFactory,
     HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.

@@ -152,3 +152,10 @@ pub trait PostStateDataProvider: Send + Sync {
     /// Needed to create state provider.
     fn canonical_fork(&self) -> BlockNumHash;
 }
+
+/// A type that can compute the state root of a given post state.
+#[auto_impl[Box,&]]
+pub trait StateRootProvider: Send + Sync {
+    /// Returns the state root of the given block.
+    fn state_root(&self, post_state: &PostState) -> Result<H256>;
+}
