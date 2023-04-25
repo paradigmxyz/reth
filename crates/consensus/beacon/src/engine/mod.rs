@@ -428,41 +428,33 @@ where
         forkchoice_state: ForkchoiceState,
     ) -> PipelineState<DB, U> {
         let next_action = std::mem::take(&mut self.next_action);
-        if let BeaconEngineAction::RunPipeline(target) = next_action {
+
+        let (tip, should_run_pipeline) = match next_action {
+            BeaconEngineAction::RunPipeline(target) => {
+                let tip = match target {
+                    PipelineTarget::Head => forkchoice_state.head_block_hash,
+                    PipelineTarget::Safe => forkchoice_state.safe_block_hash,
+                };
+                (Some(tip), true)
+            }
+            BeaconEngineAction::None => (None, self.continuous),
+        };
+
+        if should_run_pipeline {
             self.metrics.pipeline_runs.increment(1);
-            let tip = match target {
-                PipelineTarget::Head => forkchoice_state.head_block_hash,
-                PipelineTarget::Safe => forkchoice_state.safe_block_hash,
-            };
-            trace!(target: "consensus::engine", ?tip, "Starting the pipeline");
+            trace!(target: "consensus::engine", ?tip, continuous = tip.is_none(), "Starting the pipeline");
             let (tx, rx) = oneshot::channel();
             let db = self.db.clone();
             self.task_spawner.spawn_critical_blocking(
                 "pipeline",
                 Box::pin(async move {
-                    let result = pipeline.run_as_fut(db, Some(tip)).await;
+                    let result = pipeline.run_as_fut(db, tip).await;
                     let _ = tx.send(result);
                 }),
             );
             PipelineState::Running(rx)
         } else {
-            // if we are in the debug continuous syncing mode, and don't have a target, we need to
-            // run the pipeline again, forever
-            if self.continuous {
-                trace!(target: "consensus::engine", "Starting the pipeline for another continuous sync run");
-                let (tx, rx) = oneshot::channel();
-                let db = self.db.clone();
-                self.task_spawner.spawn_critical_blocking(
-                    "pipeline",
-                    Box::pin(async move {
-                        let result = pipeline.run_as_fut(db, None).await;
-                        let _ = tx.send(result);
-                    }),
-                );
-                PipelineState::Running(rx)
-            } else {
-                PipelineState::Idle(pipeline)
-            }
+            PipelineState::Idle(pipeline)
         }
     }
 
