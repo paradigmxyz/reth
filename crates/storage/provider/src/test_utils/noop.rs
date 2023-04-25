@@ -203,6 +203,10 @@ impl StateProviderFactory for NoopProvider {
         Ok(Box::new(*self))
     }
 
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
     fn pending(&self) -> Result<StateProviderBox<'_>> {
         Ok(Box::new(*self))
     }

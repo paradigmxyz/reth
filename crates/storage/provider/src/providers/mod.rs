@@ -270,6 +270,16 @@ where
         self.database.history_by_block_hash(block_hash)
     }
 
+    fn state_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>> {
+        // check tree first
+        if let Some(pending) = self.tree.find_pending_state_provider(block) {
+            return self.pending_with_provider(pending)
+        }
+
+        // not found in tree, check database
+        self.history_by_block_hash(block)
+    }
+
     /// Storage provider for pending state.
     fn pending(&self) -> Result<StateProviderBox<'_>> {
         if let Some(block) = self.tree.pending_block() {
@@ -351,11 +361,11 @@ where
     DB: Send + Sync,
     Tree: BlockchainTreePendingStateProvider,
 {
-    fn pending_state_provider(
+    fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Box<dyn PostStateDataProvider>> {
-        self.tree.pending_state_provider(block_hash)
+    ) -> Option<Box<dyn PostStateDataProvider>> {
+        self.tree.find_pending_state_provider(block_hash)
     }
 }
 

@@ -1,7 +1,7 @@
 use super::AccountProvider;
 use crate::{post_state::PostState, BlockHashProvider};
 use auto_impl::auto_impl;
-use reth_interfaces::Result;
+use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, Bytes,
     StorageKey, StorageValue, H256, KECCAK_EMPTY, U256,
@@ -74,7 +74,18 @@ pub trait StateProvider:
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
-/// `BlockNumber` or the latest state.
+/// `BlockNumber`, the latest state, or the pending state.
+///
+/// This type differentiates states into `historical`, `latest` and `pending`, where the `latest`
+/// block determines what is historical or pending: `[historical..latest..pending]`.
+///
+/// The `latest` state represents the state after the most recent block has been committed to the
+/// database, `historical` states are states that have been committed to the database before the
+/// `latest` state, and `pending` states are states that have not yet been committed to the
+/// database which may or may not become the `latest` state, depending on consensus.
+///
+/// Note: the `pending` block is considered the block that extends the canonical chain but one and
+/// has the `latest` block as its parent.
 pub trait StateProviderFactory: Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> Result<StateProviderBox<'_>>;
@@ -106,13 +117,26 @@ pub trait StateProviderFactory: Send + Sync {
         }
     }
 
-    /// Returns a [StateProvider] indexed by the given block number.
+    /// Returns a historical [StateProvider] indexed by the given historic block number.
+    ///
+    ///
+    /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_number(&self, block: BlockNumber) -> Result<StateProviderBox<'_>>;
 
-    /// Returns a [StateProvider] indexed by the given block hash.
+    /// Returns a historical [StateProvider] indexed by the given block hash.
+    ///
+    /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
 
+    /// Returns _any_[StateProvider] with matching block hash.
+    ///
+    /// This will return a [StateProvider] for either a historical or pending block.
+    fn state_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
+
     /// Storage provider for pending state.
+    ///
+    /// Represents the state at the block that extends the canonical chain by one.
+    /// If there's no `pending` block, then this is equal to [StateProviderFactory::latest]
     fn pending(&self) -> Result<StateProviderBox<'_>>;
 
     /// Return a [StateProvider] that contains post state data provider.
@@ -133,7 +157,17 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Box<dyn PostStateDataProvider>>;
+    ) -> Result<Box<dyn PostStateDataProvider>> {
+        Ok(self
+            .find_pending_state_provider(block_hash)
+            .ok_or(ProviderError::UnknownBlockHash(block_hash))?)
+    }
+
+    /// Returns state provider if a matching block exists.
+    fn find_pending_state_provider(
+        &self,
+        block_hash: BlockHash,
+    ) -> Option<Box<dyn PostStateDataProvider>>;
 }
 
 /// Post state data needs for execution on it.
