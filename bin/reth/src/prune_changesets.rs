@@ -1,7 +1,12 @@
 //! Command for clearing redundant changesets.
 use crate::dirs::{DbPath, MaybePlatformPath};
 use clap::Parser;
-use reth_db::{cursor::DbCursorRO, tables, transaction::DbTxMut};
+use reth_db::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    models::storage_sharded_key::StorageShardedKey,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_primitives::ChainSpec;
 use reth_provider::Transaction;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
@@ -61,45 +66,57 @@ impl Command {
         let instant = Instant::now();
         while let Some((key, entry)) = current_entry {
             // Seek all next changesets with the same value
-            let mut first = true;
-            let mut keys_to_delete = Vec::new();
-            let mut keys_walked = 0;
             let entry_instant = Instant::now();
-            for next_entry in storage_changesets_cursor.walk_range(key..)? {
-                if first {
-                    first = false;
-                    continue
-                }
+            let mut keys_to_delete = Vec::new();
 
-                keys_walked += 1;
-                if keys_walked % 100_000_000 == 0 {
-                    println!(
-                        "Walked {} keys for {:?} at slot {:?} in {} seconds",
-                        keys_walked,
-                        key.0 .1,
-                        entry.key,
-                        entry_instant.elapsed().as_secs()
-                    );
-                }
+            // history key to search IntegerList of block changesets.
+            let mut next_block = Some(key.0 .0 + 1);
 
-                let (next_key, next_entry) = next_entry?;
-                if key.0 .1 == next_key.0 .1 && entry.key == next_entry.key {
-                    // Found the next changeset for the same address/slot
-                    if entry.value == next_entry.value {
-                        // If the value is the same, we can delete the next changeset
-                        keys_to_delete.push(next_key);
+            while let Some(next_block_number) = next_block {
+                let history_key = StorageShardedKey::new(key.0 .1, entry.key, next_block_number);
+                let changeset_block_number = tx
+                    .cursor_read::<tables::StorageHistory>()?
+                    .seek(history_key)?
+                    .filter(|(k, _)| k.address == key.0 .1 && k.sharded_key.key == entry.key)
+                    .map(|(_, list)| {
+                        list.0.enable_rank().successor(next_block_number as usize).map(|i| i as u64)
+                    });
+
+                if let Some(Some(changeset_block_number)) = changeset_block_number {
+                    let storage_changset = tx
+                        .cursor_dup_read::<tables::StorageChangeSet>()?
+                        .seek_by_key_subkey((changeset_block_number, key.0 .1).into(), entry.key)?
+                        .filter(|e| e.key == entry.key)
+                        .ok_or(eyre::eyre!("expected changset entry"))?;
+
+                    if storage_changset.value == entry.value {
+                        // if value is the same we can delete changeset
+                        keys_to_delete.push(key);
+                        next_block = Some(changeset_block_number + 1);
                     } else {
-                        // If the value is different, we can stop looking for more changesets
-                        break
+                        next_block = None;
                     }
+                } else {
+                    // if changeset is not present that means that there was history shard but we
+                    // need to use newest value from plain state
+                    let plain_state_entry = tx
+                        .cursor_dup_read::<tables::PlainStorageState>()?
+                        .seek_by_key_subkey(key.0 .1, entry.key)?
+                        .filter(|e| e.key == entry.key && e.value == entry.value);
+                    if plain_state_entry.is_some() {
+                        // if value is the same we can delete ol changeset
+                        keys_to_delete.push(key);
+                    }
+                    next_block = None;
                 }
             }
 
             println!(
-                "Found {} changesets to delete for {:?} at slot {:?}",
+                "Found {} changesets to delete for {:?} at slot {:?} in {} seconds",
                 keys_to_delete.len(),
                 key.0 .1,
-                entry.key
+                entry.key,
+                entry_instant.elapsed().as_secs()
             );
             deleted_count += keys_to_delete.len();
             current_entry = None;
