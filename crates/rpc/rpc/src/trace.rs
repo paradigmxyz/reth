@@ -14,7 +14,7 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
-    database::{State, SubState},
+    database::{StateProviderDB, SubState},
     env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
@@ -131,7 +131,7 @@ where
         // execute all transactions on top of each other and record the traces
         self.eth_api.with_state_at(at, move |state| {
             let mut results = Vec::with_capacity(calls.len());
-            let mut db = SubState::new(State::new(state));
+            let mut db = SubState::new(StateProviderDB::new(state));
 
             for (call, trace_types) in calls {
                 let env = prepare_call_env(cfg.clone(), block_env.clone(), call, &mut db, None)?;
@@ -228,7 +228,7 @@ where
         self.eth_api
             .with_state_at(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = SubState::new(State::new(state));
+                let mut db = SubState::new(StateProviderDB::new(state));
 
                 for (idx, tx) in transactions.into_iter().enumerate() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;

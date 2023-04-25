@@ -9,7 +9,7 @@ use reth_primitives::{
 };
 use reth_provider::{CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_revm::{
-    database::{State, SubState},
+    database::{StateProviderDB, SubState},
     executor::Executor,
 };
 use reth_stages::{stages::FINISH, PipelineEvent};
@@ -160,7 +160,7 @@ where
                         Block { header, body: transactions, ommers: vec![], withdrawals: None };
 
                     // execute the new block
-                    let substate = SubState::new(State::new(client.latest().unwrap()));
+                    let substate = SubState::new(StateProviderDB::new(client.latest().unwrap()));
                     let mut executor = Executor::new(chain_spec, substate);
 
                     trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");

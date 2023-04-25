@@ -4,15 +4,17 @@ use reth_provider::StateProvider;
 use revm::{
     db::{CacheDB, DatabaseRef},
     primitives::{AccountInfo, Bytecode},
+    Database,
 };
 
-/// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
-pub type SubState<DB> = CacheDB<State<DB>>;
+/// A REVM database that wraps a state provider and can store intra-block state in an in-memory
+/// cache.
+pub type SubState<SP> = CacheDB<StateProviderDB<SP>>;
 
 /// Wrapper around StateProvider that implements revm database trait
-pub struct State<DB: StateProvider>(pub DB);
+pub struct StateProviderDB<DB: StateProvider>(pub DB);
 
-impl<DB: StateProvider> State<DB> {
+impl<DB: StateProvider> StateProviderDB<DB> {
     /// Create new State with generic StateProvider.
     pub fn new(db: DB) -> Self {
         Self(db)
@@ -34,7 +36,7 @@ impl<DB: StateProvider> State<DB> {
     }
 }
 
-impl<DB: StateProvider> DatabaseRef for State<DB> {
+impl<DB: StateProvider> DatabaseRef for StateProviderDB<DB> {
     type Error = Error;
 
     fn basic(&self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
@@ -65,5 +67,25 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
     fn block_hash(&self, number: U256) -> Result<H256, Self::Error> {
         // Note: this unwrap is potentially unsafe
         Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
+    }
+}
+
+impl<DB: StateProvider> Database for StateProviderDB<DB> {
+    type Error = Error;
+
+    fn basic(&mut self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
+        <StateProviderDB<DB> as DatabaseRef>::basic(self, address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: H256) -> Result<Bytecode, Self::Error> {
+        <StateProviderDB<DB> as DatabaseRef>::code_by_hash(self, code_hash)
+    }
+
+    fn storage(&mut self, address: H160, index: U256) -> Result<U256, Self::Error> {
+        <StateProviderDB<DB> as DatabaseRef>::storage(self, address, index)
+    }
+
+    fn block_hash(&mut self, number: U256) -> Result<H256, Self::Error> {
+        <StateProviderDB<DB> as DatabaseRef>::block_hash(self, number)
     }
 }

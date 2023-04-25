@@ -191,8 +191,10 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 pub trait PostStateDataProvider: Send + Sync {
     /// Return post state
     fn state(&self) -> &PostState;
+
     /// Return block hash by block number of pending or canonical chain.
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash>;
+
     /// return canonical fork, the block on what post state was forked from.
     ///
     /// Needed to create state provider.

@@ -151,6 +151,8 @@ impl Default for SenderRecoveryConfig {
     }
 }
 
+// TODO: Replace this with a tuple struct just wrapping `ExecutionStageThresholds` in the
+// `reth-stages` crate.
 /// Execution stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ExecutionConfig {
@@ -160,7 +162,7 @@ pub struct ExecutionConfig {
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000 }
+        Self { commit_threshold: 10_000 }
     }
 }
 

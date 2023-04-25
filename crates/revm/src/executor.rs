@@ -108,8 +108,7 @@ where
         has_state_clear_eip: bool,
         post_state: &mut PostState,
     ) {
-        let db = self.db();
-        commit_state_changes(db, post_state, block_number, changes, has_state_clear_eip);
+        commit_state_changes(self.db(), post_state, block_number, changes, has_state_clear_eip)
     }
 
     /// Collect all balance changes at the end of the block.
@@ -594,7 +593,7 @@ pub fn insert_post_block_withdrawals_balance_increments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::State;
+    use crate::database::StateProviderDB;
     use reth_consensus_common::calc;
     use reth_primitives::{
         constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
@@ -737,7 +736,7 @@ mod tests {
         // spec at berlin fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
 
-        let db = SubState::new(State::new(db));
+        let db = SubState::new(StateProviderDB::new(db));
 
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
@@ -891,7 +890,7 @@ mod tests {
                 .build(),
         );
 
-        let db = SubState::new(State::new(db));
+        let db = SubState::new(StateProviderDB::new(db));
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
         let out = executor
@@ -970,7 +969,7 @@ mod tests {
         // spec at berlin fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
 
-        let db = SubState::new(State::new(db));
+        let db = SubState::new(StateProviderDB::new(db));
 
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
@@ -1015,7 +1014,7 @@ mod tests {
         // spec at shanghai fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let db = SubState::new(State::new(StateProviderTest::default()));
+        let db = SubState::new(StateProviderDB::new(StateProviderTest::default()));
 
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
@@ -1055,7 +1054,7 @@ mod tests {
         db.insert_account(account, Account::default(), None, HashMap::default());
 
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().istanbul_activated().build());
-        let db = SubState::new(State::new(db));
+        let db = SubState::new(StateProviderDB::new(db));
 
         let default_acc = RevmAccount {
             info: AccountInfo::default(),

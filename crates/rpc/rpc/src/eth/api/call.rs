@@ -17,7 +17,7 @@ use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, U256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::{
     access_list::AccessListInspector,
-    database::{State, SubState},
+    database::{StateProviderDB, SubState},
 };
 use reth_rpc_types::CallRequest;
 use reth_transaction_pool::TransactionPool;
@@ -81,7 +81,7 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db = SubState::new(State::new(state));
+        let mut db = SubState::new(StateProviderDB::new(state));
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
@@ -250,7 +250,7 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         env.cfg.disable_base_fee = true;
 
-        let mut db = SubState::new(State::new(state));
+        let mut db = SubState::new(StateProviderDB::new(state));
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit
@@ -291,7 +291,7 @@ where
 fn map_out_of_gas_err<S>(
     env_gas_limit: U256,
     mut env: Env,
-    mut db: &mut CacheDB<State<S>>,
+    mut db: &mut CacheDB<StateProviderDB<S>>,
 ) -> EthApiError
 where
     S: StateProvider,

@@ -527,9 +527,14 @@ impl PostState {
             for (key, value) in storage.storage {
                 tracing::trace!(target: "provider::post_state", ?address, ?key, "Updating plain state storage");
                 let key = H256(key.to_be_bytes());
-                if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
-                    if entry.key == key {
-                        storages_cursor.delete_current()?;
+
+                // NOTE: If the storage was wiped, we know that none of these entries will exist, so
+                // we can save some time by not seeking around
+                if !storage.wiped {
+                    if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
+                        if entry.key == key {
+                            storages_cursor.delete_current()?;
+                        }
                     }
                 }
 

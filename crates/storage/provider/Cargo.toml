@@ -14,19 +14,22 @@ reth-interfaces = { path = "../../interfaces" }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
 reth-trie = { path = "../../trie" }
+reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 # async
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 
-# tracing
+# observability
 tracing = "0.1"
+metrics = "0.20.1"
 
 # misc
 thiserror = "1.0.37"
 auto_impl = "1.0"
 itertools = "0.10"
 pin-project = "1.0"
+schnellru = "0.2"
 
 # test-utils
 reth-rlp = { path = "../../rlp", optional = true }

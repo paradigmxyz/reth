@@ -25,7 +25,7 @@ use reth_primitives::{
 };
 use reth_provider::{BlockProvider, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{
-    database::{State, SubState},
+    database::{StateProviderDB, SubState},
     env::tx_env_with_recovered,
     executor::{
         commit_state_changes, increment_account_balance, post_block_withdrawals_balance_increments,
@@ -541,7 +541,7 @@ fn build_payload<Pool, Client>(
         debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
 
         let state = client.state_by_block_hash(parent_block.hash)?;
-        let mut db = SubState::new(State::new(state));
+        let mut db = SubState::new(StateProviderDB::new(state));
         let mut post_state = PostState::default();
 
         let mut cumulative_gas_used = 0;
@@ -712,7 +712,7 @@ where
     debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
-    let mut db = SubState::new(State::new(state));
+    let mut db = SubState::new(StateProviderDB::new(state));
     let mut post_state = PostState::default();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();

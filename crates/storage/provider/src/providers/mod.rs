@@ -16,6 +16,7 @@ use reth_primitives::{
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
+    cache::{CachedStateProvider, LruStateCache, StateCache},
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
