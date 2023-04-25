@@ -1174,13 +1174,10 @@ mod tests {
     #[test]
     fn post_state_state_root() {
         let mut state: BTreeMap<Address, (Account, BTreeMap<H256, U256>)> = (0..10)
-            .into_iter()
             .map(|key| {
                 let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
-                let storage = (0..10)
-                    .into_iter()
-                    .map(|key| (H256::from_low_u64_be(key), U256::from(key)))
-                    .collect();
+                let storage =
+                    (0..10).map(|key| (H256::from_low_u64_be(key), U256::from(key))).collect();
                 (Address::from_low_u64_be(key), (account, storage))
             })
             .collect();
@@ -1190,7 +1187,7 @@ mod tests {
         // insert initial state to the database
         db.update(|tx| {
             for (address, (account, storage)) in state.iter() {
-                let hashed_address = keccak256(&address);
+                let hashed_address = keccak256(address);
                 tx.put::<tables::HashedAccount>(hashed_address, *account).unwrap();
                 for (slot, value) in storage {
                     tx.put::<tables::HashedStorage>(
@@ -1240,7 +1237,7 @@ mod tests {
         let slot_2 = U256::from(2);
         let slot_2_key = H256(slot_2.to_be_bytes());
         let address_2_slot_2_old_value =
-            state.get(&address_2).unwrap().1.get(&slot_2_key).unwrap().clone();
+            *state.get(&address_2).unwrap().1.get(&slot_2_key).unwrap();
         let address_2_slot_2_new_value = U256::from(100);
         state.get_mut(&address_2).unwrap().1.insert(slot_2_key, address_2_slot_2_new_value);
         post_state.change_storage(
@@ -1261,8 +1258,7 @@ mod tests {
         // change balance of account 3
         let address_3 = Address::from_low_u64_be(3);
         let address_3_account_old = state.get(&address_3).unwrap().0;
-        let address_3_account_new =
-            Account { balance: U256::from(24), ..address_3_account_old.clone() };
+        let address_3_account_new = Account { balance: U256::from(24), ..address_3_account_old };
         state.get_mut(&address_3).unwrap().0.balance = address_3_account_new.balance;
         post_state.change_account(
             block_number,
@@ -1283,7 +1279,7 @@ mod tests {
         // change nonce of account 4
         let address_4 = Address::from_low_u64_be(4);
         let address_4_account_old = state.get(&address_4).unwrap().0;
-        let address_4_account_new = Account { nonce: 128, ..address_4_account_old.clone() };
+        let address_4_account_new = Account { nonce: 128, ..address_4_account_old };
         state.get_mut(&address_4).unwrap().0.nonce = address_4_account_new.nonce;
         post_state.change_account(
             block_number,
