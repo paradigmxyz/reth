@@ -403,7 +403,7 @@ mod tests {
         SealedBlock {
             header: transformed.header.seal_slow(),
             body: transformed.body,
-            ommers: transformed.ommers.into_iter().map(Header::seal_slow).collect(),
+            ommers: transformed.ommers,
             withdrawals: transformed.withdrawals,
         }
         .into()

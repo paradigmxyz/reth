@@ -126,16 +126,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                     // Write ommers if any
                     if !block.ommers.is_empty() {
-                        ommers_cursor.append(
-                            block_number,
-                            StoredBlockOmmers {
-                                ommers: block
-                                    .ommers
-                                    .into_iter()
-                                    .map(|header| header.unseal())
-                                    .collect(),
-                            },
-                        )?;
+                        ommers_cursor
+                            .append(block_number, StoredBlockOmmers { ommers: block.ommers })?;
                     }
 
                     // Write withdrawals if any
@@ -438,7 +430,7 @@ mod tests {
                 block.hash(),
                 BlockBody {
                     transactions: block.body.clone(),
-                    ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
+                    ommers: block.ommers.clone(),
                     withdrawals: block.withdrawals.clone(),
                 },
             )
@@ -525,13 +517,7 @@ mod tests {
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
-                                StoredBlockOmmers {
-                                    ommers: progress
-                                        .ommers
-                                        .iter()
-                                        .map(|o| o.clone().unseal())
-                                        .collect(),
-                                },
+                                StoredBlockOmmers { ommers: progress.ommers.clone() },
                             )?;
                         }
                         Ok(())
@@ -746,7 +732,7 @@ mod tests {
                         response.push(BlockResponse::Full(SealedBlock {
                             header,
                             body: body.transactions,
-                            ommers: body.ommers.into_iter().map(|h| h.seal_slow()).collect(),
+                            ommers: body.ommers,
                             withdrawals: body.withdrawals,
                         }));
                     }

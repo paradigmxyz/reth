@@ -754,15 +754,7 @@ where
             let mut ommers = Vec::new();
             if let Some((block_number, _)) = block_ommers.as_ref() {
                 if *block_number == main_block_number {
-                    // Seal ommers as they dont have hash.
-                    ommers = block_ommers
-                        .take()
-                        .unwrap()
-                        .1
-                        .ommers
-                        .into_iter()
-                        .map(|h| h.seal_slow())
-                        .collect();
+                    ommers = block_ommers.take().unwrap().1.ommers;
                     block_ommers = block_ommers_iter.next();
                 }
             };

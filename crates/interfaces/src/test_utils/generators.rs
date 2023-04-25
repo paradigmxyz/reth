@@ -125,7 +125,7 @@ pub fn random_block(
         }
         .seal_slow(),
         body: transactions,
-        ommers: ommers.into_iter().map(Header::seal_slow).collect(),
+        ommers,
         withdrawals: None,
     }
 }
