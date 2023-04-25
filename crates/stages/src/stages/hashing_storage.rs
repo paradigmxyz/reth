@@ -416,30 +416,35 @@ mod tests {
                 // Insert last progress data
                 let block_number = progress.number;
                 self.tx.commit(|tx| {
-                    progress.body.iter().try_for_each(|transaction| {
-                        tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
-                        tx.put::<tables::Transactions>(next_tx_num, transaction.clone().into())?;
-
-                        let (addr, _) = accounts
-                            .get_mut(rand::random::<usize>() % n_accounts as usize)
-                            .unwrap();
-
-                        for _ in 0..2 {
-                            let new_entry = StorageEntry {
-                                key: keccak256([rand::random::<u8>()]),
-                                value: U256::from(rand::random::<u8>() % 30 + 1),
-                            };
-                            self.insert_storage_entry(
-                                tx,
-                                (block_number, *addr).into(),
-                                new_entry,
-                                progress.header.number == stage_progress,
+                    progress.body.iter().try_for_each(
+                        |transaction| -> Result<(), reth_db::Error> {
+                            tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
+                            tx.put::<tables::Transactions>(
+                                next_tx_num,
+                                transaction.clone().into(),
                             )?;
-                        }
 
-                        next_tx_num += 1;
-                        Ok(())
-                    })?;
+                            let (addr, _) = accounts
+                                .get_mut(rand::random::<usize>() % n_accounts as usize)
+                                .unwrap();
+
+                            for _ in 0..2 {
+                                let new_entry = StorageEntry {
+                                    key: keccak256([rand::random::<u8>()]),
+                                    value: U256::from(rand::random::<u8>() % 30 + 1),
+                                };
+                                self.insert_storage_entry(
+                                    tx,
+                                    (block_number, *addr).into(),
+                                    new_entry,
+                                    progress.header.number == stage_progress,
+                                )?;
+                            }
+
+                            next_tx_num += 1;
+                            Ok(())
+                        },
+                    )?;
 
                     // Randomize rewards
                     let has_reward: bool = rand::random();
