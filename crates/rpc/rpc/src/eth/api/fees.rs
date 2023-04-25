@@ -188,6 +188,9 @@ where
         })
     }
 
+    /// Populate the fee history cache when new blocks are added to the chain
+    ///
+    /// This listens for any new blocks and updates the fee history cache
     async fn populate_fee_history_cache_on_new_block<St>(
         &mut self,
         reward_percentiles: Option<Vec<f64>>,
@@ -220,6 +223,7 @@ where
         }
     }
 
+    /// Update fee history cache on new block
     async fn add_cache_for_block(
         &mut self,
         block: &SealedBlockWithSenders,
