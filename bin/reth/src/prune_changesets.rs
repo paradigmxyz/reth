@@ -5,10 +5,10 @@ use reth_db::{cursor::DbCursorRO, tables, transaction::DbTxMut};
 use reth_primitives::ChainSpec;
 use reth_provider::Transaction;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 /// `reth prune-changesets` command
-/// Ref https://github.com/paradigmxyz/reth/pull/2355
+/// Ref <https://github.com/paradigmxyz/reth/pull/2355>
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the database folder.
@@ -58,6 +58,7 @@ impl Command {
         let mut deleted_count = 0;
 
         let mut current_entry = storage_changesets_cursor.first()?;
+        let instant = Instant::now();
         while let Some((key, entry)) = current_entry {
             // Seek all next changesets with the same value
             let mut first = true;
@@ -90,7 +91,10 @@ impl Command {
             current_entry = None;
         }
 
-        println!("Found {deleted_count} changesets to delete");
+        println!(
+            "Found {deleted_count} changesets to delete in {} seconds",
+            instant.elapsed().as_secs()
+        );
 
         // TODO: recalculate state root to ensure changes are correct
 
