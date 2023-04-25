@@ -146,6 +146,9 @@ where
     /// Max block after which the consensus engine would terminate the sync. Used for debugging
     /// purposes.
     max_block: Option<BlockNumber>,
+    /// If true, the engine will run the pipeline continuously, regardless of whether or not there
+    /// is a new fork choice state.
+    continuous: bool,
     /// The payload store.
     payload_builder: PayloadBuilderHandle,
     /// Consensus engine metrics.
@@ -166,6 +169,7 @@ where
         pipeline: Pipeline<DB, U>,
         blockchain_tree: BT,
         max_block: Option<BlockNumber>,
+        continuous: bool,
         payload_builder: PayloadBuilderHandle,
     ) -> (Self, BeaconConsensusEngineHandle) {
         let (to_engine, rx) = mpsc::unbounded_channel();
@@ -175,6 +179,7 @@ where
             pipeline,
             blockchain_tree,
             max_block,
+            continuous,
             payload_builder,
             to_engine,
             rx,
@@ -190,6 +195,7 @@ where
         pipeline: Pipeline<DB, U>,
         blockchain_tree: BT,
         max_block: Option<BlockNumber>,
+        continuous: bool,
         payload_builder: PayloadBuilderHandle,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
@@ -205,6 +211,7 @@ where
             forkchoice_state: None,
             next_action: BeaconEngineAction::None,
             max_block,
+            continuous,
             payload_builder,
             metrics: Metrics::default(),
         };
@@ -433,13 +440,29 @@ where
             self.task_spawner.spawn_critical_blocking(
                 "pipeline",
                 Box::pin(async move {
-                    let result = pipeline.run_as_fut(db, tip).await;
+                    let result = pipeline.run_as_fut(db, Some(tip)).await;
                     let _ = tx.send(result);
                 }),
             );
             PipelineState::Running(rx)
         } else {
-            PipelineState::Idle(pipeline)
+            // if we are in the debug continuous syncing mode, and don't have a target, we need to
+            // run the pipeline again, forever
+            if self.continuous {
+                trace!(target: "consensus::engine", "Starting the pipeline for another continuous sync run");
+                let (tx, rx) = oneshot::channel();
+                let db = self.db.clone();
+                self.task_spawner.spawn_critical_blocking(
+                    "pipeline",
+                    Box::pin(async move {
+                        let result = pipeline.run_as_fut(db, None).await;
+                        let _ = tx.send(result);
+                    }),
+                );
+                PipelineState::Running(rx)
+            } else {
+                PipelineState::Idle(pipeline)
+            }
         }
     }
 
@@ -748,6 +771,7 @@ mod tests {
             pipeline,
             tree,
             None,
+            false,
             payload_builder,
         );
 

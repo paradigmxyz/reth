@@ -158,7 +158,7 @@ impl Command {
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
-        init_genesis(db.clone(), self.chain.clone())?;
+        let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
@@ -212,11 +212,24 @@ impl Command {
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
 
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+
+        // Forward genesis as forkchoice state to the consensus engine.
+        // This will allow the downloader to start
         if self.debug.continuous {
             info!(target: "reth::cli", "Continuous sync mode enabled");
+            let (tip_tx, _tip_rx) = oneshot::channel();
+            let state = ForkchoiceState {
+                head_block_hash: genesis_hash,
+                finalized_block_hash: genesis_hash,
+                safe_block_hash: genesis_hash,
+            };
+            consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
+                state,
+                payload_attrs: None,
+                tx: tip_tx,
+            })?;
         }
-
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         // Forward the `debug.tip` as forkchoice state to the consensus engine.
         // This will initiate the sync up to the provided tip.
@@ -307,6 +320,7 @@ impl Command {
             pipeline,
             blockchain_tree.clone(),
             self.debug.max_block,
+            self.debug.continuous,
             payload_builder.clone(),
             consensus_engine_tx,
             consensus_engine_rx,

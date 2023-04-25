@@ -81,6 +81,7 @@ use sync_metrics::*;
 pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     stages: Vec<BoxedStage<DB>>,
     max_block: Option<BlockNumber>,
+    continuous: bool,
     listeners: PipelineEventListeners,
     sync_state_updater: Option<U>,
     progress: PipelineProgress,
@@ -100,6 +101,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
         Self {
             stages: Vec::new(),
             max_block: None,
+            continuous: false,
             listeners: PipelineEventListeners::default(),
             sync_state_updater: None,
             progress: PipelineProgress::default(),
@@ -159,14 +161,18 @@ where
         }
     }
 
-    /// Consume the pipeline and run it. Return the pipeline and its result as a future.
+    /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
+    /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, db: Arc<DB>, tip: H256) -> PipelineFut<DB, U> {
+    pub fn run_as_fut(mut self, db: Arc<DB>, tip: Option<H256>) -> PipelineFut<DB, U> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         self.register_metrics(db.clone());
         Box::pin(async move {
-            self.set_tip(tip);
+            // NOTE: the tip should only be None if we are in continuous sync mode.
+            if let Some(tip) = tip {
+                self.set_tip(tip);
+            }
             let result = self.run_loop(db).await;
             trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
             (self, result)
