@@ -72,10 +72,11 @@ use crate::{
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{listener::PoolEventBroadcast, state::SubPool, txpool::TxPool},
     traits::{
-        NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions, TransactionOrigin,
+        BlockInfo, NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions,
+        TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    OnNewBlockEvent, PoolConfig, TransactionOrdering, TransactionValidator,
+    CanonicalStateUpdate, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
 pub use events::TransactionEvent;
@@ -138,6 +139,11 @@ where
         self.pool.read().size()
     }
 
+    /// Returns the currently tracked block
+    pub(crate) fn block_info(&self) -> BlockInfo {
+        self.pool.read().block_info()
+    }
+
     /// Returns the internal `SenderId` for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
@@ -183,9 +189,9 @@ where
     }
 
     /// Updates the entire pool after a new block was executed.
-    pub(crate) fn on_new_block(&self, block: OnNewBlockEvent) {
-        let outcome = self.pool.write().on_new_block(block);
-        self.notify_on_new_block(outcome);
+    pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        let outcome = self.pool.write().on_canonical_state_change(update);
+        self.notify_on_new_state(outcome);
     }
 
     /// Add a single validated transaction into the pool.
@@ -313,8 +319,8 @@ where
     }
 
     /// Notifies transaction listeners about changes after a block was processed.
-    fn notify_on_new_block(&self, outcome: OnNewBlockOutcome) {
-        let OnNewBlockOutcome { mined, promoted, discarded, block_hash } = outcome;
+    fn notify_on_new_state(&self, outcome: OnNewCanonicalStateOutcome) {
+        let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
 
         let mut listener = self.event_listener.write();
 
@@ -486,9 +492,9 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 }
 
-/// Contains all state changes after a [`OnNewBlockEvent`] was processed
+/// Contains all state changes after a [`CanonicalStateUpdate`] was processed
 #[derive(Debug)]
-pub(crate) struct OnNewBlockOutcome {
+pub(crate) struct OnNewCanonicalStateOutcome {
     /// Hash of the block.
     pub(crate) block_hash: H256,
     /// All mined transactions.
