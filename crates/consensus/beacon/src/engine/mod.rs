@@ -751,7 +751,7 @@ mod tests {
 
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
-        let config = BlockchainTreeConfig::new(1, 2, 3);
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, canon_state_notification_sender, config)

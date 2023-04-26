@@ -118,7 +118,7 @@ impl BlockIndices {
     pub fn update_block_hashes(
         &mut self,
         hashes: BTreeMap<u64, BlockHash>,
-    ) -> (BTreeSet<BlockChainId>,Vec<BlockNumHash>) {
+    ) -> (BTreeSet<BlockChainId>, Vec<BlockNumHash>) {
         // set new canonical hashes.
         self.canonical_chain = hashes.clone();
 
@@ -134,9 +134,8 @@ impl BlockIndices {
         loop {
             let Some(old_block_value) = old_hash else {
                 // end of old_hashes canonical chain. New chain has more block then old chain.
-                
-                // add new blocks to added list.
                 while let Some(new) = new_hash {
+                    // add new blocks to added list.
                     added.push(new.into());
                     new_hash = new_hashes.next();
                 }
@@ -175,12 +174,15 @@ impl BlockIndices {
                 }
             }
         }
-        
+
         // remove childs from
-        (removed.into_iter().fold(BTreeSet::new(), |mut fold, (number, hash)| {
-            fold.extend(self.remove_block(number, hash));
-            fold
-        }),added)
+        (
+            removed.into_iter().fold(BTreeSet::new(), |mut fold, (number, hash)| {
+                fold.extend(self.remove_block(number, hash));
+                fold
+            }),
+            added,
+        )
     }
 
     /// Remove chain from indices and return dependent chains that needs to be removed.

@@ -68,9 +68,6 @@ pub enum BlockStatus {
     Accepted,
     /// If blocks is not connected to canonical chain.
     Disconnected,
-    /// Wrong hash. One of state root hashes is wrongly caclulated and this makes
-    /// full block invalid.
-    WrongHash,
 }
 
 /// Allows read only functionality on the blockchain tree.
