@@ -47,6 +47,7 @@ macro_rules! fuzz_type_and_name {
 #[allow(non_snake_case)]
 #[cfg(any(test, feature = "bench"))]
 pub mod fuzz_rlp {
+    use crate::roundtrip_encoding;
     use reth_codecs::derive_arbitrary;
     use reth_eth_wire::{
         BlockBodies, BlockHeaders, DisconnectReason, GetBlockBodies, GetBlockHeaders, GetNodeData,
@@ -59,7 +60,19 @@ pub mod fuzz_rlp {
     use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
 
-    use crate::roundtrip_encoding;
+    // manually test Ping and Pong which are not covered by the above
+
+    /// Tests the round-trip encoding of Ping
+    #[test]
+    fn roundtrip_ping() {
+        roundtrip_encoding::<P2PMessage>(P2PMessage::Ping)
+    }
+
+    /// Tests the round-trip encoding of Pong
+    #[test]
+    fn roundtrip_pong() {
+        roundtrip_encoding::<P2PMessage>(P2PMessage::Pong)
+    }
 
     // p2p subprotocol messages
 
@@ -146,18 +159,4 @@ pub mod fuzz_rlp {
     fuzz_type_and_name!(GetReceipts, fuzz_GetReceipts);
     fuzz_type_and_name!(Receipts, fuzz_Receipts);
     fuzz_type_and_name!(TransactionSigned, fuzz_TransactionSigned);
-
-    // manually test Ping and Pong which are not covered by the above
-
-    /// Tests the round-trip encoding of Ping
-    #[test]
-    fn roundtrip_ping() {
-        roundtrip_encoding::<P2PMessage>(P2PMessage::Ping)
-    }
-
-    /// Tests the round-trip encoding of Pong
-    #[test]
-    fn roundtrip_pong() {
-        roundtrip_encoding::<P2PMessage>(P2PMessage::Pong)
-    }
 }
