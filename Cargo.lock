@@ -4690,6 +4690,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -1,4 +1,8 @@
 //! Implementation of [`BlockchainTree`]
+use crate::{
+    chain::BlockChainId, AppendableChain, BlockBuffer, BlockIndices, BlockchainTreeConfig,
+    PostStateData, TreeExternals,
+};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::BlockStatus, consensus::Consensus, executor::Error as ExecError, Error,
@@ -16,11 +20,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
-
-use crate::{
-    chain::BlockChainId, AppendableChain, BlockBuffer, BlockIndices, BlockchainTreeConfig,
-    PostStateData, TreeExternals,
-};
+use tracing::info;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Tree of chains and its identifications.
@@ -144,7 +144,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 block_number: block.number,
                 block_hash: block.hash(),
                 last_finalized: last_finalized_block,
-            })
+            });
         }
 
         // we will not even try to insert blocks that are too far in the future.
@@ -153,7 +153,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 block_number: block.number,
                 block_hash: block.hash(),
                 last_finalized: last_finalized_block,
-            })
+            });
         }
 
         Ok(())
@@ -202,7 +202,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
-            return Some(PostStateData { state, parent_block_hashed, canonical_fork })
+            return Some(PostStateData { state, parent_block_hashed, canonical_fork });
         }
 
         // check if there is canonical block
@@ -213,7 +213,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 canonical_fork: ForkBlock { number: *canonical_fork.0, hash: *canonical_fork.1 },
                 state: PostState::new(),
                 parent_block_hashed: self.block_indices().canonical_chain().clone(),
-            })
+            });
         }
 
         None
@@ -270,7 +270,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 )?;
                 self.insert_chain(chain);
                 Ok(BlockStatus::Accepted)
-            }
+            };
         }
         // if not found, check if the parent can be found inside canonical chain.
         if Some(block.parent_hash) == self.block_indices.canonical_hash(&(block.number - 1)) {
@@ -289,7 +289,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             // Pass the parent total difficulty to short-circuit unnecessary calculations.
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO)
             {
-                return Err(ExecError::BlockPreMerge { hash: block.hash }.into())
+                return Err(ExecError::BlockPreMerge { hash: block.hash }.into());
             }
 
             // Create state provider
@@ -314,7 +314,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 &self.externals,
             )?;
             self.insert_chain(chain);
-            return Ok(block_status)
+            return Ok(block_status);
         }
 
         // NOTE: Block doesn't have a parent, and if we receive this block in `make_canonical`
@@ -344,7 +344,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             } else {
                 // if there is no fork block that point to other chains, break the loop.
                 // it means that this fork joins to canonical block.
-                break
+                break;
             }
         }
         hashes
@@ -365,9 +365,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             // get fork block chain
             if let Some(fork_chain_id) = self.block_indices.get_blocks_chain_id(&fork.hash) {
                 chain_id = fork_chain_id;
-                continue
+                continue;
             }
-            break
+            break;
         }
         (self.block_indices.canonical_hash(&fork.number) == Some(fork.hash)).then_some(fork)
     }
@@ -421,6 +421,15 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         self.insert_in_range_block_with_senders(block)
     }
 
+    /// Check all block hashes
+    fn check_block_hashes(&self, block: &SealedBlockWithSenders) -> Result<(), Error> {
+        if let Err(e) = self.externals.consensus.validate_header(&block, U256::MAX) {
+            info!("Block failed on prevalidating header with error: {e:?}, block:{:?}", block);
+        }
+
+        Ok(())
+    }
+
     /// Same as [BlockchainTree::insert_block_with_senders] but expects that the block is in range,
     /// See [BlockchainTree::ensure_block_is_in_range].
     pub(crate) fn insert_in_range_block_with_senders(
@@ -435,30 +444,35 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 Ok(BlockStatus::Valid)
             } else {
                 Ok(BlockStatus::Accepted)
-            }
+            };
         }
 
         // check if block is part of canonical chain
         if self.block_indices.canonical_hash(&block.number) == Some(block.hash()) {
             // block is part of canonical chain
-            return Ok(BlockStatus::Valid)
+            return Ok(BlockStatus::Valid);
         }
 
         self.try_insert_block(block)
+
+        // TODO: move block to buffer.
     }
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     pub fn finalize_block(&mut self, finalized_block: BlockNumber) {
+        // remove blocks
         let mut remove_chains = self.block_indices.finalize_canonical_blocks(
             finalized_block,
             self.config.num_of_additional_canonical_block_hashes(),
         );
-
+        // remove chains of removed blocks
         while let Some(chain_id) = remove_chains.pop_first() {
             if let Some(chain) = self.chains.remove(&chain_id) {
                 remove_chains.extend(self.block_indices.remove_chain(&chain));
             }
         }
+        // clean block buffer.
+        self.unconnected_blocks_buffer.clean_old_blocks(finalized_block);
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
@@ -489,12 +503,24 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .take(num_of_canonical_hashes as usize)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
-        let mut remove_chains = self.block_indices.update_block_hashes(last_canonical_hashes);
+        let (mut remove_chains, added_blocks) =
+            self.block_indices.update_block_hashes(last_canonical_hashes);
 
         // remove all chains that got discarded
         while let Some(chain_id) = remove_chains.first() {
             if let Some(chain) = self.chains.remove(chain_id) {
                 remove_chains.extend(self.block_indices.remove_chain(&chain));
+            }
+        }
+
+        // check unconnected block buffer for the childs of new added blocks,
+        // or remove added blocks it.
+        for added_block in added_blocks.into_iter() {
+            let include_blocks = self.unconnected_blocks_buffer.take_all_childrens(added_block);
+            // insert child blocks
+            for block in include_blocks.into_iter() {
+                // dont fail on error, just ignore the block.
+                let _ = self.insert_block(block);
             }
         }
 
@@ -544,9 +570,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 .header_td(block_hash)?
                 .ok_or(ExecError::MissingTotalDifficulty { hash: *block_hash })?;
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
-                return Err(ExecError::BlockPreMerge { hash: *block_hash }.into())
+                return Err(ExecError::BlockPreMerge { hash: *block_hash }.into());
             }
-            return Ok(())
+            return Ok(());
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
@@ -643,14 +669,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn unwind(&mut self, unwind_to: BlockNumber) -> Result<(), Error> {
         // nothing to be done if unwind_to is higher then the tip
         if self.block_indices.canonical_tip().number <= unwind_to {
-            return Ok(())
+            return Ok(());
         }
         // revert `N` blocks from current canonical chain and put them inside BlockchanTree
         let old_canon_chain = self.revert_canonical(unwind_to)?;
 
         // check if there is block in chain
         if old_canon_chain.blocks().is_empty() {
-            return Ok(())
+            return Ok(());
         }
         self.block_indices.unwind_canonical_chain(unwind_to);
         // insert old canonical chain to BlockchainTree.
