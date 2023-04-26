@@ -5,7 +5,6 @@ use crate::{
     Pool, TransactionOrdering, TransactionPool, TransactionValidator,
 };
 use futures_util::{Stream, StreamExt};
-use reth_consensus_common::validation::calculate_next_block_base_fee;
 use reth_primitives::{Address, BlockHash, FromRecoveredTransaction};
 use reth_provider::{BlockProvider, CanonStateNotification, PostState, StateProviderFactory};
 use std::{
@@ -46,11 +45,8 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                 let new_tip = new_blocks.tip();
 
                 // base fee for the next block: `new_tip+1`
-                let pending_block_base_fee = calculate_next_block_base_fee(
-                    new_tip.gas_used,
-                    new_tip.gas_limit,
-                    new_tip.base_fee_per_gas.unwrap_or_default(),
-                ) as u128;
+                let pending_block_base_fee =
+                    new_tip.next_block_base_fee().unwrap_or_default() as u128;
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -133,11 +129,8 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                 }
 
                 // base fee for the next block: `first_block+1`
-                let pending_block_base_fee = calculate_next_block_base_fee(
-                    first_block.gas_used,
-                    first_block.gas_limit,
-                    first_block.base_fee_per_gas.unwrap_or_default(),
-                ) as u128;
+                let pending_block_base_fee =
+                    first_block.next_block_base_fee().unwrap_or_default() as u128;
                 let changed_accounts = changed_accounts_iter(state).collect();
                 let update = CanonicalStateUpdate {
                     hash: first_block.hash,
@@ -169,11 +162,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                 let (blocks, state) = new.inner();
                 let tip = blocks.tip();
                 // base fee for the next block: `tip+1`
-                let pending_block_base_fee = calculate_next_block_base_fee(
-                    tip.gas_used,
-                    tip.gas_limit,
-                    tip.base_fee_per_gas.unwrap_or_default(),
-                ) as u128;
+                let pending_block_base_fee = tip.next_block_base_fee().unwrap_or_default() as u128;
 
                 let first_block = blocks.first();
                 // check if the range of the commit is canonical
