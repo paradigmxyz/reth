@@ -5,7 +5,6 @@ use crate::{
     session::{Direction, ExceedsSessionLimit},
 };
 use std::time::Duration;
-use tracing::trace;
 
 /// Default request timeout for a single request.
 ///
