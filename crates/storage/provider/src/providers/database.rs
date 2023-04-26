@@ -16,6 +16,7 @@ use reth_revm_primitives::{
     primitives::{BlockEnv, CfgEnv, SpecId},
 };
 use std::{ops::RangeBounds, sync::Arc};
+use tracing::trace;
 
 /// A common provider that fetches data from a database.
 ///
@@ -57,6 +58,7 @@ impl<DB: Database> ShareableDatabase<DB> {
         // +1 as the changeset that we want is the one that was applied after this block.
         block_number += 1;
 
+        trace!(target: "providers", ?block_number, "Returning historical block provider for block number");
         Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
     }
 
@@ -72,6 +74,7 @@ impl<DB: Database> ShareableDatabase<DB> {
         // as the  changeset contains old values.
         block_number += 1;
 
+        trace!(target: "providers", ?block_hash, "Returning historical block provider for block hash");
         Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
     }
 }
