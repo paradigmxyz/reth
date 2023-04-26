@@ -256,11 +256,8 @@ pub fn validate_header_regarding_parent(
         })
     }
 
-    // difficulty check is done by consensus.
-    // TODO(onbjerg): Unsure what the check here is supposed to be, but it should be moved to
-    // [BeaconConsensus]. if chain_spec.paris_status().block_number() > Some(child.number) {
-    //    // TODO how this needs to be checked? As ice age did increment it by some formula
-    //}
+    // TODO Check difficulty increment between parent and child
+    // Ace age did increment it by some formula that we need to follow.
 
     let mut parent_gas_limit = parent.gas_limit;
 
