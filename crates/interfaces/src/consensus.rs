@@ -16,7 +16,7 @@ pub trait Consensus: Debug + Send + Sync {
     /// This is called on standalone header to check if all hashe
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError>;
 
-    /// Validate if the header information regarding parent are correct.
+    /// Validate that the header information regarding parent are correct.
     /// This check block number, timestamp, basefee and gas limit increment.
     ///
     /// This is called before properties that are not in the header itself (like total difficulty)
