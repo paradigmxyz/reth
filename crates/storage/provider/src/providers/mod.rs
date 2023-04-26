@@ -303,6 +303,7 @@ where
 
         // check tree first
         if let Some(pending) = self.tree.find_pending_state_provider(block) {
+            trace!(target: "providers::blockchain", "Returning pending state provider");
             return self.pending_with_provider(pending)
         }
 

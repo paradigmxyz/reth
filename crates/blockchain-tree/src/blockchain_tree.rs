@@ -16,6 +16,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
+use tracing::trace;
 
 use crate::{
     chain::BlockChainId, AppendableChain, BlockIndices, BlockchainTreeConfig, PostStateData,
@@ -177,8 +178,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///       needed for evm `BLOCKHASH` opcode.
     /// Return none if block is not known.
     pub fn post_state_data(&self, block_hash: BlockHash) -> Option<PostStateData> {
+        trace!(target: "blockchain_tree", ?block_hash, "Searching for post state data");
         // if it is part of the chain
         if let Some(chain_id) = self.block_indices.get_blocks_chain_id(&block_hash) {
+            trace!(target: "blockchain_tree", ?block_hash, "Constructing post state data based on non-canonical chain");
             // get block state
             let chain = self.chains.get(&chain_id).expect("Chain should be present");
             let block_number = chain.block_number(block_hash)?;
@@ -206,6 +209,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         if let Some(canonical_fork) =
             self.block_indices().canonical_chain().iter().find(|(_, value)| **value == block_hash)
         {
+            trace!(target: "blockchain_tree", ?block_hash, "Constructing post state data based on canonical chain");
             return Some(PostStateData {
                 canonical_fork: ForkBlock { number: *canonical_fork.0, hash: *canonical_fork.1 },
                 state: PostState::new(),
@@ -535,6 +539,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<(), Error> {
         // If block is already canonical don't return error.
         if self.block_indices.is_block_hash_canonical(block_hash) {
+            trace!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
             let td = self
                 .externals
                 .shareable_db()
