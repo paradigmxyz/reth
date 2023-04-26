@@ -74,7 +74,7 @@ impl SessionsConfig {
 /// Limits for sessions.
 ///
 /// By default, no session limits will be enforced
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SessionLimits {
     max_pending_inbound: Option<u32>,
