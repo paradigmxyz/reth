@@ -610,7 +610,7 @@ impl PeersManager {
     /// Returns the idle peer with the highest reputation.
     ///
     /// Peers that are `trusted`, see [PeerKind], are prioritized as long as they're not currently
-    /// marked as banned. Peers with a `forkId` are considered better than peers without.
+    /// marked as banned.
     ///
     /// If `connect_trusted_nodes_only` is enabled, see [PeersConfig], then this will only consider
     /// `trusted` peers.
@@ -631,19 +631,14 @@ impl PeersManager {
         }
 
         for maybe_better in unconnected {
+            // if the peer is trusted, return it immediately
             if maybe_better.1.is_trusted() {
                 return Some((*maybe_better.0, maybe_better.1))
             }
-            match (maybe_better.1.fork_id.as_ref(), best_peer.1.fork_id.as_ref()) {
-                (Some(_), Some(_)) | (None, None) => {
-                    if maybe_better.1.reputation > best_peer.1.reputation {
-                        best_peer = maybe_better;
-                    }
-                }
-                (Some(_), None) => {
-                    best_peer = maybe_better;
-                }
-                _ => {}
+
+            // otherwise we keep track of the best peer using the reputation
+            if maybe_better.1.reputation > best_peer.1.reputation {
+                best_peer = maybe_better;
             }
         }
         Some((*best_peer.0, best_peer.1))
