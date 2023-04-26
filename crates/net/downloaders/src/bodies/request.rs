@@ -169,7 +169,7 @@ where
                     withdrawals: next_body.withdrawals,
                 };
 
-                if let Err(error) = self.consensus.pre_validate_block(&block) {
+                if let Err(error) = self.consensus.validate_block(&block) {
                     // Put the header back and return an error
                     let hash = block.hash();
                     self.headers.push_front(block.header);

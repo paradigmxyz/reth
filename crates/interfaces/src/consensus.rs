@@ -11,13 +11,21 @@ pub use reth_rpc_types::engine::ForkchoiceState;
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {
-    /// Validate if the header is correct and follows consensus specification.
+    /// Validate if header is correct and follows consensus specification.
+    ///
+    /// This is called on standalone header to check if all hashe
+    fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError>;
+
+    /// Validate that the header information regarding parent are correct.
+    /// This checks the block number, timestamp, basefee and gas limit increment.
     ///
     /// This is called before properties that are not in the header itself (like total difficulty)
     /// have been computed.
     ///
     /// **This should not be called for the genesis block**.
-    fn pre_validate_header(
+    ///
+    /// Note: Validating header against its parent does not include other Consensus validations.
+    fn validate_header_agains_parent(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
@@ -27,7 +35,9 @@ pub trait Consensus: Debug + Send + Sync {
     /// computed properties (like total difficulty).
     ///
     /// Some consensus engines may want to do additional checks here.
-    fn validate_header(
+    ///
+    /// Note: validating headers with TD does not include other Consensus validation.
+    fn validate_header_with_total_difficulty(
         &self,
         header: &Header,
         total_difficulty: U256,
@@ -40,7 +50,9 @@ pub trait Consensus: Debug + Send + Sync {
     /// 11.1 "Ommer Validation".
     ///
     /// **This should not be called for the genesis block**.
-    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError>;
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError>;
 }
 
 /// Consensus Errors

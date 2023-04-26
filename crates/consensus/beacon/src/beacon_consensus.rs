@@ -23,18 +23,21 @@ impl BeaconConsensus {
 }
 
 impl Consensus for BeaconConsensus {
-    fn pre_validate_header(
+    fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
+        validation::validate_header_standalone(header, &self.chain_spec)?;
+        Ok(())
+    }
+
+    fn validate_header_agains_parent(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validation::validate_header_standalone(header, &self.chain_spec)?;
         validation::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
-
         Ok(())
     }
 
-    fn validate_header(
+    fn validate_header_with_total_difficulty(
         &self,
         header: &Header,
         total_difficulty: U256,
@@ -76,7 +79,7 @@ impl Consensus for BeaconConsensus {
         Ok(())
     }
 
-    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         validation::validate_block_standalone(block, &self.chain_spec)
     }
 }
