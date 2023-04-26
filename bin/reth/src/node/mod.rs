@@ -70,6 +70,7 @@ use tracing::*;
 use crate::dirs::MaybePlatformPath;
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
+use reth_provider::providers::BlockchainProvider;
 use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
@@ -151,14 +152,13 @@ impl Command {
 
         info!(target: "reth::cli", path = %db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
-        let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
-        init_genesis(db.clone(), self.chain.clone())?;
+        let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
@@ -169,11 +169,33 @@ impl Command {
 
         self.init_trusted_nodes(&mut config);
 
+        // configure blockchain tree
+        let tree_externals = TreeExternals::new(
+            db.clone(),
+            Arc::clone(&consensus),
+            Factory::new(self.chain.clone()),
+            Arc::clone(&self.chain),
+        );
+        let tree_config = BlockchainTreeConfig::default();
+        // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
+        // depth at least N blocks must be sent at once.
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+        let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
+            tree_externals,
+            canon_state_notification_sender.clone(),
+            tree_config,
+        )?);
+
+        // setup the blockchain provider
+        let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
+        let blockchain_db = BlockchainProvider::new(shareable_db, blockchain_tree.clone());
+
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            EthTransactionValidator::new(shareable_db.clone(), Arc::clone(&self.chain)),
+            EthTransactionValidator::new(blockchain_db.clone(), Arc::clone(&self.chain)),
             Default::default(),
         );
-        info!(target: "reth::cli", "Test transaction pool initialized");
+        info!(target: "reth::cli", "Transaction pool initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key =
@@ -190,11 +212,24 @@ impl Command {
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
 
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+
+        // Forward genesis as forkchoice state to the consensus engine.
+        // This will allow the downloader to start
         if self.debug.continuous {
             info!(target: "reth::cli", "Continuous sync mode enabled");
+            let (tip_tx, _tip_rx) = oneshot::channel();
+            let state = ForkchoiceState {
+                head_block_hash: genesis_hash,
+                finalized_block_hash: genesis_hash,
+                safe_block_hash: genesis_hash,
+            };
+            consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
+                state,
+                payload_attrs: None,
+                tx: tip_tx,
+            })?;
         }
-
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         // Forward the `debug.tip` as forkchoice state to the consensus engine.
         // This will initiate the sync up to the provided tip.
@@ -217,29 +252,11 @@ impl Command {
             None => None,
         };
 
-        // configure blockchain tree
-        let tree_externals = TreeExternals::new(
-            db.clone(),
-            Arc::clone(&consensus),
-            Factory::new(self.chain.clone()),
-            Arc::clone(&self.chain),
-        );
-        let tree_config = BlockchainTreeConfig::default();
-        // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
-        // depth at least N blocks must be sent at once.
-        let (canon_state_notification_sender, _receiver) =
-            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
-        let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
-            tree_externals,
-            canon_state_notification_sender.clone(),
-            tree_config,
-        )?);
-
         // Configure the pipeline
         let mut pipeline = if self.auto_mine {
             let (_, client, mut task) = AutoSealBuilder::new(
                 Arc::clone(&self.chain),
-                shareable_db.clone(),
+                blockchain_db.clone(),
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
@@ -285,7 +302,7 @@ impl Command {
 
         // configure the payload builder
         let payload_generator = BasicPayloadJobGenerator::new(
-            shareable_db.clone(),
+            blockchain_db.clone(),
             transaction_pool.clone(),
             ctx.task_executor.clone(),
             // TODO use extradata from args
@@ -303,6 +320,7 @@ impl Command {
             pipeline,
             blockchain_tree.clone(),
             self.debug.max_block,
+            self.debug.continuous,
             payload_builder.clone(),
             consensus_engine_tx,
             consensus_engine_rx,
@@ -310,7 +328,7 @@ impl Command {
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let engine_api = EngineApi::new(
-            ShareableDatabase::new(db, self.chain.clone()),
+            blockchain_db.clone(),
             self.chain.clone(),
             beacon_engine_handle,
             payload_builder.into(),
@@ -321,7 +339,7 @@ impl Command {
         let (_rpc_server, _auth_server) = self
             .rpc
             .start_servers(
-                shareable_db.clone(),
+                blockchain_db.clone(),
                 transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
@@ -331,14 +349,14 @@ impl Command {
             .await?;
 
         // Run consensus engine to completion
-        let (rx, tx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor.spawn_critical("consensus engine", async move {
             let res = beacon_consensus_engine.await;
-            let _ = rx.send(res);
+            let _ = tx.send(res);
         });
 
-        tx.await??;
+        rx.await??;
 
         info!(target: "reth::cli", "Consensus engine has exited.");
 

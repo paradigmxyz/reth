@@ -55,6 +55,7 @@ pub trait PeersInfo: Send + Sync {
 }
 
 /// Provides an API for managing the peers of the network.
+#[async_trait]
 pub trait Peers: PeersInfo {
     /// Adds a peer to the peer set.
     fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
@@ -80,6 +81,9 @@ pub trait Peers: PeersInfo {
 
     /// Send a reputation change for the given peer.
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind);
+
+    /// Get the reputation of a peer.
+    async fn reputation_by_id(&self, peer_id: PeerId) -> Result<Option<Reputation>, NetworkError>;
 }
 
 /// Represents the kind of peer

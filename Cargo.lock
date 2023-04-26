@@ -4641,6 +4641,8 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
+ "metrics",
+ "reth-metrics-derive",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",

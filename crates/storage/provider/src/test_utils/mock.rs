@@ -1,7 +1,7 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, PostStateDataProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
@@ -222,16 +222,27 @@ impl BlockHashProvider for MockEthProvider {
 
 impl BlockIdProvider for MockEthProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
+        let best_block_number = self.best_block_number()?;
         let lock = self.headers.lock();
+
         Ok(lock
             .iter()
-            .max_by_key(|h| h.1.number)
+            .find(|(_, header)| header.number == best_block_number)
             .map(|(hash, header)| ChainInfo {
                 best_hash: *hash,
                 best_number: header.number,
                 last_finalized: None,
                 safe_finalized: None,
             })
+            .expect("provider is empty"))
+    }
+
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        let lock = self.headers.lock();
+        Ok(lock
+            .iter()
+            .max_by_key(|h| h.1.number)
+            .map(|(_, header)| header.number)
             .expect("provider is empty"))
     }
 
@@ -264,6 +275,12 @@ impl BlockProvider for MockEthProvider {
 impl AccountProvider for MockEthProvider {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         Ok(self.accounts.lock().get(&address).cloned().map(|a| a.account))
+    }
+}
+
+impl StateRootProvider for MockEthProvider {
+    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+        todo!()
     }
 }
 
@@ -339,10 +356,7 @@ impl StateProviderFactory for MockEthProvider {
         Ok(Box::new(self.clone()))
     }
 
-    fn history_by_block_number(
-        &self,
-        _block: reth_primitives::BlockNumber,
-    ) -> Result<StateProviderBox<'_>> {
+    fn history_by_block_number(&self, _block: BlockNumber) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
@@ -350,7 +364,15 @@ impl StateProviderFactory for MockEthProvider {
         todo!()
     }
 
-    fn pending<'a>(
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
@@ -363,10 +385,7 @@ impl StateProviderFactory for Arc<MockEthProvider> {
         Ok(Box::new(self.clone()))
     }
 
-    fn history_by_block_number(
-        &self,
-        _block: reth_primitives::BlockNumber,
-    ) -> Result<StateProviderBox<'_>> {
+    fn history_by_block_number(&self, _block: BlockNumber) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
@@ -374,7 +393,15 @@ impl StateProviderFactory for Arc<MockEthProvider> {
         todo!()
     }
 
-    fn pending<'a>(
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {

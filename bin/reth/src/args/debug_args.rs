@@ -10,7 +10,7 @@ pub struct DebugArgs {
     /// Prompt the downloader to download blocks one at a time.
     ///
     /// NOTE: This is for testing purposes only.
-    #[arg(long = "debug.continuous", help_heading = "Debug")]
+    #[arg(long = "debug.continuous", help_heading = "Debug", conflicts_with = "tip")]
     pub continuous: bool,
 
     /// Flag indicating whether the node should be terminated after the pipeline sync.
@@ -20,7 +20,7 @@ pub struct DebugArgs {
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag
-    #[arg(long = "debug.tip", help_heading = "Debug")]
+    #[arg(long = "debug.tip", help_heading = "Debug", conflicts_with = "continuous")]
     pub tip: Option<H256>,
 
     /// Runs the sync only up to the specified block.

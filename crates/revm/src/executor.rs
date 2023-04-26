@@ -470,7 +470,9 @@ pub fn commit_state_changes<DB>(
 
             // insert storage into new db account.
             cached_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
-                storage_changeset.insert(key, (value.original_value(), value.present_value()));
+                if value.is_changed() {
+                    storage_changeset.insert(key, (value.original_value(), value.present_value()));
+                }
                 (key, value.present_value())
             }));
 
@@ -598,7 +600,9 @@ mod tests {
         constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
-    use reth_provider::{post_state::Storage, AccountProvider, BlockHashProvider, StateProvider};
+    use reth_provider::{
+        post_state::Storage, AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
+    };
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
 
@@ -650,6 +654,12 @@ mod tests {
                 .iter()
                 .filter_map(|(block, hash)| range.contains(block).then_some(*hash))
                 .collect())
+        }
+    }
+
+    impl StateRootProvider for StateProviderTest {
+        fn state_root(&self, _post_state: PostState) -> reth_interfaces::Result<H256> {
+            todo!()
         }
     }
 

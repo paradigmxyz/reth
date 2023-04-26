@@ -1,10 +1,10 @@
 //! Wrapper around BlockchainTree that allows for it to be shared.
+use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::Consensus,
-    provider::ProviderError,
     Error,
 };
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
@@ -16,8 +16,6 @@ use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
 };
-
-use super::BlockchainTree;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
 #[derive(Clone)]
@@ -102,24 +100,19 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingStateProvider
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn pending_state_provider(
+    fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Box<dyn PostStateDataProvider>, Error> {
-        let post_state = self
-            .tree
-            .read()
-            .post_state_data(block_hash)
-            .ok_or(ProviderError::UnknownBlockHash(block_hash))
-            .map(Box::new)?;
-        Ok(Box::new(post_state))
+    ) -> Option<Box<dyn PostStateDataProvider>> {
+        let provider = self.tree.read().post_state_data(block_hash)?;
+        Some(Box::new(provider))
     }
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> CanonStateSubscriptions
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn subscribe_canon_state(&self) -> reth_provider::CanonStateNotifications {
+    fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {
         self.tree.read().subscribe_canon_state()
     }
 }

@@ -7,6 +7,7 @@
 
 //! reth basic payload job generator
 
+use crate::metrics::PayloadBuilderMetrics;
 use futures_core::{ready, Stream};
 use futures_util::FutureExt;
 use reth_payload_builder::{
@@ -15,9 +16,7 @@ use reth_payload_builder::{
 };
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    constants::{
-        EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION,
-    },
+    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, RETH_CLIENT_VERSION, SLOT_DURATION},
     proofs, Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, EMPTY_OMMER_ROOT, U256,
 };
@@ -46,6 +45,8 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::trace;
+
+mod metrics;
 
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
@@ -143,6 +144,7 @@ where
             best_payload: None,
             pending_block: None,
             payload_task_guard: self.payload_task_guard.clone(),
+            metrics: Default::default(),
         })
     }
 }
@@ -252,6 +254,8 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     pending_block: Option<PendingPayload>,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
+    /// metrics for this type
+    metrics: PayloadBuilderMetrics,
 }
 
 impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
@@ -283,6 +287,7 @@ where
             let guard = this.payload_task_guard.clone();
             let payload_config = this.config.clone();
             let best_payload = this.best_payload.clone();
+            this.metrics.inc_initiated_payload_builds();
             this.executor.spawn_blocking(Box::pin(async move {
                 // acquire the permit for executing the task
                 let _permit = guard.0.acquire().await;
@@ -311,6 +316,7 @@ where
                     }
                 }
                 Poll::Ready(Err(err)) => {
+                    this.metrics.inc_failed_payload_builds();
                     this.interval.reset();
                     return Poll::Ready(Some(Err(err)))
                 }
@@ -345,6 +351,7 @@ where
         // Note: it is assumed that this is unlikely to happen, as the payload job is started right
         // away and the first full block should have been built by the time CL is requesting the
         // payload.
+        self.metrics.inc_requested_empty_payload();
         build_empty_payload(&self.client, self.config.clone()).map(Arc::new)
     }
 }
@@ -448,7 +455,6 @@ fn build_payload<Pool, Client>(
 
         // TODO this needs to access the _pending_ state of the parent block hash
         let state = client.latest()?;
-
         let mut db = SubState::new(State::new(state));
         let mut post_state = PostState::default();
 
@@ -551,18 +557,20 @@ fn build_payload<Pool, Client>(
             withdrawals = Some(attributes.withdrawals);
         }
 
-        // create the block header
-        let transactions_root = proofs::calculate_transaction_root(executed_txs.iter());
-
         let receipts_root = post_state.receipts_root();
         let logs_bloom = post_state.logs_bloom();
+
+        // calculate the state root
+        let state_root = db.db.0.state_root(post_state)?;
+
+        // create the block header
+        let transactions_root = proofs::calculate_transaction_root(executed_txs.iter());
 
         let header = Header {
             parent_hash: parent_block.hash,
             ommers_hash: EMPTY_OMMER_ROOT,
             beneficiary: initialized_block_env.coinbase,
-            // TODO compute state root
-            state_root: Default::default(),
+            state_root,
             transactions_root,
             receipts_root,
             withdrawals_root,
@@ -596,7 +604,9 @@ where
     Client: StateProviderFactory,
 {
     // TODO this needs to access the _pending_ state of the parent block hash
-    let _state = client.latest()?;
+    let state = client.latest()?;
+    let mut db = SubState::new(State::new(state));
+    let mut post_state = PostState::default();
 
     let PayloadConfig {
         initialized_block_env,
@@ -604,27 +614,43 @@ where
         extra_data,
         attributes,
         initialized_cfg,
-        ..
+        chain_spec,
     } = config;
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
+    let block_number = initialized_block_env.number.to::<u64>();
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
     let mut withdrawals_root = None;
     let mut withdrawals = None;
 
+    // perform at least all the withdrawals
     if initialized_cfg.spec_id >= SpecId::SHANGHAI {
-        withdrawals_root = Some(EMPTY_WITHDRAWALS);
+        let balance_increments = post_block_withdrawals_balance_increments(
+            &chain_spec,
+            attributes.timestamp,
+            &attributes.withdrawals,
+        );
+
+        for (address, increment) in balance_increments {
+            increment_account_balance(&mut db, &mut post_state, block_number, address, increment)?;
+        }
+
+        // calculate withdrawals root
+        withdrawals_root = Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()));
+
         // set withdrawals
         withdrawals = Some(attributes.withdrawals);
     }
+
+    // calculate the state root
+    let state_root = db.db.0.state_root(post_state)?;
 
     let header = Header {
         parent_hash: parent_block.hash,
         ommers_hash: EMPTY_OMMER_ROOT,
         beneficiary: initialized_block_env.coinbase,
-        // TODO compute state root
-        state_root: Default::default(),
+        state_root,
         transactions_root: EMPTY_TRANSACTIONS,
         withdrawals_root,
         receipts_root: EMPTY_RECEIPTS,

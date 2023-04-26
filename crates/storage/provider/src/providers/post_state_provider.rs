@@ -1,4 +1,7 @@
-use crate::{AccountProvider, BlockHashProvider, PostStateDataProvider, StateProvider};
+use crate::{
+    AccountProvider, BlockHashProvider, PostState, PostStateDataProvider, StateProvider,
+    StateRootProvider,
+};
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256, U256};
 
@@ -6,9 +9,9 @@ use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256, U256
 /// underlying state provider.
 pub struct PostStateProvider<SP: StateProvider, PSDP: PostStateDataProvider> {
     /// The inner state provider.
-    pub state_provider: SP,
+    pub(crate) state_provider: SP,
     /// Post state data,
-    pub post_state_data_provider: PSDP,
+    pub(crate) post_state_data_provider: PSDP,
 }
 
 impl<SP: StateProvider, PSDP: PostStateDataProvider> PostStateProvider<SP, PSDP> {
@@ -45,6 +48,16 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> AccountProvider
         } else {
             self.state_provider.basic_account(address)
         }
+    }
+}
+
+impl<SP: StateProvider, PSDP: PostStateDataProvider> StateRootProvider
+    for PostStateProvider<SP, PSDP>
+{
+    fn state_root(&self, post_state: PostState) -> Result<H256> {
+        let mut state = self.post_state_data_provider.state().clone();
+        state.extend(post_state);
+        self.state_provider.state_root(state)
     }
 }
 

@@ -124,8 +124,16 @@ impl<T: TransactionOrdering> TxPool<T> {
         BlockInfo {
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
-            pending_base_fee: self.all_transactions.pending_basefee,
+            pending_basefee: self.all_transactions.pending_basefee,
         }
+    }
+
+    /// Updates the pool based on the changed base fee.
+    ///
+    /// This enforces the dynamic fee requirement.
+    pub(crate) fn update_base_fee(&mut self, _new_base_fee: U256) {
+        // TODO update according to the changed base_fee
+        todo!()
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
@@ -567,11 +575,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Updates the block specific info
     fn set_block_info(&mut self, block_info: BlockInfo) {
-        let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_base_fee } =
+        let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_basefee } =
             block_info;
         self.last_seen_block_number = last_seen_block_number;
         self.last_seen_block_hash = last_seen_block_hash;
-        self.pending_basefee = pending_base_fee;
+        self.pending_basefee = pending_basefee;
     }
 
     /// Rechecks all transactions in the pool against the changes.

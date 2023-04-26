@@ -226,7 +226,7 @@ where
         let block_info = BlockInfo {
             last_seen_block_hash: hash,
             last_seen_block_number: number,
-            pending_base_fee: pending_block_base_fee,
+            pending_basefee: pending_block_base_fee,
         };
         let outcome = self.pool.write().on_canonical_state_change(
             block_info,

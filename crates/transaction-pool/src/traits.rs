@@ -252,7 +252,7 @@ impl TransactionOrigin {
 /// block hash. In other words, the first added block of the range must be the child of the last
 /// known block hash.
 ///
-/// This is used to update the pool state according.
+/// This is used to update the pool state accordingly.
 #[derive(Debug, Clone)]
 pub struct CanonicalStateUpdate {
     /// Hash of the tip block.
@@ -531,5 +531,5 @@ pub struct BlockInfo {
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
     /// currently tracking.
-    pub pending_base_fee: u128,
+    pub pending_basefee: u128,
 }
