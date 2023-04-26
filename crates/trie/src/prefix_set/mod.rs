@@ -33,8 +33,6 @@ impl PrefixSet {
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
     pub fn contains<T: Into<Nibbles>>(&mut self, prefix: T) -> bool {
-        let prefix = prefix.into();
-
         if !self.sorted {
             self.keys.sort();
             self.sorted = true;
