@@ -16,9 +16,11 @@ use reth_payload_builder::{
 };
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, RETH_CLIENT_VERSION, SLOT_DURATION},
+    constants::{
+        EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION,
+    },
     proofs, Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    SealedBlock, EMPTY_OMMER_ROOT, U256,
+    SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
 use reth_provider::{BlockProvider, PostState, StateProviderFactory};
 use reth_revm::{
@@ -32,7 +34,10 @@ use reth_revm::{
 use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use revm::primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId};
+use revm::{
+    db::{CacheDB, DatabaseRef},
+    primitives::{BlockEnv, CfgEnv, Env, ResultAndState},
+};
 use std::{
     future::Future,
     pin::Pin,
@@ -529,33 +534,14 @@ fn build_payload<Pool, Client>(
             return Ok(BuildOutcome::Aborted { fees: total_fees })
         }
 
-        let mut withdrawals_root = None;
-        let mut withdrawals = None;
-
-        // get balance changes from withdrawals
-        if initialized_cfg.spec_id >= SpecId::SHANGHAI {
-            let balance_increments = post_block_withdrawals_balance_increments(
-                &chain_spec,
-                attributes.timestamp,
-                &attributes.withdrawals,
-            );
-            for (address, increment) in balance_increments {
-                increment_account_balance(
-                    &mut db,
-                    &mut post_state,
-                    block_number,
-                    address,
-                    increment,
-                )?;
-            }
-
-            // calculate withdrawals root
-            withdrawals_root =
-                Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()));
-
-            // set withdrawals
-            withdrawals = Some(attributes.withdrawals);
-        }
+        let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
+            &mut db,
+            &mut post_state,
+            &chain_spec,
+            block_number,
+            attributes.timestamp,
+            attributes.withdrawals,
+        )?;
 
         let receipts_root = post_state.receipts_root();
         let logs_bloom = post_state.logs_bloom();
@@ -613,35 +599,22 @@ where
         parent_block,
         extra_data,
         attributes,
-        initialized_cfg,
         chain_spec,
+        ..
     } = config;
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
-    let mut withdrawals_root = None;
-    let mut withdrawals = None;
-
-    // perform at least all the withdrawals
-    if initialized_cfg.spec_id >= SpecId::SHANGHAI {
-        let balance_increments = post_block_withdrawals_balance_increments(
-            &chain_spec,
-            attributes.timestamp,
-            &attributes.withdrawals,
-        );
-
-        for (address, increment) in balance_increments {
-            increment_account_balance(&mut db, &mut post_state, block_number, address, increment)?;
-        }
-
-        // calculate withdrawals root
-        withdrawals_root = Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()));
-
-        // set withdrawals
-        withdrawals = Some(attributes.withdrawals);
-    }
+    let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
+        &mut db,
+        &mut post_state,
+        &chain_spec,
+        block_number,
+        attributes.timestamp,
+        attributes.withdrawals,
+    )?;
 
     // calculate the state root
     let state_root = db.db.0.state_root(post_state)?;
@@ -670,6 +643,65 @@ where
     let sealed_block = block.seal_slow();
 
     Ok(BuiltPayload::new(attributes.id, sealed_block, U256::ZERO))
+}
+
+/// Represents the outcome of committing withdrawals to the runtime database and post state.
+/// Pre-shanghai these are `None` values.
+struct WithdrawalsOutcome {
+    withdrawals: Option<Vec<Withdrawal>>,
+    withdrawals_root: Option<H256>,
+}
+
+impl WithdrawalsOutcome {
+    /// No withdrawals pre shanghai
+    fn pre_shanghai() -> Self {
+        Self { withdrawals: None, withdrawals_root: None }
+    }
+
+    fn empty() -> Self {
+        Self { withdrawals: Some(vec![]), withdrawals_root: Some(EMPTY_WITHDRAWALS) }
+    }
+}
+
+/// Executes the withdrawals and commits them to the _runtime_ Database and PostState.
+///
+/// Returns the withdrawals root.
+///
+/// Returns `None` values pre shanghai
+#[allow(clippy::too_many_arguments)]
+fn commit_withdrawals<DB>(
+    db: &mut CacheDB<DB>,
+    post_state: &mut PostState,
+    chain_spec: &ChainSpec,
+    block_number: u64,
+    timestamp: u64,
+    withdrawals: Vec<Withdrawal>,
+) -> Result<WithdrawalsOutcome, <DB as DatabaseRef>::Error>
+where
+    DB: DatabaseRef,
+{
+    if !chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
+        return Ok(WithdrawalsOutcome::pre_shanghai())
+    }
+
+    if withdrawals.is_empty() {
+        return Ok(WithdrawalsOutcome::empty())
+    }
+
+    let balance_increments =
+        post_block_withdrawals_balance_increments(chain_spec, timestamp, &withdrawals);
+
+    for (address, increment) in balance_increments {
+        increment_account_balance(db, post_state, block_number, address, increment)?;
+    }
+
+    let withdrawals_root = proofs::calculate_withdrawals_root(withdrawals.iter());
+
+    // calculate withdrawals root
+    Ok(WithdrawalsOutcome {
+        withdrawals: Some(withdrawals),
+        withdrawals_root: Some(withdrawals_root),
+    })
 }
 
 /// Checks if the new payload is better than the current best.
