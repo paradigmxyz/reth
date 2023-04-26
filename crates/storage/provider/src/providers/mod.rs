@@ -27,6 +27,7 @@ use std::{
 mod database;
 mod post_state_provider;
 mod state;
+use crate::traits::BlockSource;
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
 
@@ -140,6 +141,25 @@ where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
 {
+    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
+        let block = match source {
+            BlockSource::Any => {
+                // check pending source first
+                // Note: it's fine to return the unsealed block because the caller already has the
+                // hash
+                let mut block = self.tree.block_by_hash(hash).map(|block| block.unseal());
+                if block.is_none() {
+                    block = self.database.block_by_hash(hash)?;
+                }
+                block
+            }
+            BlockSource::Pending => self.tree.block_by_hash(hash).map(|block| block.unseal()),
+            BlockSource::Database => self.database.block_by_hash(hash)?,
+        };
+
+        Ok(block)
+    }
+
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         self.database.block(id)
     }
