@@ -3,7 +3,7 @@
 //! Stage debugging tool
 use crate::{
     args::{get_secret_key, NetworkArgs, StageEnum},
-    dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath, SecretKeyPath},
+    dirs::{ConfigPath, MaybePlatformPath, PlatformPath, DataDirPath},
     prometheus_exporter,
 };
 use clap::Parser;
@@ -34,6 +34,16 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
     db: MaybePlatformPath<DbPath>,
+
+    /// The path to the data dir for all reth files and subdirectories.
+    ///
+    /// Defaults to the OS-specific data directory:
+    ///
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    data_dir: MaybePlatformPath<DataDirPath>,
 
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
