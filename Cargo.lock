@@ -5086,7 +5086,6 @@ dependencies = [
  "futures-core",
  "futures-util",
  "metrics",
- "reth-consensus-common",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
