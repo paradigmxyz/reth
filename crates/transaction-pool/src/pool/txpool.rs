@@ -128,14 +128,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Updates the pool based on the changed base fee.
-    ///
-    /// This enforces the dynamic fee requirement.
-    pub(crate) fn update_base_fee(&mut self, _new_base_fee: U256) {
-        // TODO update according to the changed base_fee
-        todo!()
-    }
-
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pending_pool.best()
@@ -189,7 +181,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Remove all transaction that were included in the block
         for tx_hash in mined_transactions.iter() {
-            if self.remove_transaction_by_hash(tx_hash).is_some() {
+            if self.prune_transaction_by_hash(tx_hash).is_some() {
                 // Update removed transactions metric
                 self.metrics.removed_transactions.increment(1);
             }
@@ -264,7 +256,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // Update invalid transactions metric
                 self.metrics.invalid_transactions.increment(1);
                 match e {
-                    InsertErr::Underpriced { existing, .. } => {
+                    InsertErr::Underpriced { existing, transaction: _ } => {
                         Err(PoolError::ReplacementUnderpriced(existing))
                     }
                     InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => Err(
@@ -323,6 +315,9 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Removes and returns all matching transactions from the pool.
+    ///
+    /// Note: this does not advance any descendants of the removed transactions and does not apply
+    /// any additional updates.
     pub(crate) fn remove_transactions(
         &mut self,
         hashes: impl IntoIterator<Item = TxHash>,
@@ -352,6 +347,19 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.remove_from_subpool(pool, tx.id())
     }
 
+    /// This removes the transaction from the pool and advances any descendant state inside the
+    /// subpool.
+    ///
+    /// This is intended to be used when a transaction is included in a block,
+    /// [Self::on_canonical_state_change]
+    fn prune_transaction_by_hash(
+        &mut self,
+        tx_hash: &H256,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
+        self.prune_from_subpool(pool, tx.id())
+    }
+
     /// Removes the transaction from the given pool.
     ///
     /// Caution: this only removes the tx from the sub-pool and not from the pool itself
@@ -363,6 +371,20 @@ impl<T: TransactionOrdering> TxPool<T> {
         match pool {
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
+            SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
+        }
+    }
+
+    /// Removes the transaction from the given pool and advance sub-pool internal state, with the
+    /// expectation that the given transaction is included in a block.
+    fn prune_from_subpool(
+        &mut self,
+        pool: SubPool,
+        tx: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        match pool {
+            SubPool::Queued => self.queued_pool.remove_transaction(tx),
+            SubPool::Pending => self.pending_pool.prune_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
         }
     }
@@ -615,7 +637,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // The `unique_sender` loop will process the first transaction of all senders, update its
         // state and internally update all consecutive transactions
-        'unique_sender: while let Some((id, tx)) = iter.next() {
+        'transactions: while let Some((id, tx)) = iter.next() {
             // Advances the iterator to the next sender
             macro_rules! next_sender {
                 ($iter:ident) => {
@@ -633,6 +655,17 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
             // check if this is a changed account
             if let Some(info) = changed_accounts.get(&id.sender) {
+                // discard all transactions with a nonce lower than the current state nonce
+                if id.nonce < info.state_nonce {
+                    updates.push(PoolUpdate {
+                        id: *tx.transaction.id(),
+                        hash: *tx.transaction.hash(),
+                        current: tx.subpool,
+                        destination: Destination::Discard,
+                    });
+                    continue 'transactions
+                }
+
                 let ancestor = TransactionId::ancestor(id.nonce, info.state_nonce, id.sender);
                 // If there's no ancestor then this is the next transaction.
                 if ancestor.is_none() {
@@ -653,7 +686,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
             if tx.state.has_nonce_gap() {
                 next_sender!(iter);
-                continue
+                continue 'transactions
             }
 
             // Since this is the first transaction of the sender, it has no parked ancestors
@@ -673,13 +706,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
             while let Some((peek, ref mut tx)) = iter.peek_mut() {
                 if peek.sender != id.sender {
                     // Found the next sender
-                    continue 'unique_sender
+                    continue 'transactions
                 }
 
                 // can short circuit
                 if tx.state.has_nonce_gap() {
                     next_sender!(iter);
-                    continue 'unique_sender
+                    continue 'transactions
                 }
 
                 // update cumulative cost
@@ -785,20 +818,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns all transactions that _follow_ after the given id but have the same sender.
     ///
-    /// NOTE: The range is _exclusive_
-    pub(crate) fn descendant_txs_exclusive_mut<'a, 'b: 'a>(
-        &'a mut self,
-        id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
-        self.txs
-            .range_mut((Excluded(id), Unbounded))
-            .take_while(|(other, _)| id.sender == other.sender)
-    }
-
-    /// Returns all transactions that _follow_ after the given id but have the same sender.
-    ///
     /// NOTE: The range is _inclusive_: if the transaction that belongs to `id` it field be the
     /// first value.
+    #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn descendant_txs<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
@@ -1091,7 +1114,11 @@ pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 #[derive(Debug)]
 pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
-    Underpriced { transaction: Arc<ValidPoolTransaction<T>>, existing: TxHash },
+    Underpriced {
+        #[allow(unused)]
+        transaction: Arc<ValidPoolTransaction<T>>,
+        existing: TxHash,
+    },
     /// The transactions feeCap is lower than the chain's minimum fee requirement.
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
@@ -1116,6 +1143,7 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
     /// Where to move the transaction to.
     move_to: SubPool,
     /// Current state of the inserted tx.
+    #[allow(unused)]
     state: TxState,
     /// The transaction that was replaced by this.
     replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,
@@ -1198,11 +1226,6 @@ pub(crate) struct SenderInfo {
 // === impl SenderInfo ===
 
 impl SenderInfo {
-    /// Creates a new entry for an incoming, not yet tracked sender.
-    fn new_incoming(state_nonce: u64, balance: U256) -> Self {
-        Self { state_nonce, balance }
-    }
-
     /// Updates the info with the new values.
     fn update(&mut self, state_nonce: u64, balance: U256) {
         *self = Self { state_nonce, balance };

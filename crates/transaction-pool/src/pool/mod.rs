@@ -65,8 +65,6 @@
 //!    transactions are _currently_ waiting for state changes that eventually move them into
 //!    category (2.) and become pending.
 
-#![allow(dead_code)] // TODO(mattsse): remove once remaining checks implemented
-
 use crate::{
     error::{PoolError, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
@@ -479,13 +477,6 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
     promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
     discarded: Vec<TxHash>,
-}
-
-impl<T: PoolTransaction> AddedPendingTransaction<T> {
-    /// Create a new, empty transaction.
-    fn new(transaction: Arc<ValidPoolTransaction<T>>) -> Self {
-        Self { transaction, promoted: Default::default(), discarded: Default::default() }
-    }
 }
 
 /// Represents a transaction that was added into the pool and its state
