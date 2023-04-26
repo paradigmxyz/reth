@@ -469,6 +469,52 @@ mod tests {
     }
 
     #[test]
+    fn db_cursor_insert_dup() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+        let key = Address::random();
+        let subkey1 = H256::random();
+        let subkey2 = H256::random();
+
+        let entry1 = StorageEntry { key: subkey1, value: U256::ZERO };
+        assert!(dup_cursor.insert(key, entry1).is_ok());
+
+        // Can't insert
+        let entry2 = StorageEntry { key: subkey2, value: U256::ZERO };
+        assert!(dup_cursor.insert(key, entry2).is_err());
+    }
+
+    #[test]
+    fn db_cursor_delete_current_non_existent() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let key1 = Address::from_low_u64_be(1);
+        let key2 = Address::from_low_u64_be(2);
+        let key3 = Address::from_low_u64_be(3);
+        let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
+
+        assert!(cursor.insert(key1, Account::default()).is_ok());
+        assert!(cursor.insert(key2, Account::default()).is_ok());
+        assert!(cursor.insert(key3, Account::default()).is_ok());
+
+        // Seek & delete key2
+        cursor.seek_exact(key2).unwrap();
+        assert_eq!(cursor.delete_current(), Ok(()));
+        assert_eq!(cursor.seek_exact(key2), Ok(None));
+
+        // Seek & delete key2 again
+        assert_eq!(cursor.seek_exact(key2), Ok(None));
+        assert_eq!(cursor.delete_current(), Ok(()));
+        // Assert that key1 is still there
+        assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
+        // Assert that key3 was deleted
+        assert_eq!(cursor.seek_exact(key3), Ok(None));
+    }
+
+    #[test]
     fn db_cursor_insert_wherever_cursor_is() {
         let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
