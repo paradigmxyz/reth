@@ -45,6 +45,7 @@ impl<DB: Clone> Clone for ShareableDatabase<DB> {
 impl<DB: Database> ShareableDatabase<DB> {
     /// Storage provider for latest block
     pub fn latest(&self) -> Result<StateProviderBox<'_>> {
+        trace!(target: "providers::db", "Returning latest state provider");
         Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
     }
 
@@ -58,7 +59,7 @@ impl<DB: Database> ShareableDatabase<DB> {
         // +1 as the changeset that we want is the one that was applied after this block.
         block_number += 1;
 
-        trace!(target: "providers", ?block_number, "Returning historical block provider for block number");
+        trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
     }
 
@@ -74,7 +75,7 @@ impl<DB: Database> ShareableDatabase<DB> {
         // as the  changeset contains old values.
         block_number += 1;
 
-        trace!(target: "providers", ?block_hash, "Returning historical block provider for block hash");
+        trace!(target: "providers::db", ?block_hash, "Returning historical state provider for block hash");
         Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
     }
 }
