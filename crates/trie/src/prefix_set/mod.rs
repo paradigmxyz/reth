@@ -35,6 +35,7 @@ impl PrefixSet {
     pub fn contains<T: Into<Nibbles>>(&mut self, prefix: T) -> bool {
         if !self.sorted {
             self.keys.sort();
+            self.keys.dedup();
             self.sorted = true;
         }
 
