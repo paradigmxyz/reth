@@ -1254,12 +1254,8 @@ mod tests {
     }
 
     fn extension_node_trie(tx: &mut Transaction<'_, Env<WriteMap>>) -> H256 {
-        let a = Account {
-            nonce: 0,
-            balance: U256::from(1u64),
-            bytecode_hash: Some(H256::random()),
-            ..Default::default()
-        };
+        let a =
+            Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(H256::random()) };
         let val = encode_account(a, None);
 
         let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>().unwrap();
