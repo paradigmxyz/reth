@@ -41,6 +41,18 @@ impl Block {
         }
     }
 
+    /// Seal the block with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    pub fn seal(self, hash: H256) -> SealedBlock {
+        SealedBlock {
+            header: self.header.seal(hash),
+            body: self.body,
+            ommers: self.ommers,
+            withdrawals: self.withdrawals,
+        }
+    }
+
     /// Transform into a [`BlockWithSenders`].
     pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
         assert_eq!(self.body.len(), senders.len(), "Unequal number of senders");

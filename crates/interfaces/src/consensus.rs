@@ -16,15 +16,15 @@ pub trait Consensus: Debug + Send + Sync {
     /// This is called on standalone header to check if all hashe
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError>;
 
-    /// Validate if the header information regarding parent are correct.
-    /// This check block number, timestamp, basefee and gas limit increment.
+    /// Validate that the header information regarding parent are correct.
+    /// This checks the block number, timestamp, basefee and gas limit increment.
     ///
     /// This is called before properties that are not in the header itself (like total difficulty)
     /// have been computed.
     ///
     /// **This should not be called for the genesis block**.
     ///
-    /// Note: Validating header agains parent does not include other Consensus validations.
+    /// Note: Validating header against its parent does not include other Consensus validations.
     fn validate_header_agains_parent(
         &self,
         header: &SealedHeader,

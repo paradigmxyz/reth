@@ -158,9 +158,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let range = input.next_block_range();
         let (from_block, to_block) = range.clone().into_inner();
-        let current_blook = input.previous_stage_progress();
+        let current_block = input.previous_stage_progress();
 
-        let block_root = tx.get_header(current_blook)?.state_root;
+        let block_root = tx.get_header(current_block)?.state_root;
 
         let checkpoint = self.get_execution_checkpoint(tx)?;
 
@@ -171,7 +171,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             if let Some(checkpoint) = &checkpoint {
                 debug!(
                     target: "sync::stages::merkle::exec",
-                    current = ?current_blook,
+                    current = ?current_block,
                     target = ?to_block,
                     last_account_key = ?checkpoint.last_account_key,
                     last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
@@ -180,7 +180,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             } else {
                 debug!(
                     target: "sync::stages::merkle::exec",
-                    current = ?current_blook,
+                    current = ?current_block,
                     target = ?to_block,
                     "Rebuilding trie"
                 );
@@ -204,7 +204,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_blook, target = ?to_block, "Updating trie");
+            debug!(target: "sync::stages::merkle::exec", current = ?current_block, target = ?to_block, "Updating trie");
             let (root, updates) = StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
             updates.flush(tx.deref_mut())?;

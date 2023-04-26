@@ -1,7 +1,8 @@
 use crate::{
-    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider, StateProvider,
-    StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
+    traits::{BlockSource, ReceiptProvider},
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, PostState, PostStateDataProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
@@ -254,6 +255,10 @@ impl BlockIdProvider for MockEthProvider {
 }
 
 impl BlockProvider for MockEthProvider {
+    fn find_block_by_hash(&self, hash: H256, _source: BlockSource) -> Result<Option<Block>> {
+        self.block(hash.into())
+    }
+
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         let lock = self.blocks.lock();
         match id {
