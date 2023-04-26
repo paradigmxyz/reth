@@ -1,6 +1,6 @@
 use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
-    traits::ReceiptProvider,
+    traits::{BlockSource, ReceiptProvider},
     BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
     ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
@@ -158,6 +158,14 @@ impl<DB: Database> BlockIdProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
+    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
+        if source.is_database() {
+            self.block(hash.into())
+        } else {
+            Ok(None)
+        }
+    }
+
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         if let Some(number) = self.block_number_for_id(id)? {
             if let Some(header) = self.header_by_number(number)? {
