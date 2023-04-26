@@ -5,6 +5,7 @@ use crate::{
     session::{Direction, ExceedsSessionLimit},
 };
 use std::time::Duration;
+use tracing::trace;
 
 /// Default request timeout for a single request.
 ///
@@ -17,7 +18,7 @@ pub const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 pub const PROTOCOL_BREACH_REQUEST_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
 /// Configuration options when creating a [SessionManager](crate::session::SessionManager).
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SessionsConfig {
     /// Size of the session command buffer (per session task).
@@ -74,7 +75,7 @@ impl SessionsConfig {
 /// Limits for sessions.
 ///
 /// By default, no session limits will be enforced
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SessionLimits {
     max_pending_inbound: Option<u32>,
@@ -139,19 +140,23 @@ impl SessionCounter {
 
     pub(crate) fn inc_pending_inbound(&mut self) {
         self.pending_inbound += 1;
+        trace!(target: "net::sessions::counter", new_pending_inbound=?self.pending_inbound, "Incremented pending inbound sessions");
     }
 
     pub(crate) fn inc_pending_outbound(&mut self) {
         self.pending_outbound += 1;
+        trace!(target: "net::sessions::counter", new_pending_outbound=?self.pending_outbound, "Incremented pending outbound sessions");
     }
 
     pub(crate) fn dec_pending(&mut self, direction: &Direction) {
         match direction {
             Direction::Outgoing(_) => {
                 self.pending_outbound -= 1;
+                trace!(target: "net::sessions::counter", new_pending_outbound=?self.pending_outbound, "Decremented pending outbound sessions");
             }
             Direction::Incoming => {
                 self.pending_inbound -= 1;
+                trace!(target: "net::sessions::counter", new_pending_outbound=?self.pending_outbound, "Decremented pending inbound sessions");
             }
         }
     }
@@ -160,9 +165,11 @@ impl SessionCounter {
         match direction {
             Direction::Outgoing(_) => {
                 self.active_outbound += 1;
+                trace!(target: "net::sessions::counter", new_active_outbound=?self.active_outbound, "Incremented active outbound sessions");
             }
             Direction::Incoming => {
                 self.active_inbound += 1;
+                trace!(target: "net::sessions::counter", new_active_inbound=?self.active_inbound, "Incremented active inbound sessions");
             }
         }
     }
@@ -171,9 +178,11 @@ impl SessionCounter {
         match direction {
             Direction::Outgoing(_) => {
                 self.active_outbound -= 1;
+                trace!(target: "net::sessions::counter", new_active_outbound=?self.active_outbound, "Decremented active outbound sessions");
             }
             Direction::Incoming => {
                 self.active_inbound -= 1;
+                trace!(target: "net::sessions::counter", new_active_inbound=?self.active_inbound, "Decremented active inbound sessions");
             }
         }
     }
