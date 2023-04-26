@@ -77,7 +77,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             td += header.difficulty;
 
             self.consensus
-                .validate_header(&header, td)
+                .validate_header_with_total_difficulty(&header, td)
                 .map_err(|error| StageError::Validation { block: header.number, error })?;
             cursor_td.append(block_number, td.into())?;
         }

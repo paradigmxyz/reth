@@ -149,9 +149,10 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        externals.consensus.validate_header(&block, U256::MAX)?;
-        externals.consensus.pre_validate_header(&block, parent_block)?;
-        externals.consensus.pre_validate_block(&block)?;
+        externals.consensus.validate_header_with_total_difficulty(&block, U256::MAX)?;
+        externals.consensus.validate_header(&block)?;
+        externals.consensus.validate_header_agains_parent(&block, parent_block)?;
+        externals.consensus.validate_block(&block)?;
 
         let (unseal, senders) = block.into_components();
         let unseal = unseal.unseal();
