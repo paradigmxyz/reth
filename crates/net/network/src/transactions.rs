@@ -795,6 +795,8 @@ mod tests {
             match ev {
                 NetworkEvent::SessionEstablished {
                     peer_id,
+                    remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,
@@ -803,6 +805,8 @@ mod tests {
                     // to insert a new peer in transactions peerset
                     transactions.on_network_event(NetworkEvent::SessionEstablished {
                         peer_id,
+                        remote_addr,
+                        client_version,
                         capabilities,
                         messages,
                         status,
@@ -870,12 +874,16 @@ mod tests {
             match ev {
                 NetworkEvent::SessionEstablished {
                     peer_id,
+                    remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,
                     version,
                 } => transactions.on_network_event(NetworkEvent::SessionEstablished {
                     peer_id,
+                    remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,

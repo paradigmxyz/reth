@@ -13,8 +13,10 @@ pub type CanonStateNotificationSender = Sender<CanonStateNotification>;
 /// A type that allows to register chain related event subscriptions.
 #[auto_impl(&, Arc)]
 pub trait CanonStateSubscriptions: Send + Sync {
-    /// Get notified when a new block was imported.
-    fn subscribe_canon_state(&self) -> CanonStateNotifications;
+    /// Get notified when a new canonical chain was imported.
+    ///
+    /// A canonical chain be one or more blocks, a reorg or a revert.
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications;
 }
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
@@ -26,6 +28,8 @@ pub enum CanonStateNotification {
     /// Chain reorgs and both old and new chain are returned.
     Reorg { old: Arc<Chain>, new: Arc<Chain> },
     /// Chain got reverted without reorg and only old chain is returned.
+    ///
+    /// This reverts the chain's tip to the first block of the chain.
     Revert { old: Arc<Chain> },
     /// Chain got extended without reorg and only new chain is returned.
     Commit { new: Arc<Chain> },

@@ -4,9 +4,9 @@ use crate::PostState;
 use reth_interfaces::{executor::Error as ExecError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
-    TxHash,
+    TransactionSigned, TxHash,
 };
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 /// A chain of blocks and their final state.
 ///
@@ -64,8 +64,14 @@ impl Chain {
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub fn into_inner(self) -> (ChainBlocks, PostState) {
-        (ChainBlocks { blocks: self.blocks }, self.state)
+    pub fn into_inner(self) -> (ChainBlocks<'static>, PostState) {
+        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.state)
+    }
+
+    /// Destructure the chain into its inner components, the blocks and the state at the tip of the
+    /// chain.
+    pub fn inner(&self) -> (ChainBlocks<'_>, &PostState) {
+        (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
     }
 
     /// Get the block at which this chain forked.
@@ -202,16 +208,16 @@ impl Chain {
 
 /// All blocks in the chain
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ChainBlocks {
-    blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
+pub struct ChainBlocks<'a> {
+    blocks: Cow<'a, BTreeMap<BlockNumber, SealedBlockWithSenders>>,
 }
 
-impl ChainBlocks {
+impl<'a> ChainBlocks<'a> {
     /// Creates a consuming iterator over all blocks in the chain with increasing block number.
     ///
     /// Note: this always yields at least one block.
     pub fn into_blocks(self) -> impl Iterator<Item = SealedBlockWithSenders> {
-        self.blocks.into_values()
+        self.blocks.into_owned().into_values()
     }
 
     /// Creates an iterator over all blocks in the chain with increasing block number.
@@ -227,14 +233,29 @@ impl ChainBlocks {
     pub fn tip(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
     }
+
+    /// Get the _first_ block of the chain.
+    ///
+    /// # Note
+    ///
+    /// Chains always have at least one block.
+    pub fn first(&self) -> &SealedBlockWithSenders {
+        self.blocks.first_key_value().expect("Chain should have at least one block").1
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.blocks.values().flat_map(|block| block.body.iter())
+    }
 }
 
-impl IntoIterator for ChainBlocks {
+impl<'a> IntoIterator for ChainBlocks<'a> {
     type Item = (BlockNumber, SealedBlockWithSenders);
     type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, SealedBlockWithSenders>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.blocks.into_iter()
+        #[allow(clippy::unnecessary_to_owned)]
+        self.blocks.into_owned().into_iter()
     }
 }
 

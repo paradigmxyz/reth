@@ -20,6 +20,15 @@ pub enum ReputationChangeKind {
     FailedToConnect,
     /// Connection dropped by peer.
     Dropped,
+    /// Reset the reputation to the default value.
+    Reset,
     /// Apply a reputation change by value
     Other(Reputation),
+}
+
+impl ReputationChangeKind {
+    /// Returns true if the reputation change is a reset.
+    pub fn is_reset(&self) -> bool {
+        matches!(self, Self::Reset)
+    }
 }

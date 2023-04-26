@@ -73,9 +73,11 @@ impl PoolError {
                 false
             }
             PoolError::FeeCapBelowMinimumProtocolFeeCap(_, _) => {
-                // fee cap of the tx below the technical minimum determined by the protocol: always
-                // invalid
-                true
+                // fee cap of the tx below the technical minimum determined by the protocol, see
+                // [MINIMUM_PROTOCOL_FEE_CAP](reth_primitives::constants::MIN_PROTOCOL_BASE_FEE)
+                // although this transaction will always be invalid, we do not want to penalize the
+                // sender because this check simply could not be implemented by the client
+                false
             }
             PoolError::SpammerExceededCapacity(_, _) => {
                 // spammer detected

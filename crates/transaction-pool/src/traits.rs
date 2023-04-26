@@ -24,15 +24,20 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
 
-    /// Returns stats about the pool.
-    fn status(&self) -> PoolSize;
+    /// Returns stats about the pool and all sub-pools.
+    fn pool_size(&self) -> PoolSize;
 
-    /// Event listener for when a new block was mined.
+    /// Returns the block the pool is currently tracking.
+    ///
+    /// This tracks the block that the pool has last seen.
+    fn block_info(&self) -> BlockInfo;
+
+    /// Event listener for when the pool needs to be updated
     ///
     /// Implementers need to update the pool accordingly.
     /// For example the base fee of the pending block is determined after a block is mined which
     /// affects the dynamic fee requirement of pending transactions in the pool.
-    fn on_new_block(&self, event: OnNewBlockEvent);
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
 
     /// Imports an _external_ transaction.
     ///
@@ -42,6 +47,17 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: P2P
     async fn add_external_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
         self.add_transaction(TransactionOrigin::External, transaction).await
+    }
+
+    /// Imports all _external_ transactions
+    ///
+    ///
+    /// Consumer: Utility
+    async fn add_external_transactions(
+        &self,
+        transactions: Vec<Self::Transaction>,
+    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+        self.add_transactions(TransactionOrigin::External, transactions).await
     }
 
     /// Adds an _unvalidated_ transaction into the pool.
@@ -108,7 +124,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Removes all transactions corresponding to the given hashes.
     ///
-    /// Also removes all dependent transactions.
+    /// Also removes all _dependent_ transactions.
     ///
     /// Consumer: Block production
     fn remove_transactions(
@@ -229,25 +245,48 @@ impl TransactionOrigin {
     }
 }
 
-/// Event fired when a new block was mined
+/// Represents changes after a new canonical block or range of canonical blocks was added to the
+/// chain.
+///
+/// It is expected that this is only used if the added blocks are canonical to the pool's last known
+/// block hash. In other words, the first added block of the range must be the child of the last
+/// known block hash.
+///
+/// This is used to update the pool state accordingly.
 #[derive(Debug, Clone)]
-pub struct OnNewBlockEvent {
-    /// Hash of the added block.
+pub struct CanonicalStateUpdate {
+    /// Hash of the tip block.
     pub hash: H256,
+    /// Number of the tip block.
+    pub number: u64,
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
     pub pending_block_base_fee: u128,
-    /// Provides a set of state changes that affected the accounts.
-    pub state_changes: StateDiff,
-    /// All mined transactions in the block
+    /// A set of changed accounts across a range of blocks.
+    pub changed_accounts: Vec<ChangedAccount>,
+    /// All mined transactions in the block range.
     pub mined_transactions: Vec<H256>,
 }
 
-/// Contains a list of changed state
-#[derive(Debug, Clone)]
-pub struct StateDiff {
-    // TODO(mattsse) this could be an `Arc<revm::State>>`
+/// Represents a changed account
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct ChangedAccount {
+    /// The address of the account.
+    pub address: Address,
+    /// Account nonce.
+    pub nonce: u64,
+    /// Account balance.
+    pub balance: U256,
+}
+
+// === impl ChangedAccount ===
+
+impl ChangedAccount {
+    /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
+    pub(crate) fn empty(address: Address) -> Self {
+        Self { address, nonce: 0, balance: U256::ZERO }
+    }
 }
 
 /// An `Iterator` that only returns transactions that are ready to be executed.
@@ -479,4 +518,18 @@ pub struct PoolSize {
     pub queued: usize,
     /// Reported size of transactions in the _queued_ sub-pool.
     pub queued_size: usize,
+}
+
+/// Represents the current status of the pool.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct BlockInfo {
+    /// Hash for the currently tracked block.
+    pub last_seen_block_hash: H256,
+    /// Current the currently tracked block.
+    pub last_seen_block_number: u64,
+    /// Currently enforced base fee: the threshold for the basefee sub-pool.
+    ///
+    /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
+    /// currently tracking.
+    pub pending_basefee: u128,
 }

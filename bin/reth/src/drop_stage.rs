@@ -14,7 +14,8 @@ use reth_db::{
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
 use reth_stages::stages::{
-    ACCOUNT_HASHING, EXECUTION, MERKLE_EXECUTION, MERKLE_UNWIND, STORAGE_HASHING,
+    ACCOUNT_HASHING, EXECUTION, INDEX_ACCOUNT_HISTORY, INDEX_STORAGE_HISTORY, MERKLE_EXECUTION,
+    MERKLE_UNWIND, STORAGE_HASHING,
 };
 use std::sync::Arc;
 use tracing::info;
@@ -99,6 +100,15 @@ impl Command {
                     tx.put::<tables::SyncStage>(MERKLE_EXECUTION.0.to_string(), 0)?;
                     tx.put::<tables::SyncStage>(MERKLE_UNWIND.0.to_string(), 0)?;
                     tx.delete::<tables::SyncStageProgress>(MERKLE_EXECUTION.0.into(), None)?;
+                    Ok::<_, eyre::Error>(())
+                })??;
+            }
+            StageEnum::History => {
+                tool.db.update(|tx| {
+                    tx.clear::<tables::AccountHistory>()?;
+                    tx.clear::<tables::StorageHistory>()?;
+                    tx.put::<tables::SyncStage>(INDEX_ACCOUNT_HISTORY.0.to_string(), 0)?;
+                    tx.put::<tables::SyncStage>(INDEX_STORAGE_HISTORY.0.to_string(), 0)?;
                     Ok::<_, eyre::Error>(())
                 })??;
             }

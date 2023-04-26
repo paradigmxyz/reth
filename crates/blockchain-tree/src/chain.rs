@@ -10,7 +10,6 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::PostStateProvider, BlockExecutor, Chain, ExecutorFactory, PostStateDataProvider,
-    StateProviderFactory,
 };
 use std::{
     collections::BTreeMap,
@@ -150,9 +149,10 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        externals.consensus.validate_header(&block, U256::MAX)?;
-        externals.consensus.pre_validate_header(&block, parent_block)?;
-        externals.consensus.pre_validate_block(&block)?;
+        externals.consensus.validate_header_with_total_difficulty(&block, U256::MAX)?;
+        externals.consensus.validate_header(&block)?;
+        externals.consensus.validate_header_agains_parent(&block, parent_block)?;
+        externals.consensus.validate_block(&block)?;
 
         let (unseal, senders) = block.into_components();
         let unseal = unseal.unseal();
@@ -163,7 +163,7 @@ impl AppendableChain {
         let history_provider = db.history_by_block_number(canonical_fork.number)?;
         let state_provider = history_provider;
 
-        let provider = PostStateProvider { state_provider, post_state_data_provider };
+        let provider = PostStateProvider::new(state_provider, post_state_data_provider);
 
         let mut executor = externals.executor_factory.with_sp(&provider);
         executor.execute_and_verify_receipt(&unseal, U256::MAX, Some(senders)).map_err(Into::into)

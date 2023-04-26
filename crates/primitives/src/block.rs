@@ -36,7 +36,7 @@ impl Block {
         SealedBlock {
             header: self.header.seal_slow(),
             body: self.body,
-            ommers: self.ommers.into_iter().map(|o| o.seal_slow()).collect(),
+            ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
     }
@@ -105,7 +105,7 @@ pub struct SealedBlock {
     /// Transactions with signatures.
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
-    pub ommers: Vec<SealedHeader>,
+    pub ommers: Vec<Header>,
     /// Block withdrawals.
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
@@ -117,7 +117,7 @@ impl SealedBlock {
     }
 
     /// Splits the sealed block into underlying components
-    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<SealedHeader>) {
+    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
         (self.header, self.body, self.ommers)
     }
 
@@ -137,7 +137,7 @@ impl SealedBlock {
         Block {
             header: self.header.unseal(),
             body: self.body,
-            ommers: self.ommers.into_iter().map(|o| o.unseal()).collect(),
+            ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
     }

@@ -506,6 +506,7 @@ impl Discv4Service {
             info!(target : "discv4",  ?external_ip, "Updating external ip");
             self.local_node_record.address = external_ip;
             let _ = self.local_eip_868_enr.set_ip(external_ip, &self.secret_key);
+            info!(target : "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
         }
     }
 

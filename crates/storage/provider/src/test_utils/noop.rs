@@ -1,7 +1,7 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostState, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -31,6 +31,10 @@ impl BlockHashProvider for NoopProvider {
 impl BlockIdProvider for NoopProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
         Ok(ChainInfo::default())
+    }
+
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        Ok(0)
     }
 
     fn block_number(&self, _hash: H256) -> Result<Option<BlockNumber>> {
@@ -126,6 +130,12 @@ impl AccountProvider for NoopProvider {
     }
 }
 
+impl StateRootProvider for NoopProvider {
+    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+        todo!()
+    }
+}
+
 impl StateProvider for NoopProvider {
     fn storage(&self, _account: Address, _storage_key: StorageKey) -> Result<Option<StorageValue>> {
         Ok(None)
@@ -197,7 +207,15 @@ impl StateProviderFactory for NoopProvider {
         Ok(Box::new(*self))
     }
 
-    fn pending<'a>(
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {

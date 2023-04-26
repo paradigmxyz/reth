@@ -1,10 +1,10 @@
 use super::AccountProvider;
 use crate::{post_state::PostState, BlockHashProvider};
 use auto_impl::auto_impl;
-use reth_interfaces::Result;
+use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
-    Address, BlockHash, BlockNumHash, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
-    KECCAK_EMPTY, U256,
+    Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, Bytes,
+    StorageKey, StorageValue, H256, KECCAK_EMPTY, U256,
 };
 
 /// Type alias of boxed [StateProvider].
@@ -12,7 +12,9 @@ pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
-pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
+pub trait StateProvider:
+    BlockHashProvider + AccountProvider + StateRootProvider + Send + Sync
+{
     /// Get storage of given account.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;
 
@@ -72,20 +74,74 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
-/// `BlockNumber` or the latest state.
+/// `BlockNumber`, the latest state, or the pending state.
+///
+/// This type differentiates states into `historical`, `latest` and `pending`, where the `latest`
+/// block determines what is historical or pending: `[historical..latest..pending]`.
+///
+/// The `latest` state represents the state after the most recent block has been committed to the
+/// database, `historical` states are states that have been committed to the database before the
+/// `latest` state, and `pending` states are states that have not yet been committed to the
+/// database which may or may not become the `latest` state, depending on consensus.
+///
+/// Note: the `pending` block is considered the block that extends the canonical chain but one and
+/// has the `latest` block as its parent.
 pub trait StateProviderFactory: Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> Result<StateProviderBox<'_>>;
 
-    /// Returns a [StateProvider] indexed by the given block number.
+    /// Returns a [StateProvider] indexed by the given [BlockId].
+    fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox<'_>> {
+        match block_id {
+            BlockId::Number(block_number) => self.history_by_block_number_or_tag(block_number),
+            BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
+        }
+    }
+
+    /// Returns a [StateProvider] indexed by the given block number or tag
+    fn history_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> Result<StateProviderBox<'_>> {
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                todo!()
+            }
+            BlockNumberOrTag::Safe => {
+                todo!()
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
+        }
+    }
+
+    /// Returns a historical [StateProvider] indexed by the given historic block number.
+    ///
+    ///
+    /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_number(&self, block: BlockNumber) -> Result<StateProviderBox<'_>>;
 
-    /// Returns a [StateProvider] indexed by the given block hash.
+    /// Returns a historical [StateProvider] indexed by the given block hash.
+    ///
+    /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
+
+    /// Returns _any_[StateProvider] with matching block hash.
+    ///
+    /// This will return a [StateProvider] for either a historical or pending block.
+    fn state_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
+
+    /// Storage provider for pending state.
+    ///
+    /// Represents the state at the block that extends the canonical chain by one.
+    /// If there's no `pending` block, then this is equal to [StateProviderFactory::latest]
+    fn pending(&self) -> Result<StateProviderBox<'_>>;
 
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
-    fn pending(
+    fn pending_with_provider(
         &self,
         post_state_data: Box<dyn PostStateDataProvider>,
     ) -> Result<StateProviderBox<'_>>;
@@ -101,11 +157,21 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Box<dyn PostStateDataProvider>>;
+    ) -> Result<Box<dyn PostStateDataProvider>> {
+        Ok(self
+            .find_pending_state_provider(block_hash)
+            .ok_or(ProviderError::UnknownBlockHash(block_hash))?)
+    }
+
+    /// Returns state provider if a matching block exists.
+    fn find_pending_state_provider(
+        &self,
+        block_hash: BlockHash,
+    ) -> Option<Box<dyn PostStateDataProvider>>;
 }
 
 /// Post state data needs for execution on it.
-/// This trait is used to create state provider over pending state.
+/// This trait is used to create a state provider over pending state.
 ///
 /// Pending state contains:
 /// * [`PostState`] contains all changed of accounts and storage of pending chain
@@ -121,4 +187,11 @@ pub trait PostStateDataProvider: Send + Sync {
     ///
     /// Needed to create state provider.
     fn canonical_fork(&self) -> BlockNumHash;
+}
+
+/// A type that can compute the state root of a given post state.
+#[auto_impl[Box,&, Arc]]
+pub trait StateRootProvider: Send + Sync {
+    /// Returns the state root of the PostState on top of the current state.
+    fn state_root(&self, post_state: PostState) -> Result<H256>;
 }
