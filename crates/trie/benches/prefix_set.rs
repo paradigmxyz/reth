@@ -1,25 +1,13 @@
-#![allow(dead_code, unused_imports, non_snake_case)]
-
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use proptest::{
-    arbitrary::Arbitrary,
     prelude::*,
     strategy::{Strategy, ValueTree},
     test_runner::{basic_result_cache, TestRunner},
 };
-use reth_db::{
-    cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    mdbx::Env,
-    TxHashNumber,
-};
-use reth_primitives::H256;
 use reth_trie::{prefix_set::PrefixSet, Nibbles};
-use std::{
-    collections::{BTreeSet, HashSet},
-    time::Instant,
-};
+use std::collections::BTreeSet;
 
 pub trait PrefixSetAbstraction: Default {
     fn insert(&mut self, key: Nibbles);
@@ -32,7 +20,7 @@ impl PrefixSetAbstraction for PrefixSet {
     }
 
     fn contains(&mut self, key: Nibbles) -> bool {
-        PrefixSet::contains(&self, key)
+        PrefixSet::contains(self, key)
     }
 }
 
@@ -123,10 +111,7 @@ criterion_main!(prefix_set);
 
 mod implementations {
     use super::*;
-    use std::{
-        collections::btree_set::Range, iter::Peekable, marker::PhantomPinned, ops::Bound, pin::Pin,
-        ptr::NonNull,
-    };
+    use std::ops::Bound;
 
     #[derive(Default)]
     pub struct BTreeAnyPrefixSet {
