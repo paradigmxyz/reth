@@ -19,10 +19,10 @@ use reth_primitives::{
     constants::{
         EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{BlockProvider, PostState, StateProviderFactory};
+use reth_provider::{BlockProvider, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -107,19 +107,21 @@ where
         &self,
         attributes: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        // TODO this needs to access the _pending_ state of the parent block hash
-
-        let block_id: BlockId = if attributes.parent.is_zero() {
+        let parent_block = if attributes.parent.is_zero() {
             // use latest block if parent is zero: genesis block
-            BlockNumberOrTag::Latest.into()
+            self.client
+                .block(BlockNumberOrTag::Latest.into())?
+                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?
+                .seal_slow()
         } else {
-            attributes.parent.into()
-        };
+            let block = self
+                .client
+                .find_block_by_hash(attributes.parent, BlockSource::Any)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
 
-        let parent_block = self
-            .client
-            .block(block_id)?
-            .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
+            // we already now the hash, so we can seal it
+            block.seal(attributes.parent)
+        };
 
         // configure evm env based on parent block
         let (initialized_cfg, initialized_block_env) =
@@ -128,7 +130,7 @@ where
         let config = PayloadConfig {
             initialized_block_env,
             initialized_cfg,
-            parent_block: Arc::new(parent_block.seal_slow()),
+            parent_block: Arc::new(parent_block),
             extra_data: self.config.extradata.clone(),
             attributes,
             chain_spec: Arc::clone(&self.chain_spec),
@@ -458,8 +460,7 @@ fn build_payload<Pool, Client>(
             chain_spec,
         } = config;
 
-        // TODO this needs to access the _pending_ state of the parent block hash
-        let state = client.latest()?;
+        let state = client.state_by_block_hash(parent_block.hash)?;
         let mut db = SubState::new(State::new(state));
         let mut post_state = PostState::default();
 
@@ -589,11 +590,6 @@ fn build_empty_payload<Client>(
 where
     Client: StateProviderFactory,
 {
-    // TODO this needs to access the _pending_ state of the parent block hash
-    let state = client.latest()?;
-    let mut db = SubState::new(State::new(state));
-    let mut post_state = PostState::default();
-
     let PayloadConfig {
         initialized_block_env,
         parent_block,
@@ -602,6 +598,10 @@ where
         chain_spec,
         ..
     } = config;
+
+    let state = client.state_by_block_hash(parent_block.hash)?;
+    let mut db = SubState::new(State::new(state));
+    let mut post_state = PostState::default();
 
     let base_fee = initialized_block_env.basefee.to::<u64>();
     let block_number = initialized_block_env.number.to::<u64>();
