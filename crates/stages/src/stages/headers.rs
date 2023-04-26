@@ -194,6 +194,17 @@ where
     ) -> Result<ExecOutput, StageError> {
         let current_progress = input.stage_progress.unwrap_or_default();
 
+        // check if the stage is done early in case there are existing headers
+        if self.is_stage_done(tx, current_progress)? {
+            let stage_progress = current_progress.max(
+                tx.cursor_read::<tables::CanonicalHeaders>()?
+                    .last()?
+                    .map(|(num, _)| num)
+                    .unwrap_or_default(),
+            );
+            return Ok(ExecOutput { stage_progress, done: true })
+        }
+
         // Lookup the head and tip of the sync range
         let gap = self.get_sync_gap(tx, current_progress).await?;
         let tip = gap.target.tip();
