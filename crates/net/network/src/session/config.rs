@@ -140,23 +140,19 @@ impl SessionCounter {
 
     pub(crate) fn inc_pending_inbound(&mut self) {
         self.pending_inbound += 1;
-        trace!(target: "net::sessions::counter", new_pending_inbound=?self.pending_inbound, "Incremented pending inbound sessions");
     }
 
     pub(crate) fn inc_pending_outbound(&mut self) {
         self.pending_outbound += 1;
-        trace!(target: "net::sessions::counter", new_pending_outbound=?self.pending_outbound, "Incremented pending outbound sessions");
     }
 
     pub(crate) fn dec_pending(&mut self, direction: &Direction) {
         match direction {
             Direction::Outgoing(_) => {
                 self.pending_outbound -= 1;
-                trace!(target: "net::sessions::counter", new_pending_outbound=?self.pending_outbound, "Decremented pending outbound sessions");
             }
             Direction::Incoming => {
                 self.pending_inbound -= 1;
-                trace!(target: "net::sessions::counter", new_pending_outbound=?self.pending_outbound, "Decremented pending inbound sessions");
             }
         }
     }
@@ -165,11 +161,9 @@ impl SessionCounter {
         match direction {
             Direction::Outgoing(_) => {
                 self.active_outbound += 1;
-                trace!(target: "net::sessions::counter", new_active_outbound=?self.active_outbound, "Incremented active outbound sessions");
             }
             Direction::Incoming => {
                 self.active_inbound += 1;
-                trace!(target: "net::sessions::counter", new_active_inbound=?self.active_inbound, "Incremented active inbound sessions");
             }
         }
     }
@@ -178,11 +172,9 @@ impl SessionCounter {
         match direction {
             Direction::Outgoing(_) => {
                 self.active_outbound -= 1;
-                trace!(target: "net::sessions::counter", new_active_outbound=?self.active_outbound, "Decremented active outbound sessions");
             }
             Direction::Incoming => {
                 self.active_inbound -= 1;
-                trace!(target: "net::sessions::counter", new_active_inbound=?self.active_inbound, "Decremented active inbound sessions");
             }
         }
     }
