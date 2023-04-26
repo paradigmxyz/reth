@@ -10,11 +10,11 @@ use crate::{
         pending::PendingPool,
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate},
-        AddedPendingTransaction, AddedTransaction, OnNewBlockOutcome,
+        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
-    traits::{PoolSize, StateDiff},
-    OnNewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
-    ValidPoolTransaction, U256,
+    traits::{BlockInfo, PoolSize},
+    CanonicalStateUpdate, ChangedAccount, PoolConfig, PoolResult, PoolTransaction,
+    TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{constants::MIN_PROTOCOL_BASE_FEE, TxHash, H256};
@@ -120,6 +120,15 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
+    /// Returns the currently tracked block values
+    pub(crate) fn block_info(&self) -> BlockInfo {
+        BlockInfo {
+            last_seen_block_hash: self.all_transactions.last_seen_block_hash,
+            last_seen_block_number: self.all_transactions.last_seen_block_number,
+            pending_basefee: self.all_transactions.pending_basefee,
+        }
+    }
+
     /// Updates the pool based on the changed base fee.
     ///
     /// This enforces the dynamic fee requirement.
@@ -166,22 +175,26 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This removes all mined transactions, updates according to the new base fee and rechecks
     /// sender allowance.
-    pub(crate) fn on_new_block(&mut self, event: OnNewBlockEvent) -> OnNewBlockOutcome {
+    pub(crate) fn on_canonical_state_change(
+        &mut self,
+        event: CanonicalStateUpdate,
+    ) -> OnNewCanonicalStateOutcome {
         // Remove all transaction that were included in the block
         for tx_hash in &event.mined_transactions {
-            self.remove_transaction_by_hash(tx_hash);
-            // Update removed transactions metric
-            self.metrics.removed_transactions.increment(1);
+            if self.remove_transaction_by_hash(tx_hash).is_some() {
+                // Update removed transactions metric
+                self.metrics.removed_transactions.increment(1);
+            }
         }
 
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
         let updates =
-            self.all_transactions.update(event.pending_block_base_fee, &event.state_changes);
+            self.all_transactions.update(event.pending_block_base_fee, &event.changed_accounts);
 
         // Process the sub-pool updates
         let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
-        OnNewBlockOutcome {
+        OnNewCanonicalStateOutcome {
             block_hash: event.hash,
             mined: event.mined_transactions,
             promoted,
@@ -489,8 +502,6 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
 pub(crate) struct AllTransactions<T: PoolTransaction> {
-    /// Expected base fee for the pending block.
-    pending_basefee: u128,
     /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
@@ -505,6 +516,12 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FnvHashMap<SenderId, usize>,
+    /// The current block number the pool keeps track of.
+    last_seen_block_number: u64,
+    /// The current block hash the pool keeps track of.
+    last_seen_block_hash: H256,
+    /// Expected base fee for the pending block.
+    pending_basefee: u128,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
@@ -572,7 +589,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn update(
         &mut self,
         pending_block_base_fee: u128,
-        _state_diffs: &StateDiff,
+        _changed_accounts: &[ChangedAccount],
     ) -> Vec<PoolUpdate> {
         // update new basefee
         self.pending_basefee = pending_block_base_fee;
@@ -1010,12 +1027,14 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
             max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
-            pending_basefee: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: 30_000_000,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
+            last_seen_block_number: 0,
+            last_seen_block_hash: Default::default(),
+            pending_basefee: Default::default(),
         }
     }
 }
