@@ -1,5 +1,4 @@
 use crate::Nibbles;
-use std::collections::BTreeSet;
 
 mod loader;
 pub use loader::PrefixSetLoader;
@@ -25,20 +24,46 @@ pub use loader::PrefixSetLoader;
 /// ```
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSet {
-    keys: BTreeSet<Nibbles>,
+    keys: Vec<Nibbles>,
+    sorted: bool,
+    index: usize,
 }
 
 impl PrefixSet {
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
-    pub fn contains<T: Into<Nibbles>>(&self, prefix: T) -> bool {
+    pub fn contains<T: Into<Nibbles>>(&mut self, prefix: T) -> bool {
+        if !self.sorted {
+            self.keys.sort();
+            self.keys.dedup();
+            self.sorted = true;
+        }
+
         let prefix = prefix.into();
-        self.keys.iter().any(|key| key.has_prefix(&prefix))
+
+        while self.index > 0 && self.keys[self.index] > prefix {
+            self.index -= 1;
+        }
+
+        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+            if key.has_prefix(&prefix) {
+                self.index += idx;
+                return true
+            }
+
+            if key > &prefix {
+                self.index += idx;
+                return false
+            }
+        }
+
+        false
     }
 
     /// Inserts the given `nibbles` into the set.
     pub fn insert<T: Into<Nibbles>>(&mut self, nibbles: T) {
-        self.keys.insert(nibbles.into());
+        self.sorted = false;
+        self.keys.push(nibbles.into());
     }
 
     /// Returns the number of elements in the set.

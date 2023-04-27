@@ -248,7 +248,7 @@ where
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
     ) -> Result<OnForkChoiceUpdated, BeaconEngineError> {
-        trace!(target: "consensus::engine", ?state, "Received new forkchoice state");
+        trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
@@ -325,7 +325,7 @@ where
     fn process_payload_attributes(
         &self,
         attrs: PayloadAttributes,
-        header: Header,
+        head: Header,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
         // 7. Client software MUST ensure that payloadAttributes.timestamp is
@@ -334,7 +334,7 @@ where
         //    software MUST respond with -38003: `Invalid payload attributes` and
         //    MUST NOT begin a payload build process. In such an event, the
         //    forkchoiceState update MUST NOT be rolled back.
-        if attrs.timestamp <= header.timestamp.into() {
+        if attrs.timestamp <= head.timestamp.into() {
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 
@@ -343,7 +343,7 @@ where
         //    if payloadAttributes is not null and the forkchoice state has been
         //    updated successfully. The build process is specified in the Payload
         //    building section.
-        let attributes = PayloadBuilderAttributes::new(header.parent_hash, attrs);
+        let attributes = PayloadBuilderAttributes::new(state.head_block_hash, attrs);
 
         // send the payload to the builder and return the receiver for the pending payload id,
         // initiating payload job is handled asynchronously

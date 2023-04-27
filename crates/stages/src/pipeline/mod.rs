@@ -149,7 +149,7 @@ where
     }
 
     /// Registers progress metrics for each registered stage
-    fn register_metrics(&mut self, db: Arc<DB>) {
+    pub fn register_metrics(&mut self, db: Arc<DB>) {
         for stage in &self.stages {
             let stage_id = stage.id();
             self.metrics.stage_checkpoint(

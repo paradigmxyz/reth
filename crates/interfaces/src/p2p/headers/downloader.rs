@@ -79,7 +79,7 @@ pub fn validate_header_download(
     ensure_parent(header, parent)?;
     // validate header against parent
     consensus
-        .validate_header_agains_parent(header, parent)
+        .validate_header_against_parent(header, parent)
         .map_err(|error| DownloadError::HeaderValidation { hash: parent.hash(), error })?;
     // validate header standalone
     consensus

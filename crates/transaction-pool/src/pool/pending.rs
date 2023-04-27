@@ -3,7 +3,7 @@ use crate::{
     pool::{best::BestTransactions, size::SizeTracker},
     TransactionOrdering, ValidPoolTransaction,
 };
-use reth_primitives::TxHash;
+
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -128,7 +128,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Removes a _mined_ transaction from the pool.
     ///
     /// If the transactions has a descendant transaction it will advance it to the best queue.
-    pub(crate) fn remove_mined(
+    pub(crate) fn prune_transaction(
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
@@ -160,11 +160,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
         id
     }
 
-    /// Returns the transaction for the id if it's in the pool but not yet mined.
-    pub(crate) fn get(&self, id: &TransactionId) -> Option<Arc<PendingTransaction<T>>> {
-        self.by_id.get(id).cloned()
-    }
-
     /// Removes the worst transaction from this pool.
     pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let worst = self.all.iter().next_back().map(|tx| *tx.transaction.id())?;
@@ -182,6 +177,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// Whether the pool is empty
+    #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }
@@ -191,15 +188,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
 pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Reference to the actual transaction.
     pub(crate) transaction: PendingTransactionRef<T>,
-}
-
-// == impl PendingTransaction ===
-
-impl<T: TransactionOrdering> PendingTransaction<T> {
-    /// Returns all ids this transaction satisfies.
-    pub(crate) fn id(&self) -> &TransactionId {
-        &self.transaction.transaction.transaction_id
-    }
 }
 
 impl<T: TransactionOrdering> Clone for PendingTransaction<T> {
@@ -222,11 +210,6 @@ impl<T: TransactionOrdering> PendingTransactionRef<T> {
     /// The next transaction of the sender: `nonce + 1`
     pub(crate) fn unlocks(&self) -> TransactionId {
         self.transaction.transaction_id.descendant()
-    }
-
-    /// The hash for this transaction
-    pub(crate) fn hash(&self) -> &TxHash {
-        self.transaction.hash()
     }
 }
 

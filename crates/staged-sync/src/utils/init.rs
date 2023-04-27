@@ -6,6 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{keccak256, Account, Bytecode, ChainSpec, StorageEntry, H256};
+use reth_stages::StageKind;
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -68,6 +69,11 @@ pub fn init_genesis<DB: Database>(
     tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
     tx.put::<tables::Headers>(0, header)?;
 
+    // insert sync stage
+    for stage in StageKind::ALL.iter() {
+        tx.put::<tables::SyncStage>(stage.to_string(), 0)?;
+    }
+
     tx.commit()?;
     Ok(hash)
 }
@@ -115,14 +121,12 @@ pub fn insert_genesis_state<DB: Database>(
 
 #[cfg(test)]
 mod tests {
-
-    use std::sync::Arc;
-
     use super::{init_genesis, InitDatabaseError};
     use reth_db::mdbx::test_utils::create_test_rw_db;
     use reth_primitives::{
         GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
     };
+    use std::sync::Arc;
 
     #[test]
     fn success_init_genesis_mainnet() {

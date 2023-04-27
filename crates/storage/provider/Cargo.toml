@@ -17,6 +17,7 @@ reth-trie = { path = "../../trie" }
 
 # async
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = "0.1"
 
 # tracing
 tracing = "0.1"

@@ -172,9 +172,10 @@ where
                             trace!(?payload, %id, "new payload");
                         }
                         Poll::Ready(Some(Err(err))) => {
-                            warn!(?err, %id, "payload job failed; resolving payload");
-                            this.metrics.set_active_jobs(this.payload_jobs.len());
+                            warn!(?err, ?id, "payload job failed; resolving payload");
                             this.metrics.inc_failed_jobs();
+
+                            this.payload_jobs.push((job, id));
                             continue 'jobs
                         }
                         Poll::Ready(None) => {
@@ -203,7 +204,9 @@ where
                         let id = attr.payload_id();
                         let mut res = Ok(id);
 
-                        if !this.contains_payload(id) {
+                        if this.contains_payload(id) {
+                            warn!(%id, parent = ?attr.parent, "payload job already in progress");
+                        } else {
                             // no job for this payload yet, create one
                             match this.generator.new_payload_job(attr) {
                                 Ok(job) => {

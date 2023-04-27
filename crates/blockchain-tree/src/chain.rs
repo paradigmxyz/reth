@@ -150,7 +150,7 @@ impl AppendableChain {
         EF: ExecutorFactory,
     {
         // some checks are done before blocks comes here.
-        externals.consensus.validate_header_agains_parent(&block, parent_block)?;
+        externals.consensus.validate_header_against_parent(&block, parent_block)?;
 
         let (unseal, senders) = block.into_components();
         let unseal = unseal.unseal();

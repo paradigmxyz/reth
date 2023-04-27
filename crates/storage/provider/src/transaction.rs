@@ -1024,7 +1024,7 @@ where
         &self,
         block_number: BlockNumber,
     ) -> Result<(), TransactionError> {
-        // iterate over
+        // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.cursor_write::<tables::SyncStage>()?;
         while let Some((stage_name, _)) = cursor.next()? {
             cursor.upsert(stage_name, block_number)?

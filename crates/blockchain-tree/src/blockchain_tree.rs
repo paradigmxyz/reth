@@ -317,7 +317,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // if there is parrent inside buffer, validate against it.
         if let Some(buffered_parent) = self.unconnected_blocks_buffer.block(parent) {
-            self.externals.consensus.validate_header_agains_parent(&block, buffered_parent)?
+            self.externals.consensus.validate_header_against_parent(&block, buffered_parent)?
         }
 
         // insert block inside unconnected block buffer. Delaying it execution.

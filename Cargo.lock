@@ -5167,6 +5167,7 @@ dependencies = [
  "reth-trie",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
@@ -5374,6 +5375,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-staged-sync",
+ "reth-stages",
  "reth-tracing",
  "secp256k1 0.26.0",
  "serde",
@@ -5474,6 +5476,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "derive_more",
  "hex",
  "proptest",

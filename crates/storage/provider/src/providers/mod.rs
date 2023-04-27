@@ -299,7 +299,6 @@ where
         if let Some(pending) = self.tree.find_pending_state_provider(block) {
             return self.pending_with_provider(pending)
         }
-
         // not found in tree, check database
         self.history_by_block_hash(block)
     }
