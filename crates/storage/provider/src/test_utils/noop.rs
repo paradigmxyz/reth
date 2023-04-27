@@ -1,7 +1,8 @@
 use crate::{
-    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, PostState, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider,
+    traits::{BlockSource, ReceiptProvider},
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, PostState, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -43,6 +44,10 @@ impl BlockIdProvider for NoopProvider {
 }
 
 impl BlockProvider for NoopProvider {
+    fn find_block_by_hash(&self, hash: H256, _source: BlockSource) -> Result<Option<Block>> {
+        self.block(hash.into())
+    }
+
     fn block(&self, _id: BlockId) -> Result<Option<Block>> {
         Ok(None)
     }

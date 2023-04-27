@@ -5463,6 +5463,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "derive_more",
  "hex",
  "proptest",

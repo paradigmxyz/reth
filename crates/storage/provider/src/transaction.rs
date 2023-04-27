@@ -916,10 +916,10 @@ where
             for (address, (account, storage)) in local_plain_state.into_iter() {
                 // revert account
                 if let Some(account) = account {
-                    plain_accounts_cursor.seek_exact(address)?;
+                    let existing_entry = plain_accounts_cursor.seek_exact(address)?;
                     if let Some(account) = account {
                         plain_accounts_cursor.upsert(address, account)?;
-                    } else {
+                    } else if existing_entry.is_some() {
                         plain_accounts_cursor.delete_current()?;
                     }
                 }
@@ -940,7 +940,7 @@ where
                     // TODO: This does not use dupsort features
                     // insert value if needed
                     if storage_value != U256::ZERO {
-                        plain_storage_cursor.insert(address, storage_entry)?;
+                        plain_storage_cursor.upsert(address, storage_entry)?;
                     }
                 }
             }

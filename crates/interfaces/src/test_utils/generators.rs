@@ -6,6 +6,7 @@ use reth_primitives::{
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
 use std::{
+    cmp::{max, min},
     collections::BTreeMap,
     ops::{Range, RangeInclusive, Sub},
 };
@@ -192,7 +193,7 @@ where
         let (prev_from, _) = state.get_mut(&from).unwrap();
         transition.push((from, *prev_from, Vec::new()));
 
-        transfer = transfer.min(prev_from.balance).max(U256::from(1));
+        transfer = max(min(transfer, prev_from.balance), U256::from(1));
         prev_from.balance = prev_from.balance.wrapping_sub(transfer);
 
         // deposit in receiving account and update storage

@@ -232,33 +232,36 @@ impl SessionManager {
 
     /// Starts a new pending session from the local node to the given remote node.
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_peer_id: PeerId) {
-        let session_id = self.next_id();
-        let (disconnect_tx, disconnect_rx) = oneshot::channel();
-        let pending_events = self.pending_sessions_tx.clone();
-        let secret_key = self.secret_key;
-        let hello_message = self.hello_message.clone();
-        let fork_filter = self.fork_filter.clone();
-        let status = self.status;
-        let band_with_meter = self.bandwidth_meter.clone();
-        self.spawn(start_pending_outbound_session(
-            disconnect_rx,
-            pending_events,
-            session_id,
-            remote_addr,
-            remote_peer_id,
-            secret_key,
-            hello_message,
-            status,
-            fork_filter,
-            band_with_meter,
-        ));
+        // The error can be dropped because no dial will be made if it would exceed the limit
+        if self.counter.ensure_pending_outbound().is_ok() {
+            let session_id = self.next_id();
+            let (disconnect_tx, disconnect_rx) = oneshot::channel();
+            let pending_events = self.pending_sessions_tx.clone();
+            let secret_key = self.secret_key;
+            let hello_message = self.hello_message.clone();
+            let fork_filter = self.fork_filter.clone();
+            let status = self.status;
+            let band_with_meter = self.bandwidth_meter.clone();
+            self.spawn(start_pending_outbound_session(
+                disconnect_rx,
+                pending_events,
+                session_id,
+                remote_addr,
+                remote_peer_id,
+                secret_key,
+                hello_message,
+                status,
+                fork_filter,
+                band_with_meter,
+            ));
 
-        let handle = PendingSessionHandle {
-            disconnect_tx: Some(disconnect_tx),
-            direction: Direction::Outgoing(remote_peer_id),
-        };
-        self.pending_sessions.insert(session_id, handle);
-        self.counter.inc_pending_outbound();
+            let handle = PendingSessionHandle {
+                disconnect_tx: Some(disconnect_tx),
+                direction: Direction::Outgoing(remote_peer_id),
+            };
+            self.pending_sessions.insert(session_id, handle);
+            self.counter.inc_pending_outbound();
+        }
     }
 
     /// Initiates a shutdown of the channel.
