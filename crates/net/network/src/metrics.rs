@@ -9,6 +9,9 @@ pub struct NetworkMetrics {
     /// Number of currently connected peers
     pub(crate) connected_peers: Gauge,
 
+    /// Number of currently backed off peers
+    pub(crate) backed_off_peers: Gauge,
+
     /// Number of peers known to the node
     pub(crate) tracked_peers: Gauge,
 
