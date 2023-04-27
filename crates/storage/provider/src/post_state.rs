@@ -299,7 +299,7 @@ impl PostState {
         self.bytecode.extend(other.bytecode);
     }
 
-    /// Reverts each change up to and including any change that is part of `block_number`.
+    /// Reverts each change up to the `target_block_number` (excluding).
     ///
     /// The reverted changes are removed from this post-state, and their effects are reverted.
     pub fn revert_to(&mut self, target_block_number: BlockNumber) {
