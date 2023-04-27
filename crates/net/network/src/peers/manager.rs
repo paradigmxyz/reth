@@ -99,8 +99,8 @@ pub(crate) struct PeersManager {
     ban_list: BanList,
     /// Tracks currently backed off peers.
     backed_off_peers: HashMap<PeerId, std::time::Instant>,
-    /// Interval at which to check for peers to unban.
-    unban_interval: Interval,
+    /// Interval at which to check for peers to unban and release from the backoff map.
+    release_interval: Interval,
     /// How long to ban bad peers.
     ban_duration: Duration,
     /// How long peers to which we could not connect for non-fatal reasons, e.g.
@@ -153,7 +153,7 @@ impl PeersManager {
                 now + refill_slots_interval,
                 refill_slots_interval,
             ),
-            unban_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
+            release_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
             connection_info,
             ban_list,
             backed_off_peers: Default::default(),
@@ -717,8 +717,9 @@ impl PeersManager {
                 }
             }
 
-            if self.unban_interval.poll_tick(cx).is_ready() {
-                let (_, unbanned_peers) = self.ban_list.evict(std::time::Instant::now());
+            if self.release_interval.poll_tick(cx).is_ready() {
+                let now = std::time::Instant::now();
+                let (_, unbanned_peers) = self.ban_list.evict(now);
 
                 for peer_id in unbanned_peers {
                     if let Some(peer) = self.peers.get_mut(&peer_id) {
@@ -732,7 +733,7 @@ impl PeersManager {
                 // clear the backoff list of expired backoffs, and mark the relevant peers as
                 // ready to be dialed
                 self.backed_off_peers.retain(|peer_id, until| {
-                    if std::time::Instant::now() > *until {
+                    if now > *until {
                         if let Some(peer) = self.peers.get_mut(peer_id) {
                             peer.backed_off = false;
                         }
