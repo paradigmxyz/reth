@@ -8,7 +8,15 @@ use std::{
 pub type BufferedBlocks = BTreeMap<BlockNumber, HashMap<BlockHash, SealedBlockWithSenders>>;
 
 /// Contains the Tree of pending blocks that are not executed but buffered
-/// While pipeline is is
+/// It allows us to store unconnected blocks for potential inclusion.
+///
+/// It has three main functionality:
+/// * `insert_block` for inserting blocks inside the buffer.
+/// * `take_all_childrens` for connecting blocks if the parent gets received and inserted.
+/// * `clean_old_blocks` to clear old blocks that are below finalized line.
+///
+/// Note: Buffer is limited by number of blocks that it can contains and eviction of the block
+/// is done by last recently used block.
 #[derive(Debug)]
 pub struct BlockBuffer {
     /// Blocks ordered by block number inside the BTreeMap.

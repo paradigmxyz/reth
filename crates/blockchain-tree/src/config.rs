@@ -28,7 +28,7 @@ impl Default for BlockchainTreeConfig {
             // EVM requires that last 256 block hashes are available.
             num_of_additional_canonical_block_hashes: 256,
             // max unconnected blocks.
-            max_unconnected_blocks: 100,
+            max_unconnected_blocks: 200,
         }
     }
 }
