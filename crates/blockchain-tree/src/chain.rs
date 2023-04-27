@@ -76,13 +76,8 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let changeset = Self::validate_and_execute(
-            block.clone(),
-            parent_header,
-            canonical_fork,
-            state_provider,
-            externals,
-        )?;
+        let changeset =
+            Self::validate_and_execute(block.clone(), parent_header, state_provider, externals)?;
 
         Ok(Self { chain: Chain::new(vec![(block.clone(), changeset)]) })
     }
@@ -119,13 +114,8 @@ impl AppendableChain {
             canonical_block_hashes,
             canonical_fork,
         };
-        let block_state = Self::validate_and_execute(
-            block.clone(),
-            parent,
-            canonical_fork,
-            post_state_data,
-            externals,
-        )?;
+        let block_state =
+            Self::validate_and_execute(block.clone(), parent, post_state_data, externals)?;
         state.extend(block_state);
 
         let chain =
@@ -139,7 +129,6 @@ impl AppendableChain {
     fn validate_and_execute<PSDP, DB, C, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
-        canonical_fork: ForkBlock,
         post_state_data_provider: PSDP,
         externals: &TreeExternals<DB, C, EF>,
     ) -> Result<PostState, Error>
@@ -160,6 +149,7 @@ impl AppendableChain {
         //get state provider.
         let db = externals.shareable_db();
         // TODO, small perf can check if caonical fork is the latest state.
+        let canonical_fork = post_state_data_provider.canonical_fork();
         let history_provider = db.history_by_block_number(canonical_fork.number)?;
         let state_provider = history_provider;
 
@@ -192,13 +182,8 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let block_state = Self::validate_and_execute(
-            block.clone(),
-            parent_block,
-            canonical_fork,
-            post_state_data,
-            externals,
-        )?;
+        let block_state =
+            Self::validate_and_execute(block.clone(), parent_block, post_state_data, externals)?;
         self.state.extend(block_state);
         self.blocks.insert(block.number, block);
         Ok(())
