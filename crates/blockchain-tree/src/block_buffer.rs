@@ -1,5 +1,11 @@
+use lru::LruCache;
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
-use std::collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet};
+use std::{
+    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
+    num::NonZeroUsize,
+};
+/// Type that contains blocks by number and hash.
+pub type BufferedBlocks = BTreeMap<BlockNumber, HashMap<BlockHash, SealedBlockWithSenders>>;
 
 /// Contains the Tree of pending blocks that are not executed but buffered
 /// While pipeline is is
@@ -9,14 +15,15 @@ pub struct BlockBuffer {
     ///
     /// Note: BTreeMap is used so that we can remove the finalized old blocks
     /// from the buffer
-    blocks: BTreeMap<BlockNumber, HashMap<BlockHash, SealedBlockWithSenders>>,
+    blocks: BufferedBlocks,
     /// Needed for removal of the blocks. and to connect the potential unconnected block
     /// to the connected one.
     parent_to_child: HashMap<BlockHash, HashSet<BlockNumHash>>,
-    /// Current number of blocks found in buffer.
-    num_of_blocks: usize,
-    /// Max number of blocks.
-    max_blocks: usize,
+    /// LRU used for tracing oldest inserted blocks that are going to be
+    /// first in line for evicting if `max_blocks` limit is hit.
+    ///
+    /// Used as counter of amount of blocks inside buffer.
+    lru: LruCache<BlockNumHash, ()>,
 }
 
 impl BlockBuffer {
@@ -25,66 +32,42 @@ impl BlockBuffer {
         Self {
             blocks: Default::default(),
             parent_to_child: Default::default(),
-            num_of_blocks: 0,
-            max_blocks: limit,
+            lru: LruCache::new(NonZeroUsize::new(limit).unwrap()),
         }
     }
 
-    /// Evict block from the buffer
-    ///
-    /// Iterate over blocks from lowest number to the highest
-    /// and evict first block that does not have childrens.
-    ///
-    /// If there is no block like that evict the first oldest one.
-    fn evict_block(&mut self) {
-        let mut remove_block = None;
-        'main: for (number, block_hashes) in self.blocks.iter() {
-            for (block_hash, _) in block_hashes.iter() {
-                if self.parent_to_child.get(block_hash).is_none() {
-                    remove_block = Some(BlockNumHash::new(*number, *block_hash));
-                    break 'main
-                }
-            }
-        }
-        // if we found oldest block that does not have known childs, remove it
-        if let Some(remove_block) = remove_block {
-            self.remove_from_block(&remove_block);
-        }
-
-        // if this is not the case, remove first oldest block. Dont touch children.
-        if let Some((parent_hash, remove_block)) =
-            self.blocks.first_key_value().and_then(|(number, v)| {
-                v.iter()
-                    .next()
-                    .map(|(hash, block)| (block.parent_hash, BlockNumHash::new(*number, *hash)))
-            })
-        {
-            // discard this block but not remove and only remove its parent to child connection
-            self.remove_from_block(&remove_block);
-
-            // remove from parent to child connection, but only for this block parent.
-            if let hash_map::Entry::Occupied(mut entry) = self.parent_to_child.entry(parent_hash) {
-                entry.get_mut().remove(&remove_block);
-                // if set is empty remove block entry.
-                if entry.get().is_empty() {
-                    entry.remove();
-                }
-            };
-        }
-    }
-    /// Return reference to the asked block.
-    pub fn block(&self, block: BlockNumHash) -> Option<&SealedBlockWithSenders> {
-        self.blocks.get(&block.number)?.get(&block.hash)
-    }
     /// Insert block inside the buffer.
     pub fn insert_block(&mut self, block: SealedBlockWithSenders) {
+        let num_hash = block.num_hash();
+
         self.parent_to_child.entry(block.parent_hash).or_default().insert(block.num_hash());
         self.blocks.entry(block.number).or_default().insert(block.hash, block);
-        if self.num_of_blocks == self.max_blocks {
-            self.evict_block()
-        } else {
-            self.num_of_blocks += 1;
+
+        if let Some((evicted_num_hash, _)) =
+            self.lru.push(num_hash, ()).filter(|(b, _)| *b != num_hash)
+        {
+            // evict the block if limit is hit
+            if let Some(evicted_block) = self.remove_from_block(&evicted_num_hash) {
+                // evict the block if limit is hit
+                self.remove_from_parent(evicted_block.parent_hash, &evicted_num_hash);
+            }
         }
+    }
+
+    /// Get all the children of the block and its child children.
+    /// This is used to get all the blocks that are dependent on the block that is included.
+    ///
+    /// Note: that order of returned blocks is important and the blocks with lower block number
+    /// in the chain will come first so that they can be executed in the correct order.
+    pub fn take_all_childrens(&mut self, parent: BlockNumHash) -> Vec<SealedBlockWithSenders> {
+        // remove parent block if present
+        let mut taken = Vec::new();
+        if let Some(block) = self.remove_from_block(&parent) {
+            taken.push(block);
+        }
+
+        taken.extend(self.remove_childrens(vec![parent]).into_iter());
+        taken
     }
 
     /// Clean up the old blocks from the buffer as blocks before finalization are not needed
@@ -102,22 +85,55 @@ impl BlockBuffer {
                 blocks.into_iter().map(|(hash, block)| BlockNumHash::new(block.number, hash)),
             );
         }
-        self.num_of_blocks -= remove_parent_children.len();
+        // remove from lru
+        for block in remove_parent_children.iter() {
+            self.lru.pop(block);
+        }
 
         self.remove_childrens(remove_parent_children);
+    }
+
+    /// Return reference to buffered blocks
+    pub fn blocks(&self) -> &BufferedBlocks {
+        &self.blocks
+    }
+
+    /// Return reference to the asked block.
+    pub fn block(&self, block: BlockNumHash) -> Option<&SealedBlockWithSenders> {
+        self.blocks.get(&block.number)?.get(&block.hash)
+    }
+
+    /// Return number of blocks inside buffer.
+    pub fn len(&self) -> usize {
+        self.lru.len()
+    }
+
+    /// Return if buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.lru.is_empty()
+    }
+
+    /// Remove from parent child connection. Dont touch childrens.
+    fn remove_from_parent(&mut self, parent: BlockHash, block: &BlockNumHash) {
+        // remove from parent to child connection, but only for this block parent.
+        if let hash_map::Entry::Occupied(mut entry) = self.parent_to_child.entry(parent) {
+            entry.get_mut().remove(block);
+            // if set is empty remove block entry.
+            if entry.get().is_empty() {
+                entry.remove();
+            }
+        };
     }
 
     /// Remove block from `self.blocks`
     fn remove_from_block(&mut self, block: &BlockNumHash) -> Option<SealedBlockWithSenders> {
         if let Entry::Occupied(mut entry) = self.blocks.entry(block.number) {
             let ret = entry.get_mut().remove(&block.hash);
-            if ret.is_some() {
-                self.num_of_blocks -= 1;
-            }
             // if set is empty remove block entry.
             if entry.get().is_empty() {
                 entry.remove();
             }
+            self.lru.pop(block);
             return ret
         };
         None
@@ -145,20 +161,230 @@ impl BlockBuffer {
         }
         removed_blocks
     }
+}
 
-    /// Get all the children of the block and its child children.
-    /// This is used to get all the blocks that are dependent on the block that is included.
-    ///
-    /// Note: that order of returned blocks is important and the blocks with lower block number
-    /// in the chain will come first so that they can be executed in the correct order.
-    pub fn take_all_childrens(&mut self, parent: BlockNumHash) -> Vec<SealedBlockWithSenders> {
-        // remove parent block if present
-        let mut taken = Vec::new();
-        if let Some(block) = self.remove_from_block(&parent) {
-            taken.push(block);
-        }
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
 
-        taken.extend(self.remove_childrens(vec![parent]).into_iter());
-        taken
+    use reth_interfaces::test_utils::generators::random_block;
+    use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
+
+    use crate::BlockBuffer;
+
+    fn create_block(number: u64, parent: BlockHash) -> SealedBlockWithSenders {
+        let block = random_block(number, Some(parent), None, None);
+        block.seal_with_senders().unwrap()
+    }
+
+    #[test]
+    fn simple_insertion() {
+        let block1 = create_block(10, BlockHash::random());
+        let mut buffer = BlockBuffer::new(3);
+
+        buffer.insert_block(block1.clone());
+        assert_eq!(buffer.len(), 1);
+        assert_eq!(buffer.block(block1.num_hash()), Some(&block1));
+    }
+
+    #[test]
+    fn take_all_chain_of_childrens() {
+        let main_parent = BlockNumHash::new(9, BlockHash::random());
+        let block1 = create_block(10, main_parent.hash);
+        let block2 = create_block(11, block1.hash);
+        let block3 = create_block(12, block2.hash);
+        let block4 = create_block(14, BlockHash::random());
+
+        let mut buffer = BlockBuffer::new(5);
+
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block3.clone());
+        buffer.insert_block(block4.clone());
+
+        assert_eq!(buffer.len(), 4);
+        assert_eq!(buffer.take_all_childrens(main_parent), vec![block1, block2, block3]);
+        assert_eq!(buffer.len(), 1);
+    }
+
+    #[test]
+    fn take_all_multi_level_childrens() {
+        let main_parent = BlockNumHash::new(9, BlockHash::random());
+        let block1 = create_block(10, main_parent.hash);
+        let block2 = create_block(11, block1.hash);
+        let block3 = create_block(11, block1.hash);
+        let block4 = create_block(12, block2.hash);
+
+        let mut buffer = BlockBuffer::new(5);
+
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block3.clone());
+        buffer.insert_block(block4.clone());
+
+        assert_eq!(buffer.len(), 4);
+        assert_eq!(
+            buffer
+                .take_all_childrens(main_parent)
+                .into_iter()
+                .map(|b| (b.hash, b))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                (block1.hash, block1),
+                (block2.hash, block2),
+                (block3.hash, block3),
+                (block4.hash, block4)
+            ])
+        );
+        assert_eq!(buffer.len(), 0);
+    }
+
+    #[test]
+    fn take_self_with_childs() {
+        let main_parent = BlockNumHash::new(9, BlockHash::random());
+        let block1 = create_block(10, main_parent.hash);
+        let block2 = create_block(11, block1.hash);
+        let block3 = create_block(11, block1.hash);
+        let block4 = create_block(12, block2.hash);
+
+        let mut buffer = BlockBuffer::new(5);
+
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block3.clone());
+        buffer.insert_block(block4.clone());
+
+        assert_eq!(buffer.len(), 4);
+        assert_eq!(
+            buffer
+                .take_all_childrens(block1.num_hash())
+                .into_iter()
+                .map(|b| (b.hash, b))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                (block1.hash, block1),
+                (block2.hash, block2),
+                (block3.hash, block3),
+                (block4.hash, block4)
+            ])
+        );
+        assert_eq!(buffer.len(), 0);
+    }
+
+    #[test]
+    fn clean_chain_of_childres() {
+        let main_parent = BlockNumHash::new(9, BlockHash::random());
+        let block1 = create_block(10, main_parent.hash);
+        let block2 = create_block(11, block1.hash);
+        let block3 = create_block(12, block2.hash);
+        let block4 = create_block(14, BlockHash::random());
+
+        let mut buffer = BlockBuffer::new(5);
+
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block3.clone());
+        buffer.insert_block(block4.clone());
+
+        assert_eq!(buffer.len(), 4);
+        buffer.clean_old_blocks(block1.number);
+        assert_eq!(buffer.len(), 1);
+    }
+
+    #[test]
+    fn clean_all_multi_level_childrens() {
+        let main_parent = BlockNumHash::new(9, BlockHash::random());
+        let block1 = create_block(10, main_parent.hash);
+        let block2 = create_block(11, block1.hash);
+        let block3 = create_block(11, block1.hash);
+        let block4 = create_block(12, block2.hash);
+
+        let mut buffer = BlockBuffer::new(5);
+
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block3.clone());
+        buffer.insert_block(block4.clone());
+
+        assert_eq!(buffer.len(), 4);
+        buffer.clean_old_blocks(block1.number);
+        assert_eq!(buffer.len(), 0);
+    }
+
+    #[test]
+    fn clean_multi_chains() {
+        let main_parent = BlockNumHash::new(9, BlockHash::random());
+        let block1 = create_block(10, main_parent.hash);
+        let block1a = create_block(10, main_parent.hash);
+        let block2 = create_block(11, block1.hash);
+        let block2a = create_block(11, block1.hash);
+        let random_block1 = create_block(10, BlockHash::random());
+        let random_block2 = create_block(11, BlockHash::random());
+        let random_block3 = create_block(12, BlockHash::random());
+
+        let mut buffer = BlockBuffer::new(10);
+
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block1a.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block2a.clone());
+        buffer.insert_block(random_block1.clone());
+        buffer.insert_block(random_block2.clone());
+        buffer.insert_block(random_block3.clone());
+
+        assert_eq!(buffer.len(), 7);
+        buffer.clean_old_blocks(10);
+        assert_eq!(buffer.len(), 2);
+    }
+
+    fn assert_block_existance(buffer: &BlockBuffer, block: &SealedBlockWithSenders) {
+        assert!(buffer.blocks.get(&block.number).and_then(|t| t.get(&block.hash)).is_none());
+        assert!(buffer
+            .parent_to_child
+            .get(&block.parent_hash)
+            .and_then(|p| p.get(&block.num_hash()))
+            .is_none());
+    }
+
+    #[test]
+    fn evict_with_gap() {
+        let main_parent = BlockNumHash::new(9, BlockHash::random());
+        let block1 = create_block(10, main_parent.hash);
+        let block2 = create_block(11, block1.hash);
+        let block3 = create_block(12, block2.hash);
+        let block4 = create_block(13, BlockHash::random());
+
+        let mut buffer = BlockBuffer::new(3);
+
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block3.clone());
+        buffer.insert_block(block4.clone());
+
+        // block3 gets evicted
+        assert_block_existance(&buffer, &block3);
+
+        assert_eq!(buffer.len(), 3);
+    }
+
+    #[test]
+    fn simple_eviction() {
+        let main_parent = BlockNumHash::new(9, BlockHash::random());
+        let block1 = create_block(10, main_parent.hash);
+        let block2 = create_block(11, block1.hash);
+        let block3 = create_block(12, block2.hash);
+        let block4 = create_block(13, BlockHash::random());
+
+        let mut buffer = BlockBuffer::new(3);
+
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block3.clone());
+        buffer.insert_block(block4.clone());
+
+        // block3 gets evicted
+        assert_block_existance(&buffer, &block1);
+
+        assert_eq!(buffer.len(), 3);
     }
 }
