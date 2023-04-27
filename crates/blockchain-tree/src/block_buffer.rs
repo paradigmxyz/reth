@@ -369,8 +369,8 @@ mod tests {
         buffer.insert_block(block3.clone());
         buffer.insert_block(block4.clone());
 
-        // block3 gets evicted
-        assert_block_existance(&buffer, &block3);
+        // block1 gets evicted
+        assert_block_existance(&buffer, &block1);
 
         assert_eq!(buffer.len(), 3);
     }
