@@ -93,8 +93,10 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for HistoricalStateProviderRef<'a, 
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, _post_state: PostState) -> Result<H256> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
+    fn state_root(&self, post_state: PostState) -> Result<H256> {
+        post_state
+            .state_root_slow(self.tx)
+            .map_err(|err| reth_interfaces::Error::Database(err.into()))
     }
 }
 
