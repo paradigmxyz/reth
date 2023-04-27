@@ -515,7 +515,10 @@ where
                 .sessions_mut()
                 .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
             NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
-                self.swarm.state_mut().add_peer_kind(peer, kind, addr);
+                // only add peer if we are not shutting down
+                if !self.swarm.is_shutting_down() {
+                    self.swarm.state_mut().add_peer_kind(peer, kind, addr);
+                }
             }
             NetworkHandleMessage::RemovePeer(peer_id, kind) => {
                 self.swarm.state_mut().remove_peer(peer_id, kind);
