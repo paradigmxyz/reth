@@ -54,7 +54,7 @@ impl Consensus for AutoSealConsensus {
         Ok(())
     }
 
-    fn validate_header_agains_parent(
+    fn validate_header_against_parent(
         &self,
         _header: &SealedHeader,
         _parent: &SealedHeader,

@@ -170,6 +170,7 @@ where
             cursor_header.insert(header_number, header)?;
             cursor_canonical.insert(header_number, header_hash)?;
         }
+
         Ok(latest)
     }
 }
