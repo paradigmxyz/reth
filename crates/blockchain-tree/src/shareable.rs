@@ -34,7 +34,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     for ShareableBlockchainTree<DB, C, EF>
 {
-    /// Recover senders and call [`BlockchainTreeEngine::insert_block_with_senders`].
     fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
         let mut tree = self.tree.write();
         tree.ensure_block_is_in_range(&block)?;
