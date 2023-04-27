@@ -2,13 +2,14 @@
 use crate::{chain::BlockReceipts, Chain};
 use auto_impl::auto_impl;
 use std::sync::Arc;
-use tokio::sync::broadcast::{Receiver, Sender};
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
 
 /// Type alias for a receiver that receives [CanonStateNotification]
-pub type CanonStateNotifications = Receiver<CanonStateNotification>;
+pub type CanonStateNotifications = broadcast::Receiver<CanonStateNotification>;
 
 /// Type alias for a sender that sends [CanonStateNotification]
-pub type CanonStateNotificationSender = Sender<CanonStateNotification>;
+pub type CanonStateNotificationSender = broadcast::Sender<CanonStateNotification>;
 
 /// A type that allows to register chain related event subscriptions.
 #[auto_impl(&, Arc)]
@@ -17,6 +18,11 @@ pub trait CanonStateSubscriptions: Send + Sync {
     ///
     /// A canonical chain be one or more blocks, a reorg or a revert.
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications;
+
+    /// Convenience method to get a stream of [`CanonStateNotification`].
+    fn canonical_state_stream(&self) -> BroadcastStream<CanonStateNotification> {
+        BroadcastStream::new(self.subscribe_to_canonical_state())
+    }
 }
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
