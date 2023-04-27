@@ -26,10 +26,6 @@ const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 16 * REPUTATION_UNIT;
 /// The reputation change to apply to a peer which violates protocol rules: minimal reputation
 const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;
 
-/// A reputation change to apply to backoff the peer. This has the same effect as marking the peer
-/// as banned.
-pub(crate) const BACKOFF_REPUTATION_CHANGE: i32 = i32::MIN;
-
 /// Returns `true` if the given reputation is below the [`BANNED_REPUTATION`] threshold
 #[inline]
 pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
