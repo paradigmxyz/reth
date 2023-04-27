@@ -192,6 +192,12 @@ impl PeersManager {
         self.connection_info.num_outbound
     }
 
+    /// Returns the number of currently backed off peers.
+    #[inline]
+    pub(crate) fn num_backed_off_peers(&self) -> usize {
+        self.backoff_list.len()
+    }
+
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
     /// returns an error if the inbound ip address is on the ban list or
