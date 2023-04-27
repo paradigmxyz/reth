@@ -49,7 +49,7 @@ use tokio::{
     sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
-use tracing::trace;
+use tracing::{debug, trace};
 
 mod metrics;
 
@@ -323,6 +323,7 @@ where
                     }
                 }
                 Poll::Ready(Err(err)) => {
+                    trace!(?err, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
                     this.interval.reset();
                     return Poll::Ready(Some(Err(err)))
@@ -459,6 +460,8 @@ fn build_payload<Pool, Client>(
             attributes,
             chain_spec,
         } = config;
+
+        debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
 
         let state = client.state_by_block_hash(parent_block.hash)?;
         let mut db = SubState::new(State::new(state));
@@ -598,6 +601,8 @@ where
         chain_spec,
         ..
     } = config;
+
+    debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
     let mut db = SubState::new(State::new(state));
