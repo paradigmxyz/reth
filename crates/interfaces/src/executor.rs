@@ -48,12 +48,6 @@ pub enum Error {
         block_number: BlockNumber,
         last_finalized: BlockNumber,
     },
-    #[error("Block #{block_number} ({block_hash:?}) too far into the future. Last finalized block is #{last_finalized}")]
-    PendingBlockIsInFuture {
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        last_finalized: BlockNumber,
-    },
     #[error("Block number #{block_number} not found in blockchain tree chain")]
     BlockNumberNotFoundInChain { block_number: BlockNumber },
     #[error("Block hash {block_hash} not found in blockchain tree chain")]

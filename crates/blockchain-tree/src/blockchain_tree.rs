@@ -424,6 +424,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         self.insert_in_range_block_with_senders(block)
     }
 
+    /// Insert block for future execution.
+    pub fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), Error> {
+        self.validate_block(&block)?;
+        self.unconnected_blocks_buffer.insert_block(block);
+        Ok(())
+    }
+
     /// Validate if block is correct and if i
     fn validate_block(&self, block: &SealedBlockWithSenders) -> Result<(), Error> {
         if let Err(e) =
@@ -524,8 +531,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .take(num_of_canonical_hashes as usize)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
-        let (mut remove_chains, added_blocks) =
-            self.block_indices.update_block_hashes(last_canonical_hashes);
+        let (mut remove_chains, _) =
+            self.block_indices.update_block_hashes(last_canonical_hashes.clone());
 
         // remove all chains that got discarded
         while let Some(chain_id) = remove_chains.first() {
@@ -535,9 +542,19 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // check unconnected block buffer for the childs of new added blocks,
-        // or remove added blocks it.
-        for added_block in added_blocks.into_iter() {
-            self.connected_unconected_blocks(added_block)
+        for added_block in last_canonical_hashes.into_iter() {
+            self.connected_unconected_blocks(added_block.into())
+        }
+
+        // check unconnected block buffer for childs of the chains.
+        let mut all_chain_blocks = Vec::new();
+        for (_, chain) in self.chains.iter() {
+            for (&number, blocks) in chain.blocks.iter() {
+                all_chain_blocks.push(BlockNumHash { number, hash: blocks.hash })
+            }
+        }
+        for block in all_chain_blocks.into_iter() {
+            self.connected_unconected_blocks(block)
         }
 
         Ok(())
