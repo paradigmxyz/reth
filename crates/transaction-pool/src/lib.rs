@@ -4,7 +4,8 @@
     rust_2018_idioms,
     unreachable_pub,
     missing_debug_implementations,
-    rustdoc::broken_intra_doc_links
+    rustdoc::broken_intra_doc_links,
+    unused_crate_dependencies
 )]
 #![doc(test(
     no_crate_inject,
@@ -97,6 +98,7 @@ use crate::{
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
+use aquamarine as _;
 use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};

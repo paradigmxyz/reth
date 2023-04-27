@@ -18,7 +18,6 @@ normal = [
 [dependencies]
 
 # reth
-reth-consensus-common = { path = "../consensus/common" }
 reth-primitives = { path  = "../primitives" }
 reth-provider = { path = "../storage/provider" }
 reth-interfaces = { path = "../interfaces" }
@@ -42,10 +41,6 @@ serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags = "1.3"
 auto_impl = "1.0"
-
-# ruint
-# Using the uint! requires the crate to be imported
-ruint = "1.7.0"
 
 # testing
 rand = { version = "0.8", optional = true }
