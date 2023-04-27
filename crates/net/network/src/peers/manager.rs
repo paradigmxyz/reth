@@ -1388,17 +1388,10 @@ mod test {
         })
         .await;
 
-        assert!(peers.ban_list.is_banned_peer(&peer));
-        assert!(peers.peers.get(&peer).is_some());
+        assert!(peers.backoff_list.contains_key(&peer));
+        assert!(peers.peers.get(&peer).unwrap().is_backed_off());
 
         tokio::time::sleep(backoff_durations.low).await;
-
-        match event!(peers) {
-            PeerAction::UnBanPeer { peer_id, .. } => {
-                assert_eq!(peer_id, peer);
-            }
-            _ => unreachable!(),
-        }
 
         match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
@@ -1406,6 +1399,9 @@ mod test {
             }
             _ => unreachable!(),
         }
+
+        assert!(!peers.backoff_list.contains_key(&peer));
+        assert!(!peers.peers.get(&peer).unwrap().is_backed_off());
     }
 
     #[tokio::test]
@@ -1455,17 +1451,10 @@ mod test {
         })
         .await;
 
-        assert!(peers.ban_list.is_banned_peer(&peer));
-        assert!(peers.peers.get(&peer).is_some());
+        assert!(peers.backoff_list.contains_key(&peer));
+        assert!(peers.peers.get(&peer).unwrap().is_backed_off());
 
         tokio::time::sleep(backoff_durations.high).await;
-
-        match event!(peers) {
-            PeerAction::UnBanPeer { peer_id, .. } => {
-                assert_eq!(peer_id, peer);
-            }
-            _ => unreachable!(),
-        }
 
         match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
@@ -1473,6 +1462,9 @@ mod test {
             }
             _ => unreachable!(),
         }
+
+        assert!(!peers.backoff_list.contains_key(&peer));
+        assert!(!peers.peers.get(&peer).unwrap().is_backed_off());
     }
 
     #[tokio::test]
