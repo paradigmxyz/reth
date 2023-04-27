@@ -36,7 +36,7 @@ use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{BlockEnv, CfgEnv, Env, ResultAndState},
+    primitives::{BlockEnv, CfgEnv, EVMError, Env, ResultAndState},
 };
 use std::{
     future::Future,
@@ -500,9 +500,25 @@ fn build_payload<Pool, Client>(
             let mut evm = revm::EVM::with_env(env);
             evm.database(&mut db);
 
-            // TODO skip invalid transactions
-            let ResultAndState { result, state } =
-                evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+            let ResultAndState { result, state } = match evm.transact() {
+                Ok(res) => res,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            trace!(?err, ?tx, "skipping invalid transaction");
+                            // this is an invalid transaction, we can skip it
+                            continue
+                        }
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                        }
+                    }
+                }
+            };
+
+            // let ResultAndState { result, state } =
+            evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
             let gas_used = result.gas_used();
 
             // commit changes
