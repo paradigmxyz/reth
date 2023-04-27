@@ -36,7 +36,7 @@ use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{BlockEnv, CfgEnv, Env, ResultAndState},
+    primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState},
 };
 use std::{
     future::Future,
@@ -478,13 +478,13 @@ fn build_payload<Pool, Client>(
 
         let block_number = initialized_block_env.number.to::<u64>();
 
-        while let Some(tx) = best_txs.next() {
+        while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
-            if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
+            if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as invalid
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
-                best_txs.mark_invalid(&tx);
+                best_txs.mark_invalid(&pool_tx);
                 continue
             }
 
@@ -494,7 +494,7 @@ fn build_payload<Pool, Client>(
             }
 
             // convert tx to a signed transaction
-            let tx = tx.to_recovered_transaction();
+            let tx = pool_tx.to_recovered_transaction();
 
             // Configure the environment for the block.
             let env = Env {
@@ -506,9 +506,36 @@ fn build_payload<Pool, Client>(
             let mut evm = revm::EVM::with_env(env);
             evm.database(&mut db);
 
-            // TODO skip invalid transactions
-            let ResultAndState { result, state } =
-                evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+            let ResultAndState { result, state } = match evm.transact() {
+                Ok(res) => res,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                                // if the nonce is too low, we can skip this transaction
+                                trace!(?err, ?tx, "skipping nonce too low transaction");
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                trace!(
+                                    ?err,
+                                    ?tx,
+                                    "skipping invalid transaction and its descendants"
+                                );
+                                best_txs.mark_invalid(&pool_tx);
+                            }
+                            continue
+                        }
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                        }
+                    }
+                }
+            };
+
+            // let ResultAndState { result, state } =
+            evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
             let gas_used = result.gas_used();
 
             // commit changes
