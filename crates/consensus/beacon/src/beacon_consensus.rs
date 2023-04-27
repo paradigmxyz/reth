@@ -28,7 +28,7 @@ impl Consensus for BeaconConsensus {
         Ok(())
     }
 
-    fn validate_header_agains_parent(
+    fn validate_header_against_parent(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,

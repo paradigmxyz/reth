@@ -25,7 +25,7 @@ pub trait Consensus: Debug + Send + Sync {
     /// **This should not be called for the genesis block**.
     ///
     /// Note: Validating header against its parent does not include other Consensus validations.
-    fn validate_header_agains_parent(
+    fn validate_header_against_parent(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
