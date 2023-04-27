@@ -98,7 +98,7 @@ pub(crate) struct PeersManager {
     /// Tracks unwanted ips/peer ids.
     ban_list: BanList,
     /// Tracks currently backed off peers.
-    backoff_list: HashMap<PeerId, std::time::Instant>,
+    backed_off_peers: HashMap<PeerId, std::time::Instant>,
     /// Interval at which to check for peers to unban.
     unban_interval: Interval,
     /// How long to ban bad peers.
@@ -156,7 +156,7 @@ impl PeersManager {
             unban_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
             connection_info,
             ban_list,
-            backoff_list: Default::default(),
+            backed_off_peers: Default::default(),
             ban_duration,
             backoff_durations,
             connect_trusted_nodes_only,
@@ -195,7 +195,7 @@ impl PeersManager {
     /// Returns the number of currently backed off peers.
     #[inline]
     pub(crate) fn num_backed_off_peers(&self) -> usize {
-        self.backoff_list.len()
+        self.backed_off_peers.len()
     }
 
     /// Invoked when a new _incoming_ tcp connection is accepted.
@@ -207,10 +207,10 @@ impl PeersManager {
         addr: IpAddr,
     ) -> Result<(), InboundConnectionError> {
         if self.ban_list.is_banned_ip(&addr) {
-            return Err(InboundConnectionError::IpBanned)
+            return Err(InboundConnectionError::IpBanned);
         }
         if !self.connection_info.has_in_capacity() {
-            return Err(InboundConnectionError::ExceedsLimit(self.connection_info.max_inbound))
+            return Err(InboundConnectionError::ExceedsLimit(self.connection_info.max_inbound));
         }
         // keep track of new connection
         self.connection_info.inc_in();
@@ -255,9 +255,9 @@ impl PeersManager {
     pub(crate) fn on_incoming_session_established(&mut self, peer_id: PeerId, addr: SocketAddr) {
         // we only need to check the peer id here as the ip address will have been checked at
         // on_inbound_pending_session. We also check if the peer is in the backoff list here.
-        if self.ban_list.is_banned_peer(&peer_id) || self.backoff_list.contains_key(&peer_id) {
+        if self.ban_list.is_banned_peer(&peer_id) || self.backed_off_peers.contains_key(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
-            return
+            return;
         }
 
         // start a new tick, so the peer is not immediately rewarded for the time since last tick
@@ -268,7 +268,7 @@ impl PeersManager {
                 let value = entry.get_mut();
                 if value.is_banned() {
                     self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
-                    return
+                    return;
                 }
                 value.state = PeerConnectionState::In;
             }
@@ -300,7 +300,7 @@ impl PeersManager {
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.backed_off = true;
-            self.backoff_list.insert(peer_id, until);
+            self.backed_off_peers.insert(peer_id, until);
         }
     }
 
@@ -348,7 +348,7 @@ impl PeersManager {
                 peer.apply_reputation(reputation_change.as_i32())
             }
         } else {
-            return
+            return;
         };
 
         match outcome {
@@ -372,7 +372,7 @@ impl PeersManager {
         if let Some(mut peer) = self.peers.get_mut(peer_id) {
             peer.state = PeerConnectionState::Idle;
         } else {
-            return
+            return;
         }
         self.connection_info.decr_out()
     }
@@ -403,7 +403,7 @@ impl PeersManager {
                     // session to that peer
                     entry.get_mut().severe_backoff_counter = 0;
                     entry.get_mut().state = PeerConnectionState::Idle;
-                    return
+                    return;
                 }
             }
             Entry::Vacant(_) => return,
@@ -548,7 +548,7 @@ impl PeersManager {
         fork_id: Option<ForkId>,
     ) {
         if self.ban_list.is_banned(&peer_id, &addr.ip()) {
-            return
+            return;
         }
 
         match self.peers.entry(peer_id) {
@@ -565,7 +565,7 @@ impl PeersManager {
                     peer.remove_after_disconnect = false;
                 }
 
-                return
+                return;
             }
             Entry::Vacant(entry) => {
                 trace!(target : "net::peers", ?peer_id, ?addr, "discovered new node");
@@ -583,7 +583,7 @@ impl PeersManager {
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId) {
         let Entry::Occupied(entry) = self.peers.entry(peer_id) else { return };
         if entry.get().is_trusted() {
-            return
+            return;
         }
         let mut peer = entry.remove();
 
@@ -610,7 +610,7 @@ impl PeersManager {
     pub(crate) fn remove_peer_from_trusted_set(&mut self, peer_id: PeerId) {
         let Entry::Occupied(mut entry) = self.peers.entry(peer_id) else { return };
         if !entry.get().is_trusted() {
-            return
+            return;
         }
 
         let peer = entry.get_mut();
@@ -629,23 +629,23 @@ impl PeersManager {
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
-            peer.state.is_unconnected() &&
-                !peer.is_banned() &&
-                !peer.is_backed_off() &&
-                (!self.connect_trusted_nodes_only || peer.is_trusted())
+            peer.state.is_unconnected()
+                && !peer.is_banned()
+                && !peer.is_backed_off()
+                && (!self.connect_trusted_nodes_only || peer.is_trusted())
         });
 
         // keep track of the best peer, if there's one
         let mut best_peer = unconnected.next()?;
 
         if best_peer.1.is_trusted() {
-            return Some((*best_peer.0, best_peer.1))
+            return Some((*best_peer.0, best_peer.1));
         }
 
         for maybe_better in unconnected {
             // if the peer is trusted, return it immediately
             if maybe_better.1.is_trusted() {
-                return Some((*maybe_better.0, maybe_better.1))
+                return Some((*maybe_better.0, maybe_better.1));
             }
 
             // otherwise we keep track of the best peer using the reputation
@@ -674,7 +674,7 @@ impl PeersManager {
 
                 // If best peer does not meet reputation threshold exit immediately.
                 if peer.is_banned() {
-                    break
+                    break;
                 }
 
                 trace!(target : "net::peers",  ?peer_id, addr=?peer.addr, "schedule outbound connection");
@@ -696,7 +696,7 @@ impl PeersManager {
         loop {
             // drain buffered actions
             if let Some(action) = self.queued_actions.pop_front() {
-                return Poll::Ready(action)
+                return Poll::Ready(action);
             }
 
             while let Poll::Ready(Some(cmd)) = self.handle_rx.poll_next_unpin(cx) {
@@ -724,19 +724,19 @@ impl PeersManager {
                     if let Some(peer) = self.peers.get_mut(&peer_id) {
                         peer.unban();
                     } else {
-                        continue
+                        continue;
                     }
                     self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                 }
 
                 // clear the backoff list of expired backoffs, and mark the relevant peers as
                 // ready to be dialed
-                self.backoff_list.retain(|peer_id, until| {
+                self.backed_off_peers.retain(|peer_id, until| {
                     if std::time::Instant::now() > *until {
                         if let Some(peer) = self.peers.get_mut(peer_id) {
                             peer.backed_off = false;
                         }
-                        return false
+                        return false;
                     }
                     true
                 })
@@ -749,7 +749,7 @@ impl PeersManager {
             }
 
             if self.queued_actions.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -893,15 +893,15 @@ impl Peer {
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();
-            return ReputationChangeOutcome::DisconnectAndBan
+            return ReputationChangeOutcome::DisconnectAndBan;
         }
 
         if self.is_banned() && !is_banned_reputation(previous) {
-            return ReputationChangeOutcome::Ban
+            return ReputationChangeOutcome::Ban;
         }
 
         if !self.is_banned() && is_banned_reputation(previous) {
-            return ReputationChangeOutcome::Unban
+            return ReputationChangeOutcome::Unban;
         }
 
         ReputationChangeOutcome::None
@@ -1394,7 +1394,7 @@ mod test {
         })
         .await;
 
-        assert!(peers.backoff_list.contains_key(&peer));
+        assert!(peers.backed_off_peers.contains_key(&peer));
         assert!(peers.peers.get(&peer).unwrap().is_backed_off());
 
         tokio::time::sleep(backoff_durations.low).await;
@@ -1406,7 +1406,7 @@ mod test {
             _ => unreachable!(),
         }
 
-        assert!(!peers.backoff_list.contains_key(&peer));
+        assert!(!peers.backed_off_peers.contains_key(&peer));
         assert!(!peers.peers.get(&peer).unwrap().is_backed_off());
     }
 
@@ -1457,7 +1457,7 @@ mod test {
         })
         .await;
 
-        assert!(peers.backoff_list.contains_key(&peer));
+        assert!(peers.backed_off_peers.contains_key(&peer));
         assert!(peers.peers.get(&peer).unwrap().is_backed_off());
 
         tokio::time::sleep(backoff_durations.high).await;
@@ -1469,7 +1469,7 @@ mod test {
             _ => unreachable!(),
         }
 
-        assert!(!peers.backoff_list.contains_key(&peer));
+        assert!(!peers.backed_off_peers.contains_key(&peer));
         assert!(!peers.peers.get(&peer).unwrap().is_backed_off());
     }
 
