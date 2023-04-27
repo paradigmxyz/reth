@@ -40,7 +40,7 @@ use reth_interfaces::{
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedHeader, H256};
-use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
+use reth_provider::{BlockProvider, CanonStateSubscriptions, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
@@ -196,6 +196,27 @@ impl Command {
             Default::default(),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
+
+        // spawn txpool maintenance task
+        {
+            let pool = transaction_pool.clone();
+            let chain_events = blockchain_db.canonical_state_stream();
+            let client = blockchain_db.clone();
+            ctx.task_executor.spawn_critical(
+                "txpool maintenance task",
+                Box::pin(async move {
+                    let chain_events = chain_events.filter_map(|event| async move { event.ok() });
+                    pin_mut!(chain_events);
+                    reth_transaction_pool::maintain::maintain_transaction_pool(
+                        client,
+                        pool,
+                        chain_events,
+                    )
+                    .await
+                }),
+            );
+            debug!(target: "reth::cli", "Spawned txpool maintenance task");
+        }
 
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key =
