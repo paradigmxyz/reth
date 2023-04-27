@@ -151,7 +151,7 @@ impl AppendableChain {
     {
         externals.consensus.validate_header_with_total_difficulty(&block, U256::MAX)?;
         externals.consensus.validate_header(&block)?;
-        externals.consensus.validate_header_agains_parent(&block, parent_block)?;
+        externals.consensus.validate_header_against_parent(&block, parent_block)?;
         externals.consensus.validate_block(&block)?;
 
         let (unseal, senders) = block.into_components();

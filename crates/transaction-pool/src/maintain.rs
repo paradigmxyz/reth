@@ -22,10 +22,10 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
     pool: Pool<V, T>,
     mut events: St,
 ) where
-    Client: StateProviderFactory + BlockProvider + 'static,
+    Client: StateProviderFactory + BlockProvider,
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+    St: Stream<Item = CanonStateNotification> + Unpin,
 {
     // TODO set current head for the pool
 

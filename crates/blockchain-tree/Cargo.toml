@@ -13,11 +13,14 @@ normal = [
 ]
 
 [dependencies]
-# reth 
+# reth
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
+
+# tracing
+tracing = "0.1"
 
 # common
 parking_lot = { version = "0.12"}

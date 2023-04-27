@@ -156,7 +156,7 @@ impl Stream for TestDownload {
             }
 
             let empty = SealedHeader::default();
-            if let Err(error) = this.consensus.validate_header_agains_parent(&empty, &empty) {
+            if let Err(error) = this.consensus.validate_header_against_parent(&empty, &empty) {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
@@ -314,7 +314,7 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn validate_header_agains_parent(
+    fn validate_header_against_parent(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
