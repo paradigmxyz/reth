@@ -471,18 +471,21 @@ fn build_payload<Pool, Client>(
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
         let mut executed_txs = Vec::new();
-        let best_txs = pool.best_transactions();
+        let mut best_txs = pool.best_transactions();
 
         let mut total_fees = U256::ZERO;
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let block_number = initialized_block_env.number.to::<u64>();
 
-        for tx in best_txs {
+        while let Some(tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
             if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
-                // TODO: try find transactions that can fit into the block
-                break
+                // we can't fit this transaction into the block, so we need to mark it as invalid
+                // which also removes all dependent transaction from the iterator before we can
+                // continue
+                best_txs.mark_invalid(&tx);
+                continue
             }
 
             // check if the job was cancelled, if so we can exit early
