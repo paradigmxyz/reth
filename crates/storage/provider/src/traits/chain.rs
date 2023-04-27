@@ -2,7 +2,7 @@
 use crate::{chain::BlockReceipts, Chain};
 use auto_impl::auto_impl;
 use std::sync::Arc;
-use tokio::sync::broadcast::{self};
+use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Type alias for a receiver that receives [CanonStateNotification]
