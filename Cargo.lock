@@ -5084,7 +5084,6 @@ dependencies = [
 name = "reth-payload-builder"
 version = "0.1.0"
 dependencies = [
- "futures-core",
  "futures-util",
  "metrics",
  "reth-interfaces",

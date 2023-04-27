@@ -8,7 +8,7 @@
 //! reth basic payload job generator
 
 use crate::metrics::PayloadBuilderMetrics;
-use futures_core::{ready, Stream};
+use futures_core::ready;
 use futures_util::FutureExt;
 use reth_payload_builder::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
@@ -265,42 +265,44 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     metrics: PayloadBuilderMetrics,
 }
 
-impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
+impl<Client, Pool, Tasks> Future for BasicPayloadJob<Client, Pool, Tasks>
 where
     Client: StateProviderFactory + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
-    type Item = Result<Arc<BuiltPayload>, PayloadBuilderError>;
+    type Output = Result<(), PayloadBuilderError>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
         // check if the deadline is reached
-        let deadline_reached = this.deadline.as_mut().poll(cx).is_ready();
+        if this.deadline.as_mut().poll(cx).is_ready() {
+            trace!("Payload building deadline reached");
+            return Poll::Ready(Ok(()))
+        }
 
         // check if the interval is reached
-        if this.interval.poll_tick(cx).is_ready() &&
-            this.pending_block.is_none() &&
-            !deadline_reached
-        {
-            let _ = this.interval.poll_tick(cx);
-            trace!("spawn new payload build task");
-            let (tx, rx) = oneshot::channel();
-            let client = this.client.clone();
-            let pool = this.pool.clone();
-            let cancel = Cancelled::default();
-            let _cancel = cancel.clone();
-            let guard = this.payload_task_guard.clone();
-            let payload_config = this.config.clone();
-            let best_payload = this.best_payload.clone();
-            this.metrics.inc_initiated_payload_builds();
-            this.executor.spawn_blocking(Box::pin(async move {
-                // acquire the permit for executing the task
-                let _permit = guard.0.acquire().await;
-                build_payload(client, pool, payload_config, cancel, best_payload, tx)
-            }));
-            this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+        while this.interval.poll_tick(cx).is_ready() {
+            // start a new job if there is no pending block and we haven't reached the deadline
+            if this.pending_block.is_none() {
+                trace!("spawn new payload build task");
+                let (tx, rx) = oneshot::channel();
+                let client = this.client.clone();
+                let pool = this.pool.clone();
+                let cancel = Cancelled::default();
+                let _cancel = cancel.clone();
+                let guard = this.payload_task_guard.clone();
+                let payload_config = this.config.clone();
+                let best_payload = this.best_payload.clone();
+                this.metrics.inc_initiated_payload_builds();
+                this.executor.spawn_blocking(Box::pin(async move {
+                    // acquire the permit for executing the task
+                    let _permit = guard.0.acquire().await;
+                    build_payload(client, pool, payload_config, cancel, best_payload, tx)
+                }));
+                this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+            }
         }
 
         // poll the pending block
@@ -323,20 +325,14 @@ where
                     }
                 }
                 Poll::Ready(Err(err)) => {
+                    // job failed, but we simply try again next interval
                     trace!(?err, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
-                    this.interval.reset();
-                    return Poll::Ready(Some(Err(err)))
                 }
                 Poll::Pending => {
                     this.pending_block = Some(fut);
                 }
             }
-        }
-
-        if deadline_reached {
-            trace!("Payload building deadline reached");
-            return Poll::Ready(None)
         }
 
         Poll::Pending
