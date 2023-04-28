@@ -17,7 +17,8 @@ use reth_payload_builder::{
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     constants::{
-        EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION,
+        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION,
+        SLOT_DURATION,
     },
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
@@ -593,7 +594,7 @@ fn build_payload<Pool, Client>(
             logs_bloom,
             timestamp: attributes.timestamp,
             mix_hash: attributes.prev_randao,
-            nonce: 0,
+            nonce: BEACON_NONCE,
             base_fee_per_gas: Some(base_fee),
             number: parent_block.number + 1,
             gas_limit: block_gas_limit,
@@ -661,7 +662,7 @@ where
         logs_bloom: Default::default(),
         timestamp: attributes.timestamp,
         mix_hash: attributes.prev_randao,
-        nonce: 0,
+        nonce: BEACON_NONCE,
         base_fee_per_gas: Some(base_fee),
         number: parent_block.number + 1,
         gas_limit: block_gas_limit,
