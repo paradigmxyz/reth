@@ -221,7 +221,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Try inserting block inside the tree.
-    /// If blocks does not have parent [`BlockStatus::Disconnected`] would be returned
+    ///
+    /// If blocks does not have parent [`BlockStatus::Disconnected`] would be returned.
     pub fn try_insert_block(
         &mut self,
         block: SealedBlockWithSenders,
@@ -274,7 +275,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
         }
         // if not found, check if the parent can be found inside canonical chain.
-        if Some(block.parent_hash) == self.block_indices.canonical_hash(&(block.number - 1)) {
+        if Some(block.parent_hash) == self.block_indices.canonical_hash(block.number - 1) {
             // create new chain that points to that block
             //return self.fork_canonical_chain(block.clone());
             // TODO save pending block to database
@@ -370,7 +371,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
             break
         }
-        (self.block_indices.canonical_hash(&fork.number) == Some(fork.hash)).then_some(fork)
+        (self.block_indices.canonical_hash(fork.number) == Some(fork.hash)).then_some(fork)
     }
 
     /// Insert a chain into the tree.
@@ -440,7 +441,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // check if block is part of canonical chain
-        if self.block_indices.canonical_hash(&block.number) == Some(block.hash()) {
+        if self.block_indices.canonical_hash(block.number) == Some(block.hash()) {
             // block is part of canonical chain
             return Ok(BlockStatus::Valid)
         }
@@ -595,7 +596,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
             let canon_fork = new_canon_chain.fork_block();
             // sanity check
-            if self.block_indices.canonical_hash(&canon_fork.number) != Some(canon_fork.hash) {
+            if self.block_indices.canonical_hash(canon_fork.number) != Some(canon_fork.hash) {
                 unreachable!("all chains should point to canonical chain.");
             }
 
