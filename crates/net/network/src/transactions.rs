@@ -349,7 +349,9 @@ where
                 // remove the peer
                 self.peers.remove(&peer_id);
             }
-            NetworkEvent::SessionEstablished { peer_id, messages, version, .. } => {
+            NetworkEvent::SessionEstablished {
+                peer_id, client_version, messages, version, ..
+            } => {
                 // insert a new peer into the peerset
                 self.peers.insert(
                     peer_id,
@@ -359,6 +361,7 @@ where
                         ),
                         request_tx: messages,
                         version,
+                        client_version,
                     },
                 );
 
@@ -685,6 +688,9 @@ struct Peer {
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
     version: EthVersion,
+    /// The peer's client version.
+    #[allow(unused)]
+    client_version: Arc<String>,
 }
 
 /// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)

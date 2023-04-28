@@ -13,7 +13,7 @@ pub use reth_rpc_types::engine::ForkchoiceState;
 pub trait Consensus: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
     ///
-    /// This is called on standalone header to check if all hashe
+    /// This is called on standalone header to check if all hashes are correct.
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError>;
 
     /// Validate that the header information regarding parent are correct.
@@ -59,7 +59,7 @@ pub trait Consensus: Debug + Send + Sync {
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 pub enum ConsensusError {
-    #[error("Block used gas ({gas_used:?}) is greater than gas limit ({gas_limit:?}).")]
+    #[error("Block used gas ({gas_used}) is greater than gas limit ({gas_limit}).")]
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
     #[error("Block ommer hash ({got:?}) is different from expected: ({expected:?})")]
     BodyOmmersHashDiff { got: H256, expected: H256 },
@@ -71,25 +71,27 @@ pub enum ConsensusError {
     BodyReceiptsRootDiff { got: H256, expected: H256 },
     #[error("Block withdrawals root ({got:?}) is different from expected ({expected:?})")]
     BodyWithdrawalsRootDiff { got: H256, expected: H256 },
-    #[error("Block with [hash:{hash:?},number: {number:}] is already known.")]
+    #[error("Block with [hash:{hash:?},number: {number}] is already known.")]
     BlockKnown { hash: BlockHash, number: BlockNumber },
     #[error("Block parent [hash:{hash:?}] is not known.")]
     ParentUnknown { hash: BlockHash },
-    #[error("Block number {block_number:?} is mismatch with parent block number {parent_block_number:?}")]
+    #[error(
+        "Block number {block_number} is mismatch with parent block number {parent_block_number}"
+    )]
     ParentBlockNumberMismatch { parent_block_number: BlockNumber, block_number: BlockNumber },
     #[error(
-    "Block timestamp {timestamp:?} is in past in comparison with parent timestamp {parent_timestamp:?}."
+    "Block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}."
     )]
     TimestampIsInPast { parent_timestamp: u64, timestamp: u64 },
-    #[error("Block timestamp {timestamp:?} is in future in comparison of our clock time {present_timestamp:?}.")]
+    #[error("Block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}.")]
     TimestampIsInFuture { timestamp: u64, present_timestamp: u64 },
-    #[error("Child gas_limit {child_gas_limit:?} max increase is {parent_gas_limit:?}/1024.")]
+    #[error("Child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024.")]
     GasLimitInvalidIncrease { parent_gas_limit: u64, child_gas_limit: u64 },
-    #[error("Child gas_limit {child_gas_limit:?} max decrease is {parent_gas_limit:?}/1024.")]
+    #[error("Child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024.")]
     GasLimitInvalidDecrease { parent_gas_limit: u64, child_gas_limit: u64 },
     #[error("Base fee missing.")]
     BaseFeeMissing,
-    #[error("Block base fee ({got:?}) is different then expected: ({expected:?}).")]
+    #[error("Block base fee ({got}) is different then expected: ({expected}).")]
     BaseFeeDiff { expected: u64, got: u64 },
     #[error("Transaction signer recovery error.")]
     TransactionSignerRecoveryError,
