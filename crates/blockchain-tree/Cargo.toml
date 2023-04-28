@@ -19,11 +19,10 @@ reth-interfaces = { path = "../interfaces" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
-# tracing
-tracing = "0.1"
-
 # common
 parking_lot = { version = "0.12"}
+lru = "0.10"
+tracing = "0.1"
 
 # mics
 aquamarine = "0.3.0"

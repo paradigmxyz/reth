@@ -143,7 +143,7 @@ impl Chain {
         if chain_tip.hash != chain.fork_block_hash() {
             return Err(ExecError::AppendChainDoesntConnect {
                 chain_tip: chain_tip.num_hash(),
-                other_chain_fork: chain.fork_block().into_components(),
+                other_chain_fork: chain.fork_block(),
             }
             .into())
         }

@@ -29,3 +29,7 @@ pub use shareable::ShareableBlockchainTree;
 
 pub mod post_state_data;
 pub use post_state_data::{PostStateData, PostStateDataRef};
+
+/// Buffer of not executed blocks.
+pub mod block_buffer;
+pub use block_buffer::BlockBuffer;

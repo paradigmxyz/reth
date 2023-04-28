@@ -339,8 +339,12 @@ where
     DB: Send + Sync,
     Tree: BlockchainTreeEngine,
 {
-    fn insert_block_with_senders(&self, block: SealedBlockWithSenders) -> Result<BlockStatus> {
-        self.tree.insert_block_with_senders(block)
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<()> {
+        self.tree.buffer_block(block)
+    }
+
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus> {
+        self.tree.insert_block(block)
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
