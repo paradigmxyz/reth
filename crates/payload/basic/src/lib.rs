@@ -8,7 +8,7 @@
 //! reth basic payload job generator
 
 use crate::metrics::PayloadBuilderMetrics;
-use futures_core::{ready, Stream};
+use futures_core::ready;
 use futures_util::FutureExt;
 use reth_payload_builder::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
@@ -36,7 +36,7 @@ use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{BlockEnv, CfgEnv, Env, ResultAndState},
+    primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState},
 };
 use std::{
     future::Future,
@@ -265,42 +265,44 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     metrics: PayloadBuilderMetrics,
 }
 
-impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
+impl<Client, Pool, Tasks> Future for BasicPayloadJob<Client, Pool, Tasks>
 where
     Client: StateProviderFactory + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
-    type Item = Result<Arc<BuiltPayload>, PayloadBuilderError>;
+    type Output = Result<(), PayloadBuilderError>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
         // check if the deadline is reached
-        let deadline_reached = this.deadline.as_mut().poll(cx).is_ready();
+        if this.deadline.as_mut().poll(cx).is_ready() {
+            trace!("Payload building deadline reached");
+            return Poll::Ready(Ok(()))
+        }
 
         // check if the interval is reached
-        if this.interval.poll_tick(cx).is_ready() &&
-            this.pending_block.is_none() &&
-            !deadline_reached
-        {
-            let _ = this.interval.poll_tick(cx);
-            trace!("spawn new payload build task");
-            let (tx, rx) = oneshot::channel();
-            let client = this.client.clone();
-            let pool = this.pool.clone();
-            let cancel = Cancelled::default();
-            let _cancel = cancel.clone();
-            let guard = this.payload_task_guard.clone();
-            let payload_config = this.config.clone();
-            let best_payload = this.best_payload.clone();
-            this.metrics.inc_initiated_payload_builds();
-            this.executor.spawn_blocking(Box::pin(async move {
-                // acquire the permit for executing the task
-                let _permit = guard.0.acquire().await;
-                build_payload(client, pool, payload_config, cancel, best_payload, tx)
-            }));
-            this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+        while this.interval.poll_tick(cx).is_ready() {
+            // start a new job if there is no pending block and we haven't reached the deadline
+            if this.pending_block.is_none() {
+                trace!("spawn new payload build task");
+                let (tx, rx) = oneshot::channel();
+                let client = this.client.clone();
+                let pool = this.pool.clone();
+                let cancel = Cancelled::default();
+                let _cancel = cancel.clone();
+                let guard = this.payload_task_guard.clone();
+                let payload_config = this.config.clone();
+                let best_payload = this.best_payload.clone();
+                this.metrics.inc_initiated_payload_builds();
+                this.executor.spawn_blocking(Box::pin(async move {
+                    // acquire the permit for executing the task
+                    let _permit = guard.0.acquire().await;
+                    build_payload(client, pool, payload_config, cancel, best_payload, tx)
+                }));
+                this.pending_block = Some(PendingPayload { _cancel, payload: rx });
+            }
         }
 
         // poll the pending block
@@ -323,20 +325,14 @@ where
                     }
                 }
                 Poll::Ready(Err(err)) => {
+                    // job failed, but we simply try again next interval
                     trace!(?err, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
-                    this.interval.reset();
-                    return Poll::Ready(Some(Err(err)))
                 }
                 Poll::Pending => {
                     this.pending_block = Some(fut);
                 }
             }
-        }
-
-        if deadline_reached {
-            trace!("Payload building deadline reached");
-            return Poll::Ready(None)
         }
 
         Poll::Pending
@@ -471,18 +467,21 @@ fn build_payload<Pool, Client>(
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
         let mut executed_txs = Vec::new();
-        let best_txs = pool.best_transactions();
+        let mut best_txs = pool.best_transactions();
 
         let mut total_fees = U256::ZERO;
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let block_number = initialized_block_env.number.to::<u64>();
 
-        for tx in best_txs {
+        while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
-            if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
-                // TODO: try find transactions that can fit into the block
-                break
+            if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+                // we can't fit this transaction into the block, so we need to mark it as invalid
+                // which also removes all dependent transaction from the iterator before we can
+                // continue
+                best_txs.mark_invalid(&pool_tx);
+                continue
             }
 
             // check if the job was cancelled, if so we can exit early
@@ -491,7 +490,7 @@ fn build_payload<Pool, Client>(
             }
 
             // convert tx to a signed transaction
-            let tx = tx.to_recovered_transaction();
+            let tx = pool_tx.to_recovered_transaction();
 
             // Configure the environment for the block.
             let env = Env {
@@ -503,9 +502,36 @@ fn build_payload<Pool, Client>(
             let mut evm = revm::EVM::with_env(env);
             evm.database(&mut db);
 
-            // TODO skip invalid transactions
-            let ResultAndState { result, state } =
-                evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+            let ResultAndState { result, state } = match evm.transact() {
+                Ok(res) => res,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                                // if the nonce is too low, we can skip this transaction
+                                trace!(?err, ?tx, "skipping nonce too low transaction");
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                trace!(
+                                    ?err,
+                                    ?tx,
+                                    "skipping invalid transaction and its descendants"
+                                );
+                                best_txs.mark_invalid(&pool_tx);
+                            }
+                            continue
+                        }
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                        }
+                    }
+                }
+            };
+
+            // let ResultAndState { result, state } =
+            evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
             let gas_used = result.gas_used();
 
             // commit changes

@@ -26,7 +26,6 @@ reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"
 futures-util = "0.3"
-futures-core = "0.3"
 
 ## misc
 thiserror = "1.0"

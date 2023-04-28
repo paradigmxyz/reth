@@ -5094,7 +5094,6 @@ dependencies = [
 name = "reth-payload-builder"
 version = "0.1.0"
 dependencies = [
- "futures-core",
  "futures-util",
  "metrics",
  "reth-interfaces",
@@ -5459,13 +5458,11 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "rand 0.8.5",
- "reth-consensus-common",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
- "ruint",
  "serde",
  "thiserror",
  "tokio",

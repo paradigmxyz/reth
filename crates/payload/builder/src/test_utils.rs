@@ -4,9 +4,9 @@ use crate::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadBuilderHandle,
     PayloadBuilderService, PayloadJob, PayloadJobGenerator,
 };
-use futures_core::Stream;
 use reth_primitives::{Block, U256};
 use std::{
+    future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -47,10 +47,10 @@ pub struct TestPayloadJob {
     attr: PayloadBuilderAttributes,
 }
 
-impl Stream for TestPayloadJob {
-    type Item = Result<Arc<BuiltPayload>, PayloadBuilderError>;
+impl Future for TestPayloadJob {
+    type Output = Result<(), PayloadBuilderError>;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Pending
     }
 }
