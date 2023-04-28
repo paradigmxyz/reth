@@ -533,6 +533,7 @@ mod tests {
         parent.gas_limit = 30000000;
         parent.base_fee_per_gas = Some(0x28041f7f5);
         parent.number -= 1;
+        parent.timestamp -= 1;
 
         let ommers = Vec::new();
         let body = Vec::new();
