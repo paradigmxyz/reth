@@ -68,7 +68,7 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// The tracked chains and their current data.
     chains: HashMap<BlockChainId, AppendableChain>,
     /// Unconnected block buffer.
-    unconnected_blocks_buffer: BlockBuffer,
+    buffered_blocks: BlockBuffer,
     /// Static blockchain ID generator
     block_chain_id_generator: u64,
     /// Indices to block and their connection to the canonical chain.
@@ -120,7 +120,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         Ok(Self {
             externals,
-            unconnected_blocks_buffer: BlockBuffer::new(config.max_unconnected_blocks() as usize),
+            buffered_blocks: BlockBuffer::new(config.max_unconnected_blocks()),
             block_chain_id_generator: 0,
             chains: Default::default(),
             block_indices: BlockIndices::new(
@@ -213,7 +213,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// Try inserting block inside the tree.
     /// If blocks does not have parent [`BlockStatus::Disconnected`] would be returned
-    pub fn try_block_insert(
+    pub fn try_insert_block(
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<BlockStatus, Error> {
@@ -265,7 +265,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 self.insert_chain(chain);
                 Ok(BlockStatus::Accepted)
             };
-            self.connected_unconected_blocks(block_num_hash);
+            self.try_connect_buffered_blocks(block_num_hash);
             return status
         }
 
@@ -277,7 +277,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             // https://github.com/paradigmxyz/reth/issues/1713
 
             let db = self.externals.shareable_db();
-            let fork_block = parent;
 
             // Validate that the block is post merge
             let parent_td = db
@@ -307,21 +306,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 &block,
                 &parent_header,
                 canonical_block_hashes,
-                fork_block,
+                parent,
                 &self.externals,
             )?;
             self.insert_chain(chain);
-            self.connected_unconected_blocks(block_num_hash);
+            self.try_connect_buffered_blocks(block_num_hash);
             return Ok(block_status)
         }
 
-        // if there is parrent inside buffer, validate against it.
-        if let Some(buffered_parent) = self.unconnected_blocks_buffer.block(parent) {
+        // if there is a parent inside the buffer, validate against it.
+        if let Some(buffered_parent) = self.buffered_blocks.block(parent) {
             self.externals.consensus.validate_header_against_parent(&block, buffered_parent)?
         }
 
         // insert block inside unconnected block buffer. Delaying it execution.
-        self.unconnected_blocks_buffer.insert_block(block);
+        self.buffered_blocks.insert_block(block);
 
         Ok(BlockStatus::Disconnected)
     }
@@ -427,7 +426,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Insert block for future execution.
     pub fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), Error> {
         self.validate_block(&block)?;
-        self.unconnected_blocks_buffer.insert_block(block);
+        self.buffered_blocks.insert_block(block);
         Ok(())
     }
 
@@ -483,7 +482,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         self.validate_block(&block)?;
 
         // try to insert block
-        self.try_block_insert(block)
+        self.try_insert_block(block)
     }
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
@@ -500,7 +499,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
         }
         // clean block buffer.
-        self.unconnected_blocks_buffer.clean_old_blocks(finalized_block);
+        self.buffered_blocks.clean_old_blocks(finalized_block);
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
@@ -543,7 +542,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // check unconnected block buffer for the childs of new added blocks,
         for added_block in last_canonical_hashes.into_iter() {
-            self.connected_unconected_blocks(added_block.into())
+            self.try_connect_buffered_blocks(added_block.into())
         }
 
         // check unconnected block buffer for childs of the chains.
@@ -554,15 +553,15 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
         }
         for block in all_chain_blocks.into_iter() {
-            self.connected_unconected_blocks(block)
+            self.try_connect_buffered_blocks(block)
         }
 
         Ok(())
     }
 
     /// Connect unconnected blocks
-    fn connected_unconected_blocks(&mut self, new_block: BlockNumHash) {
-        let include_blocks = self.unconnected_blocks_buffer.take_all_childrens(new_block);
+    fn try_connect_buffered_blocks(&mut self, new_block: BlockNumHash) {
+        let include_blocks = self.buffered_blocks.take_all_childrens(new_block);
         // insert child blocks
         for block in include_blocks.into_iter() {
             // dont fail on error, just ignore the block.
@@ -868,7 +867,7 @@ mod tests {
                 assert_eq!((num, hashes), pending_blocks);
             }
             if let Some(buffered_blocks) = self.buffered_blocks {
-                assert_eq!(*tree.unconnected_blocks_buffer.blocks(), buffered_blocks);
+                assert_eq!(*tree.buffered_blocks.blocks(), buffered_blocks);
             }
         }
     }

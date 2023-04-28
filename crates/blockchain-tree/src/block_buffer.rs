@@ -55,7 +55,7 @@ impl BlockBuffer {
             self.lru.push(num_hash, ()).filter(|(b, _)| *b != num_hash)
         {
             // evict the block if limit is hit
-            if let Some(evicted_block) = self.remove_from_block(&evicted_num_hash) {
+            if let Some(evicted_block) = self.remove_from_blocks(&evicted_num_hash) {
                 // evict the block if limit is hit
                 self.remove_from_parent(evicted_block.parent_hash, &evicted_num_hash);
             }
@@ -70,11 +70,11 @@ impl BlockBuffer {
     pub fn take_all_childrens(&mut self, parent: BlockNumHash) -> Vec<SealedBlockWithSenders> {
         // remove parent block if present
         let mut taken = Vec::new();
-        if let Some(block) = self.remove_from_block(&parent) {
+        if let Some(block) = self.remove_from_blocks(&parent) {
             taken.push(block);
         }
 
-        taken.extend(self.remove_childrens(vec![parent]).into_iter());
+        taken.extend(self.remove_children(vec![parent]).into_iter());
         taken
     }
 
@@ -98,7 +98,7 @@ impl BlockBuffer {
             self.lru.pop(block);
         }
 
-        self.remove_childrens(remove_parent_children);
+        self.remove_children(remove_parent_children);
     }
 
     /// Return reference to buffered blocks
@@ -133,8 +133,10 @@ impl BlockBuffer {
         };
     }
 
-    /// Remove block from `self.blocks`
-    fn remove_from_block(&mut self, block: &BlockNumHash) -> Option<SealedBlockWithSenders> {
+    /// Remove block from `self.blocks`, This will also remove block from `self.lru`.
+    ///
+    /// Note: This function will not remove block from the `self.parent_to_child` connection.
+    fn remove_from_blocks(&mut self, block: &BlockNumHash) -> Option<SealedBlockWithSenders> {
         if let Entry::Occupied(mut entry) = self.blocks.entry(block.number) {
             let ret = entry.get_mut().remove(&block.hash);
             // if set is empty remove block entry.
@@ -147,20 +149,18 @@ impl BlockBuffer {
         None
     }
 
-    /// Return all childs and childs childrens from given blocks. Remove them from buffer.
-    fn remove_childrens(
-        &mut self,
-        mut remove_parent_children: Vec<BlockNumHash>,
-    ) -> Vec<SealedBlockWithSenders> {
+    /// Remove all children and their descendants for the given blocks and return them.
+    fn remove_children(&mut self, parent_blocks: Vec<BlockNumHash>) -> Vec<SealedBlockWithSenders> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
+        let mut remove_parent_children = parent_blocks;
         let mut removed_blocks = Vec::new();
         while let Some(parent_num_hash) = remove_parent_children.pop() {
             // get this child blocks children and add them to the remove list.
             if let Some(parent_childrens) = self.parent_to_child.remove(&parent_num_hash.hash) {
                 // remove child from buffer
                 for child in parent_childrens.iter() {
-                    if let Some(block) = self.remove_from_block(child) {
+                    if let Some(block) = self.remove_from_blocks(child) {
                         removed_blocks.push(block);
                     }
                 }

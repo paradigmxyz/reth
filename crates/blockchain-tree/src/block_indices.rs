@@ -175,7 +175,7 @@ impl BlockIndices {
             }
         }
 
-        // remove childs from
+        // remove childs of removed blocks
         (
             removed.into_iter().fold(BTreeSet::new(), |mut fold, (number, hash)| {
                 fold.extend(self.remove_block(number, hash));
