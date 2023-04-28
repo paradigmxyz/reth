@@ -74,9 +74,11 @@ impl Command {
                     tx.clear::<tables::StorageChangeSet>()?;
                     tx.clear::<tables::Bytecodes>()?;
                     tx.put::<tables::SyncStage>(EXECUTION.0.to_string(), 0)?;
-                    insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
                     Ok::<_, eyre::Error>(())
                 })??;
+
+                let tx = db.tx_mut()?;
+                insert_genesis_state::<Env<WriteMap>>(&tx, self.chain.genesis())?;
             }
             StageEnum::Hashing => {
                 tool.db.update(|tx| {

@@ -1391,7 +1391,7 @@ fn unwind_storage_history_shards<DB: Database>(
 }
 
 /// An error that can occur when using the transaction container
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
 pub enum TransactionError {
     /// The transaction encountered a database error.
     #[error(transparent)]
