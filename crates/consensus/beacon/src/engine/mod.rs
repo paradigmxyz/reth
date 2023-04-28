@@ -389,7 +389,7 @@ where
 
         let status = if self.is_pipeline_idle() {
             let block_hash = block.hash;
-            match self.blockchain_tree.insert_block(block) {
+            match self.blockchain_tree.insert_block_without_senders(block) {
                 Ok(status) => {
                     let latest_valid_hash =
                         matches!(status, BlockStatus::Valid).then_some(block_hash);
@@ -404,15 +404,16 @@ where
                     let latest_valid_hash =
                         matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. }))
                             .then_some(H256::zero());
-                    let status = match error {
-                        Error::Execution(ExecutorError::PendingBlockIsInFuture { .. }) => {
-                            PayloadStatusEnum::Syncing
-                        }
-                        error => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
-                    };
+                    let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
                     PayloadStatus::new(status, latest_valid_hash)
                 }
             }
+        } else if let Err(error) = self.blockchain_tree.buffer_block_without_sender(block) {
+            let latest_valid_hash =
+                matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. }))
+                    .then_some(H256::zero());
+            let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+            PayloadStatus::new(status, latest_valid_hash)
         } else {
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
@@ -751,7 +752,7 @@ mod tests {
 
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
-        let config = BlockchainTreeConfig::new(1, 2, 3);
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, canon_state_notification_sender, config)

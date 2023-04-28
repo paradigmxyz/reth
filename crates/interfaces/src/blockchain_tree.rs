@@ -10,17 +10,23 @@ use std::collections::{BTreeMap, HashSet};
 ///   finalize and commit it to db. If we dont have the block, pipeline syncing should start to
 ///   fetch the blocks from p2p. Do reorg in tables if canonical chain if needed.
 pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
-    /// Recover senders and call [`BlockchainTreeEngine::insert_block_with_senders`].
-    fn insert_block(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
+    /// Recover senders and call [`BlockchainTreeEngine::insert_block`].
+    fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
         let block = block.seal_with_senders().ok_or(ExecutionError::SenderRecoveryError)?;
-        self.insert_block_with_senders(block)
+        self.insert_block(block)
     }
 
+    /// Recover senders and call [`BlockchainTreeEngine::buffer_block`].
+    fn buffer_block_without_sender(&self, block: SealedBlock) -> Result<(), Error> {
+        let block = block.seal_with_senders().ok_or(ExecutionError::SenderRecoveryError)?;
+        self.buffer_block(block)
+    }
+
+    /// buffer block with senders
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), Error>;
+
     /// Insert block with senders
-    fn insert_block_with_senders(
-        &self,
-        block: SealedBlockWithSenders,
-    ) -> Result<BlockStatus, Error>;
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, Error>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     fn finalize_block(&self, finalized_block: BlockNumber);
