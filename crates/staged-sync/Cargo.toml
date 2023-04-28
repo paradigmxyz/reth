@@ -31,7 +31,7 @@ tracing = "0.1.37"
 
 # crypto
 rand = { version = "0.8", optional = true }
-secp256k1 = { version = "0.26.0", features = [
+secp256k1 = { version = "0.27.0", features = [
     "global-context",
     "rand-std",
     "recovery",
@@ -41,7 +41,7 @@ secp256k1 = { version = "0.26.0", features = [
 thiserror = "1"
 
 # enr
-enr = { version = "0.8.0", features = ["serde", "rust-secp256k1"], optional = true }
+enr = { version = "0.8.1", features = ["serde", "rust-secp256k1"], optional = true }
 
 # ethers
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }
@@ -70,7 +70,7 @@ futures = "0.3"
 tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 
 # crypto
-secp256k1 = { version = "0.26.0", features = [
+secp256k1 = { version = "0.27.0", features = [
     "global-context",
     "rand-std",
     "recovery",
