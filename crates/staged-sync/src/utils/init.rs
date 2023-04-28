@@ -143,20 +143,8 @@ pub fn insert_genesis_hashes<DB: Database>(
         account.storage.map(|storage| (addr, storage.into_iter().map(|(k, v)| (k, v.into()))))
     });
     transaction.insert_storage_for_hashing(alloc_storage)?;
-    transaction.close();
+    transaction.commit()?;
     Ok(())
-
-    // inserting intermediate nodes
-    // TODO: fn prefixes(alloc: HashMap<Address, GenesisAccount>) -> Result<(PrefixSet,
-    // HashMap<H256, PrefixSet>)>?
-    //
-    // maybe with HashedPostState?
-    //
-    // So we can do
-    // let (account_prefixes, storage_prefixes) = prefixes(genesis.alloc)?;
-    // let state_root = StateRoot::new(tx)
-    //     .with_changed_account_prefixes(account_prefixes)
-    //     .with_changed_storage_prefixes(storage_prefixes)
 }
 
 #[cfg(test)]
