@@ -41,13 +41,13 @@ pub enum FieldTypes {
 }
 
 /// Derives the `Compact` trait and its from/to implementations.
-pub fn derive(input: TokenStream) -> TokenStream {
+pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let mut output = quote! {};
 
     let DeriveInput { ident, data, .. } = parse_macro_input!(input);
     let fields = get_fields(&data);
-    output.extend(generate_flag_struct(&ident, &fields));
-    output.extend(generate_from_to(&ident, &fields));
+    output.extend(generate_flag_struct(&ident, &fields, is_zstd));
+    output.extend(generate_from_to(&ident, &fields, is_zstd));
     output.into()
 }
 

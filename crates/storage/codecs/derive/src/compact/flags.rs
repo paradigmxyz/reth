@@ -2,7 +2,11 @@ use super::*;
 
 /// Generates the flag fieldset struct that is going to be used to store the length of fields and
 /// their potential presence.
-pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
+pub(crate) fn generate_flag_struct(
+    ident: &Ident,
+    fields: &FieldList,
+    is_zstd: bool,
+) -> TokenStream2 {
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
     let flags_ident = format_ident!("{ident}Flags");
@@ -27,6 +31,7 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
                 })
                 .collect::<Vec<_>>(),
             &mut field_flags,
+            is_zstd,
         )
     };
 
@@ -77,6 +82,7 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
 fn build_struct_field_flags(
     fields: Vec<&StructFieldDescriptor>,
     field_flags: &mut Vec<TokenStream2>,
+    is_zstd: bool,
 ) -> u8 {
     let mut total_bits = 0;
 
@@ -106,6 +112,15 @@ fn build_struct_field_flags(
             }
         }
     }
+
+    if is_zstd {
+        field_flags.push(quote! {
+            pub __zstd: B1,
+        });
+
+        total_bits += 1;
+    }
+
     total_bits
 }
 
