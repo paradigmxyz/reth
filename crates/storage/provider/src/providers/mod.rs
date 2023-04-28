@@ -413,6 +413,10 @@ where
     fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool {
         self.tree.share_chain(first, second)
     }
+
+    fn is_block_known(&self, hash: &BlockHash) -> bool {
+        self.tree.is_block_known(hash)
+    }
 }
 
 impl<DB, Tree> BlockchainTreePendingStateProvider for BlockchainProvider<DB, Tree>

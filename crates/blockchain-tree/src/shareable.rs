@@ -132,12 +132,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     }
 
     fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
-        trace!(target: "blockchain_tree", "Checking if block is canonical");
+        trace!(target: "blockchain_tree", ?block_hash, "Checking if block is canonical");
         self.tree.read().block_indices().is_block_hash_canonical(block_hash)
     }
 
     fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool {
-        trace!(target: "blockchain_tree", "Returning chain for a block");
+        trace!(target: "blockchain_tree", ?first, ?second, "Returning whether or not the two blocks share a chain");
         let tree = self.tree.read();
         let indices = tree.block_indices();
         if indices.is_block_hash_canonical(first) {
@@ -157,6 +157,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
 
             second_chain_index == first_chain_index
         }
+    }
+
+    fn is_block_known(&self, hash: &BlockHash) -> bool {
+        trace!(target: "blockchain_tree", ?hash, "Checking if block is known");
+        let tree = self.tree.read();
+        tree.block_indices().is_block_hash_canonical(hash) || tree.block_by_hash(*hash).is_some()
     }
 }
 

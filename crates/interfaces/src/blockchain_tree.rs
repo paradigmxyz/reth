@@ -89,6 +89,8 @@ pub trait BlockchainTreeViewer: Send + Sync {
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
 
     /// Returns the block with matching hash.
+    ///
+    /// This will not return blocks that are part of the canonical chain.
     fn block_by_hash(&self, hash: BlockHash) -> Option<SealedBlock>;
 
     /// Canonical block number and hashes best known by the tree.
@@ -124,4 +126,8 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Return whether or not the two block hashes share a chain. If either does not exist in the
     /// tree and are not part of the canonical chain, this should return `false`.
     fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool;
+
+    /// Return whether or not the block is known to either the tree or is part of the canonical
+    /// chain.
+    fn is_block_known(&self, hash: &BlockHash) -> bool;
 }
