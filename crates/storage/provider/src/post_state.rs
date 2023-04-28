@@ -870,6 +870,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn wiped_revert() {
+        let address = Address::random();
+
+        let init_block_number = 1;
+        let init_account = Account { balance: U256::from(3), ..Default::default() };
+        let init_slot = U256::from(1);
+
+        // Create init state for demonstration purposes
+        // Block 1
+        // Account: exists
+        // Storage: 0x01: 1
+        let mut init_state = PostState::new();
+        init_state.create_account(init_block_number, address, init_account);
+        init_state.change_storage(
+            init_block_number,
+            address,
+            BTreeMap::from([(init_slot, (U256::ZERO, U256::from(1)))]),
+        );
+
+        let mut post_state = PostState::new();
+        // Block 2
+        // Account: destroyed
+        // Storage: wiped
+        post_state.destroy_account(2, address, init_account);
+        assert!(post_state.storage.get(&address).unwrap().wiped);
+
+        // Block 3
+        // Account: recreated
+        // Storage: wiped, then 0x01: 2
+        let recreated_account = Account { balance: U256::from(4), ..Default::default() };
+        post_state.create_account(3, address, recreated_account);
+        post_state.change_storage(
+            3,
+            address,
+            BTreeMap::from([(init_slot, (U256::ZERO, U256::from(2)))]),
+        );
+        assert!(post_state.storage.get(&address).unwrap().wiped);
+
+        // Revert to block 2
+        post_state.revert_to(2);
+        assert!(post_state.storage.get(&address).unwrap().wiped);
+    }
+
     /// Checks that if an account is touched multiple times in the same block,
     /// then the old value from the first change is kept and not overwritten.
     ///
