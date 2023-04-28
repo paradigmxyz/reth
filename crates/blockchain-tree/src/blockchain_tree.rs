@@ -700,12 +700,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
 
-        trace!(target: "blockchain_tree", ?chain, ?chain_id, "Got chain id for block hash");
-
         // we are spliting chain as there is possibility that only part of chain get canonicalized.
         let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
-
-        trace!(target: "blockchain_tree", ?canonical, "Split canonical chain, finding fork block");
 
         let mut block_fork = canonical.fork_block();
         let mut block_fork_number = canonical.fork_block_number();
