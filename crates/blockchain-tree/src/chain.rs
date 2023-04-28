@@ -160,7 +160,7 @@ impl AppendableChain {
     }
 
     /// Validate and execute the given block, and append it to this chain.
-    pub fn append_block<DB, C, EF>(
+    pub(crate) fn append_block<DB, C, EF>(
         &mut self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
