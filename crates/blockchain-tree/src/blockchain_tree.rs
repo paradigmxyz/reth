@@ -424,7 +424,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// # Note
     ///
-    /// This recovers transaction signers (unlike [`BlockchainTree::insert_block_with_senders`]).
+    /// This recovers transaction signers (unlike [`BlockchainTree::insert_block`]).
     pub fn insert_block_without_senders(
         &mut self,
         block: SealedBlock,
