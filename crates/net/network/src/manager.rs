@@ -656,7 +656,7 @@ where
                             info!(
                                 target : "net",
                                 ?remote_addr,
-                                client_version,
+                                %client_version,
                                 ?peer_id,
                                 ?total_active,
                                 "Session established"
@@ -884,7 +884,7 @@ pub enum NetworkEvent {
         /// The remote addr of the peer to which a session was established.
         remote_addr: SocketAddr,
         /// The client version of the peer to which a session was established.
-        client_version: String,
+        client_version: Arc<String>,
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.

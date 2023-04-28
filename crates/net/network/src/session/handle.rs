@@ -62,7 +62,7 @@ pub(crate) struct ActiveSessionHandle {
     /// Sender half of the command channel used send commands _to_ the spawned session
     pub(crate) commands_to_session: mpsc::Sender<SessionCommand>,
     /// The client's name and version
-    pub(crate) client_version: String,
+    pub(crate) client_version: Arc<String>,
     /// The address we're connected to
     pub(crate) remote_addr: SocketAddr,
 }
@@ -85,7 +85,7 @@ pub struct PeerInfo {
     /// The identifier of the remote peer
     pub remote_id: PeerId,
     /// The client's name and version
-    pub client_version: String,
+    pub client_version: Arc<String>,
     /// The address we're connected to
     pub remote_addr: SocketAddr,
     /// The direction of the session
