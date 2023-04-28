@@ -205,6 +205,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Check that the block is part of the canonical chain, even if it is not in the tree's range.
+    ///
+    /// This differs from `is_block_hash_canonical` in that it will check the database if the block
+    /// is not in the tree's range.
     pub(crate) fn ensure_block_is_canonical(&self, block_hash: &BlockHash) -> Result<bool, Error> {
         Ok(self.get_block_num(block_hash)?.is_some())
     }
