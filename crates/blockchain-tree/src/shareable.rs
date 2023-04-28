@@ -37,11 +37,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
 {
     fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
         let mut tree = self.tree.write();
-        tree.ensure_block_is_in_range(&block)?;
+        // check if block is known before recovering all senders.
+        if let Some(status) = tree.is_block_known(block.num_hash())? {
+            return Ok(status)
+        }
         let block = block
             .seal_with_senders()
             .ok_or(reth_interfaces::executor::Error::SenderRecoveryError)?;
-        tree.insert_in_range_block_with_senders(block)
+        tree.insert_block_inner(block, true)
     }
 
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), Error> {
@@ -50,7 +53,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
 
     fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, Error> {
         trace!(target: "blockchain_tree", ?block, "Inserting block");
-        self.tree.write().insert_block_with_senders(block)
+        self.tree.write().insert_block(block)
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
