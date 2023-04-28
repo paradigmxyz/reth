@@ -1,10 +1,7 @@
 //! Trait abstractions used by the payload crate.
 
 use crate::{error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes};
-
-use std::future::Future;
-
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 /// A type that can build a payload.
 ///
