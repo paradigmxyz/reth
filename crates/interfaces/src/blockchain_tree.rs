@@ -54,9 +54,9 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
 }
 
 /// From Engine API spec, block inclusion can be valid, accepted or invalid.
-/// Invalid case is already covered by error but we needs to make distinction
+/// Invalid case is already covered by error, but we need to make distinction
 /// between if it is valid (extends canonical chain) or just accepted (is side chain).
-/// If we dont know the block parent we are returning Disconnected status
+/// If we don't know the block parent we are returning Disconnected status
 /// as we can't make a claim if block is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {

@@ -266,7 +266,7 @@ impl BlockIndices {
     /// this is function that is going to remove N number of last canonical hashes.
     ///
     /// NOTE: This is not safe standalone, as it will not disconnect
-    /// blocks that deppends on unwinded canonical chain. And should be
+    /// blocks that depends on unwinded canonical chain. And should be
     /// used when canonical chain is reinserted inside Tree.
     pub(crate) fn unwind_canonical_chain(&mut self, unwind_to: BlockNumber) {
         // this will remove all blocks numbers that are going to be replaced.
@@ -316,8 +316,8 @@ impl BlockIndices {
     }
 
     /// get canonical hash
-    pub fn canonical_hash(&self, block_number: &BlockNumber) -> Option<BlockHash> {
-        self.canonical_chain.get(block_number).cloned()
+    pub fn canonical_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
+        self.canonical_chain.get(&block_number).cloned()
     }
 
     /// get canonical tip

@@ -13,7 +13,7 @@ pub use reth_rpc_types::engine::ForkchoiceState;
 pub trait Consensus: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
     ///
-    /// This is called on standalone header to check if all hashe
+    /// This is called on standalone header to check if all hashes are correct.
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError>;
 
     /// Validate that the header information regarding parent are correct.
