@@ -131,6 +131,12 @@ impl Transaction {
             ),
         };
 
+        let signature = Signature::from_primitive_signature(
+            *signed_tx.signature(),
+            signed_tx.tx_type(),
+            signed_tx.chain_id(),
+        );
+
         Self {
             hash: signed_tx.hash(),
             nonce: U256::from(signed_tx.nonce()),
@@ -140,10 +146,7 @@ impl Transaction {
             gas_price,
             max_fee_per_gas,
             max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),
-            signature: Some(Signature::from_primitive_signature(
-                *signed_tx.signature(),
-                signed_tx.chain_id(),
-            )),
+            signature: Some(signature),
             gas: U256::from(signed_tx.gas_limit()),
             input: signed_tx.input().clone(),
             chain_id,
