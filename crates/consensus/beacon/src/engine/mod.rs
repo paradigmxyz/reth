@@ -355,6 +355,8 @@ where
             } else {
                 PipelineTarget::Head
             };
+            self.forkchoice_state = Some(state);
+            // TODO: does the pipeline need to be idle here?
             self.require_pipeline_run(target);
             return Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
                 PayloadStatusEnum::Syncing,
