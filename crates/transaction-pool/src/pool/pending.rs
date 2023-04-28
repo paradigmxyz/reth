@@ -20,6 +20,7 @@ use std::{
 ///
 /// Once an `independent` transaction was executed it *unlocks* the next nonce, if this transaction
 /// is also pending, then this will be moved to the `independent` queue.
+#[derive(Clone)]
 pub(crate) struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: T,
@@ -83,6 +84,44 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
+    /// Removes all transactions and their dependent transaction from the subpool that no longer
+    /// satisfy the given basefee (`tx.fee < basefee`)
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    pub(crate) fn enforce_basefee(
+        &mut self,
+        basefee: u128,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut to_remove = Vec::new();
+
+        {
+            let mut iter = self.by_id.iter().peekable();
+            while let Some((id, tx)) = iter.next() {
+                if tx.transaction.transaction.max_fee_per_gas() < basefee {
+                    // this transaction no longer satisfies the basefee: remove it and all its
+                    // descendants
+                    to_remove.push(*id);
+                    'this: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'this
+                        }
+                        to_remove.push(**peek);
+                        iter.next();
+                    }
+                }
+            }
+        }
+
+        dbg!(&to_remove);
+
+        let mut removed = Vec::with_capacity(to_remove.len());
+        for id in to_remove {
+            removed.push(self.remove_transaction(&id).expect("transaction exists"));
+        }
+
+        removed
+    }
+
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
     ///
     /// Note: for a transaction with nonce higher than the current on chain nonce this will always
@@ -127,7 +166,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Removes a _mined_ transaction from the pool.
     ///
-    /// If the transactions has a descendant transaction it will advance it to the best queue.
+    /// If the transaction has a descendant transaction it will advance it to the best queue.
     pub(crate) fn prune_transaction(
         &mut self,
         id: &TransactionId,
@@ -147,9 +186,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let tx = self.by_id.remove(id)?;
-        // keep track of size
-        self.size_of -= tx.transaction.transaction.size();
         self.all.remove(&tx.transaction);
+        self.size_of -= tx.transaction.transaction.size();
         self.independent_transactions.remove(&tx.transaction);
         Some(tx.transaction.transaction.clone())
     }
@@ -178,7 +216,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Whether the pool is empty
     #[cfg(test)]
-    #[allow(unused)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }
@@ -245,5 +282,67 @@ impl<T: TransactionOrdering> Ord for PendingTransactionRef<T> {
         self.priority
             .cmp(&other.priority)
             .then_with(|| other.submission_id.cmp(&self.submission_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{MockOrdering, MockTransaction, MockTransactionFactory};
+
+    #[test]
+    fn test_enforce_basefee() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
+        pool.add_transaction(tx.clone());
+
+        assert!(pool.by_id.contains_key(tx.id()));
+        assert_eq!(pool.len(), 1);
+
+        let removed = pool.enforce_basefee(0);
+        assert!(removed.is_empty());
+
+        let removed = pool.enforce_basefee(tx.max_fee_per_gas() + 1);
+        assert_eq!(removed.len(), 1);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_enforce_basefee_descendant() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let t = MockTransaction::eip1559().inc_price_by(10);
+        let root_tx = f.validated_arc(t.clone());
+        pool.add_transaction(root_tx.clone());
+
+        let descendant_tx = f.validated_arc(t.inc_nonce().decr_price());
+        pool.add_transaction(descendant_tx.clone());
+
+        assert!(pool.by_id.contains_key(root_tx.id()));
+        assert!(pool.by_id.contains_key(descendant_tx.id()));
+        assert_eq!(pool.len(), 2);
+
+        assert_eq!(pool.independent_transactions.len(), 1);
+
+        let removed = pool.enforce_basefee(0);
+        assert!(removed.is_empty());
+
+        // two dependent tx in the pool with decreasing fee
+
+        {
+            let mut pool2 = pool.clone();
+            let removed = pool2.enforce_basefee(descendant_tx.max_fee_per_gas() + 1);
+            assert_eq!(removed.len(), 1);
+            assert_eq!(pool2.len(), 1);
+            // descendant got popped
+            assert!(pool2.by_id.contains_key(root_tx.id()));
+            assert!(!pool2.by_id.contains_key(descendant_tx.id()));
+        }
+
+        // remove root transaction via fee
+        let removed = pool.enforce_basefee(root_tx.max_fee_per_gas() + 1);
+        assert_eq!(removed.len(), 2);
+        assert!(pool.is_empty());
     }
 }
