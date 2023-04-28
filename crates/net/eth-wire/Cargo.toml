@@ -47,7 +47,7 @@ tokio-util = { version = "0.7.4", features = ["io", "codec"] }
 hex-literal = "0.3"
 hex = "0.4"
 rand = "0.8"
-secp256k1 = { version = "0.26.0", features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
 
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }

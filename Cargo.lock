@@ -1632,9 +1632,9 @@ dependencies = [
 
 [[package]]
 name = "enr"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb4d5fbf6f56acecd38f5988eb2e4ae412008a2a30268c748c701ec6322f39d4"
+checksum = "cf56acd72bb22d2824e66ae8e9e5ada4d0de17a69c7fd35569dde2ada8ec9116"
 dependencies = [
  "base64 0.13.1",
  "bytes",
@@ -1643,7 +1643,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "sha3",
  "zeroize",
@@ -1939,7 +1939,7 @@ dependencies = [
  "auto_impl",
  "base64 0.21.0",
  "bytes",
- "enr 0.8.0",
+ "enr 0.8.1",
  "ethers-core",
  "futures-channel",
  "futures-core",
@@ -4606,7 +4606,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "shellexpand",
@@ -4748,7 +4748,7 @@ dependencies = [
  "reth-interfaces",
  "reth-libmdbx",
  "reth-primitives",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "tempfile",
@@ -4763,7 +4763,7 @@ name = "reth-discv4"
 version = "0.1.0"
 dependencies = [
  "discv5",
- "enr 0.8.0",
+ "enr 0.8.1",
  "generic-array",
  "hex",
  "rand 0.8.5",
@@ -4773,7 +4773,7 @@ dependencies = [
  "reth-rlp",
  "reth-rlp-derive",
  "reth-tracing",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "thiserror",
  "tokio",
@@ -4787,7 +4787,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "data-encoding",
- "enr 0.8.0",
+ "enr 0.8.1",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -4795,7 +4795,7 @@ dependencies = [
  "reth-rlp",
  "reth-tracing",
  "schnellru",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_with",
  "thiserror",
@@ -4851,7 +4851,7 @@ dependencies = [
  "reth-net-common",
  "reth-primitives",
  "reth-rlp",
- "secp256k1 0.26.0",
+ "secp256k1",
  "sha2 0.10.6",
  "sha3",
  "thiserror",
@@ -4883,7 +4883,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-tracing",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "smol_str",
  "snap",
@@ -4915,7 +4915,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
- "secp256k1 0.26.0",
+ "secp256k1",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -5022,7 +5022,7 @@ dependencies = [
  "aquamarine",
  "async-trait",
  "auto_impl",
- "enr 0.8.0",
+ "enr 0.8.1",
  "ethers-core",
  "ethers-middleware",
  "ethers-providers",
@@ -5055,7 +5055,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "serial_test",
@@ -5128,7 +5128,7 @@ dependencies = [
  "reth-rlp-derive",
  "revm-primitives",
  "ruint",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "serde_with",
@@ -5251,7 +5251,7 @@ dependencies = [
  "revm",
  "revm-primitives",
  "schnellru",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "thiserror",
@@ -5346,7 +5346,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "confy",
- "enr 0.8.0",
+ "enr 0.8.1",
  "ethers-core",
  "ethers-middleware",
  "ethers-providers",
@@ -5366,7 +5366,7 @@ dependencies = [
  "reth-staged-sync",
  "reth-stages",
  "reth-tracing",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "shellexpand",
@@ -5513,7 +5513,7 @@ dependencies = [
  "once_cell",
  "revm-primitives",
  "ripemd",
- "secp256k1 0.27.0",
+ "secp256k1",
  "sha2 0.10.6",
  "sha3",
  "substrate-bn",
@@ -5879,22 +5879,13 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4124a35fe33ae14259c490fd70fa199a32b9ce9502f2ee6bc4f81ec06fa65894"
-dependencies = [
- "rand 0.8.5",
- "secp256k1-sys",
- "serde",
-]
-
-[[package]]
-name = "secp256k1"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25996b82292a7a57ed3508f052cfff8640d38d32018784acd714758b43da9c8f"
 dependencies = [
+ "rand 0.8.5",
  "secp256k1-sys",
+ "serde",
 ]
 
 [[package]]
