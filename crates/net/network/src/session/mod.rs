@@ -457,6 +457,7 @@ impl SessionManager {
 
                 self.spawn(session);
 
+                let client_version = Arc::new(client_id);
                 let handle = ActiveSessionHandle {
                     direction,
                     session_id,
@@ -465,7 +466,7 @@ impl SessionManager {
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
                     commands_to_session,
-                    client_version: client_id.clone(),
+                    client_version: Arc::clone(&client_version),
                     remote_addr,
                 };
 
@@ -475,7 +476,7 @@ impl SessionManager {
                 Poll::Ready(SessionEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
-                    client_version: client_id,
+                    client_version,
                     version,
                     capabilities,
                     status,
@@ -592,7 +593,7 @@ pub(crate) enum SessionEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
-        client_version: String,
+        client_version: Arc<String>,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
