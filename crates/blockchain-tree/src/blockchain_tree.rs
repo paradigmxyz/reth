@@ -185,7 +185,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// Returns None if the block is not part of the canonical chain or any side chain.
     pub fn get_block_num(&self, block_hash: &BlockHash) -> Result<Option<u64>, Error> {
-        // NOTE: is_block_hash_canonical does not check the db
         // first check the canonical chain
         if let Some((num, _)) =
             self.block_indices.canonical_chain().iter().find(|(_, hash)| *hash == block_hash)
