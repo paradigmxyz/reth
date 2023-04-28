@@ -356,16 +356,24 @@ where
                 PipelineTarget::Head
             };
             self.require_pipeline_run(target);
-            return Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(PayloadStatusEnum::Syncing)))
+            return Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Syncing,
+            )))
         }
 
-        // check if finalized is part of the same chain
-        if !self.blockchain_tree.share_chain(&state.head_block_hash, &state.finalized_block_hash) {
+        // check if finalized is part of the same chain (and not zero)
+        if !state.finalized_block_hash.is_zero() &&
+            !self
+                .blockchain_tree
+                .share_chain(&state.head_block_hash, &state.finalized_block_hash)
+        {
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
 
-        // check if safe is part of the same chain as the head
-        if !self.blockchain_tree.share_chain(&state.head_block_hash, &state.safe_block_hash) {
+        // check if safe is part of the same chain as the head (and not zero)
+        if !state.safe_block_hash.is_zero() &&
+            !self.blockchain_tree.share_chain(&state.head_block_hash, &state.safe_block_hash)
+        {
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
 
