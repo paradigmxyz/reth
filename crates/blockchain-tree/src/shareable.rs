@@ -131,6 +131,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         self.tree.read().pending_block().cloned()
     }
 
+    // TODO: better errors for the unexpected cases here (unknown fork block with index etc.)
     fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> Result<bool, Error> {
         trace!(target: "blockchain_tree", ?first, ?second, "Returning whether or not the two blocks share a chain");
         let tree = self.tree.read();
@@ -175,7 +176,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         // if the block number of the fork block is greater than the canonical block num, because
         // the fork block by definition connects to the canonical chain, we know that the two
         // blocks share a chain
-        Ok(num >= fork_block.number)
+        Ok(fork_block.number >= num)
     }
 
     fn is_block_known(&self, hash: &BlockHash) -> Result<bool, Error> {
