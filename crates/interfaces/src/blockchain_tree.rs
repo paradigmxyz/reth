@@ -120,14 +120,11 @@ pub trait BlockchainTreeViewer: Send + Sync {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
     }
 
-    /// Return whether or not the block hash is canonical.
-    fn is_block_hash_canonical(&self, hash: &BlockHash) -> bool;
-
     /// Return whether or not the two block hashes share a chain. If either does not exist in the
     /// tree and are not part of the canonical chain, this should return `false`.
-    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool;
+    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> Result<bool, Error>;
 
     /// Return whether or not the block is known to either the tree or is part of the canonical
     /// chain.
-    fn is_block_known(&self, hash: &BlockHash) -> bool;
+    fn is_block_known(&self, hash: &BlockHash) -> Result<bool, Error>;
 }

@@ -181,6 +181,34 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(None)
     }
 
+    /// Get the block number for the block, even if it outside of the tree's range.
+    ///
+    /// Returns None if the block is not part of the canonical chain or any side chain.
+    pub fn get_block_num(&self, block_hash: &BlockHash) -> Result<Option<u64>, Error> {
+        // NOTE: is_block_hash_canonical does not check the db
+        // first check the canonical chain
+        if let Some((num, _)) =
+            self.block_indices.canonical_chain().iter().find(|(_, hash)| *hash == block_hash)
+        {
+            Ok(Some(*num))
+        } else {
+            // get the block hash as part of a side chain, otherwise check the db in case it's out
+            // of range
+            if let Some(block) = self.block_by_hash(*block_hash) {
+                Ok(Some(block.number))
+            } else {
+                let db = self.externals.shareable_db();
+                let header_num = db.header(block_hash)?.map(|header| header.number);
+                Ok(header_num)
+            }
+        }
+    }
+
+    /// Check that the block is part of the canonical chain, even if it is not in the tree's range.
+    pub(crate) fn ensure_block_is_canonical(&self, block_hash: &BlockHash) -> Result<bool, Error> {
+        Ok(self.get_block_num(block_hash)?.is_some())
+    }
+
     /// Expose internal indices of the BlockchainTree.
     pub fn block_indices(&self) -> &BlockIndices {
         &self.block_indices
@@ -398,7 +426,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// the block.
     ///
     /// Returns `None` if the chain is not known.
-    fn canonical_fork(&self, chain_id: BlockChainId) -> Option<ForkBlock> {
+    pub fn canonical_fork(&self, chain_id: BlockChainId) -> Option<ForkBlock> {
         let mut chain_id = chain_id;
         let mut fork;
         loop {

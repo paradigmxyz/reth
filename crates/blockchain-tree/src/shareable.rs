@@ -131,38 +131,57 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         self.tree.read().pending_block().cloned()
     }
 
-    fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
-        trace!(target: "blockchain_tree", ?block_hash, "Checking if block is canonical");
-        self.tree.read().block_indices().is_block_hash_canonical(block_hash)
-    }
-
-    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool {
+    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> Result<bool, Error> {
         trace!(target: "blockchain_tree", ?first, ?second, "Returning whether or not the two blocks share a chain");
         let tree = self.tree.read();
         let indices = tree.block_indices();
-        if indices.is_block_hash_canonical(first) {
-            // canonical, only need to check if the other is canonical
-            indices.is_block_hash_canonical(second)
-        } else {
-            // non-canonical chain
-            let Some(first_chain_index) = indices.get_blocks_chain_id(first) else {
-                // not in the tree, not canonical, the second can't share a chain
-                return false
+        let (non_canon_index, maybe_canon_hash) =
+            match (indices.get_blocks_chain_id(first), indices.get_blocks_chain_id(second)) {
+                // both part of side chains in the tree
+                (Some(first_index), Some(second_index)) => return Ok(first_index == second_index),
+                (Some(first_index), None) => {
+                    // if the first is not canonical, and returned None for chain id, exit early
+                    if !tree.ensure_block_is_canonical(second)? {
+                        return Ok(false)
+                    }
+                    (first_index, second)
+                }
+                (None, Some(second_index)) => {
+                    // if the first is not canonical, and returned None for chain id, exit early
+                    if !tree.ensure_block_is_canonical(first)? {
+                        return Ok(false)
+                    }
+                    (second_index, first)
+                }
+                (None, None) => {
+                    // both part of canonical chain (or do not exist), exit
+                    return Ok(tree.ensure_block_is_canonical(first)? &&
+                        tree.ensure_block_is_canonical(second)?)
+                }
             };
 
-            let Some(second_chain_index) = indices.get_blocks_chain_id(second) else {
-                // not in the tree, not canonical, the first can't share a chain
-                return false
-            };
+        let Some(fork_block) = tree.canonical_fork(non_canon_index) else {
+            // NOTE: not known - this should not occur because we have an index
+            return Ok(false)
+        };
 
-            second_chain_index == first_chain_index
-        }
+        let Some(num) = tree.get_block_num(maybe_canon_hash)? else {
+            // not known in either the tree or db
+            return Ok(false)
+        };
+
+        // one is on the canonical chain, the other is on a side chain
+        //
+        // if the block number of the fork block is greater than the canonical block num, because
+        // the fork block by definition connects to the canonical chain, we know that the two
+        // blocks share a chain
+        Ok(num >= fork_block.number)
     }
 
-    fn is_block_known(&self, hash: &BlockHash) -> bool {
+    fn is_block_known(&self, hash: &BlockHash) -> Result<bool, Error> {
         trace!(target: "blockchain_tree", ?hash, "Checking if block is known");
         let tree = self.tree.read();
-        tree.block_indices().is_block_hash_canonical(hash) || tree.block_by_hash(*hash).is_some()
+        Ok(tree.ensure_block_is_canonical(hash)? || tree.block_by_hash(*hash).is_some())
     }
 }
 

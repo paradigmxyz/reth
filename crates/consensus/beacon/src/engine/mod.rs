@@ -343,8 +343,8 @@ where
 
         // TODO: is this the right check that the block exists and is VALID?
         // This is here so we know that the block is `VALID` before performing same-chain checks,
-        // if it's in the tree it should be VALID
-        if !self.blockchain_tree.is_block_known(&state.head_block_hash) {
+        // if it's in the tree or db it should be VALID
+        if !self.blockchain_tree.is_block_known(&state.head_block_hash)? {
             // If this is the first forkchoice received, start downloading from safe block
             // hash.
             let target = if is_first_forkchoice &&
@@ -365,14 +365,14 @@ where
         if !state.finalized_block_hash.is_zero() &&
             !self
                 .blockchain_tree
-                .share_chain(&state.head_block_hash, &state.finalized_block_hash)
+                .share_chain(&state.head_block_hash, &state.finalized_block_hash)?
         {
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
 
         // check if safe is part of the same chain as the head (and not zero)
         if !state.safe_block_hash.is_zero() &&
-            !self.blockchain_tree.share_chain(&state.head_block_hash, &state.safe_block_hash)
+            !self.blockchain_tree.share_chain(&state.head_block_hash, &state.safe_block_hash)?
         {
             return Ok(OnForkChoiceUpdated::invalid_state())
         }

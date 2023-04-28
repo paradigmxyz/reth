@@ -406,15 +406,11 @@ where
         self.tree.pending_block_num_hash()
     }
 
-    fn is_block_hash_canonical(&self, hash: &BlockHash) -> bool {
-        self.tree.is_block_hash_canonical(hash)
-    }
-
-    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool {
+    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> Result<bool> {
         self.tree.share_chain(first, second)
     }
 
-    fn is_block_known(&self, hash: &BlockHash) -> bool {
+    fn is_block_known(&self, hash: &BlockHash) -> Result<bool> {
         self.tree.is_block_known(hash)
     }
 }
