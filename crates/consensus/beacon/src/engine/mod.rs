@@ -334,8 +334,41 @@ where
 
         // TODO: check PoW / EIP-3675 terminal block conditions for the fork choice head
         // TODO: ensure validity of the payload (is this satisfied already?)
-
         let is_first_forkchoice = self.forkchoice_state.is_none();
+
+        // Client software MUST return -38002: Invalid forkchoice state error if the payload
+        // referenced by forkchoiceState.headBlockHash is VALID and a payload referenced by either
+        // forkchoiceState.finalizedBlockHash or forkchoiceState.safeBlockHash does not belong to
+        // the chain defined by forkchoiceState.headBlockHash.
+
+        // TODO: is this the right check that the block exists and is VALID?
+        // This is here so we know that the block is `VALID` before performing same-chain checks,
+        // if it's in the tree it should be VALID
+        let Some(block) = self.blockchain_tree.block_by_hash(state.head_block_hash) else {
+            // If this is the first forkchoice received, start downloading from safe block
+            // hash.
+            let target = if is_first_forkchoice &&
+                !state.safe_block_hash.is_zero() &&
+                self.get_block_number(state.safe_block_hash)?.is_none()
+            {
+                PipelineTarget::Safe
+            } else {
+                PipelineTarget::Head
+            };
+            self.require_pipeline_run(target);
+            return Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(PayloadStatusEnum::Syncing)))
+        };
+
+        // check if finalized is part of the same chain
+        if !self.blockchain_tree.share_chain(&state.head_block_hash, &state.finalized_block_hash) {
+            return Ok(OnForkChoiceUpdated::invalid_state())
+        }
+
+        // check if safe is part of the same chain as the head
+        if !self.blockchain_tree.share_chain(&state.head_block_hash, &state.safe_block_hash) {
+            return Ok(OnForkChoiceUpdated::invalid_state())
+        }
+
         self.forkchoice_state = Some(state);
         let status = if self.is_pipeline_idle() {
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {

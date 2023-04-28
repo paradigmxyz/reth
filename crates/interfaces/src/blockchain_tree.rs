@@ -117,4 +117,11 @@ pub trait BlockchainTreeViewer: Send + Sync {
     fn pending_block(&self) -> Option<SealedBlock> {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
     }
+
+    /// Return whether or not the block hash is canonical.
+    fn is_block_hash_canonical(&self, hash: &BlockHash) -> bool;
+
+    /// Return whether or not the two block hashes share a chain. If either does not exist in the
+    /// tree and are not part of the canonical chain, this should return `false`.
+    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool;
 }

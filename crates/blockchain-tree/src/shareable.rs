@@ -130,6 +130,34 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         trace!(target: "blockchain_tree", "Returning first pending block");
         self.tree.read().pending_block().cloned()
     }
+
+    fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
+        trace!(target: "blockchain_tree", "Checking if block is canonical");
+        self.tree.read().block_indices().is_block_hash_canonical(block_hash)
+    }
+
+    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool {
+        trace!(target: "blockchain_tree", "Returning chain for a block");
+        let tree = self.tree.read();
+        let indices = tree.block_indices();
+        if indices.is_block_hash_canonical(first) {
+            // canonical, only need to check if the other is canonical
+            indices.is_block_hash_canonical(second)
+        } else {
+            // non-canonical chain
+            let Some(first_chain_index) = indices.get_blocks_chain_id(first) else {
+                // not in the tree, not canonical, the second can't share a chain
+                return false
+            };
+
+            let Some(second_chain_index) = indices.get_blocks_chain_id(second) else {
+                // not in the tree, not canonical, the first can't share a chain
+                return false
+            };
+
+            second_chain_index == first_chain_index
+        }
+    }
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingStateProvider

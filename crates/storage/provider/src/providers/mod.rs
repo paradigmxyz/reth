@@ -405,6 +405,14 @@ where
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         self.tree.pending_block_num_hash()
     }
+
+    fn is_block_hash_canonical(&self, hash: &BlockHash) -> bool {
+        self.tree.is_block_hash_canonical(hash)
+    }
+
+    fn share_chain(&self, first: &BlockHash, second: &BlockHash) -> bool {
+        self.tree.share_chain(first, second)
+    }
 }
 
 impl<DB, Tree> BlockchainTreePendingStateProvider for BlockchainProvider<DB, Tree>
