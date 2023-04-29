@@ -176,6 +176,10 @@ pub trait EthApi {
     #[method(name = "eth_gasPrice")]
     async fn gas_price(&self) -> Result<U256>;
 
+    /// Introduced in EIP-1159, returns suggestion for the priority for dynamic fee transactions.
+    #[method(name = "eth_maxPriorityFeePerGas")]
+    async fn max_priority_fee_per_gas(&self) -> Result<U256>;
+
     /// Returns the Transaction fee history
     ///
     /// Introduced in EIP-1159 for getting information on the appropriate priority fee to use.
@@ -190,10 +194,6 @@ pub trait EthApi {
         newest_block: BlockId,
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory>;
-
-    /// Returns the current maxPriorityFeePerGas per gas in wei.
-    #[method(name = "eth_maxPriorityFeePerGas")]
-    async fn max_priority_fee_per_gas(&self) -> Result<U256>;
 
     /// Returns whether the client is actively mining new blocks.
     #[method(name = "eth_mining")]
