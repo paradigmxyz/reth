@@ -103,13 +103,15 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
 
     is_zstd
         .then(|| {
+            let dict = format_ident!("{}_DICTIONARY", ident.to_string().to_uppercase());
             quote! {
                 if flags.__zstd() != 0 {
-                    let mut decompressor = crate::compression::get_transaction_decompressor();
+                    let mut decompressor = zstd::bulk::Decompressor::with_dictionary(&#dict)
+                    .expect("Failed to initialize decompressor.");
 
-                    let mut tmp: Vec<u8> = Vec::with_capacity(len * 3);
+                    let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
 
-                    decompressor.decompress_to_buffer(&buf[..], &mut tmp).unwrap();
+                    decompressor.decompress_to_buffer(&buf[..], &mut tmp).expect("Failed to decompress.");
                     let mut original_buf = buf;
 
                     let mut buf: &[u8] = tmp.as_slice();
@@ -168,9 +170,10 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     if is_zstd {
         lines.push(quote! {
             if zstd {
-                let mut compressor = crate::compression::get_transaction_compressor();
+                let mut compressor = zstd::bulk::Compressor::with_dictionary(0, &RECEIPT_DICTIONARY)
+                    .expect("Failed to initialize compressor.");
 
-                let compressed = compressor.compress(&buffer).expect("oops");
+                let compressed = compressor.compress(&buffer).expect("Failed to compress.");
                 buf.put(compressed.as_slice());
             } else {
                 buf.put(buffer);

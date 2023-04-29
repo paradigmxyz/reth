@@ -1,4 +1,6 @@
-use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
+use crate::{
+    compression::TRANSACTION_DICTIONARY, keccak256, Address, Bytes, ChainId, TxHash, H256,
+};
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
@@ -11,6 +13,7 @@ use reth_rlp::{
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
+use zstd::bulk::{Compressor, Decompressor};
 
 mod access_list;
 mod error;
@@ -743,13 +746,14 @@ impl Compact for TransactionSignedNoHash {
         let is_zstd = self.transaction.input().len() >= 32;
 
         let tx_bits = if is_zstd {
-            let mut compressor = crate::compression::get_transaction_compressor();
+            let mut compressor = Compressor::with_dictionary(0, &TRANSACTION_DICTIONARY)
+                .expect("Failed to initialize compressor.");
 
             let mut tmp = bytes::BytesMut::with_capacity(100);
             let tx_bits = self.transaction.to_compact(&mut tmp);
 
             // todo increase buf capacity and compress there?
-            buf.put_slice(&compressor.compress(&tmp).expect("oops"));
+            buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
             tx_bits as u8
         } else {
             self.transaction.to_compact(buf) as u8
@@ -761,17 +765,19 @@ impl Compact for TransactionSignedNoHash {
         buf.as_mut().len() - before
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let prefix = buf.get_u8() as usize;
 
-        let (signature, mut buf) = Signature::from_compact(buf, prefix & 1);
+        let (signature, buf) = Signature::from_compact(buf, prefix & 1);
 
         let is_zstd = prefix >> 3;
         let (transaction, buf) = if is_zstd != 0 {
-            let mut decompressor = crate::compression::get_transaction_decompressor();
-            let mut tmp: Vec<u8> = Vec::with_capacity(len * 3);
+            let mut decompressor = Decompressor::with_dictionary(&TRANSACTION_DICTIONARY)
+                .expect("Failed to initialize decompressor.");
 
-            decompressor.decompress_to_buffer(&buf[..], &mut tmp).unwrap();
+            let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
+
+            decompressor.decompress_to_buffer(&buf[..], &mut tmp).expect("Failed to decompress.");
 
             // TODO: enforce that zstd is only present at a "top" level type
             // buf.advance(read);
