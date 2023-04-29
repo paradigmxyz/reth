@@ -739,19 +739,47 @@ impl Compact for TransactionSignedNoHash {
         buf.put_u8(0);
 
         let sig_bit = self.signature.to_compact(buf) as u8;
-        let tx_bit = self.transaction.to_compact(buf) as u8;
 
-        // replace with actual flags
-        buf.as_mut()[before] = sig_bit | (tx_bit << 1);
+        let is_zstd = self.transaction.input().len() >= 32;
+
+        let tx_bits = if is_zstd {
+            let mut compressor = crate::compression::get_transaction_compressor();
+
+            let mut tmp = bytes::BytesMut::with_capacity(100);
+            let tx_bits = self.transaction.to_compact(&mut tmp);
+
+            // todo increase buf capacity and compress there?
+            buf.put_slice(&compressor.compress(&tmp).expect("oops"));
+            tx_bits as u8
+        } else {
+            self.transaction.to_compact(buf) as u8
+        };
+
+        // replace with actual flags. tx_bits takes two bits
+        buf.as_mut()[before] = sig_bit | (tx_bits << 1) | ((is_zstd as u8) << 3);
 
         buf.as_mut().len() - before
     }
 
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let prefix = buf.get_u8() as usize;
 
-        let (signature, buf) = Signature::from_compact(buf, prefix & 1);
-        let (transaction, buf) = Transaction::from_compact(buf, prefix >> 1);
+        let (signature, mut buf) = Signature::from_compact(buf, prefix & 1);
+
+        let is_zstd = prefix >> 3;
+        let (transaction, buf) = if is_zstd != 0 {
+            let mut decompressor = crate::compression::get_transaction_decompressor();
+            let mut tmp: Vec<u8> = Vec::with_capacity(len * 3);
+
+            let read = decompressor.decompress_to_buffer(&buf[..], &mut tmp).unwrap();
+            buf.advance(read);
+
+            let (transaction, _) = Transaction::from_compact(tmp.as_slice(), (prefix & 0b110) >> 1);
+
+            (transaction, buf)
+        } else {
+            Transaction::from_compact(buf, prefix >> 1)
+        };
 
         (TransactionSignedNoHash { signature, transaction }, buf)
     }
