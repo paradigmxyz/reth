@@ -59,6 +59,14 @@ impl BlockIndices {
         &self.blocks_to_chain
     }
 
+    /// Returns the hash and number of the pending block (the first block in the
+    /// [Self::pending_blocks]) set.
+    pub fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
+        let canonical_tip = self.canonical_tip();
+        let hash = self.fork_to_child.get(&canonical_tip.hash)?.iter().next().copied()?;
+        Some(BlockNumHash { number: canonical_tip.number + 1, hash })
+    }
+
     /// Return all pending block hashes. Pending blocks are considered blocks
     /// that are extending that canonical tip by one block number.
     pub fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {

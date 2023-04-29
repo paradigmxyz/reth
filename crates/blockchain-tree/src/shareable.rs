@@ -102,10 +102,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         self.tree.read().block_indices().pending_blocks()
     }
 
-    fn pending_block(&self) -> Option<BlockNumHash> {
+    fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         trace!(target: "blockchain_tree", "Returning first pending block");
-        let (number, blocks) = self.tree.read().block_indices().pending_blocks();
-        blocks.first().map(|&hash| BlockNumHash { number, hash })
+        self.tree.read().block_indices().pending_block_num_hash()
+    }
+
+    fn pending_block(&self) -> Option<SealedBlock> {
+        trace!(target: "blockchain_tree", "Returning first pending block");
+        self.tree.read().pending_block().cloned()
     }
 }
 
