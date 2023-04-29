@@ -771,8 +771,10 @@ impl Compact for TransactionSignedNoHash {
             let mut decompressor = crate::compression::get_transaction_decompressor();
             let mut tmp: Vec<u8> = Vec::with_capacity(len * 3);
 
-            let read = decompressor.decompress_to_buffer(&buf[..], &mut tmp).unwrap();
-            buf.advance(read);
+            decompressor.decompress_to_buffer(&buf[..], &mut tmp).unwrap();
+
+            // TODO: enforce that zstd is only present at a "top" level type
+            // buf.advance(read);
 
             let (transaction, _) = Transaction::from_compact(tmp.as_slice(), (prefix & 0b110) >> 1);
 

@@ -108,9 +108,8 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
                     let mut decompressor = zstd::bulk::Decompressor::new().unwrap();
                     let mut tmp: Vec<u8> = Vec::with_capacity(len * 3);
 
-                    let read = decompressor.decompress_to_buffer(&buf[..], &mut tmp).unwrap();
+                    decompressor.decompress_to_buffer(&buf[..], &mut tmp).unwrap();
                     let mut original_buf = buf;
-                    original_buf.advance(read);
 
                     let mut buf: &[u8] = tmp.as_slice();
                     #(#lines)*
