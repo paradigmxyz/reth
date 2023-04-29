@@ -105,7 +105,8 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
         .then(|| {
             quote! {
                 if flags.__zstd() != 0 {
-                    let mut decompressor = zstd::bulk::Decompressor::new().unwrap();
+                    let mut decompressor = crate::compression::get_transaction_decompressor();
+
                     let mut tmp: Vec<u8> = Vec::with_capacity(len * 3);
 
                     decompressor.decompress_to_buffer(&buf[..], &mut tmp).unwrap();
@@ -167,7 +168,8 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     if is_zstd {
         lines.push(quote! {
             if zstd {
-                let mut compressor = zstd::bulk::Compressor::new(0).expect("oops2");
+                let mut compressor = crate::compression::get_transaction_compressor();
+
                 let compressed = compressor.compress(&buffer).expect("oops");
                 buf.put(compressed.as_slice());
             } else {
