@@ -13,7 +13,10 @@ use reth_rlp::{
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
-use zstd::bulk::{Compressor, Decompressor};
+use zstd::{
+    bulk::{Compressor, Decompressor},
+    dict::{DecoderDictionary, EncoderDictionary},
+};
 
 mod access_list;
 mod error;
@@ -746,7 +749,8 @@ impl Compact for TransactionSignedNoHash {
         let is_zstd = self.transaction.input().len() >= 32;
 
         let tx_bits = if is_zstd {
-            let mut compressor = Compressor::with_dictionary(0, &TRANSACTION_DICTIONARY)
+            let encoder_dict = EncoderDictionary::new(&TRANSACTION_DICTIONARY, 0);
+            let mut compressor = Compressor::with_prepared_dictionary(&encoder_dict)
                 .expect("Failed to initialize compressor.");
 
             let mut tmp = bytes::BytesMut::with_capacity(100);
@@ -772,7 +776,8 @@ impl Compact for TransactionSignedNoHash {
 
         let is_zstd = prefix >> 3;
         let (transaction, buf) = if is_zstd != 0 {
-            let mut decompressor = Decompressor::with_dictionary(&TRANSACTION_DICTIONARY)
+            let decoder_dict = DecoderDictionary::new(&TRANSACTION_DICTIONARY);
+            let mut decompressor = Decompressor::with_prepared_dictionary(&decoder_dict)
                 .expect("Failed to initialize decompressor.");
 
             let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
