@@ -14,11 +14,44 @@ use std::{future::Future, sync::Arc};
 ///
 /// Note: A PayloadJob need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1`, See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
 pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + Sync {
+    /// Represents the future that resolves the block that's returned to the CL.
+    type ResolvePayloadFuture: Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>>
+        + Send
+        + Sync;
+
     /// Returns the best payload that has been built so far.
     ///
-    /// Note: this is expected to be an empty block without transaction if nothing has been built
-    /// yet.
+    /// Note: This is never called by the CL.
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError>;
+
+    /// Called when the payload is requested by the CL.
+    ///
+    /// This is invoked on [`engine_getPayloadV2`](https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2) and [`engine_getPayloadV1`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_getpayloadv1).
+    ///
+    /// The timeout for returning the payload to the CL is 1s.
+    /// Ideally, future returned by this method must resolve in under 1s. Ideally this is the best
+    /// payload built so far or an empty block without transactions if nothing has been built yet.
+    ///
+    /// According to the spec:
+    /// > Client software MAY stop the corresponding build process after serving this call.
+    ///
+    /// It is at the discretion of the implementer whether the build job should be kept alive or
+    /// terminated.
+    ///
+    /// If this returns [KeepPayloadJobAlive::Yes] then the future the [PayloadJob] will be polled
+    /// once more, if this returns [KeepPayloadJobAlive::No] then the [PayloadJob] will be dropped
+    /// after this call
+    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+}
+
+/// Whether the payload job should be kept alive or terminated after the payload was requested by
+/// the CL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepPayloadJobAlive {
+    /// Keep the job alive.
+    Yes,
+    /// Terminate the job.
+    No,
 }
 
 /// A type that knows how to create new jobs for creating payloads.
