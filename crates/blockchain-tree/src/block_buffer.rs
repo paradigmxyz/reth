@@ -208,7 +208,7 @@ mod tests {
         buffer.insert_block(block1.clone());
         buffer.insert_block(block2.clone());
         buffer.insert_block(block3.clone());
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block4);
 
         assert_eq!(buffer.len(), 4);
         assert_eq!(buffer.take_all_childrens(main_parent), vec![block1, block2, block3]);
@@ -290,9 +290,9 @@ mod tests {
         let mut buffer = BlockBuffer::new(5);
 
         buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block3.clone());
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block2);
+        buffer.insert_block(block3);
+        buffer.insert_block(block4);
 
         assert_eq!(buffer.len(), 4);
         buffer.clean_old_blocks(block1.number);
@@ -310,9 +310,9 @@ mod tests {
         let mut buffer = BlockBuffer::new(5);
 
         buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block3.clone());
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block2);
+        buffer.insert_block(block3);
+        buffer.insert_block(block4);
 
         assert_eq!(buffer.len(), 4);
         buffer.clean_old_blocks(block1.number);
@@ -332,13 +332,13 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(10);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block1a.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block2a.clone());
-        buffer.insert_block(random_block1.clone());
-        buffer.insert_block(random_block2.clone());
-        buffer.insert_block(random_block3.clone());
+        buffer.insert_block(block1);
+        buffer.insert_block(block1a);
+        buffer.insert_block(block2);
+        buffer.insert_block(block2a);
+        buffer.insert_block(random_block1);
+        buffer.insert_block(random_block2);
+        buffer.insert_block(random_block3);
 
         assert_eq!(buffer.len(), 7);
         buffer.clean_old_blocks(10);
@@ -365,9 +365,9 @@ mod tests {
         let mut buffer = BlockBuffer::new(3);
 
         buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block3.clone());
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block2);
+        buffer.insert_block(block3);
+        buffer.insert_block(block4);
 
         // block1 gets evicted
         assert_block_existance(&buffer, &block1);
@@ -386,9 +386,9 @@ mod tests {
         let mut buffer = BlockBuffer::new(3);
 
         buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block3.clone());
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block2);
+        buffer.insert_block(block3);
+        buffer.insert_block(block4);
 
         // block3 gets evicted
         assert_block_existance(&buffer, &block1);
