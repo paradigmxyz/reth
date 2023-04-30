@@ -39,7 +39,7 @@ pub(crate) fn generate_flag_struct(
         return placeholder_flag_struct(&flags_ident)
     }
 
-    let total_bytes = pad_flag_struct(total_bits, &mut field_flags);
+    let (total_bytes, unused_bits) = pad_flag_struct(total_bits, &mut field_flags);
 
     // Provides the number of bytes used to represent the flag struct.
     let readable_bytes = vec![
@@ -49,6 +49,9 @@ pub(crate) fn generate_flag_struct(
         total_bytes.into()
     ];
 
+    let docs =
+        format!("Fieldset that facilitates compacting the parent type. Unused bits: {unused_bits}");
+
     // Generate the flag struct.
     quote! {
 
@@ -57,7 +60,7 @@ pub(crate) fn generate_flag_struct(
             use bytes::Buf;
             use modular_bitfield::prelude::*;
 
-            /// Fieldset that facilitates compacting the parent type.
+            #[doc = #docs]
             #[bitfield]
             #[derive(Clone, Copy, Debug, Default)]
             pub struct #flags_ident {
@@ -127,8 +130,8 @@ fn build_struct_field_flags(
 /// Total number of bits should be divisible by 8, so we might need to pad the struct with an unused
 /// skipped field.
 ///
-/// Returns the total number of bytes used by the flags struct.
-fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> u8 {
+/// Returns the total number of bytes used by the flags struct and how many unused bits.
+fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> (u8, u8) {
     let remaining = 8 - total_bits % 8;
     if remaining != 8 {
         let bsize = format_ident!("B{remaining}");
@@ -136,9 +139,9 @@ fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> u8 {
             #[skip]
             unused: #bsize ,
         });
-        (total_bits + remaining) / 8
+        ((total_bits + remaining) / 8, remaining)
     } else {
-        total_bits / 8
+        (total_bits / 8, 0)
     }
 }
 
