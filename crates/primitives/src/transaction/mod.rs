@@ -1,5 +1,6 @@
 use crate::{
-    compression::TRANSACTION_DICTIONARY, keccak256, Address, Bytes, ChainId, TxHash, H256,
+    compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
+    keccak256, Address, Bytes, ChainId, TxHash, H256,
 };
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
@@ -13,10 +14,6 @@ use reth_rlp::{
 use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
-use zstd::{
-    bulk::{Compressor, Decompressor},
-    dict::{DecoderDictionary, EncoderDictionary},
-};
 
 mod access_list;
 mod error;
@@ -749,16 +746,15 @@ impl Compact for TransactionSignedNoHash {
         let is_zstd = self.transaction.input().len() >= 32;
 
         let tx_bits = if is_zstd {
-            let encoder_dict = EncoderDictionary::new(&TRANSACTION_DICTIONARY, 0);
-            let mut compressor = Compressor::with_prepared_dictionary(&encoder_dict)
-                .expect("Failed to initialize compressor.");
+            TRANSACTION_COMPRESSOR.with(|compressor| {
+                let mut compressor = compressor.borrow_mut();
+                let mut tmp = bytes::BytesMut::with_capacity(100);
+                let tx_bits = self.transaction.to_compact(&mut tmp);
 
-            let mut tmp = bytes::BytesMut::with_capacity(100);
-            let tx_bits = self.transaction.to_compact(&mut tmp);
-
-            // todo increase buf capacity and compress there?
-            buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
-            tx_bits as u8
+                // todo increase buf capacity and compress there?
+                buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                tx_bits as u8
+            })
         } else {
             self.transaction.to_compact(buf) as u8
         };
@@ -776,20 +772,22 @@ impl Compact for TransactionSignedNoHash {
 
         let is_zstd = prefix >> 3;
         let (transaction, buf) = if is_zstd != 0 {
-            let decoder_dict = DecoderDictionary::new(&TRANSACTION_DICTIONARY);
-            let mut decompressor = Decompressor::with_prepared_dictionary(&decoder_dict)
-                .expect("Failed to initialize decompressor.");
+            TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                let mut decompressor = decompressor.borrow_mut();
+                let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
 
-            let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
+                decompressor
+                    .decompress_to_buffer(&buf[..], &mut tmp)
+                    .expect("Failed to decompress.");
 
-            decompressor.decompress_to_buffer(&buf[..], &mut tmp).expect("Failed to decompress.");
+                // TODO: enforce that zstd is only present at a "top" level type
+                // buf.advance(read);
 
-            // TODO: enforce that zstd is only present at a "top" level type
-            // buf.advance(read);
+                let (transaction, _) =
+                    Transaction::from_compact(tmp.as_slice(), (prefix & 0b110) >> 1);
 
-            let (transaction, _) = Transaction::from_compact(tmp.as_slice(), (prefix & 0b110) >> 1);
-
-            (transaction, buf)
+                (transaction, buf)
+            })
         } else {
             Transaction::from_compact(buf, prefix >> 1)
         };
