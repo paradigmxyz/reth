@@ -109,9 +109,15 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
                     #decompressor.with(|decompressor| {
                         let mut decompressor = decompressor.borrow_mut();
 
-                        let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
+                        let mut tmp: Vec<u8> = Vec::with_capacity(1000);
 
-                        decompressor.decompress_to_buffer(&buf[..], &mut tmp).expect("Failed to decompress.");
+                        while let Err(err) = decompressor.decompress_to_buffer(&buf[..], &mut tmp) {
+                            let err = err.to_string();
+                            if !err.contains("Destination buffer is too small") {
+                                panic!("Failed to decompress: {}", err);
+                            }
+                            tmp.reserve(10_000);
+                        }
                         let mut original_buf = buf;
 
                         let mut buf: &[u8] = tmp.as_slice();

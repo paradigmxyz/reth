@@ -774,14 +774,17 @@ impl Compact for TransactionSignedNoHash {
         let (transaction, buf) = if is_zstd != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                 let mut decompressor = decompressor.borrow_mut();
-                let mut tmp: Vec<u8> = Vec::with_capacity(100_000_0);
+                let mut tmp: Vec<u8> = Vec::with_capacity(1000);
 
-                decompressor
-                    .decompress_to_buffer(&buf[..], &mut tmp)
-                    .expect("Failed to decompress.");
+                while let Err(err) = decompressor.decompress_to_buffer(&buf[..], &mut tmp) {
+                    let err = err.to_string();
+                    if !err.contains("Destination buffer is too small") {
+                        panic!("Failed to decompress: {}", err);
+                    }
+                    tmp.reserve(24_000);
+                }
 
                 // TODO: enforce that zstd is only present at a "top" level type
-                // buf.advance(read);
 
                 let (transaction, _) =
                     Transaction::from_compact(tmp.as_slice(), (prefix & 0b110) >> 1);
