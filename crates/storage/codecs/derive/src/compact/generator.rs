@@ -103,21 +103,21 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
 
     is_zstd
         .then(|| {
-            let dict = format_ident!("{}_DICTIONARY", ident.to_string().to_uppercase());
+            let decompressor = format_ident!("{}_DECOMPRESSOR", ident.to_string().to_uppercase());
             quote! {
                 if flags.__zstd() != 0 {
-                    let decoder_dict = zstd::dict::DecoderDictionary::new(&#dict);
-                    let mut decompressor = zstd::bulk::Decompressor::with_prepared_dictionary(&decoder_dict)
-                    .expect("Failed to initialize decompressor.");
+                    #decompressor.with(|decompressor| {
+                        let mut decompressor = decompressor.borrow_mut();
 
-                    let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
+                        let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
 
-                    decompressor.decompress_to_buffer(&buf[..], &mut tmp).expect("Failed to decompress.");
-                    let mut original_buf = buf;
+                        decompressor.decompress_to_buffer(&buf[..], &mut tmp).expect("Failed to decompress.");
+                        let mut original_buf = buf;
 
-                    let mut buf: &[u8] = tmp.as_slice();
-                    #(#lines)*
-                    (obj, original_buf)
+                        let mut buf: &[u8] = tmp.as_slice();
+                        #(#lines)*
+                        (obj, original_buf)
+                    })
                 } else {
                     #(#lines)*
                     (obj, buf)
@@ -169,16 +169,16 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     });
 
     if is_zstd {
-        let dict = format_ident!("{}_DICTIONARY", ident.to_string().to_uppercase());
+        let compressor = format_ident!("{}_COMPRESSOR", ident.to_string().to_uppercase());
 
         lines.push(quote! {
             if zstd {
-                let encoder_dict = zstd::dict::EncoderDictionary::new(&#dict, 0);
-                let mut compressor = zstd::bulk::Compressor::with_prepared_dictionary(&encoder_dict)
-                .expect("Failed to initialize compressor.");
+                #compressor.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
 
-                let compressed = compressor.compress(&buffer).expect("Failed to compress.");
-                buf.put(compressed.as_slice());
+                    let compressed = compressor.compress(&buffer).expect("Failed to compress.");
+                    buf.put(compressed.as_slice());
+                });
             } else {
                 buf.put(buffer);
             }

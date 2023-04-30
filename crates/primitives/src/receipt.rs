@@ -1,4 +1,8 @@
-use crate::{bloom::logs_bloom, compression::RECEIPT_DICTIONARY, Bloom, Log, TxType};
+use crate::{
+    bloom::logs_bloom,
+    compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
+    Bloom, Log, TxType,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{main_codec, Compact, CompactZstd};
 use reth_rlp::{length_of_length, Decodable, Encodable};

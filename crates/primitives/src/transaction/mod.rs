@@ -748,7 +748,7 @@ impl Compact for TransactionSignedNoHash {
         let tx_bits = if is_zstd {
             TRANSACTION_COMPRESSOR.with(|compressor| {
                 let mut compressor = compressor.borrow_mut();
-                let mut tmp = bytes::BytesMut::with_capacity(100);
+                let mut tmp = bytes::BytesMut::with_capacity(100_000);
                 let tx_bits = self.transaction.to_compact(&mut tmp);
 
                 // todo increase buf capacity and compress there?
@@ -774,7 +774,7 @@ impl Compact for TransactionSignedNoHash {
         let (transaction, buf) = if is_zstd != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                 let mut decompressor = decompressor.borrow_mut();
-                let mut tmp: Vec<u8> = Vec::with_capacity(100_000);
+                let mut tmp: Vec<u8> = Vec::with_capacity(100_000_0);
 
                 decompressor
                     .decompress_to_buffer(&buf[..], &mut tmp)
