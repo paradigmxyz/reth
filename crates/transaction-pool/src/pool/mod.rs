@@ -150,6 +150,10 @@ where
     pub(crate) fn block_info(&self) -> BlockInfo {
         self.pool.read().block_info()
     }
+    /// Returns the currently tracked block
+    pub(crate) fn set_block_info(&self, info: BlockInfo) {
+        self.pool.write().set_block_info(info)
+    }
 
     /// Returns the internal `SenderId` for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {

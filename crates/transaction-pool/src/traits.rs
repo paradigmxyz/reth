@@ -335,8 +335,10 @@ pub trait PoolTransaction:
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
-    /// This will return `None` for non-EIP1559 transactions
-    fn max_fee_per_gas(&self) -> Option<u128>;
+    /// For legacy transactions this is gas_price.
+    ///
+    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
+    fn max_fee_per_gas(&self) -> u128;
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
@@ -425,12 +427,14 @@ impl PoolTransaction for PooledTransaction {
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
-    /// This will return `None` for non-EIP1559 transactions
-    fn max_fee_per_gas(&self) -> Option<u128> {
+    /// For legacy transactions this is gas_price.
+    ///
+    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
+    fn max_fee_per_gas(&self) -> u128 {
         match &self.transaction.transaction {
-            Transaction::Legacy(_) => None,
-            Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(tx) => Some(tx.max_fee_per_gas),
+            Transaction::Legacy(tx) => tx.gas_price,
+            Transaction::Eip2930(tx) => tx.gas_price,
+            Transaction::Eip1559(tx) => tx.max_fee_per_gas,
         }
     }
 
