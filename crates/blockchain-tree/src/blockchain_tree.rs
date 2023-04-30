@@ -888,7 +888,7 @@ mod tests {
         let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
 
         // last finalized block would be number 9.
-        setup_genesis(externals.db.clone(), genesis.clone());
+        setup_genesis(externals.db.clone(), genesis);
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
