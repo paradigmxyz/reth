@@ -81,6 +81,9 @@ impl NodeState {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(number, hash) => {
                 info!(target: "reth::cli", number, ?hash, "Block added to canonical chain");
             }
+            BeaconConsensusEngineEvent::ForkBlockAdded(number, hash) => {
+                info!(target: "reth::cli", number, ?hash, "Block added to fork chain");
+            }
         }
     }
 }

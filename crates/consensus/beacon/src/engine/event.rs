@@ -8,4 +8,6 @@ pub enum BeaconConsensusEngineEvent {
     ForkchoiceUpdated(ForkchoiceState),
     /// A block was added to the canonical chain.
     CanonicalBlockAdded(BlockNumber, BlockHash),
+    /// A block was added to the fork chain.
+    ForkBlockAdded(BlockNumber, BlockHash),
 }

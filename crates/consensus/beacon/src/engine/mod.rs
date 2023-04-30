@@ -101,6 +101,13 @@ impl BeaconConsensusEngineHandle {
         });
         rx
     }
+
+    /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
+    pub fn event_listener(&self) -> UnboundedReceiverStream<BeaconConsensusEngineEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::EventListener(tx));
+        UnboundedReceiverStream::new(rx)
+    }
 }
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
@@ -395,14 +402,25 @@ where
         };
 
         let status = if self.is_pipeline_idle() {
-            let block_hash = block.hash;
             match self.blockchain_tree.insert_block_without_senders(block) {
                 Ok(status) => {
-                    let latest_valid_hash =
-                        matches!(status, BlockStatus::Valid).then_some(block_hash);
+                    let mut latest_valid_hash = None;
                     let status = match status {
-                        BlockStatus::Valid => PayloadStatusEnum::Valid,
-                        BlockStatus::Accepted => PayloadStatusEnum::Accepted,
+                        BlockStatus::Valid => {
+                            latest_valid_hash = Some(block_hash);
+                            self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                                block_number,
+                                block_hash,
+                            ));
+                            PayloadStatusEnum::Valid
+                        }
+                        BlockStatus::Accepted => {
+                            self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(
+                                block_number,
+                                block_hash,
+                            ));
+                            PayloadStatusEnum::Accepted
+                        }
                         BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
                     };
                     PayloadStatus::new(status, latest_valid_hash)
@@ -560,6 +578,9 @@ where
                         this.metrics.new_payload_messages.increment(1);
                         let status = this.on_new_payload(payload);
                         let _ = tx.send(Ok(status));
+                    }
+                    BeaconEngineMessage::EventListener(tx) => {
+                        this.listeners.push_listener(tx);
                     }
                 }
             }
