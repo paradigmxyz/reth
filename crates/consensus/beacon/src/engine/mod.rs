@@ -274,13 +274,12 @@ where
                         self.require_pipeline_run(PipelineTarget::Head);
                     }
 
-                    // get header for further validation
-                    let header = self
-                        .db
-                        .view(|tx| tx.get::<tables::Headers>(head_block_number))??
-                        .expect("was canonicalized, so it exists");
-
                     if let Some(attrs) = attrs {
+                        // get header for further validation
+                        let header = self
+                            .db
+                            .view(|tx| tx.get::<tables::Headers>(head_block_number))??
+                            .expect("was canonicalized, so it exists");
                         return Ok(self.process_payload_attributes(attrs, header, state))
                     }
 
