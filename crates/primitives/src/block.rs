@@ -155,6 +155,12 @@ impl SealedBlock {
     }
 }
 
+impl From<SealedBlock> for Block {
+    fn from(block: SealedBlock) -> Self {
+        block.unseal()
+    }
+}
+
 impl Deref for SealedBlock {
     type Target = SealedHeader;
     fn deref(&self) -> &Self::Target {
