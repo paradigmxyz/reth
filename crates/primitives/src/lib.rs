@@ -33,6 +33,7 @@ mod receipt;
 mod storage;
 mod transaction;
 pub mod trie;
+pub mod utils;
 mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
@@ -119,11 +120,6 @@ mod __reexport {
 
 // Useful reexports
 pub use __reexport::*;
-
-/// Various utilities
-pub mod utils {
-    pub use ethers_core::types::serde_helpers;
-}
 
 /// Helpers for working with serde
 pub mod serde_helper;

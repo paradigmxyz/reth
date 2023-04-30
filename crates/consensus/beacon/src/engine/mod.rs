@@ -1,4 +1,4 @@
-use crate::engine::metrics::Metrics;
+use crate::engine::{message::OnForkChoiceUpdated, metrics::Metrics};
 use futures::{Future, FutureExt, StreamExt, TryFutureExt};
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
@@ -9,7 +9,7 @@ use reth_interfaces::{
     Error,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
-use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
+use reth_primitives::{utils::EventListeners, BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
 };
@@ -35,9 +35,12 @@ mod error;
 pub use error::{BeaconEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
 
 mod metrics;
+
 mod pipeline_state;
-use crate::engine::message::OnForkChoiceUpdated;
 pub use pipeline_state::PipelineState;
+
+mod event;
+pub use event::BeaconConsensusEngineEvent;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
@@ -151,6 +154,8 @@ where
     continuous: bool,
     /// The payload store.
     payload_builder: PayloadBuilderHandle,
+    /// Listeners for engine events.
+    listeners: EventListeners<BeaconConsensusEngineEvent>,
     /// Consensus engine metrics.
     metrics: Metrics,
 }
@@ -213,6 +218,7 @@ where
             max_block,
             continuous,
             payload_builder,
+            listeners: EventListeners::default(),
             metrics: Metrics::default(),
         };
 
@@ -317,6 +323,7 @@ where
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
 
+        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
         trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
     }
