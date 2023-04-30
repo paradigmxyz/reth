@@ -776,7 +776,7 @@ impl Compact for TransactionSignedNoHash {
                 let mut decompressor = decompressor.borrow_mut();
                 let mut tmp: Vec<u8> = Vec::with_capacity(1000);
 
-                while let Err(err) = decompressor.decompress_to_buffer(&buf[..], &mut tmp) {
+                while let Err(err) = decompressor.decompress_to_buffer(buf, &mut tmp) {
                     let err = err.to_string();
                     if !err.contains("Destination buffer is too small") {
                         panic!("Failed to decompress: {}", err);
