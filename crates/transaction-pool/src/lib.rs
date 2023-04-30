@@ -103,6 +103,7 @@ use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
+use tracing::{instrument, trace};
 
 mod config;
 pub mod error;
@@ -163,6 +164,13 @@ where
     /// Get the config the pool was configured with.
     pub fn config(&self) -> &PoolConfig {
         self.inner().config()
+    }
+
+    /// Sets the current block info for the pool.
+    #[instrument(skip(self), target = "txpool")]
+    pub fn set_block_info(&self, info: BlockInfo) {
+        trace!(target: "txpool", "updating pool block info");
+        self.pool.set_block_info(info)
     }
 
     /// Returns future that validates all transaction in the given iterator.

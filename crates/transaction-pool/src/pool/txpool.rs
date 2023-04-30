@@ -128,6 +128,40 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
+    /// Updates the tracked basefee
+    ///
+    /// Depending on the change in direction of the basefee, this will promote or demote
+    /// transactions from the basefee pool.
+    fn update_basefee(&mut self, pending_basefee: u128) {
+        match pending_basefee.cmp(&self.all_transactions.pending_basefee) {
+            Ordering::Equal => {
+                // fee unchanged, nothing to update
+            }
+            Ordering::Greater => {
+                // increased base fee: recheck pending pool and remove all that are no longer valid
+                for tx in self.pending_pool.enforce_basefee(pending_basefee) {
+                    self.basefee_pool.add_transaction(tx);
+                }
+            }
+            Ordering::Less => {
+                // decreased base fee: recheck basefee pool and promote all that are now valid
+                for tx in self.basefee_pool.enforce_basefee(pending_basefee) {
+                    self.pending_pool.add_transaction(tx);
+                }
+            }
+        }
+    }
+
+    /// Sets the current block info for the pool.
+    ///
+    /// This will also apply updates to the pool based on the new base fee
+    pub(crate) fn set_block_info(&mut self, info: BlockInfo) {
+        let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_basefee } = info;
+        self.all_transactions.last_seen_block_hash = last_seen_block_hash;
+        self.all_transactions.last_seen_block_number = last_seen_block_number;
+        self.update_basefee(pending_basefee)
+    }
+
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pending_pool.best()
@@ -638,7 +672,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // The `unique_sender` loop will process the first transaction of all senders, update its
         // state and internally update all consecutive transactions
         'transactions: while let Some((id, tx)) = iter.next() {
-            // Advances the iterator to the next sender
             macro_rules! next_sender {
                 ($iter:ident) => {
                     'this: while let Some((peek, _)) = iter.peek() {
@@ -649,7 +682,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 };
             }
-
             // tracks the balance if the sender was changed in the block
             let mut changed_balance = None;
 
@@ -770,14 +802,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Rechecks the transaction's dynamic fee condition.
     fn update_tx_base_fee(pending_block_base_fee: &u128, tx: &mut PoolInternalTransaction<T>) {
         // Recheck dynamic fee condition.
-        if let Some(fee_cap) = tx.transaction.max_fee_per_gas() {
-            match fee_cap.cmp(pending_block_base_fee) {
-                Ordering::Greater | Ordering::Equal => {
-                    tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                }
-                Ordering::Less => {
-                    tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
-                }
+        match tx.transaction.max_fee_per_gas().cmp(pending_block_base_fee) {
+            Ordering::Greater | Ordering::Equal => {
+                tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+            }
+            Ordering::Less => {
+                tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
             }
         }
     }
@@ -932,15 +962,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
 
         // Check dynamic fee
-        if let Some(fee_cap) = transaction.max_fee_per_gas() {
-            if fee_cap < self.minimal_protocol_basefee {
-                return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
-            }
-            if fee_cap >= self.pending_basefee {
-                state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-            }
-        } else {
-            // legacy transactions always satisfy the condition
+        let fee_cap = transaction.max_fee_per_gas();
+
+        if fee_cap < self.minimal_protocol_basefee {
+            return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
+        }
+        if fee_cap >= self.pending_basefee {
             state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
         }
 
