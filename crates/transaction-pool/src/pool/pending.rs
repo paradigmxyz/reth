@@ -112,8 +112,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
             }
         }
 
-        dbg!(&to_remove);
-
         let mut removed = Vec::with_capacity(to_remove.len());
         for id in to_remove {
             removed.push(self.remove_transaction(&id).expect("transaction exists"));
