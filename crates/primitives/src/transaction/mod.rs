@@ -781,7 +781,7 @@ impl Compact for TransactionSignedNoHash {
                     if !err.contains("Destination buffer is too small") {
                         panic!("Failed to decompress: {}", err);
                     }
-                    tmp.reserve(24_000);
+                    tmp.reserve(tmp.capacity() + 24_000);
                 }
 
                 // TODO: enforce that zstd is only present at a "top" level type

@@ -116,7 +116,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
                             if !err.contains("Destination buffer is too small") {
                                 panic!("Failed to decompress: {}", err);
                             }
-                            tmp.reserve(10_000);
+                            tmp.reserve(tmp.capacity() + 10_000);
                         }
                         let mut original_buf = buf;
 
