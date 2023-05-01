@@ -140,3 +140,47 @@ where
         Ok(proof)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::eth::cache::EthStateCache;
+    use reth_primitives::{StorageKey, StorageValue};
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
+    use reth_transaction_pool::test_utils::testing_pool;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn test_storage() {
+        // === Noop ===
+        let pool = testing_pool();
+
+        let eth_api = EthApi::new(
+            NoopProvider::default(),
+            pool.clone(),
+            (),
+            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+        );
+        let address = Address::random();
+        let storage = eth_api.storage_at(address, U256::ZERO, None).unwrap();
+        assert_eq!(storage, U256::ZERO.into());
+
+        // === Mock ===
+        let mock_provider = MockEthProvider::default();
+        let storage_value = StorageValue::from(1337);
+        let storage_key = StorageKey::random();
+        let storage = HashMap::from([(storage_key, storage_value)]);
+        let account = ExtendedAccount::new(0, U256::ZERO).extend_storage(storage);
+        mock_provider.add_account(address, account);
+
+        let eth_api = EthApi::new(
+            mock_provider.clone(),
+            pool.clone(),
+            (),
+            EthStateCache::spawn(mock_provider, Default::default()),
+        );
+
+        let storage = eth_api.storage_at(address, storage_key.into(), None).unwrap();
+        assert_eq!(storage, storage_value.into());
+    }
+}
