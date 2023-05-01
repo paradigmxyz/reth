@@ -189,13 +189,13 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::execution", to_block = input.unwind_to, "Unwinding");
-
         // Acquire changeset cursors
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let block_range = input.unwind_to + 1..=input.stage_progress;
+        let (block_range, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let unwind_progress = *block_range.start() - 1;
 
         if block_range.is_empty() {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -254,7 +254,8 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_progress })
     }
 }
 
@@ -281,7 +282,7 @@ mod tests {
     fn stage() -> ExecutionStage<Factory> {
         let factory =
             Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
-        ExecutionStage::new(factory, 100)
+        ExecutionStage::new(factory, 1)
     }
 
     #[tokio::test]

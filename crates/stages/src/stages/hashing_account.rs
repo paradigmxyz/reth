@@ -282,12 +282,15 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // There is no threshold on account unwind, we will always take changesets and
         // apply past values to HashedAccount table.
 
-        let range = input.unwind_block_range();
+        let (range, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let unwind_progress = *range.start();
 
         // Aggregate all transition changesets and and make list of account that have been changed.
         tx.unwind_account_hashing(range)?;
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_progress })
     }
 }
 

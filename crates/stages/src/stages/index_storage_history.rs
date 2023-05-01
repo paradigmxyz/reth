@@ -56,12 +56,14 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
-        let range = input.unwind_block_range();
+        let (range, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let unwind_progress = *range.start();
 
         tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_progress })
     }
 }
 

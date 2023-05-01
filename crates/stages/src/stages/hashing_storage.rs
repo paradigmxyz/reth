@@ -204,11 +204,14 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let range = input.unwind_block_range();
+        let (range, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let unwind_progress = *range.start();
 
         tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_progress })
     }
 }
 

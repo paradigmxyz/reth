@@ -3,7 +3,10 @@ use async_trait::async_trait;
 use reth_db::database::Database;
 use reth_primitives::BlockNumber;
 use reth_provider::Transaction;
-use std::{cmp::min, ops::RangeInclusive};
+use std::{
+    cmp::{max, min},
+    ops::RangeInclusive,
+};
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -66,20 +69,24 @@ pub struct UnwindInput {
 }
 
 impl UnwindInput {
-    /// Return next block range that needs to be executed.
+    /// Return next block range that needs to be unwound.
     pub fn unwind_block_range(&self) -> RangeInclusive<BlockNumber> {
-        self.unwind_block_range_with_threshold(u64::MAX)
+        self.unwind_block_range_with_threshold(u64::MAX).0
     }
 
-    /// Return the next block range to execute.
-    pub fn unwind_block_range_with_threshold(&self, threshold: u64) -> RangeInclusive<BlockNumber> {
+    /// Return the next block range to unwind.
+    pub fn unwind_block_range_with_threshold(
+        &self,
+        threshold: u64,
+    ) -> (RangeInclusive<BlockNumber>, bool) {
         // plus +1 is to skip present block.
-        let start = self.unwind_to + 1;
-        let mut end = self.stage_progress;
+        let mut start = self.unwind_to + 1;
+        let end = self.stage_progress;
 
-        end = min(end, start.saturating_add(threshold));
+        start = max(start, end.saturating_sub(threshold));
 
-        start..=end
+        let is_final_range = start == self.unwind_to + 1;
+        (start..=end, is_final_range)
     }
 }
 
