@@ -64,7 +64,7 @@ impl NetworkArgs {
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
 
-        let peers_file = self.peers_file.unwrap_or(default_peers_file);
+        let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         let network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
