@@ -17,7 +17,8 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// Represents the future that resolves the block that's returned to the CL.
     type ResolvePayloadFuture: Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>>
         + Send
-        + Sync;
+        + Sync
+        + 'static;
 
     /// Returns the best payload that has been built so far.
     ///
