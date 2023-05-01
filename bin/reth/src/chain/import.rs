@@ -1,5 +1,5 @@
 use crate::{
-    dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath},
+    dirs::{ConfigPath, DataDirPath, MaybePlatformPath, PlatformPath},
     node::events::{handle_events, NodeEvent},
 };
 use clap::{crate_version, Parser};
@@ -26,7 +26,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
 
@@ -37,15 +37,20 @@ pub struct ImportCommand {
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
     config: MaybePlatformPath<ConfigPath>,
 
-    /// The path to the database folder.
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    data_dir: MaybePlatformPath<DataDirPath>,
+
+    /// The path to the database folder. If not specified, it will be set in the data dir for the
+    /// chain being used.
+    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
+    db: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -80,8 +85,11 @@ impl ImportCommand {
         let config: Config = self.load_config_with_chain(self.chain.chain)?;
         info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
 
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+        // add network name to data dir
+        let data_dir = self.data_dir.unwrap_or_chain_default(self.chain.chain);
+
+        // use the overridden db path if specified
+        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);

@@ -1,6 +1,5 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
 use futures::FutureExt;
 use reth_network_api::{NetworkInfo, Peers};
