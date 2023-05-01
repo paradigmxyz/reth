@@ -6,7 +6,8 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::{basic_result_cache, TestRunner},
 };
-use reth_trie::{prefix_set::PrefixSet, Nibbles};
+use reth_primitives::trie::Nibbles;
+use reth_trie::prefix_set::PrefixSet;
 use std::collections::BTreeSet;
 
 pub trait PrefixSetAbstraction: Default {

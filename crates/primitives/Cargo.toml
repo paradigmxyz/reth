@@ -36,6 +36,9 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 # used for forkid
 crc = "3"
 
+# tracing
+tracing = "0.1"
+
 # tokio
 tokio = { version = "1", default-features = false, features = ["sync"] }
 tokio-stream = "0.1"
