@@ -47,11 +47,6 @@ pub struct ImportCommand {
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
 
-    /// The path to the database folder. If not specified, it will be set in the data dir for the
-    /// chain being used.
-    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
-    db: Option<PathBuf>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -89,8 +84,7 @@ impl ImportCommand {
         let config: Config = self.load_config(config_path.clone())?;
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
-        // use the overridden db path if specified
-        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
+        let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
