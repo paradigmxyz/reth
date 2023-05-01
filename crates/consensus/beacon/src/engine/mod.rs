@@ -1,4 +1,4 @@
-use crate::engine::metrics::Metrics;
+use crate::engine::{message::OnForkChoiceUpdated, metrics::Metrics};
 use futures::{Future, FutureExt, StreamExt, TryFutureExt};
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
@@ -36,7 +36,7 @@ pub use error::{BeaconEngineError, BeaconEngineResult, BeaconForkChoiceUpdateErr
 
 mod metrics;
 mod pipeline_state;
-use crate::engine::message::OnForkChoiceUpdated;
+
 pub use pipeline_state::PipelineState;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
@@ -238,6 +238,34 @@ where
         self.next_action = BeaconEngineAction::RunPipeline(target);
     }
 
+    /// If validation fails, the response MUST contain the latest valid hash:
+    ///
+    ///   - The block hash of the ancestor of the invalid payload satisfying the following two
+    ///    conditions:
+    ///     - It is fully validated and deemed VALID
+    ///     - Any other ancestor of the invalid payload with a higher blockNumber is INVALID
+    ///   - 0x0000000000000000000000000000000000000000000000000000000000000000 if the above
+    ///    conditions are satisfied by a PoW block.
+    ///   - null if client software cannot determine the ancestor of the invalid payload satisfying
+    ///    the above conditions.
+    fn latest_valid_hash_for_invalid_payload(
+        &self,
+        parent_hash: H256,
+        tree_error: Option<&Error>,
+    ) -> Option<H256> {
+        if let latest_valid @ Some(_) = self.blockchain_tree.find_canonical_ancestor(parent_hash) {
+            return latest_valid
+        }
+
+        // check pre merge block
+        let error = tree_error?;
+        if matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. })) {
+            return Some(H256::zero())
+        }
+
+        None
+    }
+
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
     /// valid chain.
     ///
@@ -283,8 +311,6 @@ where
                         return Ok(self.process_payload_attributes(attrs, header, state))
                     }
 
-                    // TODO: most recent valid block in the branch defined by payload and its
-                    // ancestors, not necessarily the head <https://github.com/paradigmxyz/reth/issues/2126>
                     PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
@@ -377,12 +403,16 @@ where
     fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
         let block_number = payload.block_number.as_u64();
         let block_hash = payload.block_hash;
+        let parent_hash = payload.parent_hash;
+
         trace!(target: "consensus::engine", ?block_hash, block_number, "Received new payload");
         let block = match SealedBlock::try_from(payload) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
-                return error.into()
+                let latest_valid_hash =
+                    self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+                return PayloadStatus::from(error).maybe_latest_valid_hash(latest_valid_hash)
             }
         };
 
@@ -401,16 +431,14 @@ where
                 }
                 Err(error) => {
                     let latest_valid_hash =
-                        matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. }))
-                            .then_some(H256::zero());
+                        self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
                     let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
                     PayloadStatus::new(status, latest_valid_hash)
                 }
             }
         } else if let Err(error) = self.blockchain_tree.buffer_block_without_sender(block) {
             let latest_valid_hash =
-                matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. }))
-                    .then_some(H256::zero());
+                self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
             let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
             PayloadStatus::new(status, latest_valid_hash)
         } else {
