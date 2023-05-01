@@ -58,7 +58,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     ) -> Result<UnwindOutput, StageError> {
         let (range, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
-        let unwind_progress = *range.start();
+        let unwind_progress = *range.start() - 1;
 
         tx.unwind_account_history_indices(range)?;
 

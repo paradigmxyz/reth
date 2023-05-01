@@ -193,18 +193,18 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let (block_range, is_final_range) =
+        let (range, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
-        let unwind_progress = *block_range.start() - 1;
+        let unwind_progress = *range.start() - 1;
 
-        if block_range.is_empty() {
+        if range.is_empty() {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
         let account_changeset_batch =
-            account_changeset.walk_range(block_range.clone())?.collect::<Result<Vec<_>, _>>()?;
+            account_changeset.walk_range(range.clone())?.collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
@@ -217,7 +217,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
-            .walk_range(BlockNumberAddress::range(block_range.clone()))?
+            .walk_range(BlockNumberAddress::range(range.clone()))?
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
@@ -238,7 +238,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         // Discard unwinded changesets
         let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
         while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
-            if block_num < *block_range.start() {
+            if block_num < *range.start() {
                 break
             }
             // delete all changesets
@@ -247,7 +247,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
-            if key.block_number() < *block_range.start() {
+            if key.block_number() < *range.start() {
                 break
             }
             // delete all changesets
