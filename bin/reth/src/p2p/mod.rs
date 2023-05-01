@@ -1,7 +1,7 @@
 //! P2P Debugging tool
 use crate::{
     args::{get_secret_key, DiscoveryArgs},
-    dirs::{ConfigPath, DataDirPath, MaybePlatformPath, PlatformPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
@@ -21,8 +21,8 @@ use std::{path::PathBuf, sync::Arc};
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: PlatformPath<ConfigPath>,
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -102,7 +102,11 @@ impl Command {
         let tempdir = tempfile::TempDir::new()?;
         let noop_db = Arc::new(Env::<WriteMap>::open(&tempdir.into_path(), EnvKind::RW)?);
 
-        let mut config: Config = confy::load_path(&self.config).unwrap_or_default();
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+
+        let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
         if let Some(peer) = self.trusted_peer {
             config.peers.trusted_nodes.insert(peer);
@@ -114,8 +118,6 @@ impl Command {
 
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let default_secret_key_path = data_dir.p2p_path().p2p_secret_path();
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;

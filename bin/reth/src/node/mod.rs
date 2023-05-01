@@ -3,7 +3,7 @@
 //! Starts the client
 use crate::{
     args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
-    dirs::{ConfigPath, DataDirPath},
+    dirs::DataDirPath,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -89,8 +89,8 @@ pub struct Command {
     datadir: MaybePlatformPath<DataDirPath>,
 
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: MaybePlatformPath<ConfigPath>,
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
 
     /// The path to the database folder. If not specified, it will be set in the data dir for the
     /// chain being used.
@@ -150,13 +150,14 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let mut config: Config = self.load_config()?;
-
-        // always store reth.toml in the data dir, not the chain specific data dir
-        info!(target: "reth::cli", path = ?self.config.unwrap_or_default().as_ref(), "Configuration loaded");
-
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+
+        let mut config: Config = self.load_config(config_path.clone())?;
+
+        // always store reth.toml in the data dir, not the chain specific data dir
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // use the overridden db path if specified
         let db_path = self.db.clone().unwrap_or(data_dir.db_path());
@@ -459,8 +460,7 @@ impl Command {
     }
 
     /// Loads the reth config with the given datadir root
-    fn load_config(&self) -> eyre::Result<Config> {
-        let config_path = self.config.clone().unwrap_or_default();
+    fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
@@ -778,14 +778,16 @@ mod tests {
     fn parse_config_path() {
         let cmd = Command::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
-        let config_path = cmd.config.unwrap_or_default();
-        assert_eq!(config_path.as_ref(), Path::new("my/path/to/reth.toml"));
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let config_path = cmd.config.unwrap_or(data_dir.config_path());
+        assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
         let cmd = Command::try_parse_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
-        let config_path = cmd.config.unwrap_or_default();
-        assert!(config_path.as_ref().ends_with("reth/mainnet/reth.toml"), "{:?}", cmd.config);
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let config_path = cmd.config.clone().unwrap_or(data_dir.config_path());
+        assert!(config_path.ends_with("reth/mainnet/reth.toml"), "{:?}", cmd.config);
     }
 
     #[test]

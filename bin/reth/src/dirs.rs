@@ -70,19 +70,6 @@ impl XdgPath for DataDirPath {
     }
 }
 
-/// Returns the path to the default reth configuration file.
-///
-/// Refer to [dirs_next::data_dir] for cross-platform behavior.
-#[derive(Default, Debug, Clone)]
-#[non_exhaustive]
-pub struct ConfigPath;
-
-impl XdgPath for ConfigPath {
-    fn resolve() -> Option<PathBuf> {
-        data_dir().map(|p| p.join("reth.toml"))
-    }
-}
-
 /// Returns the path to the reth logs directory.
 ///
 /// Refer to [dirs_next::cache_dir] for cross-platform behavior.
@@ -277,6 +264,11 @@ impl<D> ChainPath<D> {
         NetPath(self.0.join("net"))
     }
 
+    /// Returns the path to the config file for this chain.
+    pub fn config_path(&self) -> PathBuf {
+        self.0.join("reth.toml").into()
+    }
+
     /// Returns the path to the jwtsecret directory for this chain.
     pub fn jwt_path(&self) -> JwtSecretPath<D> {
         JwtSecretPath(self.0.join("jwtsecret"))
@@ -345,21 +337,10 @@ mod tests {
         assert!(path.as_ref().ends_with("reth/mainnet"), "{:?}", path);
 
         let db_path = path.db_path();
-        assert!(path.as_ref().ends_with("reth/mainnet/db"), "{:?}", db_path);
+        assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", db_path);
 
-        let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/db").unwrap();
+        let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
         let path = path.unwrap_or_chain_default(Chain::mainnet());
-        assert!(path.as_ref().ends_with("my/path/to/db"), "{:?}", path);
-    }
-
-    #[test]
-    fn test_maybe_config_platform_path() {
-        let path = MaybePlatformPath::<ConfigPath>::default();
-        let path = path.unwrap_or_chain_default(Chain::mainnet());
-        assert!(path.as_ref().ends_with("reth/mainnet/reth.toml"), "{:?}", path);
-
-        let path = MaybePlatformPath::<ConfigPath>::from_str("my/path/to/reth.toml").unwrap();
-        let path = path.unwrap_or_chain_default(Chain::mainnet());
-        assert!(path.as_ref().ends_with("my/path/to/reth.toml"), "{:?}", path);
+        assert!(path.as_ref().ends_with("my/path/to/datadir"), "{:?}", path);
     }
 }

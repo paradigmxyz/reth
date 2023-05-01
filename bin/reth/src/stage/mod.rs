@@ -3,7 +3,7 @@
 //! Stage debugging tool
 use crate::{
     args::{get_secret_key, NetworkArgs, StageEnum},
-    dirs::{ConfigPath, DataDirPath, MaybePlatformPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
 };
 use clap::Parser;
@@ -26,8 +26,8 @@ use tracing::*;
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: MaybePlatformPath<ConfigPath>,
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
 
     /// The path to the data dir for all reth files and subdirectories.
     ///
@@ -104,7 +104,11 @@ impl Command {
         // Does not do anything on windows.
         fdlimit::raise_fd_limit();
 
-        let config: Config = confy::load_path(self.config.unwrap_or_default()).unwrap_or_default();
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+
+        let config: Config = confy::load_path(config_path).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
         let input = ExecInput {
@@ -113,9 +117,6 @@ impl Command {
         };
 
         let unwind = UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
-
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
 
         // use the overridden db path if specified
         let db_path = self.db.clone().unwrap_or(data_dir.db_path());

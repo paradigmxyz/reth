@@ -1,5 +1,5 @@
 use crate::{
-    dirs::{ConfigPath, DataDirPath, MaybePlatformPath, PlatformPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     node::events::{handle_events, NodeEvent},
 };
 use clap::{crate_version, Parser};
@@ -34,8 +34,8 @@ use tracing::{debug, info};
 #[derive(Debug, Parser)]
 pub struct ImportCommand {
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: MaybePlatformPath<ConfigPath>,
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
 
     /// The path to the data dir for all reth files and subdirectories.
     ///
@@ -74,7 +74,7 @@ pub struct ImportCommand {
     /// The online stages (headers and bodies) are replaced by a file import, after which the
     /// remaining stages are executed.
     #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
-    path: PlatformPath<ConfigPath>,
+    path: PathBuf,
 }
 
 impl ImportCommand {
@@ -82,11 +82,12 @@ impl ImportCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
-        let config: Config = self.load_config()?;
-        info!(target: "reth::cli", path = ?self.config.unwrap_or_default(), "Configuration loaded");
-
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+
+        let config: Config = self.load_config(config_path.clone())?;
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // use the overridden db path if specified
         let db_path = self.db.clone().unwrap_or(data_dir.db_path());
@@ -181,11 +182,9 @@ impl ImportCommand {
     }
 
     /// Loads the reth config
-    fn load_config(&self) -> eyre::Result<Config> {
-        // add network name to config directory
-        let config_path = self.config.unwrap_or_default();
+    fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {}", config_path))
+            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
 }
 
