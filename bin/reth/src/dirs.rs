@@ -256,7 +256,7 @@ impl<D> ChainPath<D> {
 
     /// Returns the path to the reth p2p secret key for this chain.
     pub fn p2p_secret_path(&self) -> PathBuf {
-        self.0.join("discoverysecret").into()
+        self.0.join("discovery-secret").into()
     }
 
     /// Returns the path to the known peers file for this chain.
