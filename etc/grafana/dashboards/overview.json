@@ -2228,13 +2228,34 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "exemplar": false,
-          "expr": "reth_errors",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "{{type}}",
+          "expr": "reth_downloaders_bodies_timeout_errors",
+          "legendFormat": "Request timed out",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_unexpected_errors",
+          "hide": false,
+          "legendFormat": "Unexpected error",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_validation_errors",
+          "hide": false,
+          "legendFormat": "Invalid response",
+          "range": true,
+          "refId": "C"
         }
       ],
       "title": "Errors",
