@@ -1,5 +1,4 @@
-use super::rlp_node;
-use crate::Nibbles;
+use super::{super::Nibbles, rlp_node};
 use reth_rlp::{BufMut, Encodable};
 
 /// A leaf node represents the endpoint or terminal node in the trie. In other words, a leaf node is
@@ -55,7 +54,7 @@ impl std::fmt::Debug for LeafNode<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::hex_literal::hex;
+    use crate::hex_literal::hex;
 
     // From manual regression test
     #[test]

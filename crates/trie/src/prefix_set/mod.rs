@@ -1,4 +1,4 @@
-use crate::Nibbles;
+use reth_primitives::trie::Nibbles;
 
 mod loader;
 pub use loader::PrefixSetLoader;

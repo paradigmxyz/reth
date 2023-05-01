@@ -5149,6 +5149,7 @@ dependencies = [
  "tiny-keccak",
  "tokio",
  "tokio-stream",
+ "tracing",
  "triehash",
  "url",
 ]
