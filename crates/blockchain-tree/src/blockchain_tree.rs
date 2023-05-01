@@ -647,7 +647,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<(), Error> {
         // If block is already canonical don't return error.
         if self.block_indices.is_block_hash_canonical(block_hash) {
-            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
+            trace!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
             let td = self
                 .externals
                 .shareable_db()
