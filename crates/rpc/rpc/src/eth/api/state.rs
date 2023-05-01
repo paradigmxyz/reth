@@ -162,7 +162,7 @@ mod tests {
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
         let address = Address::random();
-        let storage = eth_api.storage_at(address, U256::ZERO, None).unwrap();
+        let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
         assert_eq!(storage, U256::ZERO.into());
 
         // === Mock ===
@@ -175,11 +175,12 @@ mod tests {
 
         let eth_api = EthApi::new(
             mock_provider.clone(),
-            pool.clone(),
+            pool,
             (),
             EthStateCache::spawn(mock_provider, Default::default()),
         );
 
+        let storage_key: U256 = storage_key.into();
         let storage = eth_api.storage_at(address, storage_key.into(), None).unwrap();
         assert_eq!(storage, storage_value.into());
     }
