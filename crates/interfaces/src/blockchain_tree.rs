@@ -105,5 +105,10 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Return block hashes that extends the canonical chain tip by one.
     ///
     /// If there is no such block, return `None`.
-    fn pending_block(&self) -> Option<BlockNumHash>;
+    fn pending_block_num_hash(&self) -> Option<BlockNumHash>;
+
+    /// Returns the pending block if there is one.
+    fn pending_block(&self) -> Option<SealedBlock> {
+        self.block_by_hash(self.pending_block_num_hash()?.hash)
+    }
 }

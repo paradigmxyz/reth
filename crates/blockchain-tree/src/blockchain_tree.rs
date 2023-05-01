@@ -163,6 +163,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         chain.block(block_hash)
     }
 
+    /// Returns the block that's considered the `Pending` block, if it exists.
+    pub fn pending_block(&self) -> Option<&SealedBlock> {
+        let b = self.block_indices.pending_block_num_hash()?;
+        self.block_by_hash(b.hash)
+    }
+
     /// Return items needed to execute on the pending state.
     /// This includes:
     ///     * `BlockHash` of canonical block that chain connects to. Needed for creating database
