@@ -71,7 +71,7 @@ impl StateCache for LruStateCache {
             if value.is_some() {
                 self.metrics.storage_hits.increment(1);
                 value
-            } else if storage.wiped {
+            } else if storage.wiped() {
                 self.metrics.storage_hits.increment(1);
                 Some(U256::ZERO)
             } else {
@@ -100,8 +100,8 @@ impl StateCache for LruStateCache {
 
     fn change_storage(&mut self, address: Address, changes: Storage) {
         if let Some(cached_storage) = self.storage_cache.peek_mut(&address) {
-            if changes.wiped {
-                cached_storage.wiped = true;
+            if changes.wiped() {
+                cached_storage.times_wiped = changes.times_wiped;
                 cached_storage.storage.clear();
             }
 
@@ -225,7 +225,7 @@ where
                 account,
                 Storage {
                     storage: BTreeMap::from([(storage_key.into(), fetched.unwrap_or_default())]),
-                    wiped: false,
+                    times_wiped: 0,
                 },
             );
             Ok(fetched)

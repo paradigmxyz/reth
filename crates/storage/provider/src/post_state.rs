@@ -516,8 +516,10 @@ impl PostState {
 
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
+            let wiped = storage.wiped();
+
             // If the storage was wiped, remove all previous entries from the database.
-            if storage.wiped() {
+            if wiped {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
@@ -530,7 +532,7 @@ impl PostState {
 
                 // NOTE: If the storage was wiped, we know that none of these entries will exist, so
                 // we can save some time by not seeking around
-                if !storage.wiped {
+                if !wiped {
                     if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
                         if entry.key == key {
                             storages_cursor.delete_current()?;
