@@ -39,7 +39,7 @@ use reth_interfaces::{
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, CanonStateSubscriptions, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
@@ -150,8 +150,10 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let mut config: Config = self.load_config_with_chain(self.chain.chain)?;
-        info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
+        let mut config: Config = self.load_config()?;
+
+        // always store reth.toml in the data dir, not the chain specific data dir
+        info!(target: "reth::cli", path = ?self.config.unwrap_or_default().as_ref(), "Configuration loaded");
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -456,12 +458,11 @@ impl Command {
         Ok(pipeline)
     }
 
-    /// Loads the reth config based on the intended chain
-    fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
-        // add network name to config directory
-        let config_path = self.config.unwrap_or_chain_default(chain);
+    /// Loads the reth config with the given datadir root
+    fn load_config(&self) -> eyre::Result<Config> {
+        let config_path = self.config.clone().unwrap_or_default();
         confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {}", config_path))
+            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {
@@ -776,20 +777,15 @@ mod tests {
     #[test]
     fn parse_config_path() {
         let cmd = Command::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
-        assert_eq!(
-            cmd.config.unwrap_or_chain_default(cmd.chain.chain).as_ref(),
-            Path::new("my/path/to/reth.toml")
-        );
+        // always store reth.toml in the data dir, not the chain specific data dir
+        let config_path = cmd.config.unwrap_or_default();
+        assert_eq!(config_path.as_ref(), Path::new("my/path/to/reth.toml"));
 
         let cmd = Command::try_parse_from(["reth"]).unwrap();
-        assert!(
-            cmd.config
-                .unwrap_or_chain_default(cmd.chain.chain)
-                .as_ref()
-                .ends_with("reth/mainnet/reth.toml"),
-            "{:?}",
-            cmd.config
-        );
+
+        // always store reth.toml in the data dir, not the chain specific data dir
+        let config_path = cmd.config.unwrap_or_default();
+        assert!(config_path.as_ref().ends_with("reth/mainnet/reth.toml"), "{:?}", cmd.config);
     }
 
     #[test]

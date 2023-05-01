@@ -14,7 +14,7 @@ use reth_downloaders::{
 use reth_interfaces::{
     consensus::Consensus, p2p::headers::client::NoopStatusUpdater, sync::SyncStateUpdater,
 };
-use reth_primitives::{Chain, ChainSpec, H256};
+use reth_primitives::{ChainSpec, H256};
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -82,8 +82,8 @@ impl ImportCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
-        let config: Config = self.load_config_with_chain(self.chain.chain)?;
-        info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
+        let config: Config = self.load_config()?;
+        info!(target: "reth::cli", path = ?self.config.unwrap_or_default(), "Configuration loaded");
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -180,10 +180,10 @@ impl ImportCommand {
         Ok((pipeline, events))
     }
 
-    /// Loads the reth config based on the intended chain
-    fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
+    /// Loads the reth config
+    fn load_config(&self) -> eyre::Result<Config> {
         // add network name to config directory
-        let config_path = self.config.unwrap_or_chain_default(chain);
+        let config_path = self.config.unwrap_or_default();
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {}", config_path))
     }

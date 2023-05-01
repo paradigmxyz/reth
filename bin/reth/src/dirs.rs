@@ -72,14 +72,14 @@ impl XdgPath for DataDirPath {
 
 /// Returns the path to the default reth configuration file.
 ///
-/// Refer to [dirs_next::config_dir] for cross-platform behavior.
+/// Refer to [dirs_next::data_dir] for cross-platform behavior.
 #[derive(Default, Debug, Clone)]
 #[non_exhaustive]
 pub struct ConfigPath;
 
 impl XdgPath for ConfigPath {
     fn resolve() -> Option<PathBuf> {
-        config_dir().map(|p| p.join("reth.toml"))
+        data_dir().map(|p| p.join("reth.toml"))
     }
 }
 
@@ -175,23 +175,11 @@ impl<D> PlatformPath<D> {
 
 impl<D> PlatformPath<D> {
     /// Converts the path to a `ChainPath` with the given `Chain`.
-    ///
-    /// If the inner path type refers to a file, the chain will be inserted between the parent
-    /// directory and the file name. If the inner path type refers to a directory, the chain will be
-    /// appended to the path.
     pub fn with_chain(&self, chain: Chain) -> ChainPath<D> {
         // extract chain name
         let chain_name = config_path_prefix(chain);
 
-        // extract the parent directory if the path is a file
-        let path = if self.0.is_file() {
-            let parent = self.0.parent().expect("Could not get parent of path");
-            let final_component = self.0.file_name().expect("Could not get file name of path");
-
-            parent.join(chain_name).join(final_component)
-        } else {
-            self.0.join(chain_name)
-        };
+        let path = self.0.join(chain_name);
 
         let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
         ChainPath::new(platform_path, chain)
@@ -213,6 +201,12 @@ impl<D: XdgPath> MaybePlatformPath<D> {
             self.0.clone().unwrap_or_else(|| PlatformPath::default().with_chain(chain).0),
             chain,
         )
+    }
+
+    /// Returns the path if it is set, otherwise returns the default path, without any chain
+    /// directory.
+    pub fn unwrap_or_default(&self) -> PlatformPath<D> {
+        self.0.clone().unwrap_or_default()
     }
 }
 

@@ -104,9 +104,7 @@ impl Command {
         // Does not do anything on windows.
         fdlimit::raise_fd_limit();
 
-        let config: Config =
-            confy::load_path(self.config.unwrap_or_chain_default(self.chain.chain))
-                .unwrap_or_default();
+        let config: Config = confy::load_path(self.config.unwrap_or_default()).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
         let input = ExecInput {
