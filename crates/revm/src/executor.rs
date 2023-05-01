@@ -3,6 +3,7 @@ use crate::{
     env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     into_reth_log,
+    primitives::bytes::BytesMut,
     stack::{InspectorStack, InspectorStackConfig},
     to_reth_acc,
 };
@@ -13,6 +14,8 @@ use reth_primitives::{
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, PostState, StateProvider};
+use reth_rlp::Encodable;
+use reth_trie::{hash_builder::HashBuilder, Nibbles};
 use revm::{
     db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
@@ -490,9 +493,55 @@ pub fn verify_receipt<'a>(
     expected_logs_bloom: Bloom,
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
 ) -> Result<(), Error> {
-    // Check receipts root.
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts_with_bloom.iter());
+
+    const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
+        if i > 0x7f {
+            i
+        } else if i == 0x7f || i + 1 == len {
+            0
+        } else {
+            i + 1
+        }
+    }
+
+    // Calculate receipts root
+    // TODO: I had to pull in reth-rlp and reth-trie here because reth-trie depends on
+    // reth-primitives, which is where the usual proof functions live, so we have a circular dep
+    let mut index_buffer = BytesMut::new();
+    let mut value_buffer = BytesMut::new();
+
+    let mut hb = HashBuilder::default();
+    let receipts_len = receipts_with_bloom.len();
+    for i in 0..receipts_len {
+        let index = adjust_index_for_rlp(i, receipts_len);
+
+        index_buffer.clear();
+        index.encode(&mut index_buffer);
+
+        value_buffer.clear();
+        receipts_with_bloom[index].encode_inner(&mut value_buffer, false);
+
+        hb.add_leaf(Nibbles::unpack(&index_buffer), &value_buffer);
+    }
+
+    // Check receipts root.
+    let receipts_root = hb.root();
+    if receipts_root != expected_receipts_root {
+        return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
+    }
+
+    // Create header log bloom.
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+    if logs_bloom != expected_logs_bloom {
+        return Err(Error::BloomLogDiff {
+            expected: Box::new(expected_logs_bloom),
+            got: Box::new(logs_bloom),
+        })
+    }
+
+    // Check receipts root.
+    let receipts_root = hb.root();
     if receipts_root != expected_receipts_root {
         return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
     }

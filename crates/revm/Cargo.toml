@@ -18,6 +18,10 @@ reth-consensus-common = { path = "../consensus/common" }
 # revm
 revm = { version = "3" }
 
+# todo: this should probably not be here, instead the fn to calculate receipts root should be adjusted in the prims crate
+reth-trie = { path = "../trie" }
+reth-rlp = { path = "../rlp" }
+
 # common
 tracing = "0.1.37"
 

@@ -72,6 +72,7 @@ pub fn calculate_receipt_root<'a>(receipts: impl Iterator<Item = &'a ReceiptWith
 pub fn calculate_receipt_root_ref<'a>(
     receipts: impl Iterator<Item = ReceiptWithBloomRef<'a>>,
 ) -> H256 {
+    // todo
     ordered_trie_root::<KeccakHasher, _>(receipts.into_iter().map(|receipt| {
         let mut receipt_rlp = Vec::new();
         receipt.encode_inner(&mut receipt_rlp, false);
