@@ -2,7 +2,7 @@ use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindI
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
-use reth_primitives::{utils::EventListeners, BlockNumber, H256};
+use reth_primitives::{listener::EventListeners, BlockNumber, H256};
 use reth_provider::Transaction;
 use std::{
     fmt::{Debug, Formatter},

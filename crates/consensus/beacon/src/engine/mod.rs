@@ -9,7 +9,7 @@ use reth_interfaces::{
     Error,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
-use reth_primitives::{utils::EventListeners, BlockNumber, Header, SealedBlock, H256};
+use reth_primitives::{listener::EventListeners, BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
 };

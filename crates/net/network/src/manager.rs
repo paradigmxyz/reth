@@ -40,7 +40,7 @@ use reth_eth_wire::{
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{utils::EventListeners, NodeRecord, PeerId, H256};
+use reth_primitives::{listener::EventListeners, NodeRecord, PeerId, H256};
 use reth_provider::BlockProvider;
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
