@@ -1,8 +1,9 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadBuilderHandle,
-    PayloadBuilderService, PayloadJob, PayloadJobGenerator,
+    error::PayloadBuilderError, traits::KeepPayloadJobAlive, BuiltPayload,
+    PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
+    PayloadJobGenerator,
 };
 use reth_primitives::{Block, U256};
 use std::{
@@ -56,11 +57,19 @@ impl Future for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
+    type ResolvePayloadFuture =
+        futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
         Ok(Arc::new(BuiltPayload::new(
             self.attr.payload_id(),
             Block::default().seal_slow(),
             U256::ZERO,
         )))
+    }
+
+    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        let fut = futures_util::future::ready(self.best_payload());
+        (fut, KeepPayloadJobAlive::No)
     }
 }
