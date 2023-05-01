@@ -75,22 +75,26 @@ impl Chain {
     }
 
     /// Get the block at which this chain forked.
+    #[track_caller]
     pub fn fork_block(&self) -> ForkBlock {
         let tip = self.first();
         ForkBlock { number: tip.number.saturating_sub(1), hash: tip.parent_hash }
     }
 
     /// Get the block number at which this chain forked.
+    #[track_caller]
     pub fn fork_block_number(&self) -> BlockNumber {
         self.first().number.saturating_sub(1)
     }
 
     /// Get the block hash at which this chain forked.
+    #[track_caller]
     pub fn fork_block_hash(&self) -> BlockHash {
         self.first().parent_hash
     }
 
     /// Get the first block in this chain.
+    #[track_caller]
     pub fn first(&self) -> &SealedBlockWithSenders {
         self.blocks.first_key_value().expect("Chain has at least one block for first").1
     }
@@ -100,6 +104,7 @@ impl Chain {
     /// # Note
     ///
     /// Chains always have at least one block.
+    #[track_caller]
     pub fn tip(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
     }
@@ -171,6 +176,7 @@ impl Chain {
     /// The second chain only contains the changes that were reverted on the first chain; however,
     /// it retains the up to date state as if the chains were one, i.e. the second chain is an
     /// extension of the first.
+    #[track_caller]
     pub fn split(mut self, split_at: SplitAt) -> ChainSplit {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
         let block_number = match split_at {
