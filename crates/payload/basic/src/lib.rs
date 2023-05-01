@@ -11,8 +11,8 @@ use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_payload_builder::{
-    error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
-    PayloadJobGenerator,
+    error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes,
+    PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
@@ -346,6 +346,8 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
+    type ResolvePayloadFuture = ResolveBestPayload;
+
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
             return Ok(payload.clone())
@@ -359,9 +361,86 @@ where
         self.metrics.inc_requested_empty_payload();
         build_empty_payload(&self.client, self.config.clone()).map(Arc::new)
     }
+
+    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        let best_payload = self.best_payload.take();
+        let maybe_better = self.pending_block.take();
+        let mut empty_payload = None;
+
+        if best_payload.is_none() {
+            // if no payload has been built yet
+            self.metrics.inc_requested_empty_payload();
+            // no payload built yet, so we need to return an empty payload
+            let (tx, rx) = oneshot::channel();
+            let client = self.client.clone();
+            let config = self.config.clone();
+            self.executor.spawn_blocking(Box::pin(async move {
+                let res = build_empty_payload(&client, config);
+                let _ = tx.send(res);
+            }));
+
+            empty_payload = Some(rx);
+        }
+
+        let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
+
+        (fut, KeepPayloadJobAlive::No)
+    }
+}
+
+/// The future that returns the best payload to be served to the consensus layer.
+///
+/// This returns the payload that's supposed to be sent to the CL.
+///
+/// If payload has been built so far, it will return that, but it will check if there's a better
+/// payload available from an in progress build job. If so it will return that.
+///
+/// If no payload has been built so far, it will either return an empty payload or the result of the
+/// in progress build job, whatever finishes first.
+#[derive(Debug)]
+pub struct ResolveBestPayload {
+    /// Best payload so far.
+    best_payload: Option<Arc<BuiltPayload>>,
+    /// Regular payload job that's currently running that might produce a better payload.
+    maybe_better: Option<PendingPayload>,
+    /// The empty payload building job in progress.
+    empty_payload: Option<oneshot::Receiver<Result<BuiltPayload, PayloadBuilderError>>>,
+}
+
+impl Future for ResolveBestPayload {
+    type Output = Result<Arc<BuiltPayload>, PayloadBuilderError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+
+        // check if there is a better payload before returning the best payload
+        if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
+            if let Poll::Ready(res) = fut.poll(cx) {
+                this.maybe_better = None;
+                if let Ok(BuildOutcome::Better(payload)) = res {
+                    return Poll::Ready(Ok(Arc::new(payload)))
+                }
+            }
+        }
+
+        if let Some(best) = this.best_payload.take() {
+            return Poll::Ready(Ok(best))
+        }
+
+        let mut empty_payload = this.empty_payload.take().expect("polled after completion");
+        match empty_payload.poll_unpin(cx) {
+            Poll::Ready(Ok(res)) => Poll::Ready(res.map(Arc::new)),
+            Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
+            Poll::Pending => {
+                this.empty_payload = Some(empty_payload);
+                Poll::Pending
+            }
+        }
+    }
 }
 
 /// A future that resolves to the result of the block building job.
+#[derive(Debug)]
 struct PendingPayload {
     /// The marker to cancel the job on drop
     _cancel: Cancelled,
@@ -381,7 +460,7 @@ impl Future for PendingPayload {
 /// A marker that can be used to cancel a job.
 ///
 /// If dropped, it will set the `cancelled` flag to true.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 struct Cancelled(Arc<AtomicBool>);
 
 // === impl Cancelled ===
@@ -416,6 +495,7 @@ struct PayloadConfig {
     chain_spec: Arc<ChainSpec>,
 }
 
+#[derive(Debug)]
 enum BuildOutcome {
     /// Successfully built a better block.
     Better(BuiltPayload),
