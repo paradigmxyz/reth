@@ -112,13 +112,13 @@ pub trait XdgPath {
 /// # Example
 ///
 /// ```
-/// use reth::dirs::{PlatformPath, DbPath};
+/// use reth::dirs::{PlatformPath, DataDirPath};
 /// use std::str::FromStr;
 ///
 /// // Resolves to the platform-specific database path
-/// let default: PlatformPath<DbPath> = PlatformPath::default();
-/// // Resolves to `$(pwd)/my/path/to/db`
-/// let custom: PlatformPath<DbPath> = PlatformPath::from_str("my/path/to/db").unwrap();
+/// let default: PlatformPath<DataDirPath> = PlatformPath::default();
+/// // Resolves to `$(pwd)/my/path/to/datadir`
+/// let custom: PlatformPath<DataDirPath> = PlatformPath::from_str("my/path/to/datadir").unwrap();
 ///
 /// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
