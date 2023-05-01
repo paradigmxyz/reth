@@ -39,6 +39,10 @@ crc = "3"
 # tracing
 tracing = "0.1"
 
+# tokio
+tokio = { version = "1", default-features = false, features = ["sync"] }
+tokio-stream = "0.1"
+
 # misc
 bytes = "1.4"
 serde = "1.0"

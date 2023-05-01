@@ -2,7 +2,7 @@ use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindI
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{listener::EventListeners, BlockNumber, H256};
 use reth_provider::Transaction;
 use std::{
     fmt::{Debug, Formatter},
@@ -82,7 +82,7 @@ pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     stages: Vec<BoxedStage<DB>>,
     max_block: Option<BlockNumber>,
     continuous: bool,
-    listeners: PipelineEventListeners,
+    listeners: EventListeners<PipelineEvent>,
     sync_state_updater: Option<U>,
     progress: PipelineProgress,
     tip_tx: Option<watch::Sender<H256>>,
@@ -102,7 +102,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
             stages: Vec::new(),
             max_block: None,
             continuous: false,
-            listeners: PipelineEventListeners::default(),
+            listeners: EventListeners::default(),
             sync_state_updater: None,
             progress: PipelineProgress::default(),
             tip_tx: None,
