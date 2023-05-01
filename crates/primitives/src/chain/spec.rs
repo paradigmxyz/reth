@@ -295,7 +295,6 @@ impl ChainSpec {
             if let ForkCondition::Block(block) = cond {
                 if cond.active_at_head(head) && block != current_applied {
                     forkhash += block;
-                    println!("block: {} forkhash: {:#?}", block, forkhash);
                     current_applied = block;
                 }
             }
@@ -306,7 +305,6 @@ impl ChainSpec {
             if let ForkCondition::Timestamp(timestamp) = cond {
                 if cond.active_at_head(head) && timestamp != current_applied {
                     forkhash += timestamp;
-                    println!("block: {} forkhash: {:#?}", timestamp, forkhash);
                     current_applied = timestamp;
                 } else {
                     // can safely return here because we have already handled all block forks and
