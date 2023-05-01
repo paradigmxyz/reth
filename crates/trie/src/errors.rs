@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 /// State root error.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq, Eq, Clone)]
 pub enum StateRootError {
     /// Internal database error.
     #[error(transparent)]
@@ -21,7 +21,7 @@ impl From<StateRootError> for reth_db::Error {
 }
 
 /// Storage root error.
-#[derive(Error, Debug)]
+#[derive(Error, PartialEq, Eq, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
