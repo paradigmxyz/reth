@@ -53,8 +53,8 @@ impl NetworkArgs {
     /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
     /// values in this option struct.
     ///
-    /// The `default_peers_file` will be used as the default location to store the persistent peers file if
-    /// `no_persist_peers` is false, and there is no provided `peers_file`.
+    /// The `default_peers_file` will be used as the default location to store the persistent peers
+    /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
     pub fn network_config(
         &self,
         config: &Config,

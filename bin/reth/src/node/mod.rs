@@ -155,7 +155,9 @@ impl Command {
 
         // add network name to data dir
         let data_dir = self.data_dir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+
+        // use the overridden db path if specified
+        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
@@ -228,17 +230,21 @@ impl Command {
         info!(target: "reth::cli", "Connecting to P2P network");
         let default_secret_key_path = data_dir.p2p_path().p2p_secret_path();
         let default_peers_path = data_dir.net_path().known_peers_path();
-        let secret_key =
-            get_secret_key(&default_secret_key_path)?;
+        let secret_key = get_secret_key(&default_secret_key_path)?;
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
             ctx.task_executor.clone(),
             secret_key,
-            default_peers_path,
+            default_peers_path.clone(),
         );
         let network = self
-            .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
+            .start_network(
+                network_config,
+                &ctx.task_executor,
+                transaction_pool.clone(),
+                default_peers_path,
+            )
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
@@ -367,7 +373,8 @@ impl Command {
         info!(target: "reth::cli", "Engine API handler initialized");
 
         // extract the jwt secret from the the args if possible
-        let jwt_secret = self.rpc.jwt_secret(&default_jwt_path)?;
+        let default_jwt_path = data_dir.jwt_path().jwtsecret_path();
+        let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
         // Start RPC servers
         let (_rpc_server, _auth_server) = self
@@ -485,6 +492,7 @@ impl Command {
         config: NetworkConfig<C>,
         task_executor: &TaskExecutor,
         pool: Pool,
+        default_peers_path: PathBuf,
     ) -> Result<NetworkHandle, NetworkError>
     where
         C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
@@ -497,7 +505,7 @@ impl Command {
             .request_handler(client)
             .split_with_handle();
 
-        let known_peers_file = self.network.persistent_peers_file(peers_path);
+        let known_peers_file = self.network.persistent_peers_file(default_peers_path);
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
             run_network_until_shutdown(shutdown, network, known_peers_file)
         });
@@ -787,16 +795,13 @@ mod tests {
     #[test]
     fn parse_db_path() {
         let cmd = Command::try_parse_from(["reth", "--db", "my/path/to/db"]).unwrap();
-        assert_eq!(
-            cmd.db.unwrap_or_chain_default(cmd.chain.chain).as_ref(),
-            Path::new("my/path/to/db")
-        );
+        let data_dir = cmd.data_dir.unwrap_or_chain_default(cmd.chain.chain);
+        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        assert_eq!(db_path, Path::new("my/path/to/db"));
 
         let cmd = Command::try_parse_from(["reth"]).unwrap();
-        assert!(
-            cmd.db.unwrap_or_chain_default(cmd.chain.chain).as_ref().ends_with("reth/mainnet/db"),
-            "{:?}",
-            cmd.config
-        );
+        let data_dir = cmd.data_dir.unwrap_or_chain_default(cmd.chain.chain);
+        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
     }
 }

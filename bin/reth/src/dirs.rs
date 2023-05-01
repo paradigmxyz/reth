@@ -209,7 +209,10 @@ pub struct MaybePlatformPath<D>(Option<PlatformPath<D>>);
 impl<D: XdgPath> MaybePlatformPath<D> {
     /// Returns the path if it is set, otherwise returns the default path for the given chain.
     pub fn unwrap_or_chain_default(&self, chain: Chain) -> ChainPath<D> {
-        ChainPath(self.0.clone().unwrap_or_else(|| PlatformPath::default().with_chain(chain).0), chain)
+        ChainPath(
+            self.0.clone().unwrap_or_else(|| PlatformPath::default().with_chain(chain).0),
+            chain,
+        )
     }
 }
 
@@ -281,7 +284,7 @@ impl<D> ChainPath<D> {
     }
 
     /// Returns the path to the jwtsecret directory for this chain.
-    pub fn jwtsecret_path(&self) -> JwtSecretPath<D> {
+    pub fn jwt_path(&self) -> JwtSecretPath<D> {
         JwtSecretPath(self.0.join("jwtsecret"))
     }
 }
