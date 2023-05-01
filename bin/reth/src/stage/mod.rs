@@ -144,10 +144,10 @@ impl Command {
                     });
                 }
 
-                let default_secret_key_path = data_dir.p2p_path().p2p_secret_path();
+                let default_secret_key_path = data_dir.p2p_secret_path();
                 let p2p_secret_key = get_secret_key(&default_secret_key_path)?;
 
-                let default_peers_path = data_dir.net_path().known_peers_path();
+                let default_peers_path = data_dir.known_peers_path();
 
                 let network = self
                     .network

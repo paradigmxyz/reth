@@ -254,14 +254,14 @@ impl<D> ChainPath<D> {
         self.0.join("db").into()
     }
 
-    /// Returns the path to the reth secret key directory for this chain.
-    pub fn p2p_path(&self) -> P2PPath<D> {
-        P2PPath(self.0.join("p2p"))
+    /// Returns the path to the reth p2p secret key for this chain.
+    pub fn p2p_secret_path(&self) -> PathBuf {
+        self.0.join("discoverysecret").into()
     }
 
-    /// Returns the path to the net directory for this chain.
-    pub fn net_path(&self) -> NetPath<D> {
-        NetPath(self.0.join("net"))
+    /// Returns the path to the known peers file for this chain.
+    pub fn known_peers_path(&self) -> PathBuf {
+        self.0.join("known-peers.json").into()
     }
 
     /// Returns the path to the config file for this chain.
@@ -269,9 +269,9 @@ impl<D> ChainPath<D> {
         self.0.join("reth.toml").into()
     }
 
-    /// Returns the path to the jwtsecret directory for this chain.
-    pub fn jwt_path(&self) -> JwtSecretPath<D> {
-        JwtSecretPath(self.0.join("jwtsecret"))
+    /// Returns the path to the jwtsecret file for this chain.
+    pub fn jwt_path(&self) -> PathBuf {
+        self.0.join("jwtsecret").into()
     }
 }
 
@@ -290,39 +290,6 @@ impl<D> Display for ChainPath<D> {
 impl<D> From<ChainPath<D>> for PathBuf {
     fn from(value: ChainPath<D>) -> Self {
         value.0.into()
-    }
-}
-
-/// A type representing a path to the reth net directory.
-#[derive(Clone, Debug, PartialEq)]
-pub struct NetPath<D>(PlatformPath<D>);
-
-impl<D> NetPath<D> {
-    /// Returns the path to the default reth known peers file for this net directory.
-    pub fn known_peers_path(&self) -> PathBuf {
-        self.0.join("known_peers.json").into()
-    }
-}
-
-/// A type representing a path to the reth jwtsecret directory.
-#[derive(Clone, Debug, PartialEq)]
-pub struct JwtSecretPath<D>(PlatformPath<D>);
-
-impl<D> JwtSecretPath<D> {
-    /// Returns the path to the default reth jwtsecret file for this jwtsecret directory.
-    pub fn jwtsecret_path(&self) -> PathBuf {
-        self.0.join("jwt.hex").into()
-    }
-}
-
-/// A type represeting a path to the reth p2p secret directory.
-#[derive(Clone, Debug, PartialEq)]
-pub struct P2PPath<D>(PlatformPath<D>);
-
-impl<D> P2PPath<D> {
-    /// Returns the path to the default reth p2p secret key file for this p2p directory.
-    pub fn p2p_secret_path(&self) -> PathBuf {
-        self.0.join("secret").into()
     }
 }
 

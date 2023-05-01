@@ -118,7 +118,7 @@ impl Command {
 
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
-        let default_secret_key_path = data_dir.p2p_path().p2p_secret_path();
+        let default_secret_key_path = data_dir.p2p_secret_path();
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
 

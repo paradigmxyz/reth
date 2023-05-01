@@ -231,8 +231,8 @@ impl Command {
         }
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let default_secret_key_path = data_dir.p2p_path().p2p_secret_path();
-        let default_peers_path = data_dir.net_path().known_peers_path();
+        let default_secret_key_path = data_dir.p2p_secret_path();
+        let default_peers_path = data_dir.known_peers_path();
         let secret_key = get_secret_key(&default_secret_key_path)?;
         let network_config = self.load_network_config(
             &config,
@@ -376,7 +376,7 @@ impl Command {
         info!(target: "reth::cli", "Engine API handler initialized");
 
         // extract the jwt secret from the the args if possible
-        let default_jwt_path = data_dir.jwt_path().jwtsecret_path();
+        let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
         // Start RPC servers
