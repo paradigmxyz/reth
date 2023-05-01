@@ -300,6 +300,8 @@ where
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
+
+                        tx.commit()?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -309,7 +311,6 @@ where
             }
         }
 
-        tx.commit()?;
         Ok(())
     }
 
