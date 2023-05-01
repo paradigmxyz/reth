@@ -601,7 +601,8 @@ mod tests {
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
-        post_state::Storage, AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
+        post_state::{ChangedStorage, Storage},
+        AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
@@ -819,7 +820,7 @@ mod tests {
                 block.number,
                 BTreeMap::from([(
                     account1,
-                    Storage {
+                    ChangedStorage {
                         wiped: false,
                         // Slot 1 changed from 0 to 2
                         storage: BTreeMap::from([(U256::from(1), U256::ZERO)])
@@ -834,7 +835,10 @@ mod tests {
             post_state.storage(),
             &BTreeMap::from([(
                 account1,
-                Storage { wiped: false, storage: BTreeMap::from([(U256::from(1), U256::from(2))]) }
+                Storage {
+                    times_wiped: 0,
+                    storage: BTreeMap::from([(U256::from(1), U256::from(2))])
+                }
             )]),
             "Should have changed 1 storage slot"
         );
@@ -992,7 +996,7 @@ mod tests {
             "Selfdestructed account should have been deleted"
         );
         assert!(
-            out.storage().get(&address_selfdestruct).unwrap().wiped,
+            out.storage().get(&address_selfdestruct).unwrap().wiped(),
             "Selfdestructed account should have its storage wiped"
         );
     }

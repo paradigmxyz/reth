@@ -27,23 +27,43 @@ pub type AccountChanges = BTreeMap<BlockNumber, BTreeMap<Address, Option<Account
 
 /// A mapping of `block -> account -> slot -> old value` that represents what slots were changed,
 /// and what their values were prior to that change.
-pub type StorageChanges = BTreeMap<BlockNumber, BTreeMap<Address, Storage>>;
+pub type StorageChanges = BTreeMap<BlockNumber, BTreeMap<Address, ChangedStorage>>;
 
-/// Storage for an account.
+/// Changed storage state for the account.
 ///
 /// # Wiped Storage
 ///
 /// The field `wiped` denotes whether the pre-existing storage in the database should be cleared or
 /// not.
-///
-/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
-/// in `storage` should be the only values written to the database.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub struct Storage {
+pub struct ChangedStorage {
     /// Whether the storage was wiped or not.
     pub wiped: bool,
     /// The storage slots.
     pub storage: BTreeMap<U256, U256>,
+}
+
+/// Latest storage state for the account.
+///
+/// # Wiped Storage
+///
+/// The `times_wiped` field indicates the number of times the storage was wiped in this poststate.
+///
+/// If `times_wiped` is greater than 0, then the account was selfdestructed at some point, and the
+/// values contained in `storage` should be the only values written to the database.
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct Storage {
+    /// The number of times the storage was wiped.
+    pub times_wiped: u64,
+    /// The storage slots.
+    pub storage: BTreeMap<U256, U256>,
+}
+
+impl Storage {
+    /// Returns `true` if the storage was wiped at any point.
+    pub fn wiped(&self) -> bool {
+        self.times_wiped > 0
+    }
 }
 
 // todo: rewrite all the docs for this
@@ -200,7 +220,7 @@ impl PostState {
             }
             storages.insert(
                 keccak256(address),
-                HashedStorage { wiped: storage.wiped, storage: hashed_storage },
+                HashedStorage { wiped: storage.wiped(), storage: hashed_storage },
             );
         }
 
@@ -259,8 +279,8 @@ impl PostState {
         self.accounts.extend(other.accounts);
         for (address, their_storage) in other.storage {
             let our_storage = self.storage.entry(address).or_default();
-            if their_storage.wiped {
-                our_storage.wiped = true;
+            if their_storage.wiped() {
+                our_storage.times_wiped += their_storage.times_wiped;
                 our_storage.storage.clear();
             }
             our_storage.storage.extend(their_storage.storage);
@@ -328,7 +348,9 @@ impl PostState {
         for (_, storages) in storage_changes_to_revert.into_iter().rev() {
             for (address, storage) in storages {
                 self.storage.entry(address).and_modify(|head_storage| {
-                    head_storage.wiped = storage.wiped;
+                    if storage.wiped {
+                        head_storage.times_wiped -= 1;
+                    }
                     head_storage.storage.extend(storage.clone().storage);
                 });
             }
@@ -405,7 +427,7 @@ impl PostState {
             .entry(address)
             .or_insert(Some(account));
         let storage = self.storage.entry(address).or_default();
-        storage.wiped = true;
+        storage.times_wiped += 1;
         storage.storage.clear();
         let storage_changes =
             self.storage_changes.entry(block_number).or_default().entry(address).or_default();
@@ -493,7 +515,7 @@ impl PostState {
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
             // If the storage was wiped, remove all previous entries from the database.
-            if storage.wiped {
+            if storage.wiped() {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
@@ -832,7 +854,7 @@ mod tests {
 
         // All the storage of account A has to be deleted in the database (wiped)
         assert!(
-            state.account_storage(&address_a).expect("Account A should have some storage").wiped,
+            state.account_storage(&address_a).expect("Account A should have some storage").wiped(),
             "The wiped flag should be set to discard all pre-existing storage from the database"
         );
         // Then, we must ensure that *only* the storage from the last transition will be written
@@ -868,6 +890,50 @@ mod tests {
             state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
             1
         );
+    }
+
+    #[test]
+    fn wiped_revert() {
+        let address = Address::random();
+
+        let init_block_number = 1;
+        let init_account = Account { balance: U256::from(3), ..Default::default() };
+        let init_slot = U256::from(1);
+
+        // Create init state for demonstration purposes
+        // Block 1
+        // Account: exists
+        // Storage: 0x01: 1
+        let mut init_state = PostState::new();
+        init_state.create_account(init_block_number, address, init_account);
+        init_state.change_storage(
+            init_block_number,
+            address,
+            BTreeMap::from([(init_slot, (U256::ZERO, U256::from(1)))]),
+        );
+
+        let mut post_state = PostState::new();
+        // Block 2
+        // Account: destroyed
+        // Storage: wiped
+        post_state.destroy_account(2, address, init_account);
+        assert!(post_state.storage.get(&address).unwrap().wiped());
+
+        // Block 3
+        // Account: recreated
+        // Storage: wiped, then 0x01: 2
+        let recreated_account = Account { balance: U256::from(4), ..Default::default() };
+        post_state.create_account(3, address, recreated_account);
+        post_state.change_storage(
+            3,
+            address,
+            BTreeMap::from([(init_slot, (U256::ZERO, U256::from(2)))]),
+        );
+        assert!(post_state.storage.get(&address).unwrap().wiped());
+
+        // Revert to block 2
+        post_state.revert_to(2);
+        assert!(post_state.storage.get(&address).unwrap().wiped());
     }
 
     /// Checks that if an account is touched multiple times in the same block,
@@ -983,7 +1049,7 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    Storage {
+                    ChangedStorage {
                         storage: BTreeMap::from([
                             (U256::from(0), U256::from(0)),
                             (U256::from(1), U256::from(3))
@@ -1008,7 +1074,7 @@ mod tests {
                         (U256::from(0), U256::from(2)),
                         (U256::from(1), U256::from(5))
                     ]),
-                    wiped: false
+                    times_wiped: 0,
                 }
             )]),
             "The latest state of the storage is incorrect"
@@ -1055,7 +1121,7 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    Storage {
+                    ChangedStorage {
                         storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
                         wiped: false,
                     }
@@ -1098,7 +1164,7 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    Storage {
+                    ChangedStorage {
                         storage: BTreeMap::from([(U256::from(0), U256::from(1)),]),
                         wiped: false,
                     }
@@ -1132,7 +1198,7 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    Storage {
+                    ChangedStorage {
                         storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
                         wiped: false,
                     }
@@ -1154,7 +1220,7 @@ mod tests {
                 address,
                 Storage {
                     storage: BTreeMap::from([(U256::from(0), U256::from(2)),]),
-                    wiped: false
+                    times_wiped: 0,
                 }
             )]),
             "The latest state of the storage is incorrect in the merged state"
