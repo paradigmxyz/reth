@@ -285,29 +285,39 @@ impl ChainSpec {
         ForkFilter::new(head, self.genesis_hash(), forks)
     }
 
-    /// Compute the [`ForkId`] for the given [`Head`]
+    /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
     pub fn fork_id(&self, head: &Head) -> ForkId {
-        let mut curr_forkhash = ForkHash::from(self.genesis_hash());
-        let mut current_applied_value = 0;
+        let mut forkhash = ForkHash::from(self.genesis_hash());
+        let mut current_applied = 0;
 
+        // handle all block forks before handling timestamp based forks. see: https://eips.ethereum.org/EIPS/eip-6122
         for (_, cond) in self.forks_iter() {
-            let value = match cond {
-                ForkCondition::Block(block) => block,
-                ForkCondition::Timestamp(time) => time,
-                ForkCondition::TTD { fork_block: Some(block), .. } => block,
-                _ => continue,
-            };
-
-            if cond.active_at_head(head) {
-                if value != current_applied_value {
-                    curr_forkhash += value;
-                    current_applied_value = value;
+            if let ForkCondition::Block(block) = cond {
+                if cond.active_at_head(head) && block != current_applied {
+                    forkhash += block;
+                    println!("block: {} forkhash: {:#?}", block, forkhash);
+                    current_applied = block;
                 }
-            } else {
-                return ForkId { hash: curr_forkhash, next: value }
             }
         }
-        ForkId { hash: curr_forkhash, next: 0 }
+
+        // timestamp are ALWAYS applied after the merge.
+        for (_, cond) in self.forks_iter() {
+            if let ForkCondition::Timestamp(timestamp) = cond {
+                if cond.active_at_head(head) && timestamp != current_applied {
+                    forkhash += timestamp;
+                    println!("block: {} forkhash: {:#?}", timestamp, forkhash);
+                    current_applied = timestamp;
+                } else {
+                    // can safely return here because we have already handled all block forks and
+                    // have handled all active timstamp forks, there should be
+                    // nothing else to handle
+                    return ForkId { hash: forkhash, next: timestamp }
+                }
+            }
+        }
+
+        ForkId { hash: forkhash, next: 0 }
     }
 
     /// Build a chainspec using [`ChainSpecBuilder`]
