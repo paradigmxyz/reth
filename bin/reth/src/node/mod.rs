@@ -205,8 +205,6 @@ impl Command {
             ctx.task_executor.spawn_critical(
                 "txpool maintenance task",
                 Box::pin(async move {
-                    let chain_events = chain_events.filter_map(|event| async move { event.ok() });
-                    pin_mut!(chain_events);
                     reth_transaction_pool::maintain::maintain_transaction_pool(
                         client,
                         pool,

@@ -140,13 +140,27 @@ impl<T: TransactionOrdering> TxPool<T> {
             Ordering::Greater => {
                 // increased base fee: recheck pending pool and remove all that are no longer valid
                 for tx in self.pending_pool.enforce_basefee(pending_basefee) {
-                    self.basefee_pool.add_transaction(tx);
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
                 }
             }
             Ordering::Less => {
                 // decreased base fee: recheck basefee pool and promote all that are now valid
                 for tx in self.basefee_pool.enforce_basefee(pending_basefee) {
-                    self.pending_pool.add_transaction(tx);
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
                 }
             }
         }
@@ -1180,6 +1194,7 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
 
 /// The internal transaction typed used by `AllTransactions` which also additional info used for
 /// determining the current state of the transaction.
+#[derive(Debug)]
 pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     /// The actual transaction object.
     pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
@@ -1530,5 +1545,25 @@ mod tests {
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce),
             Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
         ));
+    }
+
+    #[test]
+    fn update_basefee_subpools() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx = MockTransaction::eip1559().inc_price_by(10);
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        pool.update_basefee(tx.max_fee_per_gas() + 1);
+
+        assert!(pool.pending_pool.is_empty());
+        assert_eq!(pool.basefee_pool.len(), 1);
+
+        assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
     }
 }
