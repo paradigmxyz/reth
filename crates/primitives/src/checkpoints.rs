@@ -1,5 +1,5 @@
 use crate::{
-    trie::{HashBuilderState, StoredSubNode},
+    trie::{hash_builder::HashBuilderState, StoredSubNode},
     Address, H256,
 };
 use bytes::Buf;

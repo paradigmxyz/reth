@@ -5147,6 +5147,7 @@ dependencies = [
  "test-fuzz",
  "thiserror",
  "tiny-keccak",
+ "tracing",
  "triehash",
  "url",
 ]
