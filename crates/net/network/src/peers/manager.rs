@@ -369,7 +369,7 @@ impl PeersManager {
 
     /// Gracefully disconnected a pending session
     pub(crate) fn on_pending_session_gracefully_closed(&mut self, peer_id: &PeerId) {
-        if let Some(mut peer) = self.peers.get_mut(peer_id) {
+        if let Some(peer) = self.peers.get_mut(peer_id) {
             peer.state = PeerConnectionState::Idle;
         } else {
             return
@@ -466,7 +466,7 @@ impl PeersManager {
         } else {
             let mut backoff_until = None;
 
-            if let Some(mut peer) = self.peers.get_mut(peer_id) {
+            if let Some(peer) = self.peers.get_mut(peer_id) {
                 if let Some(kind) = err.should_backoff() {
                     // Increment peer.backoff_counter
                     if kind.is_severe() {

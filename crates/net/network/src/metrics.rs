@@ -45,6 +45,10 @@ pub struct TransactionsManagerMetrics {
     pub(crate) propagated_transactions: Counter,
     /// Total number of reported bad transactions
     pub(crate) reported_bad_transactions: Counter,
+    /// Total number of messages with already seen hashes
+    pub(crate) messages_with_already_seen_hashes: Counter,
+    /// Total number of messages with already seen full transactions
+    pub(crate) messages_with_already_seen_transactions: Counter,
 }
 
 /// Metrics for Disconnection types

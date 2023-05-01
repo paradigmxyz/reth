@@ -77,7 +77,7 @@ where
 
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
-            let mut filter = filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id))?;
+            let filter = filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id))?;
 
             // update filter
             // we fetch all changes from [filter.block..best_block], so we advance the filter's

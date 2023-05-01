@@ -2,10 +2,10 @@
 
 use crate::{
     traits::{CanonicalStateUpdate, ChangedAccount},
-    Pool, TransactionOrdering, TransactionPool, TransactionValidator,
+    BlockInfo, Pool, TransactionOrdering, TransactionPool, TransactionValidator,
 };
 use futures_util::{Stream, StreamExt};
-use reth_primitives::{Address, BlockHash, FromRecoveredTransaction};
+use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
 use reth_provider::{BlockProvider, CanonStateNotification, PostState, StateProviderFactory};
 use std::{
     borrow::Borrow,
@@ -27,7 +27,16 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     St: Stream<Item = CanonStateNotification> + Unpin,
 {
-    // TODO set current head for the pool
+    // ensure the pool points to latest state
+    if let Ok(Some(latest)) = client.block(BlockNumberOrTag::Latest.into()) {
+        let latest = latest.seal_slow();
+        let info = BlockInfo {
+            last_seen_block_hash: latest.hash,
+            last_seen_block_number: latest.number,
+            pending_basefee: latest.next_block_base_fee().unwrap_or_default() as u128,
+        };
+        pool.set_block_info(info);
+    }
 
     // keeps track of any dirty accounts that we failed to fetch the state for and need to retry
     let mut dirty = HashSet::new();
