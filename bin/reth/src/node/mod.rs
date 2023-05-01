@@ -86,7 +86,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    data_dir: MaybePlatformPath<DataDirPath>,
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
@@ -154,7 +154,7 @@ impl Command {
         info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
 
         // add network name to data dir
-        let data_dir = self.data_dir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
 
         // use the overridden db path if specified
         let db_path = self.db.clone().unwrap_or(data_dir.db_path());
@@ -795,12 +795,12 @@ mod tests {
     #[test]
     fn parse_db_path() {
         let cmd = Command::try_parse_from(["reth", "--db", "my/path/to/db"]).unwrap();
-        let data_dir = cmd.data_dir.unwrap_or_chain_default(cmd.chain.chain);
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = cmd.db.unwrap_or(data_dir.db_path());
         assert_eq!(db_path, Path::new("my/path/to/db"));
 
         let cmd = Command::try_parse_from(["reth"]).unwrap();
-        let data_dir = cmd.data_dir.unwrap_or_chain_default(cmd.chain.chain);
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = cmd.db.unwrap_or(data_dir.db_path());
         assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
     }

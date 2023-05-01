@@ -35,7 +35,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    data_dir: MaybePlatformPath<DataDirPath>,
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The path to the database folder. If not specified, it will be set in the data dir for the
     /// chain being used.
@@ -99,7 +99,7 @@ impl Command {
     /// Execute `dump-stage` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self.data_dir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
 
         // use the overridden db path if specified
         let db_path = self.db.clone().unwrap_or(data_dir.db_path());

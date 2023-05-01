@@ -49,7 +49,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    data_dir: MaybePlatformPath<DataDirPath>,
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// Secret key to use for this node.
     ///
@@ -115,7 +115,7 @@ impl Command {
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
         // add network name to data dir
-        let data_dir = self.data_dir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let default_secret_key_path = data_dir.p2p_path().p2p_secret_path();
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
