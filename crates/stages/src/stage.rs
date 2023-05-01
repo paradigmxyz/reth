@@ -45,8 +45,8 @@ impl ExecInput {
         &self,
         threshold: u64,
     ) -> (RangeInclusive<BlockNumber>, bool) {
-        // plus +1 is to skip present block and allways start from block number 1, not 0.
         let current_block = self.stage_progress.unwrap_or_default();
+        // +1 is to skip present block and always start from block number 1, not 0.
         let start = current_block + 1;
         let target = self.previous_stage_progress();
 
@@ -79,7 +79,7 @@ impl UnwindInput {
         &self,
         threshold: u64,
     ) -> (RangeInclusive<BlockNumber>, bool) {
-        // plus +1 is to skip present block.
+        // +1 is to skip the block we're unwinding to
         let mut start = self.unwind_to + 1;
         let end = self.stage_progress;
 
