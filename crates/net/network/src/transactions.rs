@@ -319,8 +319,7 @@ where
         }
 
         if num_already_seen > 0 {
-            self.metrics.messages_with_already_seen_hashes.increment(1);
-            self.report_bad_message(peer_id);
+            self.report_already_seen(peer_id);
         }
     }
 
@@ -461,7 +460,7 @@ where
         }
 
         if has_bad_transactions || num_already_seen > 0 {
-            self.report_bad_message(peer_id);
+            self.report_already_seen(peer_id);
         }
     }
 
@@ -469,6 +468,11 @@ where
         trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
         self.metrics.reported_bad_transactions.increment(1);
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
+    }
+
+    fn report_already_seen(&self, peer_id: PeerId) {
+        trace!(target: "net::tx", ?peer_id, "Penalizing peer for already seen transaction");
+        self.network.reputation_change(peer_id, ReputationChangeKind::AlreadySeenTransaction);
     }
 
     /// Clear the transaction
