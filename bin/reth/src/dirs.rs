@@ -271,7 +271,7 @@ impl<D> ChainPath<D> {
 
     /// Returns the path to the jwtsecret file for this chain.
     pub fn jwt_path(&self) -> PathBuf {
-        self.0.join("jwtsecret").into()
+        self.0.join("jwt.hex").into()
     }
 }
 
