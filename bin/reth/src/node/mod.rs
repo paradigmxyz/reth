@@ -71,7 +71,7 @@ use crate::dirs::MaybePlatformPath;
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
 use reth_provider::providers::BlockchainProvider;
-use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
+use reth_stages::stages::{ExecutionStageThresholds, MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
 
@@ -662,7 +662,14 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold))
+                .set(ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: stage_conf.execution.max_blocks,
+                        max_gas: stage_conf.execution.max_gas,
+                        changeset_max_gas: stage_conf.execution.changeset_max_gas,
+                    },
+                ))
                 .disable_if(MERKLE_UNWIND, || self.auto_mine)
                 .disable_if(MERKLE_EXECUTION, || self.auto_mine),
             )

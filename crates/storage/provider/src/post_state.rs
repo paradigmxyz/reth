@@ -448,12 +448,16 @@ impl PostState {
         self.receipts.push(receipt);
     }
 
-    /// Write the post state to the database.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(self, tx: &TX) -> Result<(), DbError> {
+    /// Write changeset history to the database.
+    pub fn write_history_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+        &mut self,
+        tx: &TX,
+    ) -> Result<(), DbError> {
         // Write account changes
         tracing::trace!(target: "provider::post_state", "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-        for (block_number, account_changes) in self.account_changes.into_iter() {
+        for (block_number, account_changes) in std::mem::take(&mut self.account_changes).into_iter()
+        {
             for (address, info) in account_changes.into_iter() {
                 tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
                 account_changeset_cursor
@@ -465,7 +469,8 @@ impl PostState {
         tracing::trace!(target: "provider::post_state", "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
-        for (block_number, storage_changes) in self.storage_changes.into_iter() {
+        for (block_number, storage_changes) in std::mem::take(&mut self.storage_changes).into_iter()
+        {
             for (address, mut storage) in storage_changes.into_iter() {
                 let storage_id = BlockNumberAddress((block_number, address));
 
@@ -490,7 +495,15 @@ impl PostState {
             }
         }
 
+        Ok(())
+    }
+
+    /// Write the post state to the database.
+    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(mut self, tx: &TX) -> Result<(), DbError> {
+        self.write_history_to_db(tx)?;
+
         // Write new storage state
+        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         for (address, storage) in self.storage.into_iter() {
             // If the storage was wiped, remove all previous entries from the database.
             if storage.wiped {
@@ -502,7 +515,7 @@ impl PostState {
 
             for (key, value) in storage.storage {
                 tracing::trace!(target: "provider::post_state", ?address, ?key, "Updating plain state storage");
-                let key = H256(key.to_be_bytes());
+                let key: H256 = key.into();
                 if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
                     if entry.key == key {
                         storages_cursor.delete_current()?;
