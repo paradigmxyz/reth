@@ -312,13 +312,6 @@ impl Command {
             .await?
         };
 
-        let events = stream_select(
-            network.event_listener().map(Into::into),
-            pipeline.events().map(Into::into),
-        );
-        ctx.task_executor
-            .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
-
         // configure the payload builder
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
@@ -333,6 +326,7 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
+        let pipeline_events = pipeline.events();
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
             ctx.task_executor.clone(),
@@ -345,6 +339,16 @@ impl Command {
             consensus_engine_rx,
         );
         info!(target: "reth::cli", "Consensus engine initialized");
+
+        let events = stream_select(
+            stream_select(
+                network.event_listener().map(Into::into),
+                beacon_engine_handle.event_listener().map(Into::into),
+            ),
+            pipeline_events.map(Into::into),
+        );
+        ctx.task_executor
+            .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
 
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
