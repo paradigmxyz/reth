@@ -29,15 +29,12 @@ pub type AccountChanges = BTreeMap<BlockNumber, BTreeMap<Address, Option<Account
 /// and what their values were prior to that change.
 pub type StorageChanges = BTreeMap<BlockNumber, BTreeMap<Address, ChangedStorage>>;
 
-/// Storage for an account.
+/// Changed storage state for the account.
 ///
 /// # Wiped Storage
 ///
 /// The field `wiped` denotes whether the pre-existing storage in the database should be cleared or
 /// not.
-///
-/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
-/// in `storage` should be the only values written to the database.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct ChangedStorage {
     /// Whether the storage was wiped or not.
@@ -46,7 +43,14 @@ pub struct ChangedStorage {
     pub storage: BTreeMap<U256, U256>,
 }
 
-/// TODO:
+/// Latest storage state for the account.
+///
+/// # Wiped Storage
+///
+/// The `times_wiped` field indicates the number of times the storage was wiped in this poststate.
+///
+/// If `times_wiped` is greater than 0, then the account was selfdestructed at some point, and the
+/// values contained in `storage` should be the only values written to the database.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Storage {
     /// The number of times the storage was wiped.
