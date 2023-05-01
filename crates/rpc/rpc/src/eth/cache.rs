@@ -1,9 +1,9 @@
 //! Async caching support for eth RPC
 
-use futures::{future::Either, StreamExt};
+use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Block, Receipt, TransactionSigned, H256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
 use schnellru::{ByMemoryUsage, Limiter, LruMap};
@@ -377,6 +377,41 @@ where
                 }
             }
         }
+    }
+}
+
+impl<Client, Tasks> EthStateCacheService<Client, Tasks>
+where
+    Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
+{
+    /// Check for new blocks and insert them in cache
+    async fn check_for_new_blocks<St>(&mut self, mut events: St)
+    where
+        St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+    {
+        while let Some(event) = events.next().await {
+            match event {
+                CanonStateNotification::Commit { new } => {
+                    let (new_blocks, _) = new.inner();
+                    self.insert_new_block_into_cache(new_blocks.tip().clone().hash).await;
+                }
+                CanonStateNotification::Reorg { old: _, new } => {
+                    let (new_blocks, _) = new.inner();
+                    self.insert_new_block_into_cache(new_blocks.tip().clone().hash).await;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn insert_new_block_into_cache(&mut self, block_hash: H256) {
+        let client = self.client.clone();
+        let action_tx = self.action_tx.clone();
+        self.action_task_spawner.spawn(Box::pin(async move {
+            let res = client.block_by_hash(block_hash);
+            let _ = action_tx.send(CacheAction::BlockResult { block_hash, res });
+        }));
     }
 }
 
