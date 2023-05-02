@@ -8,8 +8,8 @@ use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TxHash, TxNumber, H256, U256,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, StorageKey, StorageValue,
+    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -280,6 +280,10 @@ impl BlockProvider for MockEthProvider {
                 unreachable!("unused in network tests")
             }
         }
+    }
+
+    fn pending_block(&self) -> Result<Option<SealedBlock>> {
+        Ok(None)
     }
 
     fn ommers(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
