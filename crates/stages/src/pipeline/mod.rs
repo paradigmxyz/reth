@@ -334,6 +334,8 @@ where
                 warn!(
                     target: "sync::pipeline",
                     stage = %stage_id,
+                    max_block = self.max_block,
+                    prev_block = prev_progress,
                     "Stage reached maximum block, skipping."
                 );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
