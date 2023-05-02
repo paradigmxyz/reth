@@ -267,14 +267,13 @@ where
         parent_hash: H256,
         tree_error: Option<&Error>,
     ) -> Option<H256> {
-        if let latest_valid @ Some(_) = self.blockchain_tree.find_canonical_ancestor(parent_hash) {
-            return latest_valid
+        // check pre merge block error
+        if let Some(Error::Execution(ExecutorError::BlockPreMerge { .. })) = tree_error {
+            return Some(H256::zero())
         }
 
-        // check pre merge block
-        let error = tree_error?;
-        if matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. })) {
-            return Some(H256::zero())
+        if let latest_valid @ Some(_) = self.blockchain_tree.find_canonical_ancestor(parent_hash) {
+            return latest_valid
         }
 
         None
