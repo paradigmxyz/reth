@@ -1,6 +1,6 @@
 use crate::{
     trie::{hash_builder::HashBuilderState, StoredSubNode},
-    Address, H256,
+    Address, BlockNumber, H256,
 };
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
@@ -8,7 +8,8 @@ use reth_codecs::{main_codec, Compact};
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct MerkleCheckpoint {
-    // TODO: target block?
+    /// The target block number.
+    pub target_block: BlockNumber,
     /// The last hashed account key processed.
     pub last_account_key: H256,
     /// The last walker key processed.
@@ -19,12 +20,28 @@ pub struct MerkleCheckpoint {
     pub state: HashBuilderState,
 }
 
+impl MerkleCheckpoint {
+    /// Creates a new Merkle checkpoint.
+    pub fn new(
+        target_block: BlockNumber,
+        last_account_key: H256,
+        last_walker_key: Vec<u8>,
+        walker_stack: Vec<StoredSubNode>,
+        state: HashBuilderState,
+    ) -> Self {
+        Self { target_block, last_account_key, last_walker_key, walker_stack, state }
+    }
+}
+
 impl Compact for MerkleCheckpoint {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let mut len = 0;
+
+        buf.put_u64(self.target_block);
+        len += 8;
 
         buf.put_slice(self.last_account_key.as_slice());
         len += self.last_account_key.len();
@@ -47,6 +64,8 @@ impl Compact for MerkleCheckpoint {
     where
         Self: Sized,
     {
+        let target_block = buf.get_u64();
+
         let last_account_key = H256::from_slice(&buf[..32]);
         buf.advance(32);
 
@@ -63,7 +82,16 @@ impl Compact for MerkleCheckpoint {
         }
 
         let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (MerkleCheckpoint { last_account_key, last_walker_key, walker_stack, state }, buf)
+        (
+            MerkleCheckpoint {
+                target_block,
+                last_account_key,
+                last_walker_key,
+                walker_stack,
+                state,
+            },
+            buf,
+        )
     }
 }
 
@@ -91,4 +119,31 @@ pub struct StorageHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+
+    #[test]
+    fn merkle_checkpoint_roundtrip() {
+        let mut rng = rand::thread_rng();
+        let checkpoint = MerkleCheckpoint {
+            target_block: rng.gen(),
+            last_account_key: H256::from_low_u64_be(rng.gen()),
+            last_walker_key: H256::from_low_u64_be(rng.gen()).to_vec(),
+            walker_stack: Vec::from([StoredSubNode {
+                key: H256::from_low_u64_be(rng.gen()).to_vec(),
+                nibble: Some(rng.gen()),
+                node: None,
+            }]),
+            state: HashBuilderState::default(),
+        };
+
+        let mut buf = Vec::new();
+        let encoded = checkpoint.clone().to_compact(&mut buf);
+        let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
+        assert_eq!(decoded, checkpoint);
+    }
 }

@@ -269,6 +269,11 @@ impl PayloadStatus {
         self
     }
 
+    pub fn maybe_latest_valid_hash(mut self, latest_valid_hash: Option<H256>) -> Self {
+        self.latest_valid_hash = latest_valid_hash;
+        self
+    }
+
     /// Returns true if the payload status is syncing.
     pub fn is_syncing(&self) -> bool {
         self.status.is_syncing()
@@ -399,7 +404,7 @@ mod tests {
         // Recalculate roots
         transformed.header.transactions_root =
             proofs::calculate_transaction_root(&transformed.body);
-        transformed.header.ommers_hash = proofs::calculate_ommers_root(transformed.ommers.iter());
+        transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
         SealedBlock {
             header: transformed.header.seal_slow(),
             body: transformed.body,
