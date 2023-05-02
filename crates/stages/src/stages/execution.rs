@@ -176,13 +176,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     fn update_cache(&self, block_state: &PostState) {
         let mut cache = self.cache.lock().unwrap();
         for (address, account) in block_state.accounts() {
-            cache.change_account(*address, *account);
+            cache.update_account(*address, *account);
         }
         for (code_hash, bytecode) in block_state.bytecodes() {
             cache.insert_bytecode(*code_hash, bytecode.clone());
         }
         for (address, storage) in block_state.storage() {
-            cache.change_storage(*address, storage.clone());
+            cache.update_storage(*address, storage.clone());
         }
     }
 

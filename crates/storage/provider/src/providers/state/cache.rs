@@ -94,11 +94,28 @@ impl StateCache for LruStateCache {
         bytecode
     }
 
-    fn change_account(&mut self, address: Address, new: Option<Account>) {
+    fn update_account(&mut self, address: Address, new: Option<Account>) {
+        if let Some(current_account) = self.account_cache.peek_mut(&address) {
+            *current_account = new;
+        }
+    }
+
+    fn update_storage(&mut self, address: Address, changes: Storage) {
+        if let Some(cached_storage) = self.storage_cache.peek_mut(&address) {
+            if changes.wiped() {
+                cached_storage.times_wiped = changes.times_wiped;
+                cached_storage.storage.clear();
+            }
+
+            cached_storage.storage.extend(changes.storage);
+        }
+    }
+
+    fn upsert_account(&mut self, address: Address, new: Option<Account>) {
         self.account_cache.insert(address, new);
     }
 
-    fn change_storage(&mut self, address: Address, changes: Storage) {
+    fn upsert_storage(&mut self, address: Address, changes: Storage) {
         if let Some(cached_storage) = self.storage_cache.peek_mut(&address) {
             if changes.wiped() {
                 cached_storage.times_wiped = changes.times_wiped;
@@ -127,23 +144,25 @@ pub trait StateCache: Send + Sync {
     /// Get account code by its hash
     fn bytecode_by_hash(&mut self, code_hash: H256) -> Option<Bytecode>;
 
-    /// Change the entry for an account in the cache.
+    /// Update the entry for an account in the cache.
     ///
-    /// # Note
-    ///
-    /// The expected behavior here is that the entry is upserted.
-    fn change_account(&mut self, address: Address, new: Option<Account>);
+    /// If the account is not in the cache, this should be a no-op.
+    fn update_account(&mut self, address: Address, new: Option<Account>);
 
-    /// Change the entry for the storage of an account in the cache.
+    /// Update the entry for the storage of an account in the cache.
+    fn update_storage(&mut self, address: Address, changes: Storage);
+
+    /// Upsert the entry for an account in the cache.
+    fn upsert_account(&mut self, address: Address, new: Option<Account>);
+
+    /// Upsert the entry for the storage of an account in the cache.
     ///
     /// # Note
-    ///
-    /// The expected behavior here is that the entry is upserted.
     ///
     /// If the storage was wiped, the storage is wiped in the cache before being inserted.
     ///
     /// The slots in the given storage are overlaid on top of the existing storage in the cache.
-    fn change_storage(&mut self, address: Address, changes: Storage);
+    fn upsert_storage(&mut self, address: Address, changes: Storage);
 
     /// Change the entry for a bytecode in the cache.
     ///
@@ -196,7 +215,7 @@ where
             Ok(account)
         } else {
             let fetched = self.sp.basic_account(address)?;
-            cache.change_account(address, fetched);
+            cache.upsert_account(address, fetched);
             Ok(fetched)
         }
     }
@@ -221,7 +240,7 @@ where
             Ok(Some(value))
         } else {
             let fetched = self.sp.storage(account, storage_key)?;
-            cache.change_storage(
+            cache.upsert_storage(
                 account,
                 Storage {
                     storage: BTreeMap::from([(storage_key.into(), fetched.unwrap_or_default())]),
