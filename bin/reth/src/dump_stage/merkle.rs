@@ -1,8 +1,4 @@
-use crate::{
-    dirs::{DbPath, PlatformPath},
-    dump_stage::setup,
-    utils::DbTool,
-};
+use crate::{dump_stage::setup, utils::DbTool};
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
 use reth_primitives::{BlockNumber, MAINNET};
@@ -11,14 +7,14 @@ use reth_stages::{
     stages::{AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage},
     Stage, StageId, UnwindInput,
 };
-use std::{ops::DerefMut, sync::Arc};
+use std::{ops::DerefMut, path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
     from: BlockNumber,
     to: BlockNumber,
-    output_db: &PlatformPath<DbPath>,
+    output_db: &PathBuf,
     should_run: bool,
 ) -> Result<()> {
     let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;

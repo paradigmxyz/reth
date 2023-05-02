@@ -3,7 +3,7 @@
 //! Starts the client
 use crate::{
     args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
-    dirs::{ConfigPath, DbPath, SecretKeyPath},
+    dirs::DataDirPath,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -39,7 +39,7 @@ use reth_interfaces::{
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, CanonStateSubscriptions, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
@@ -78,19 +78,31 @@ pub mod events;
 /// Start the node
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: MaybePlatformPath<ConfigPath>,
-
-    /// The path to the database folder.
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    datadir: MaybePlatformPath<DataDirPath>,
+
+    /// The path to the configuration file to use.
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
+
+    /// The path to the database folder. If not specified, it will be set in the data dir for the
+    /// chain being used.
+    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
+    db: Option<PathBuf>,
+
+    /// Secret key to use for this node.
+    ///
+    /// This will also deterministically set the peer ID. If not specified, it will be set in the
+    /// data dir for the chain being used.
+    #[arg(long, value_name = "PATH", global = true, required = false)]
+    p2p_secret_key: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -108,12 +120,6 @@ pub struct Command {
     value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
-
-    /// Secret key to use for this node.
-    ///
-    /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
-    p2p_secret_key: MaybePlatformPath<SecretKeyPath>,
 
     /// Enable Prometheus metrics.
     ///
@@ -144,13 +150,19 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let mut config: Config = self.load_config_with_chain(self.chain.chain)?;
-        info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
 
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+        let mut config: Config = self.load_config(config_path.clone())?;
 
-        info!(target: "reth::cli", path = %db_path, "Opening database");
+        // always store reth.toml in the data dir, not the chain specific data dir
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+
+        // use the overridden db path if specified
+        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
+
+        info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
         info!(target: "reth::cli", "Database opened");
 
@@ -217,16 +229,23 @@ impl Command {
         }
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key =
-            get_secret_key(self.p2p_secret_key.unwrap_or_chain_default(self.chain.chain))?;
+        let default_secret_key_path = data_dir.p2p_secret_path();
+        let default_peers_path = data_dir.known_peers_path();
+        let secret_key = get_secret_key(&default_secret_key_path)?;
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
             ctx.task_executor.clone(),
             secret_key,
+            default_peers_path.clone(),
         );
         let network = self
-            .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
+            .start_network(
+                network_config,
+                &ctx.task_executor,
+                transaction_pool.clone(),
+                default_peers_path,
+            )
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
@@ -358,6 +377,10 @@ impl Command {
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
+        // extract the jwt secret from the the args if possible
+        let default_jwt_path = data_dir.jwt_path();
+        let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
+
         // Start RPC servers
         let (_rpc_server, _auth_server) = self
             .rpc
@@ -368,6 +391,7 @@ impl Command {
                 ctx.task_executor.clone(),
                 blockchain_tree,
                 engine_api,
+                jwt_secret,
             )
             .await?;
 
@@ -437,12 +461,10 @@ impl Command {
         Ok(pipeline)
     }
 
-    /// Loads the reth config based on the intended chain
-    fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
-        // add network name to config directory
-        let config_path = self.config.unwrap_or_chain_default(chain);
+    /// Loads the reth config with the given datadir root
+    fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {}", config_path))
+            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {
@@ -473,6 +495,7 @@ impl Command {
         config: NetworkConfig<C>,
         task_executor: &TaskExecutor,
         pool: Pool,
+        default_peers_path: PathBuf,
     ) -> Result<NetworkHandle, NetworkError>
     where
         C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
@@ -485,7 +508,7 @@ impl Command {
             .request_handler(client)
             .split_with_handle();
 
-        let known_peers_file = self.network.persistent_peers_file(self.chain.chain);
+        let known_peers_file = self.network.persistent_peers_file(default_peers_path);
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
             run_network_until_shutdown(shutdown, network, known_peers_file)
         });
@@ -581,11 +604,12 @@ impl Command {
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
         secret_key: SecretKey,
+        default_peers_path: PathBuf,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
         let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
-            .network_config(config, self.chain.clone(), secret_key)
+            .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
@@ -755,35 +779,29 @@ mod tests {
     #[test]
     fn parse_config_path() {
         let cmd = Command::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
-        assert_eq!(
-            cmd.config.unwrap_or_chain_default(cmd.chain.chain).as_ref(),
-            Path::new("my/path/to/reth.toml")
-        );
+        // always store reth.toml in the data dir, not the chain specific data dir
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let config_path = cmd.config.unwrap_or(data_dir.config_path());
+        assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
         let cmd = Command::try_parse_from(["reth"]).unwrap();
-        assert!(
-            cmd.config
-                .unwrap_or_chain_default(cmd.chain.chain)
-                .as_ref()
-                .ends_with("reth/mainnet/reth.toml"),
-            "{:?}",
-            cmd.config
-        );
+
+        // always store reth.toml in the data dir, not the chain specific data dir
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let config_path = cmd.config.clone().unwrap_or(data_dir.config_path());
+        assert!(config_path.ends_with("reth/mainnet/reth.toml"), "{:?}", cmd.config);
     }
 
     #[test]
     fn parse_db_path() {
         let cmd = Command::try_parse_from(["reth", "--db", "my/path/to/db"]).unwrap();
-        assert_eq!(
-            cmd.db.unwrap_or_chain_default(cmd.chain.chain).as_ref(),
-            Path::new("my/path/to/db")
-        );
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        assert_eq!(db_path, Path::new("my/path/to/db"));
 
         let cmd = Command::try_parse_from(["reth"]).unwrap();
-        assert!(
-            cmd.db.unwrap_or_chain_default(cmd.chain.chain).as_ref().ends_with("reth/mainnet/db"),
-            "{:?}",
-            cmd.config
-        );
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
     }
 }

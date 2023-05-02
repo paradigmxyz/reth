@@ -1,7 +1,7 @@
 //! Database debugging tool
 use crate::{
     args::StageEnum,
-    dirs::{DbPath, MaybePlatformPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
 use clap::Parser;
@@ -17,21 +17,26 @@ use reth_stages::stages::{
     ACCOUNT_HASHING, EXECUTION, INDEX_ACCOUNT_HISTORY, INDEX_STORAGE_HISTORY, MERKLE_EXECUTION,
     MERKLE_UNWIND, STORAGE_HASHING,
 };
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the database folder.
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(global = true, long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    datadir: MaybePlatformPath<DataDirPath>,
+
+    /// The path to the database folder. If not specified, it will be set in the data dir for the
+    /// chain being used.
+    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
+    db: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -56,8 +61,11 @@ pub struct Command {
 impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+
+        // use the overridden db path if specified
+        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
 
         std::fs::create_dir_all(&db_path)?;
 
