@@ -272,11 +272,7 @@ where
             return Some(H256::zero())
         }
 
-        if let latest_valid @ Some(_) = self.blockchain_tree.find_canonical_ancestor(parent_hash) {
-            return latest_valid
-        }
-
-        None
+        self.blockchain_tree.find_canonical_ancestor(parent_hash)
     }
 
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
