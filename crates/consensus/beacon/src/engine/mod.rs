@@ -485,9 +485,17 @@ where
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
-                let latest_valid_hash =
-                    self.latest_valid_hash_for_invalid_payload(parent_hash, None);
-                return PayloadStatus::from(error).maybe_latest_valid_hash(latest_valid_hash)
+
+                let mut latest_valid_hash = None;
+                if !error.is_block_hash_mismatch() {
+                    // Engine-API rule:
+                    // > `latestValidHash: null` if the blockHash validation has failed
+                    latest_valid_hash =
+                        self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+                }
+                let status = PayloadStatusEnum::from(error);
+
+                return PayloadStatus::new(status, latest_valid_hash)
             }
         };
 
