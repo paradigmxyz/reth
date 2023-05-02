@@ -8,7 +8,7 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
-    TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    SealedBlock, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -195,6 +195,10 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
             }
         }
 
+        Ok(None)
+    }
+
+    fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(None)
     }
 

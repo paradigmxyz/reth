@@ -29,8 +29,16 @@ where
         index: Index,
     ) -> EthResult<Option<RichBlock>> {
         let block_id = block_id.into();
+
+        let uncles = if block_id.is_pending() {
+            // Pending block can be fetched directly without need for caching
+            self.client().pending_block()?.map(|block| block.ommers)
+        } else {
+            self.client().ommers(block_id)?
+        }
+        .unwrap_or_default();
+
         let index = usize::from(index);
-        let uncles = self.client().ommers(block_id)?.unwrap_or_default();
         let uncle = uncles
             .into_iter()
             .nth(index)
@@ -46,7 +54,11 @@ where
         block_id: impl Into<BlockId>,
     ) -> EthResult<Option<usize>> {
         let block_id = block_id.into();
-        // TODO support pending block
+
+        if block_id.is_pending() {
+            // Pending block can be fetched directly without need for caching
+            return Ok(self.client().pending_block()?.map(|block| block.body.len()))
+        }
 
         let block_hash = match self.client().block_hash_for_id(block_id)? {
             Some(block_hash) => block_hash,
@@ -70,7 +82,12 @@ where
         block_id: impl Into<BlockId>,
     ) -> EthResult<Option<reth_primitives::SealedBlock>> {
         let block_id = block_id.into();
-        // TODO support pending block
+
+        if block_id.is_pending() {
+            // Pending block can be fetched directly without need for caching
+            return Ok(self.client().pending_block()?)
+        }
+
         let block_hash = match self.client().block_hash_for_id(block_id)? {
             Some(block_hash) => block_hash,
             None => return Ok(None),
