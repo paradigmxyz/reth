@@ -404,7 +404,7 @@ mod tests {
         // Recalculate roots
         transformed.header.transactions_root =
             proofs::calculate_transaction_root(transformed.body.iter());
-        transformed.header.ommers_hash = proofs::calculate_ommers_root(transformed.ommers.iter());
+        transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
         SealedBlock {
             header: transformed.header.seal_slow(),
             body: transformed.body,

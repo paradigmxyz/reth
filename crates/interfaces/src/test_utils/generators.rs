@@ -111,7 +111,7 @@ pub fn random_block(
 
     // Calculate roots
     let transactions_root = proofs::calculate_transaction_root(transactions.iter());
-    let ommers_hash = proofs::calculate_ommers_root(ommers.iter());
+    let ommers_hash = proofs::calculate_ommers_root(&ommers);
 
     SealedBlock {
         header: Header {
