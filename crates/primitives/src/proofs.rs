@@ -54,7 +54,7 @@ pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> H256 {
 /// Compute a trie root of the collection of items with a custom encoder.
 pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> H256
 where
-    F: FnMut(&T, &mut dyn BufMut) -> (),
+    F: FnMut(&T, &mut dyn BufMut),
 {
     let mut index_buffer = BytesMut::new();
     let mut value_buffer = BytesMut::new();
