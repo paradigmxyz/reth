@@ -385,6 +385,14 @@ impl PayloadStatusEnum {
     }
 }
 
+/// Various validation errors
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PayloadValidationError {
+    /// Thrown when a forkchoice update's head links to a previously rejected payload.
+    #[error("links to previously rejected block")]
+    LinksToRejectedPayload,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
