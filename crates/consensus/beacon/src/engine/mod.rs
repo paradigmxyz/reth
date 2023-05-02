@@ -356,9 +356,7 @@ where
                     if let Some(attrs) = attrs {
                         // get header for further validation
                         let header = self
-                            .load_header(head_block_number)
-                            .ok()
-                            .flatten()
+                            .load_header(head_block_number)?
                             .expect("was canonicalized, so it exists");
                         return Ok(self.process_payload_attributes(attrs, header, state))
                     }
