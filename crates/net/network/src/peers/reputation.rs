@@ -23,6 +23,13 @@ const TIMEOUT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;
 /// The reputation change to apply to a peer that sent a bad message.
 const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 16 * REPUTATION_UNIT;
 
+/// The reputation change applies to a peer that has sent a transaction (full or hash) that we
+/// already know about and have already previously received from that peer.
+///
+/// Note: We weight this very low because it is generally not a problem to get a transaction that we
+/// already know about, so only spammers are affected.
+const ALREADY_SEEN_TRANSACTION_REPUTATION_CHANGE: i32 = REPUTATION_UNIT / 2;
+
 /// The reputation change to apply to a peer which violates protocol rules: minimal reputation
 const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;
 
@@ -42,6 +49,8 @@ pub struct ReputationChangeWeights {
     pub bad_block: Reputation,
     /// Weight for [`ReputationChangeKind::BadTransactions`]
     pub bad_transactions: Reputation,
+    /// Weight for [`ReputationChangeKind::AlreadySeenTransaction`]
+    pub already_seen_transactions: Reputation,
     /// Weight for [`ReputationChangeKind::Timeout`]
     pub timeout: Reputation,
     /// Weight for [`ReputationChangeKind::BadProtocol`]
@@ -62,6 +71,7 @@ impl ReputationChangeWeights {
             ReputationChangeKind::BadMessage => self.bad_message.into(),
             ReputationChangeKind::BadBlock => self.bad_block.into(),
             ReputationChangeKind::BadTransactions => self.bad_transactions.into(),
+            ReputationChangeKind::AlreadySeenTransaction => self.already_seen_transactions.into(),
             ReputationChangeKind::Timeout => self.timeout.into(),
             ReputationChangeKind::BadProtocol => self.bad_protocol.into(),
             ReputationChangeKind::FailedToConnect => self.failed_to_connect.into(),
@@ -77,6 +87,7 @@ impl Default for ReputationChangeWeights {
         Self {
             bad_block: BAD_MESSAGE_REPUTATION_CHANGE,
             bad_transactions: BAD_MESSAGE_REPUTATION_CHANGE,
+            already_seen_transactions: ALREADY_SEEN_TRANSACTION_REPUTATION_CHANGE,
             bad_message: BAD_MESSAGE_REPUTATION_CHANGE,
             timeout: TIMEOUT_REPUTATION_CHANGE,
             bad_protocol: BAD_PROTOCOL_REPUTATION_CHANGE,

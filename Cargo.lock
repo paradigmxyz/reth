@@ -5147,6 +5147,9 @@ dependencies = [
  "test-fuzz",
  "thiserror",
  "tiny-keccak",
+ "tokio",
+ "tokio-stream",
+ "tracing",
  "triehash",
  "url",
 ]

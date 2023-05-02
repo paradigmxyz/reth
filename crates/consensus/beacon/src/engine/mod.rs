@@ -9,7 +9,7 @@ use reth_interfaces::{
     Error,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
-use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
+use reth_primitives::{listener::EventListeners, BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
 };
@@ -35,9 +35,13 @@ mod error;
 pub use error::{BeaconEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
 
 mod metrics;
+
 mod pipeline_state;
 
 pub use pipeline_state::PipelineState;
+
+mod event;
+pub use event::BeaconConsensusEngineEvent;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
@@ -98,6 +102,13 @@ impl BeaconConsensusEngineHandle {
         });
         rx
     }
+
+    /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
+    pub fn event_listener(&self) -> UnboundedReceiverStream<BeaconConsensusEngineEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::EventListener(tx));
+        UnboundedReceiverStream::new(rx)
+    }
 }
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
@@ -151,6 +162,8 @@ where
     continuous: bool,
     /// The payload store.
     payload_builder: PayloadBuilderHandle,
+    /// Listeners for engine events.
+    listeners: EventListeners<BeaconConsensusEngineEvent>,
     /// Consensus engine metrics.
     metrics: Metrics,
 }
@@ -213,6 +226,7 @@ where
             max_block,
             continuous,
             payload_builder,
+            listeners: EventListeners::default(),
             metrics: Metrics::default(),
         };
 
@@ -342,6 +356,7 @@ where
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
 
+        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
         trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
     }
@@ -417,14 +432,25 @@ where
         };
 
         let status = if self.is_pipeline_idle() {
-            let block_hash = block.hash;
             match self.blockchain_tree.insert_block_without_senders(block) {
                 Ok(status) => {
-                    let latest_valid_hash =
-                        matches!(status, BlockStatus::Valid).then_some(block_hash);
+                    let mut latest_valid_hash = None;
                     let status = match status {
-                        BlockStatus::Valid => PayloadStatusEnum::Valid,
-                        BlockStatus::Accepted => PayloadStatusEnum::Accepted,
+                        BlockStatus::Valid => {
+                            latest_valid_hash = Some(block_hash);
+                            self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                                block_number,
+                                block_hash,
+                            ));
+                            PayloadStatusEnum::Valid
+                        }
+                        BlockStatus::Accepted => {
+                            self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(
+                                block_number,
+                                block_hash,
+                            ));
+                            PayloadStatusEnum::Accepted
+                        }
                         BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
                     };
                     PayloadStatus::new(status, latest_valid_hash)
@@ -580,6 +606,9 @@ where
                         this.metrics.new_payload_messages.increment(1);
                         let status = this.on_new_payload(payload);
                         let _ = tx.send(Ok(status));
+                    }
+                    BeaconEngineMessage::EventListener(tx) => {
+                        this.listeners.push_listener(tx);
                     }
                 }
             }

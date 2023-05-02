@@ -1,4 +1,4 @@
-use crate::BeaconEngineResult;
+use crate::{BeaconConsensusEngineEvent, BeaconEngineResult};
 use futures::{future::Either, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::error::PayloadBuilderError;
@@ -11,7 +11,7 @@ use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -131,4 +131,6 @@ pub enum BeaconEngineMessage {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<OnForkChoiceUpdated>,
     },
+    /// Add a new listener for [`BeaconEngineMessage`].
+    EventListener(UnboundedSender<BeaconConsensusEngineEvent>),
 }
