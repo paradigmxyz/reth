@@ -170,6 +170,10 @@ where
         self.database.block(id)
     }
 
+    fn pending_block(&self) -> Result<Option<SealedBlock>> {
+        Ok(self.tree.pending_block())
+    }
+
     fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
         self.database.ommers(id)
     }

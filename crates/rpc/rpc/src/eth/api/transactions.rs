@@ -458,11 +458,10 @@ where
         index: Index,
     ) -> EthResult<Option<Transaction>> {
         let block_id = block_id.into();
-        if let Some(block) = self.client().block(block_id)? {
-            let block_hash = self
-                .client()
-                .block_hash_for_id(block_id)?
-                .ok_or(EthApiError::UnknownBlockNumber)?;
+
+        if let Some(block) = self.block(block_id).await? {
+            let block_hash = block.hash;
+            let block = block.unseal();
             if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
                 let tx =
                     tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
