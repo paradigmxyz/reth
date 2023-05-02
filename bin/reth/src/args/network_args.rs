@@ -1,10 +1,9 @@
 //! clap [Args](clap::Args) for network related arguments.
 
-use crate::dirs::{KnownPeersPath, MaybePlatformPath};
 use clap::Args;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
-use reth_primitives::{mainnet_nodes, Chain, ChainSpec, NodeRecord};
+use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
 use secp256k1::SecretKey;
 use std::{path::PathBuf, sync::Arc};
@@ -32,14 +31,13 @@ pub struct NetworkArgs {
     #[arg(long, value_delimiter = ',')]
     pub bootnodes: Option<Vec<NodeRecord>>,
 
-    /// The path to the known peers file. Connected peers are
-    /// dumped to this file on node shutdown, and read on startup.
-    /// Cannot be used with --no-persist-peers
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    pub peers_file: MaybePlatformPath<KnownPeersPath>,
+    /// The path to the known peers file. Connected peers are dumped to this file on nodes
+    /// shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
+    #[arg(long, value_name = "FILE", verbatim_doc_comment, conflicts_with = "no_persist_peers")]
+    pub peers_file: Option<PathBuf>,
 
-    /// Do not persist peers. Cannot be used with --peers-file
-    #[arg(long, verbatim_doc_comment, conflicts_with = "peers_file")]
+    /// Do not persist peers.
+    #[arg(long, verbatim_doc_comment)]
     pub no_persist_peers: bool,
 
     /// NAT resolution method.
@@ -54,16 +52,22 @@ pub struct NetworkArgs {
 impl NetworkArgs {
     /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
     /// values in this option struct.
+    ///
+    /// The `default_peers_file` will be used as the default location to store the persistent peers
+    /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
     pub fn network_config(
         &self,
         config: &Config,
         chain_spec: Arc<ChainSpec>,
         secret_key: SecretKey,
+        default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
 
+        let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
+
         let network_config_builder = config
-            .network_config(self.nat, self.persistent_peers_file(chain_spec.chain), secret_key)
+            .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec);
 
@@ -74,16 +78,13 @@ impl NetworkArgs {
 // === impl NetworkArgs ===
 
 impl NetworkArgs {
-    /// If `no_persist_peers` is true then this returns the path to the persistent peers file
-    ///
-    /// Uses the input chain to determine a chain-specific path to the known peers file.
-    pub fn persistent_peers_file(&self, chain: Chain) -> Option<PathBuf> {
+    /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
+    pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
         if self.no_persist_peers {
             return None
         }
 
-        let peers_file = self.peers_file.clone().unwrap_or_chain_default(chain);
-        Some(peers_file.into())
+        Some(peers_file)
     }
 }
 

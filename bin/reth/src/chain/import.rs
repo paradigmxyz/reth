@@ -1,5 +1,5 @@
 use crate::{
-    dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     node::events::{handle_events, NodeEvent},
 };
 use clap::{crate_version, Parser};
@@ -14,7 +14,7 @@ use reth_downloaders::{
 use reth_interfaces::{
     consensus::Consensus, p2p::headers::client::NoopStatusUpdater, sync::SyncStateUpdater,
 };
-use reth_primitives::{Chain, ChainSpec, H256};
+use reth_primitives::{ChainSpec, H256};
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -26,7 +26,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
 
@@ -34,18 +34,18 @@ use tracing::{debug, info};
 #[derive(Debug, Parser)]
 pub struct ImportCommand {
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: MaybePlatformPath<ConfigPath>,
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
 
-    /// The path to the database folder.
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -69,7 +69,7 @@ pub struct ImportCommand {
     /// The online stages (headers and bodies) are replaced by a file import, after which the
     /// remaining stages are executed.
     #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
-    path: PlatformPath<ConfigPath>,
+    path: PathBuf,
 }
 
 impl ImportCommand {
@@ -77,11 +77,14 @@ impl ImportCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
-        let config: Config = self.load_config_with_chain(self.chain.chain)?;
-        info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
 
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+        let config: Config = self.load_config(config_path.clone())?;
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+
+        let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
@@ -177,12 +180,10 @@ impl ImportCommand {
         Ok((pipeline, events))
     }
 
-    /// Loads the reth config based on the intended chain
-    fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
-        // add network name to config directory
-        let config_path = self.config.unwrap_or_chain_default(chain);
+    /// Loads the reth config
+    fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {}", config_path))
+            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
 }
 
