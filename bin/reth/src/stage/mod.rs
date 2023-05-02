@@ -80,6 +80,10 @@ pub struct Command {
     #[arg(long, short)]
     to: u64,
 
+    /// Batch size for stage execution and unwind
+    #[arg(long)]
+    batch_size: Option<u64>,
+
     /// Normally, running the stage requires unwinding for stages that already
     /// have been run, in order to not rewrite to the same database slots.
     ///
@@ -122,7 +126,7 @@ impl Command {
             prometheus_exporter::initialize_with_db_metrics(listen_addr, Arc::clone(&db)).await?;
         }
 
-        let num_blocks = self.to - self.from + 1;
+        let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
 
         match self.stage {
             StageEnum::Bodies => {
@@ -148,7 +152,7 @@ impl Command {
 
                 let mut stage = BodyStage {
                     downloader: BodiesDownloaderBuilder::default()
-                        .with_stream_batch_size(num_blocks as usize)
+                        .with_stream_batch_size(batch_size as usize)
                         .with_request_limit(config.stages.bodies.downloader_request_limit)
                         .with_max_buffered_responses(
                             config.stages.bodies.downloader_max_buffered_responses,
@@ -167,7 +171,7 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Senders => {
-                let mut stage = SenderRecoveryStage { commit_threshold: num_blocks };
+                let mut stage = SenderRecoveryStage { commit_threshold: batch_size };
 
                 // Unwind first
                 if !self.skip_unwind {
@@ -177,14 +181,14 @@ impl Command {
             }
             StageEnum::Execution => {
                 let factory = reth_revm::Factory::new(self.chain.clone());
-                let mut stage = ExecutionStage::new(factory, num_blocks);
+                let mut stage = ExecutionStage::new(factory, batch_size);
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::TxLookup => {
-                let mut stage = TransactionLookupStage::new(num_blocks);
+                let mut stage = TransactionLookupStage::new(batch_size);
 
                 // Unwind first
                 if !self.skip_unwind {
