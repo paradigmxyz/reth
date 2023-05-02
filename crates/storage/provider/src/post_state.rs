@@ -197,8 +197,10 @@ impl PostState {
     }
 
     /// Returns the receipt root for all recorded receipts.
+    /// TODO: This function hides an expensive operation (bloom). We should probably make it more
+    /// explicit.
     pub fn receipts_root(&self) -> H256 {
-        calculate_receipt_root_ref(self.receipts().iter().map(Into::into))
+        calculate_receipt_root_ref(self.receipts())
     }
 
     /// Hash all changed accounts and storage entries that are currently stored in the post state.
