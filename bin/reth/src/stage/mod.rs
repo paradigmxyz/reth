@@ -121,7 +121,7 @@ impl Command {
 
         let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
 
-        let stage: Option<Box<dyn Stage<_>>> = match self.stage {
+        let mut stage: Box<dyn Stage<_>> = match self.stage {
             StageEnum::Bodies => {
                 let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
@@ -158,41 +158,36 @@ impl Command {
                     consensus: consensus.clone(),
                 };
 
-                Some(Box::new(stage))
+                Box::new(stage)
             }
-            StageEnum::Senders => {
-                Some(Box::new(SenderRecoveryStage { commit_threshold: batch_size }))
-            }
+            StageEnum::Senders => Box::new(SenderRecoveryStage { commit_threshold: batch_size }),
             StageEnum::Execution => {
                 let factory = reth_revm::Factory::new(self.chain.clone());
-                Some(Box::new(ExecutionStage::new(factory, batch_size)))
+                Box::new(ExecutionStage::new(factory, batch_size))
             }
-            StageEnum::TxLookup => Some(Box::new(TransactionLookupStage::new(batch_size))),
-            StageEnum::Merkle => Some(Box::new(MerkleStage::default_execution())),
-            _ => None,
+            StageEnum::TxLookup => Box::new(TransactionLookupStage::new(batch_size)),
+            StageEnum::Merkle => Box::new(MerkleStage::default_execution()),
+            _ => return Ok(()),
         };
 
-        if let Some(mut stage) = stage {
-            let mut input = ExecInput {
-                previous_stage: Some((StageId("No Previous Stage"), self.to)),
-                stage_progress: Some(self.from),
-            };
+        let mut input = ExecInput {
+            previous_stage: Some((StageId("No Previous Stage"), self.to)),
+            stage_progress: Some(self.from),
+        };
 
-            let mut unwind =
-                UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
+        let mut unwind =
+            UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
 
-            if !self.skip_unwind {
-                while unwind.stage_progress > self.from {
-                    let unwind_output = stage.unwind(&mut tx, unwind).await?;
-                    unwind.stage_progress = unwind_output.stage_progress;
-                }
+        if !self.skip_unwind {
+            while unwind.stage_progress > self.from {
+                let unwind_output = stage.unwind(&mut tx, unwind).await?;
+                unwind.stage_progress = unwind_output.stage_progress;
             }
+        }
 
-            while let ExecOutput { stage_progress, done: false } =
-                stage.execute(&mut tx, input).await?
-            {
-                input.stage_progress = Some(stage_progress)
-            }
+        while let ExecOutput { stage_progress, done: false } = stage.execute(&mut tx, input).await?
+        {
+            input.stage_progress = Some(stage_progress)
         }
 
         Ok(())
