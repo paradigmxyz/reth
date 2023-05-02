@@ -154,7 +154,7 @@ impl Command {
                             config.stages.bodies.downloader_min_concurrent_requests..=
                                 config.stages.bodies.downloader_max_concurrent_requests,
                         )
-                        .build(fetch_client.clone(), consensus.clone(), db.clone()),
+                        .build(fetch_client, consensus.clone(), db.clone()),
                     consensus: consensus.clone(),
                 };
 
