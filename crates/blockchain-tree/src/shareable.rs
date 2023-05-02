@@ -95,6 +95,22 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         self.tree.read().block_indices().canonical_chain().clone()
     }
 
+    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
+        let mut parent = hash;
+        let tree = self.tree.read();
+
+        // walk up the tree and check if the parent is in the sidechain
+        while let Some(block) = tree.block_by_hash(parent) {
+            parent = block.parent_hash;
+        }
+
+        if tree.block_indices().is_block_hash_canonical(&parent) {
+            return Some(parent)
+        }
+
+        None
+    }
+
     fn canonical_tip(&self) -> BlockNumHash {
         trace!(target: "blockchain_tree", "Returning canonical tip");
         self.tree.read().block_indices().canonical_tip()

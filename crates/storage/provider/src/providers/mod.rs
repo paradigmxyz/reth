@@ -386,6 +386,10 @@ where
         self.tree.canonical_blocks()
     }
 
+    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
+        self.tree.find_canonical_ancestor(hash)
+    }
+
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
     }
