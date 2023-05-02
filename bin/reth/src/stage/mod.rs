@@ -17,7 +17,7 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     stages::{BodyStage, ExecutionStage, MerkleStage, SenderRecoveryStage, TransactionLookupStage},
-    ExecInput, Stage, StageId, UnwindInput,
+    ExecInput, ExecOutput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, sync::Arc};
 use tracing::*;
@@ -108,13 +108,6 @@ impl Command {
                 .unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
-        let input = ExecInput {
-            previous_stage: Some((StageId("No Previous Stage"), self.to)),
-            stage_progress: Some(self.from),
-        };
-
-        let unwind = UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
-
         // add network name to db directory
         let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 
@@ -128,7 +121,7 @@ impl Command {
 
         let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
 
-        match self.stage {
+        let stage: Option<Box<dyn Stage<_>>> = match self.stage {
             StageEnum::Bodies => {
                 let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
@@ -150,7 +143,7 @@ impl Command {
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);
 
-                let mut stage = BodyStage {
+                let stage = BodyStage {
                     downloader: BodiesDownloaderBuilder::default()
                         .with_stream_batch_size(batch_size as usize)
                         .with_request_limit(config.stages.bodies.downloader_request_limit)
@@ -165,49 +158,41 @@ impl Command {
                     consensus: consensus.clone(),
                 };
 
-                if !self.skip_unwind {
-                    stage.unwind(&mut tx, unwind).await?;
-                }
-                stage.execute(&mut tx, input).await?;
+                Some(Box::new(stage))
             }
             StageEnum::Senders => {
-                let mut stage = SenderRecoveryStage { commit_threshold: batch_size };
-
-                // Unwind first
-                if !self.skip_unwind {
-                    stage.unwind(&mut tx, unwind).await?;
-                }
-                stage.execute(&mut tx, input).await?;
+                Some(Box::new(SenderRecoveryStage { commit_threshold: batch_size }))
             }
             StageEnum::Execution => {
                 let factory = reth_revm::Factory::new(self.chain.clone());
-                let mut stage = ExecutionStage::new(factory, batch_size);
-                if !self.skip_unwind {
-                    stage.unwind(&mut tx, unwind).await?;
-                }
-                stage.execute(&mut tx, input).await?;
+                Some(Box::new(ExecutionStage::new(factory, batch_size)))
             }
-            StageEnum::TxLookup => {
-                let mut stage = TransactionLookupStage::new(batch_size);
+            StageEnum::TxLookup => Some(Box::new(TransactionLookupStage::new(batch_size))),
+            StageEnum::Merkle => Some(Box::new(MerkleStage::default_execution())),
+            _ => None,
+        };
 
-                // Unwind first
-                if !self.skip_unwind {
-                    stage.unwind(&mut tx, unwind).await?;
+        if let Some(mut stage) = stage {
+            let mut input = ExecInput {
+                previous_stage: Some((StageId("No Previous Stage"), self.to)),
+                stage_progress: Some(self.from),
+            };
+
+            let mut unwind =
+                UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
+
+            if !self.skip_unwind {
+                while unwind.stage_progress > self.from {
+                    let unwind_output = stage.unwind(&mut tx, unwind).await?;
+                    unwind.stage_progress = unwind_output.stage_progress;
                 }
-
-                stage.execute(&mut tx, input).await?;
             }
-            StageEnum::Merkle => {
-                let mut stage = MerkleStage::default_execution();
 
-                // Unwind first
-                if !self.skip_unwind {
-                    stage.unwind(&mut tx, unwind).await?;
-                }
-
-                stage.execute(&mut tx, input).await?;
+            while let ExecOutput { stage_progress, done: false } =
+                stage.execute(&mut tx, input).await?
+            {
+                input.stage_progress = Some(stage_progress)
             }
-            _ => {}
         }
 
         Ok(())
