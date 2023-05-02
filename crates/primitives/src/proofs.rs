@@ -1,14 +1,16 @@
 use crate::{
-    keccak256, Address, Bytes, GenesisAccount, Header, Log, ReceiptWithBloom, ReceiptWithBloomRef,
+    keccak256,
+    trie::{HashBuilder, Nibbles},
+    Address, Bytes, GenesisAccount, Header, Log, ReceiptWithBloom, ReceiptWithBloomRef,
     TransactionSigned, Withdrawal, H256,
 };
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use hash_db::Hasher;
 use hex_literal::hex;
 use plain_hasher::PlainHasher;
 use reth_rlp::Encodable;
 use std::collections::HashMap;
-use triehash::{ordered_trie_root, sec_trie_root};
+use triehash::sec_trie_root;
 
 /// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").
 pub const EMPTY_LIST_HASH: H256 =
@@ -44,50 +46,66 @@ pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
     }
 }
 
+/// Compute a trie root of the collection of rlp encodable items.
+pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> H256 {
+    ordered_trie_root_with_encoder(items, |item, buf| item.encode(buf))
+}
+
+/// Compute a trie root of the collection of items with a custom encoder.
+pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> H256
+where
+    F: FnMut(&T, &mut dyn BufMut),
+{
+    let mut index_buffer = BytesMut::new();
+    let mut value_buffer = BytesMut::new();
+
+    let mut hb = HashBuilder::default();
+    let items_len = items.len();
+    for i in 0..items_len {
+        let index = adjust_index_for_rlp(i, items_len);
+
+        index_buffer.clear();
+        index.encode(&mut index_buffer);
+
+        value_buffer.clear();
+        encode(&items[index], &mut value_buffer);
+
+        hb.add_leaf(Nibbles::unpack(&index_buffer), &value_buffer);
+    }
+
+    hb.root()
+}
+
 /// Calculate a transaction root.
 ///
 /// `(rlp(index), encoded(tx))` pairs.
-pub fn calculate_transaction_root<I, T>(transactions: I) -> H256
+pub fn calculate_transaction_root<T>(transactions: &[T]) -> H256
 where
-    I: IntoIterator<Item = T>,
     T: AsRef<TransactionSigned>,
 {
-    ordered_trie_root::<KeccakHasher, _>(transactions.into_iter().map(|tx| {
-        let mut tx_rlp = Vec::new();
-        tx.as_ref().encode_inner(&mut tx_rlp, false);
-        tx_rlp
-    }))
+    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_inner(buf, false))
 }
 
 /// Calculates the root hash of the withdrawals.
-pub fn calculate_withdrawals_root<'a>(
-    withdrawals: impl IntoIterator<Item = &'a Withdrawal>,
-) -> H256 {
-    ordered_trie_root::<KeccakHasher, _>(withdrawals.into_iter().map(|withdrawal| {
-        let mut withdrawal_rlp = Vec::new();
-        withdrawal.encode(&mut withdrawal_rlp);
-        withdrawal_rlp
-    }))
+pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> H256 {
+    ordered_trie_root(withdrawals)
 }
 
 /// Calculates the receipt root for a header.
-pub fn calculate_receipt_root<'a>(receipts: impl Iterator<Item = &'a ReceiptWithBloom>) -> H256 {
-    ordered_trie_root::<KeccakHasher, _>(receipts.into_iter().map(|receipt| {
-        let mut receipt_rlp = Vec::new();
-        receipt.encode_inner(&mut receipt_rlp, false);
-        receipt_rlp
-    }))
+pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> H256 {
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header for the reference type of [ReceiptWithBloom].
-pub fn calculate_receipt_root_ref<'a>(
-    receipts: impl Iterator<Item = ReceiptWithBloomRef<'a>>,
-) -> H256 {
-    ordered_trie_root::<KeccakHasher, _>(receipts.into_iter().map(|receipt| {
-        let mut receipt_rlp = Vec::new();
-        receipt.encode_inner(&mut receipt_rlp, false);
-        receipt_rlp
-    }))
+///
+/// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
+pub fn calculate_receipt_root_ref<T>(receipts: &[T]) -> H256
+where
+    for<'a> ReceiptWithBloomRef<'a>: From<&'a T>,
+{
+    ordered_trie_root_with_encoder(receipts, |r, buf| {
+        ReceiptWithBloomRef::from(r).encode_inner(buf, false)
+    })
 }
 
 /// Calculates the log root for headers.
@@ -139,7 +157,7 @@ mod tests {
         let block_rlp = &mut data.as_slice();
         let block: Block = Block::decode(block_rlp).unwrap();
 
-        let tx_root = calculate_transaction_root(block.body.iter());
+        let tx_root = calculate_transaction_root(&block.body);
         assert_eq!(block.transactions_root, tx_root, "Must be the same");
     }
 
@@ -157,7 +175,7 @@ mod tests {
             bloom,
         };
         let receipt = vec![receipt];
-        let root = calculate_receipt_root(receipt.iter());
+        let root = calculate_receipt_root(&receipt);
         assert_eq!(
             root,
             H256(hex!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"))
@@ -173,7 +191,7 @@ mod tests {
         assert!(block.withdrawals.is_some());
         let withdrawals = block.withdrawals.as_ref().unwrap();
         assert_eq!(withdrawals.len(), 1);
-        let withdrawals_root = calculate_withdrawals_root(withdrawals.iter());
+        let withdrawals_root = calculate_withdrawals_root(withdrawals);
         assert_eq!(block.withdrawals_root, Some(withdrawals_root));
 
         // 4 withdrawals, identical indices
@@ -183,7 +201,7 @@ mod tests {
         assert!(block.withdrawals.is_some());
         let withdrawals = block.withdrawals.as_ref().unwrap();
         assert_eq!(withdrawals.len(), 4);
-        let withdrawals_root = calculate_withdrawals_root(withdrawals.iter());
+        let withdrawals_root = calculate_withdrawals_root(withdrawals);
         assert_eq!(block.withdrawals_root, Some(withdrawals_root));
     }
 

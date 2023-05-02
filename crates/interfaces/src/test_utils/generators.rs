@@ -110,7 +110,7 @@ pub fn random_block(
         (0..ommers_count).map(|_| random_header(number, parent).unseal()).collect::<Vec<_>>();
 
     // Calculate roots
-    let transactions_root = proofs::calculate_transaction_root(transactions.iter());
+    let transactions_root = proofs::calculate_transaction_root(&transactions);
     let ommers_hash = proofs::calculate_ommers_root(&ommers);
 
     SealedBlock {
