@@ -103,3 +103,7 @@ test-utils = []
 [[bench]]
 name = "recover_ecdsa_crit"
 harness = false
+
+[[bench]]
+name = "trie_root"
+harness = false
