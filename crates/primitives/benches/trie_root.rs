@@ -4,7 +4,7 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_primitives::{proofs::KeccakHasher, ReceiptWithBloom};
+use reth_primitives::{proofs::KeccakHasher, ReceiptWithBloom, H256};
 
 /// Benchmarks different implementations of the root calculation.
 pub fn trie_root_benchmark(c: &mut Criterion) {
@@ -14,30 +14,34 @@ pub fn trie_root_benchmark(c: &mut Criterion) {
         let group_name =
             |description: &str| format!("receipts root | size: {size} | {description}");
 
-        let test_data = generate_test_data(size);
+        let (test_data, expected) = generate_test_data(size);
         use implementations::*;
 
         group.bench_function(group_name("triehash::ordered_trie_root"), |b| {
             b.iter(|| {
                 let receipts = test_data.clone();
-                black_box(trie_hash_ordered_trie_root(receipts.into_iter()));
+                let result = black_box(trie_hash_ordered_trie_root(receipts.into_iter()));
+                assert_eq!(result, expected);
             });
         });
 
         group.bench_function(group_name("HashBuilder"), |b| {
             b.iter(|| {
                 let receipts = test_data.clone();
-                black_box(hash_builder_root(receipts));
+                let result = black_box(hash_builder_root(receipts));
+                assert_eq!(result, expected);
             });
         });
     }
 }
 
-fn generate_test_data(size: usize) -> Vec<ReceiptWithBloom> {
-    prop::collection::vec(any::<ReceiptWithBloom>(), size)
+fn generate_test_data(size: usize) -> (Vec<ReceiptWithBloom>, H256) {
+    let receipts = prop::collection::vec(any::<ReceiptWithBloom>(), size)
         .new_tree(&mut TestRunner::new(ProptestConfig::default()))
         .unwrap()
-        .current()
+        .current();
+    let root = implementations::hash_builder_root(receipts.clone());
+    (receipts, root)
 }
 
 criterion_group! {
@@ -53,7 +57,6 @@ mod implementations {
     use reth_primitives::{
         proofs::adjust_index_for_rlp,
         trie::{HashBuilder, Nibbles},
-        H256,
     };
     use reth_rlp::Encodable;
     use std::vec::IntoIter;
