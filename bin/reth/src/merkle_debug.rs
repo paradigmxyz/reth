@@ -153,7 +153,7 @@ impl Command {
                     stage_progress: None,
                 };
                 loop {
-                    let clean_result = merkle_stage.execute(&mut tx, clean_input.clone()).await;
+                    let clean_result = merkle_stage.execute(&mut tx, clean_input).await;
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
                     if clean_result.unwrap().done {
                         break
