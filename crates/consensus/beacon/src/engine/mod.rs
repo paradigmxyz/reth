@@ -173,7 +173,7 @@ where
     listeners: EventListeners<BeaconConsensusEngineEvent>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
-    invalid_heads: InvalidHeaderCache,
+    invalid_headers: InvalidHeaderCache,
     /// Consensus engine metrics.
     metrics: Metrics,
 }
@@ -237,7 +237,7 @@ where
             continuous,
             payload_builder,
             listeners: EventListeners::default(),
-            invalid_heads: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
+            invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: Metrics::default(),
         };
 
@@ -296,7 +296,7 @@ where
     fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
         // check if the head was previously marked as invalid
         let (parent_hash, parent_number) = {
-            let header = self.invalid_heads.get(&head)?;
+            let header = self.invalid_headers.get(&head)?;
             (header.parent_hash, header.number.saturating_sub(1))
         };
         let mut latest_valid_hash = parent_hash;
@@ -521,7 +521,7 @@ where
                 }
                 Err(error) => {
                     // payload is deemed invalid, insert it into the cache
-                    self.invalid_heads.insert(header);
+                    self.invalid_headers.insert(header);
 
                     let latest_valid_hash =
                         self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
