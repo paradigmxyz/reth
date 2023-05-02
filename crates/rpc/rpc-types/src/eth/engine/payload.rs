@@ -208,6 +208,13 @@ pub enum PayloadError {
     Decode(#[from] reth_rlp::DecodeError),
 }
 
+impl PayloadError {
+    /// Returns `true` if the error is caused by invalid extra data.
+    pub fn is_block_hash_mismatch(&self) -> bool {
+        matches!(self, PayloadError::BlockHash { .. })
+    }
+}
+
 /// This structure contains a body of an execution payload.
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
@@ -303,17 +310,13 @@ impl Serialize for PayloadStatus {
     }
 }
 
-impl From<PayloadError> for PayloadStatus {
+impl From<PayloadError> for PayloadStatusEnum {
     fn from(error: PayloadError) -> Self {
         match error {
             error @ PayloadError::BlockHash { .. } => {
-                PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
-                    validation_error: error.to_string(),
-                })
+                PayloadStatusEnum::InvalidBlockHash { validation_error: error.to_string() }
             }
-            _ => PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: error.to_string(),
-            }),
+            _ => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
         }
     }
 }
@@ -382,6 +385,11 @@ impl PayloadStatusEnum {
     /// Returns true if the payload status is invalid.
     pub fn is_invalid(&self) -> bool {
         matches!(self, PayloadStatusEnum::Invalid { .. })
+    }
+
+    /// Returns true if the payload status is invalid block hash.
+    pub fn is_invalid_block_hash(&self) -> bool {
+        matches!(self, PayloadStatusEnum::InvalidBlockHash { .. })
     }
 }
 
