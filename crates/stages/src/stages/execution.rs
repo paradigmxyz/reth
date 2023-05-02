@@ -192,8 +192,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let start_block = input.stage_progress() + 1;
-        let max_block = input.previous_stage_progress();
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         // Build executor
         let mut executor = self.executor_factory.with_sp(CachedStateProvider::new(
@@ -203,15 +202,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Message tracking
         let mut gas_since_last_message = 0;
-        let mut last_message_block = start_block;
+        let mut last_message_block = *range.start();
         let mut last_message = Instant::now();
-
-        // Progress tracking
-        let mut progress = start_block;
 
         // Execute block range
         let mut state = PostState::default();
-        for block_number in start_block..=max_block {
+        for block_number in range.clone() {
             let (block, td) = Self::read_block_with_senders(tx, block_number)?;
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
@@ -226,19 +222,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // Merge state changes
             state.extend(block_state);
-            progress = block_number;
 
             // Gas metrics
             gas_since_last_message += block.header.gas_used;
             self.metrics
                 .mgas_processed_total
                 .increment(block.header.gas_used as f64 / MGAS_TO_GAS as f64);
-
-            // Check if we should commit now
-            if (block_number - start_block) >= self.commit_threshold {
-                info!(target: "sync::stages::execution", ?block_number, "Threshold hit, committing.");
-                break
-            }
 
             // Status messages
             let now = Instant::now();
@@ -286,7 +275,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         state.write_to_db(&**tx)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
-        Ok(ExecOutput { stage_progress: progress, done: progress == max_block })
+        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 }
 
