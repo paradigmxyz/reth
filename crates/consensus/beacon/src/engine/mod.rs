@@ -20,6 +20,8 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use std::collections::HashMap;
+use schnellru::{ByLength, LruMap};
 use tokio::sync::{
     mpsc,
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -164,6 +166,8 @@ where
     payload_builder: PayloadBuilderHandle,
     /// Listeners for engine events.
     listeners: EventListeners<BeaconConsensusEngineEvent>,
+    /// Tracks the header of invalid payloads that were rejected by the engine because they're invalid.
+    invalid_heads: InvalidHeaderCache,
     /// Consensus engine metrics.
     metrics: Metrics,
 }
@@ -227,6 +231,7 @@ where
             continuous,
             payload_builder,
             listeners: EventListeners::default(),
+            invalid_heads: InvalidHeaderCache::new(512),
             metrics: Metrics::default(),
         };
 
@@ -324,6 +329,10 @@ where
                 }
                 Err(error) => {
                     warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
+
+                    // check if the new head was previously invalidated, if so then we deem this FCU as invalid
+
+
                     // If this is the first forkchoice received, start downloading from safe block
                     // hash.
                     let target = if is_first_forkchoice &&
@@ -451,6 +460,8 @@ where
                     PayloadStatus::new(status, latest_valid_hash)
                 }
                 Err(error) => {
+                    // payload is deemed invalid
+
                     let latest_valid_hash =
                         self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
                     let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
@@ -458,11 +469,13 @@ where
                 }
             }
         } else if let Err(error) = self.blockchain_tree.buffer_block_without_sender(block) {
+            // received a new payload while we're still syncing to the target
             let latest_valid_hash =
                 self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
             let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
             PayloadStatus::new(status, latest_valid_hash)
         } else {
+            // successfully buffered the block
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
         trace!(target: "consensus::engine", ?block_hash, block_number, ?status, "Returning payload status");
@@ -690,6 +703,25 @@ enum PipelineTarget {
     Head,
     /// Corresponds to the safe block hash.
     Safe,
+}
+
+/// Keeps track of invalid headers and their hit count.
+#[derive(Debug)]
+struct InvalidHeaderCache {
+    headers: LruMap<H256, Header>,
+}
+
+impl InvalidHeaderCache {
+
+    fn new(max_length: u32) -> Self {
+        Self {
+            headers: LruMap::new(ByLength::new(max_length)),
+        }
+    }
+
+    fn insert(&mut self, header: SealedBlock) {
+        self.headers.insert(header.hash(), header);
+    }
 }
 
 #[cfg(test)]

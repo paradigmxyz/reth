@@ -4683,6 +4683,7 @@ dependencies = [
  "reth-stages",
  "reth-tasks",
  "reth-tracing",
+ "schnellru",
  "thiserror",
  "tokio",
  "tokio-stream",
