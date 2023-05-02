@@ -94,6 +94,12 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
 
+    /// Given a hash, this tries to find the last ancestor that is part of the canonical chain.
+    ///
+    /// In other words, this will walk up the chain starting with the given hash and return the
+    /// first block that's canonical.
+    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash>;
+
     /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
     fn canonical_tip(&self) -> BlockNumHash;
 
