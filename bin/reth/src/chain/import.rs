@@ -107,7 +107,7 @@ impl ImportCommand {
 
         // override the tip
         pipeline.set_tip(tip);
-        debug!(target: "reth::cli", %tip, "Tip manually set");
+        debug!(target: "reth::cli", ?tip, "Tip manually set");
 
         tokio::spawn(handle_events(None, events));
 
@@ -132,6 +132,10 @@ impl ImportCommand {
     where
         C: Consensus + 'static,
     {
+        if !file_client.has_canonical_blocks() {
+            eyre::bail!("unable to import non canonical blocks");
+        }
+
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
             .into_task();
@@ -145,6 +149,8 @@ impl ImportCommand {
 
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
+            // we want to sync all blocks the file client provides or 0 if empty
+            .with_max_block(file_client.max_block().unwrap_or(0))
             .with_sync_state_updater(file_client)
             .add_stages(
                 DefaultStages::new(
@@ -164,7 +170,6 @@ impl ImportCommand {
                 })
                 .set(ExecutionStage::new(factory, config.stages.execution.commit_threshold)),
             )
-            .with_max_block(0)
             .build();
 
         let events = pipeline.events().map(Into::into);
