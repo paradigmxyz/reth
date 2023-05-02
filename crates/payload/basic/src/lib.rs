@@ -661,7 +661,7 @@ fn build_payload<Pool, Client>(
         let state_root = db.db.0.state_root(post_state)?;
 
         // create the block header
-        let transactions_root = proofs::calculate_transaction_root(executed_txs.iter());
+        let transactions_root = proofs::calculate_transaction_root(&executed_txs);
 
         let header = Header {
             parent_hash: parent_block.hash,
@@ -807,7 +807,7 @@ where
         increment_account_balance(db, post_state, block_number, address, increment)?;
     }
 
-    let withdrawals_root = proofs::calculate_withdrawals_root(withdrawals.iter());
+    let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
 
     // calculate withdrawals root
     Ok(WithdrawalsOutcome {

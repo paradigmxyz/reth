@@ -139,10 +139,10 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             .iter()
             .map(|tx| TransactionSigned::decode(&mut tx.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
-        let transactions_root = proofs::calculate_transaction_root(transactions.iter());
+        let transactions_root = proofs::calculate_transaction_root(&transactions);
 
         let withdrawals_root =
-            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w.iter()));
+            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
         let header = Header {
             parent_hash: payload.parent_hash,
@@ -411,7 +411,7 @@ mod tests {
         let mut transformed: Block = f(unsealed);
         // Recalculate roots
         transformed.header.transactions_root =
-            proofs::calculate_transaction_root(transformed.body.iter());
+            proofs::calculate_transaction_root(&transformed.body);
         transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
         SealedBlock {
             header: transformed.header.seal_slow(),
