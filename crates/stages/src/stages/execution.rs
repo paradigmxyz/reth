@@ -282,7 +282,7 @@ mod tests {
     fn stage() -> ExecutionStage<Factory> {
         let factory =
             Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
-        ExecutionStage::new(factory, 1)
+        ExecutionStage::new(factory, 100)
     }
 
     #[tokio::test]
