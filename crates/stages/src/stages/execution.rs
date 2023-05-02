@@ -144,17 +144,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                     // transaction table, the usual `get_block_transactions_range` starts
                     // calculating them on the fly, which is very slow.
                     //
-                    // A better fix would be to find a way to have a block body that stores
-                    // transactions of varying types:
-                    // - Transactions w/o signatures
-                    // - Transactions with a recovered sender
-                    // - Transactions with a hash
-                    // - Transactions w/o a hash
-                    // - And so on...
-                    //
-                    // I chose to use this hack currently because the above is a larger refactor and
-                    // requires some thinking (i.e. do we really want a `Block` type per tx type? Do
-                    // we want so many tx types?)
+                    // Ref: https://github.com/paradigmxyz/reth/issues/2522
                     hash: Default::default(),
                     signature: tx.1.signature,
                     transaction: tx.1.transaction,
