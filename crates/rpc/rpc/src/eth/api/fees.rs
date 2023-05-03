@@ -6,7 +6,9 @@ use crate::{
 };
 use futures::{Stream, StreamExt};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, SealedBlockWithSenders, U256};
+use reth_primitives::{
+    BlockId, BlockNumberOrTag, Header, SealedBlockWithSenders, TransactionSigned, U256,
+};
 use reth_provider::{BlockProvider, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
@@ -128,31 +130,7 @@ where
                         try_into().unwrap(); // u64 -> U256 won't fail
                 let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
-                let mut sorter = Vec::with_capacity(transactions.len());
-                for transaction in transactions.iter() {
-                    let reward = transaction
-                        .effective_gas_price(header.base_fee_per_gas)
-                        .ok_or(InvalidTransactionError::FeeCapTooLow)?;
-
-                    sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward })
-                }
-
-                sorter.sort();
-
-                let mut rewards = Vec::with_capacity(reward_percentiles.len());
-                let mut sum_gas_used = sorter[0].gas_used;
-                let mut tx_index = 0;
-
-                for percentile in reward_percentiles.iter() {
-                    let threshold_gas_used = (header.gas_used as f64) * percentile / 100_f64;
-                    while sum_gas_used < threshold_gas_used as u128 && tx_index < transactions.len()
-                    {
-                        tx_index += 1;
-                        sum_gas_used += sorter[tx_index].gas_used;
-                    }
-
-                    rewards.push(U256::from(sorter[tx_index].reward));
-                }
+                let rewards = get_rewards(header, transactions, reward_percentiles.clone())?;
 
                 let fee_history_cache_item = FeeHistoryCacheItem {
                     hash: None,
@@ -204,12 +182,19 @@ where
             reward: Some(rewards),
         })
     }
+}
 
+impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+where
+    Pool: TransactionPool + Clone + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
+{
     /// Populate the fee history cache when new blocks are added to the chain
     ///
     /// This listens for any new blocks and updates the fee history cache
     async fn populate_fee_history_cache_on_new_block<St>(
-        &mut self,
+        mut self,
         reward_percentiles: Option<Vec<f64>>,
         mut events: St,
     ) where
@@ -219,7 +204,10 @@ where
             match event {
                 CanonStateNotification::Reorg { old: _, new } => {
                     let (new_blocks, _) = new.inner();
-                    match self.add_cache_for_block(&new_blocks.tip(), &reward_percentiles).await {
+                    match self
+                        .add_cache_for_block(&new_blocks.tip(), reward_percentiles.clone())
+                        .await
+                    {
                         Ok(_) => {}
                         Err(e) => {
                             warn!("Error adding block to fee history cache: {:?}", e);
@@ -228,13 +216,17 @@ where
                 }
                 CanonStateNotification::Commit { new } => {
                     let (new_blocks, _) = new.inner();
-                    match self.add_cache_for_block(&new_blocks.tip(), &reward_percentiles).await {
+                    match self
+                        .add_cache_for_block(&new_blocks.tip(), reward_percentiles.clone())
+                        .await
+                    {
                         Ok(_) => {}
                         Err(e) => {
                             warn!("Error adding block to fee history cache: {:?}", e);
                         }
                     }
                 }
+                // No need to worry about old blocks as they will be taken care of by the LRU
                 _ => {}
             }
         }
@@ -244,41 +236,20 @@ where
     async fn add_cache_for_block(
         &mut self,
         block: &SealedBlockWithSenders,
-        reward_percentiles: &Option<Vec<f64>>,
+        reward_percentiles: Option<Vec<f64>>,
     ) -> Result<(), InvalidTransactionError> {
         let header = &block.header.header;
         let txs = &block.body;
+
         let base_fee_per_gas: U256 =
             header.base_fee_per_gas.unwrap_or_default().try_into().unwrap();
 
         let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
-        let mut sorter = Vec::with_capacity(txs.len());
+        // if not provided the percentiles are []
+        let reward_percentiles = reward_percentiles.unwrap_or_default();
 
-        for transaction in txs.iter() {
-            let reward = transaction
-                .effective_gas_price(header.base_fee_per_gas)
-                .ok_or(InvalidTransactionError::FeeCapTooLow)?;
-
-            sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward });
-        }
-
-        sorter.sort();
-        let reward_percentiles = reward_percentiles.as_ref().unwrap();
-        let mut rewards = Vec::with_capacity(reward_percentiles.len());
-
-        let mut sum_gas_used = sorter[0].gas_used;
-        let mut tx_index = 0;
-
-        for percentile in reward_percentiles.iter() {
-            let threshhold_gas_used = (header.gas_used as f64) * percentile / 100_f64;
-
-            while sum_gas_used < threshhold_gas_used as u128 && tx_index < txs.len() {
-                sum_gas_used += sorter[tx_index].gas_used;
-                tx_index += 1;
-            }
-            rewards.push(U256::from(sorter[tx_index].reward));
-        }
+        let rewards = get_rewards(header, txs, reward_percentiles)?;
 
         let fee_history_cache_item = FeeHistoryCacheItem {
             hash: None,
@@ -292,4 +263,38 @@ where
         fee_history_cache.push(header.number, fee_history_cache_item);
         Ok(())
     }
+}
+
+/// Standalone function that returns rewards array for a block
+fn get_rewards(
+    header: &Header,
+    txs: &Vec<TransactionSigned>,
+    reward_percentiles: Vec<f64>,
+) -> Result<Vec<U256>, InvalidTransactionError> {
+    let mut sorter = Vec::with_capacity(txs.len());
+
+    for transaction in txs.iter() {
+        let reward = transaction
+            .effective_gas_price(header.base_fee_per_gas)
+            .ok_or(InvalidTransactionError::FeeCapTooLow)?;
+
+        sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward });
+    }
+
+    sorter.sort();
+    let mut rewards = Vec::with_capacity(reward_percentiles.len());
+
+    let mut sum_gas_used = sorter[0].gas_used;
+    let mut tx_index = 0;
+
+    for percentile in reward_percentiles.iter() {
+        let threshhold_gas_used = (header.gas_used as f64) * percentile / 100_f64;
+
+        while sum_gas_used < threshhold_gas_used as u128 && tx_index < txs.len() {
+            sum_gas_used += sorter[tx_index].gas_used;
+            tx_index += 1;
+        }
+        rewards.push(U256::from(sorter[tx_index].reward));
+    }
+    return Ok(rewards)
 }
