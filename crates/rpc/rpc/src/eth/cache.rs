@@ -373,45 +373,13 @@ where
                                 this.evm_env_cache.cache.insert(block_hash, data);
                             }
                         }
+                        CacheAction::CacheNewBlock { block_hash, block } => {
+                            this.full_block_cache.cache.insert(block_hash, block);
+                        }
                     }
                 }
             }
         }
-    }
-}
-
-impl<Client, Tasks> EthStateCacheService<Client, Tasks>
-where
-    Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
-{
-    /// Check for new blocks and insert them in cache
-    async fn check_for_new_blocks<St>(&mut self, mut events: St)
-    where
-        St: Stream<Item = CanonStateNotification> + Unpin + 'static,
-    {
-        while let Some(event) = events.next().await {
-            match event {
-                CanonStateNotification::Commit { new } => {
-                    let (new_blocks, _) = new.inner();
-                    self.insert_new_block_into_cache(new_blocks.tip().clone().hash).await;
-                }
-                CanonStateNotification::Reorg { old: _, new } => {
-                    let (new_blocks, _) = new.inner();
-                    self.insert_new_block_into_cache(new_blocks.tip().clone().hash).await;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    async fn insert_new_block_into_cache(&mut self, block_hash: H256) {
-        let client = self.client.clone();
-        let action_tx = self.action_tx.clone();
-        self.action_task_spawner.spawn(Box::pin(async move {
-            let res = client.block_by_hash(block_hash);
-            let _ = action_tx.send(CacheAction::BlockResult { block_hash, res });
-        }));
     }
 }
 
@@ -469,4 +437,30 @@ enum CacheAction {
     BlockResult { block_hash: H256, res: Result<Option<Block>> },
     ReceiptsResult { block_hash: H256, res: Result<Option<Vec<Receipt>>> },
     EnvResult { block_hash: H256, res: Box<Result<(CfgEnv, BlockEnv)>> },
+    CacheNewBlock { block_hash: H256, block: Block },
+}
+
+async fn check_for_new_blocks<St>(eth_state_cache: &EthStateCache, mut events: St)
+where
+    St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+{
+    while let Some(event) = events.next().await {
+        match event {
+            CanonStateNotification::Commit { new } => {
+                let sealed_block_with_senders = new.tip();
+                let _ = eth_state_cache.to_service.send(CacheAction::CacheNewBlock {
+                    block_hash: sealed_block_with_senders.hash,
+                    block: sealed_block_with_senders.block.clone().into(),
+                });
+            }
+            CanonStateNotification::Reorg { old: _, new } => {
+                let sealed_block_with_senders = new.tip();
+                let _ = eth_state_cache.to_service.send(CacheAction::CacheNewBlock {
+                    block_hash: sealed_block_with_senders.hash,
+                    block: sealed_block_with_senders.block.clone().into(),
+                });
+            }
+            _ => {}
+        }
+    }
 }
