@@ -336,7 +336,7 @@ where
                         this.metrics.buffered_responses.increment(1.);
                     }
                     Err(error) => {
-                        tracing::error!(target: "downloaders::bodies", ?error, "Request failed");
+                        tracing::debug!(target: "downloaders::bodies", ?error, "Request failed");
                         this.clear();
                         return Poll::Ready(Some(Err(error)))
                     }
@@ -363,7 +363,7 @@ where
                     }
                     Ok(None) => break 'inner,
                     Err(error) => {
-                        tracing::error!(target: "downloaders::bodies", ?error, "Failed to form next request");
+                        tracing::error!(target: "downloaders::bodies", ?error, "Failed to download from next request");
                         this.clear();
                         return Poll::Ready(Some(Err(error)))
                     }
