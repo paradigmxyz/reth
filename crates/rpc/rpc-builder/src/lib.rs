@@ -304,7 +304,7 @@ where
         let Self { client, pool, network, executor, events } = self;
 
         if !module_config.is_empty() {
-            let TransportRpcModuleConfig { http, ws, ipc, config } = module_config;
+            let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
 
             let mut registry = RethModuleRegistry::new(
                 client,
@@ -315,6 +315,7 @@ where
                 config.unwrap_or_default(),
             );
 
+            modules.config = module_config;
             modules.http = registry.maybe_module(http.as_ref());
             modules.ws = registry.maybe_module(ws.as_ref());
             modules.ipc = registry.maybe_module(ipc.as_ref());
