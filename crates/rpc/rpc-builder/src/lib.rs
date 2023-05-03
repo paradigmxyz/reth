@@ -1010,8 +1010,15 @@ impl RpcServerConfig {
             self.ws_server_config.is_some()
         {
             let cors = match (self.ws_cors_domains.as_ref(), self.http_cors_domains.as_ref()) {
-                (Some(_), Some(_)) => {
-                    return Err(WsHttpSamePortError::ConflictingCorsDomains.into())
+                (Some(ws_cors), Some(http_cors)) => {
+                    if ws_cors.trim() != http_cors.trim() {
+                        return Err(WsHttpSamePortError::ConflictingCorsDomains {
+                            http_cors_domains: Some(http_cors.clone()),
+                            ws_cors_domains: Some(ws_cors.clone()),
+                        }
+                        .into())
+                    }
+                    Some(ws_cors)
                 }
                 (None, cors @ Some(_)) => cors,
                 (cors @ Some(_), None) => cors,
