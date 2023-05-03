@@ -72,3 +72,49 @@ async fn test_launch_same_port_different_modules() {
         RpcError::WsHttpSamePortError(WsHttpSamePortError::ConflictingModules { .. })
     ));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_launch_same_port_same_cors() {
+    let builder = test_rpc_builder();
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Eth])
+            .with_http(vec![RethRpcModule::Eth]),
+    );
+    let addr = test_address();
+    let res = server
+        .start_server(
+            RpcServerConfig::ws(Default::default())
+                .with_ws_address(addr)
+                .with_http(Default::default())
+                .with_cors(Some("*".to_string()))
+                .with_http_cors(Some("*".to_string()))
+                .with_http_address(addr),
+        )
+        .await;
+    assert!(res.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_launch_same_port_different_cors() {
+    let builder = test_rpc_builder();
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Eth])
+            .with_http(vec![RethRpcModule::Eth]),
+    );
+    let addr = test_address();
+    let res = server
+        .start_server(
+            RpcServerConfig::ws(Default::default())
+                .with_ws_address(addr)
+                .with_http(Default::default())
+                .with_cors(Some("*".to_string()))
+                .with_http_cors(Some("example".to_string()))
+                .with_http_address(addr),
+        )
+        .await;
+    let err = res.unwrap_err();
+    assert!(matches!(
+        err,
+        RpcError::WsHttpSamePortError(WsHttpSamePortError::ConflictingCorsDomains { .. })
+    ));
+}
