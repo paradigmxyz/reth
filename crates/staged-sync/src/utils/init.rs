@@ -6,6 +6,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{keccak256, Account, Bytecode, ChainSpec, StorageEntry, H256};
+use reth_provider::{Transaction, TransactionError};
+use reth_stages::StageKind;
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -29,6 +31,10 @@ pub enum InitDatabaseError {
         /// Actual genesis hash.
         actual: H256,
     },
+
+    /// Higher level error encountered when using a Transaction.
+    #[error(transparent)]
+    TransactionError(#[from] TransactionError),
 
     /// Low-level database error.
     #[error(transparent)]
@@ -61,12 +67,22 @@ pub fn init_genesis<DB: Database>(
     let tx = db.tx_mut()?;
     insert_genesis_state::<DB>(&tx, genesis)?;
 
+    // use transaction to insert genesis header
+    let transaction = Transaction::new_raw(&db, tx);
+    insert_genesis_hashes(transaction, genesis)?;
+
     // Insert header
+    let tx = db.tx_mut()?;
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
     tx.put::<tables::HeaderNumbers>(hash, 0)?;
     tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
     tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
     tx.put::<tables::Headers>(0, header)?;
+
+    // insert sync stage
+    for stage in StageKind::ALL.iter() {
+        tx.put::<tables::SyncStage>(stage.to_string(), 0)?;
+    }
 
     tx.commit()?;
     Ok(hash)
@@ -109,20 +125,36 @@ pub fn insert_genesis_state<DB: Database>(
             }
         }
     }
+    Ok(())
+}
 
+/// Inserts hashes for the genesis state.
+pub fn insert_genesis_hashes<DB: Database>(
+    mut transaction: Transaction<'_, DB>,
+    genesis: &reth_primitives::Genesis,
+) -> Result<(), InitDatabaseError> {
+    // insert and hash accounts to hashing table
+    let alloc_accounts =
+        genesis.alloc.clone().into_iter().map(|(addr, account)| (addr, Some(account.into())));
+    transaction.insert_account_for_hashing(alloc_accounts)?;
+
+    let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
+        // only return Some if there is storage
+        account.storage.map(|storage| (addr, storage.into_iter().map(|(k, v)| (k, v.into()))))
+    });
+    transaction.insert_storage_for_hashing(alloc_storage)?;
+    transaction.commit()?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-
-    use std::sync::Arc;
-
     use super::{init_genesis, InitDatabaseError};
     use reth_db::mdbx::test_utils::create_test_rw_db;
     use reth_primitives::{
         GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
     };
+    use std::sync::Arc;
 
     #[test]
     fn success_init_genesis_mainnet() {

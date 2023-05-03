@@ -125,6 +125,7 @@ where
             SessionEvent::SessionEstablished {
                 peer_id,
                 remote_addr,
+                client_version,
                 capabilities,
                 version,
                 status,
@@ -142,6 +143,7 @@ where
                 Some(SwarmEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
+                    client_version,
                     capabilities,
                     version,
                     messages,
@@ -219,6 +221,7 @@ where
 
                 match self.sessions.on_incoming(stream, remote_addr) {
                     Ok(session_id) => {
+                        trace!(target: "net", ?remote_addr, "Incoming connection");
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
@@ -281,7 +284,7 @@ where
 
     /// Checks if the node's network connection state is 'ShuttingDown'
     #[inline]
-    fn is_shutting_down(&self) -> bool {
+    pub(crate) fn is_shutting_down(&self) -> bool {
         matches!(self.net_connection_state, NetworkConnectionState::ShuttingDown)
     }
 }
@@ -390,6 +393,7 @@ pub(crate) enum SwarmEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
+        client_version: Arc<String>,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,

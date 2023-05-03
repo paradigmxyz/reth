@@ -1,7 +1,7 @@
 use crate::{
     error::{BackoffKind, SessionError},
     peers::{
-        reputation::{is_banned_reputation, BACKOFF_REPUTATION_CHANGE, DEFAULT_REPUTATION},
+        reputation::{is_banned_reputation, DEFAULT_REPUTATION},
         ReputationChangeWeights, DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
@@ -95,10 +95,12 @@ pub(crate) struct PeersManager {
     reputation_weights: ReputationChangeWeights,
     /// Tracks current slot stats.
     connection_info: ConnectionInfo,
-    /// Tracks unwanted ips/peer ids,
+    /// Tracks unwanted ips/peer ids.
     ban_list: BanList,
-    /// Interval at which to check for peers to unban.
-    unban_interval: Interval,
+    /// Tracks currently backed off peers.
+    backed_off_peers: HashMap<PeerId, std::time::Instant>,
+    /// Interval at which to check for peers to unban and release from the backoff map.
+    release_interval: Interval,
     /// How long to ban bad peers.
     ban_duration: Duration,
     /// How long peers to which we could not connect for non-fatal reasons, e.g.
@@ -151,9 +153,10 @@ impl PeersManager {
                 now + refill_slots_interval,
                 refill_slots_interval,
             ),
-            unban_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
+            release_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
             connection_info,
             ban_list,
+            backed_off_peers: Default::default(),
             ban_duration,
             backoff_durations,
             connect_trusted_nodes_only,
@@ -187,6 +190,12 @@ impl PeersManager {
     #[inline]
     pub(crate) fn num_outbound_connections(&self) -> usize {
         self.connection_info.num_outbound
+    }
+
+    /// Returns the number of currently backed off peers.
+    #[inline]
+    pub(crate) fn num_backed_off_peers(&self) -> usize {
+        self.backed_off_peers.len()
     }
 
     /// Invoked when a new _incoming_ tcp connection is accepted.
@@ -245,7 +254,7 @@ impl PeersManager {
     /// be scheduled.
     pub(crate) fn on_incoming_session_established(&mut self, peer_id: PeerId, addr: SocketAddr) {
         // we only need to check the peer id here as the ip address will have been checked at
-        // on_inbound_pending_session
+        // on_inbound_pending_session. We also check if the peer is in the backoff list here.
         if self.ban_list.is_banned_peer(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
             return
@@ -289,7 +298,10 @@ impl PeersManager {
     fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
         trace!(target: "net::peers", ?peer_id, "backing off");
 
-        self.ban_list.ban_peer_until(peer_id, until);
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.backed_off = true;
+            self.backed_off_peers.insert(peer_id, until);
+        }
     }
 
     /// Unbans the peer
@@ -321,11 +333,20 @@ impl PeersManager {
         }
     }
 
+    pub(crate) fn get_reputation(&self, peer_id: &PeerId) -> Option<i32> {
+        self.peers.get(peer_id).map(|peer| peer.reputation)
+    }
+
     /// Apply the corresponding reputation change to the given peer
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
-        let reputation_change = self.reputation_weights.change(rep);
         let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
-            peer.apply_reputation(reputation_change.as_i32())
+            // First check if we should reset the reputation
+            if rep.is_reset() {
+                peer.reset_reputation()
+            } else {
+                let reputation_change = self.reputation_weights.change(rep);
+                peer.apply_reputation(reputation_change.as_i32())
+            }
         } else {
             return
         };
@@ -348,7 +369,7 @@ impl PeersManager {
 
     /// Gracefully disconnected a pending session
     pub(crate) fn on_pending_session_gracefully_closed(&mut self, peer_id: &PeerId) {
-        if let Some(mut peer) = self.peers.get_mut(peer_id) {
+        if let Some(peer) = self.peers.get_mut(peer_id) {
             peer.state = PeerConnectionState::Idle;
         } else {
             return
@@ -445,8 +466,8 @@ impl PeersManager {
         } else {
             let mut backoff_until = None;
 
-            if let Some(mut peer) = self.peers.get_mut(peer_id) {
-                let reputation_change = if let Some(kind) = err.should_backoff() {
+            if let Some(peer) = self.peers.get_mut(peer_id) {
+                if let Some(kind) = err.should_backoff() {
                     // Increment peer.backoff_counter
                     if kind.is_severe() {
                         peer.severe_backoff_counter += 1;
@@ -455,19 +476,18 @@ impl PeersManager {
                     let backoff_time =
                         self.backoff_durations.backoff_until(kind, peer.severe_backoff_counter);
 
-                    backoff_until = Some(backoff_time);
-
                     // The peer has signaled that it is currently unable to process any more
                     // connections, so we will hold off on attempting any new connections for a
                     // while
-                    BACKOFF_REPUTATION_CHANGE.into()
+                    backoff_until = Some(backoff_time);
                 } else {
-                    self.reputation_weights.change(reputation_change)
+                    // If the error was not a backoff error, we reduce the peer's reputation
+                    let reputation_change = self.reputation_weights.change(reputation_change);
+                    peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
                 };
 
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
-                peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
             }
             if let Some(backoff_until) = backoff_until {
                 self.backoff_peer_until(*peer_id, backoff_until);
@@ -601,7 +621,7 @@ impl PeersManager {
     /// Returns the idle peer with the highest reputation.
     ///
     /// Peers that are `trusted`, see [PeerKind], are prioritized as long as they're not currently
-    /// marked as banned. Peers with a `forkId` are considered better than peers without.
+    /// marked as banned or backed off.
     ///
     /// If `connect_trusted_nodes_only` is enabled, see [PeersConfig], then this will only consider
     /// `trusted` peers.
@@ -611,6 +631,7 @@ impl PeersManager {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
             peer.state.is_unconnected() &&
                 !peer.is_banned() &&
+                !peer.is_backed_off() &&
                 (!self.connect_trusted_nodes_only || peer.is_trusted())
         });
 
@@ -622,19 +643,14 @@ impl PeersManager {
         }
 
         for maybe_better in unconnected {
+            // if the peer is trusted, return it immediately
             if maybe_better.1.is_trusted() {
                 return Some((*maybe_better.0, maybe_better.1))
             }
-            match (maybe_better.1.fork_id.as_ref(), best_peer.1.fork_id.as_ref()) {
-                (Some(_), Some(_)) | (None, None) => {
-                    if maybe_better.1.reputation > best_peer.1.reputation {
-                        best_peer = maybe_better;
-                    }
-                }
-                (Some(_), None) => {
-                    best_peer = maybe_better;
-                }
-                _ => {}
+
+            // otherwise we keep track of the best peer using the reputation
+            if maybe_better.1.reputation > best_peer.1.reputation {
+                best_peer = maybe_better;
             }
         }
         Some((*best_peer.0, best_peer.1))
@@ -701,8 +717,9 @@ impl PeersManager {
                 }
             }
 
-            if self.unban_interval.poll_tick(cx).is_ready() {
-                let (_, unbanned_peers) = self.ban_list.evict(std::time::Instant::now());
+            if self.release_interval.poll_tick(cx).is_ready() {
+                let now = std::time::Instant::now();
+                let (_, unbanned_peers) = self.ban_list.evict(now);
 
                 for peer_id in unbanned_peers {
                     if let Some(peer) = self.peers.get_mut(&peer_id) {
@@ -712,6 +729,18 @@ impl PeersManager {
                     }
                     self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                 }
+
+                // clear the backoff list of expired backoffs, and mark the relevant peers as
+                // ready to be dialed
+                self.backed_off_peers.retain(|peer_id, until| {
+                    if now > *until {
+                        if let Some(peer) = self.peers.get_mut(peer_id) {
+                            peer.backed_off = false;
+                        }
+                        return false
+                    }
+                    true
+                })
             }
 
             if self.refill_slots_interval.poll_tick(cx).is_ready() {
@@ -813,6 +842,8 @@ pub struct Peer {
     remove_after_disconnect: bool,
     /// The kind of peer
     kind: PeerKind,
+    /// Whether the peer is currently backed off.
+    backed_off: bool,
     /// Counts number of times the peer was backed off due to a severe [BackoffKind].
     severe_backoff_counter: u32,
 }
@@ -836,6 +867,7 @@ impl Peer {
             fork_id: None,
             remove_after_disconnect: false,
             kind: Default::default(),
+            backed_off: false,
             severe_backoff_counter: 0,
         }
     }
@@ -844,13 +876,21 @@ impl Peer {
         Self { kind, ..Self::new(addr) }
     }
 
+    /// Resets the reputation of the peer to the default value. This always returns
+    /// [`ReputationChangeOutcome::None`].
+    fn reset_reputation(&mut self) -> ReputationChangeOutcome {
+        self.reputation = DEFAULT_REPUTATION;
+
+        ReputationChangeOutcome::None
+    }
+
     /// Applies a reputation change to the peer and returns what action should be taken.
     fn apply_reputation(&mut self, reputation: i32) -> ReputationChangeOutcome {
         let previous = self.reputation;
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);
 
-        trace!(target: "net::peers", repuation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
+        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();
@@ -872,6 +912,11 @@ impl Peer {
     #[inline]
     fn is_banned(&self) -> bool {
         is_banned_reputation(self.reputation)
+    }
+
+    #[inline]
+    fn is_backed_off(&self) -> bool {
+        self.backed_off
     }
 
     /// Unbans the peer by resetting its reputation
@@ -1350,17 +1395,10 @@ mod test {
         })
         .await;
 
-        assert!(peers.ban_list.is_banned_peer(&peer));
-        assert!(peers.peers.get(&peer).is_some());
+        assert!(peers.backed_off_peers.contains_key(&peer));
+        assert!(peers.peers.get(&peer).unwrap().is_backed_off());
 
         tokio::time::sleep(backoff_durations.low).await;
-
-        match event!(peers) {
-            PeerAction::UnBanPeer { peer_id, .. } => {
-                assert_eq!(peer_id, peer);
-            }
-            _ => unreachable!(),
-        }
 
         match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
@@ -1368,6 +1406,9 @@ mod test {
             }
             _ => unreachable!(),
         }
+
+        assert!(!peers.backed_off_peers.contains_key(&peer));
+        assert!(!peers.peers.get(&peer).unwrap().is_backed_off());
     }
 
     #[tokio::test]
@@ -1417,17 +1458,10 @@ mod test {
         })
         .await;
 
-        assert!(peers.ban_list.is_banned_peer(&peer));
-        assert!(peers.peers.get(&peer).is_some());
+        assert!(peers.backed_off_peers.contains_key(&peer));
+        assert!(peers.peers.get(&peer).unwrap().is_backed_off());
 
         tokio::time::sleep(backoff_durations.high).await;
-
-        match event!(peers) {
-            PeerAction::UnBanPeer { peer_id, .. } => {
-                assert_eq!(peer_id, peer);
-            }
-            _ => unreachable!(),
-        }
 
         match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
@@ -1435,6 +1469,9 @@ mod test {
             }
             _ => unreachable!(),
         }
+
+        assert!(!peers.backed_off_peers.contains_key(&peer));
+        assert!(!peers.peers.get(&peer).unwrap().is_backed_off());
     }
 
     #[tokio::test]
@@ -1693,6 +1730,21 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_reputation_management() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_peer(peer, socket_addr, None);
+        assert_eq!(peers.get_reputation(&peer), Some(0));
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::Other(1024));
+        assert_eq!(peers.get_reputation(&peer), Some(1024));
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::Reset);
+        assert_eq!(peers.get_reputation(&peer), Some(0));
     }
 
     #[tokio::test]

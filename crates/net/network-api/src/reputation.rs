@@ -12,6 +12,16 @@ pub enum ReputationChangeKind {
     BadBlock,
     /// Peer sent a bad transaction messages. E.g. Transactions which weren't recoverable.
     BadTransactions,
+    /// Peer sent a message that included a hash or transaction that we already received from the
+    /// peer.
+    ///
+    /// According to the [Eth spec](https://github.com/ethereum/devp2p/blob/master/caps/eth.md):
+    ///
+    /// > A node should never send a transaction back to a peer that it can determine already knows
+    /// > of it (either because it was previously sent or because it was informed from this peer
+    /// > originally). This is usually achieved by remembering a set of transaction hashes recently
+    /// > relayed by the peer.
+    AlreadySeenTransaction,
     /// Peer failed to respond in time.
     Timeout,
     /// Peer does not adhere to network protocol rules.
@@ -20,6 +30,15 @@ pub enum ReputationChangeKind {
     FailedToConnect,
     /// Connection dropped by peer.
     Dropped,
+    /// Reset the reputation to the default value.
+    Reset,
     /// Apply a reputation change by value
     Other(Reputation),
+}
+
+impl ReputationChangeKind {
+    /// Returns true if the reputation change is a reset.
+    pub fn is_reset(&self) -> bool {
+        matches!(self, Self::Reset)
+    }
 }

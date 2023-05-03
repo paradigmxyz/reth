@@ -165,11 +165,11 @@ where
                 let block = SealedBlock {
                     header: next_header,
                     body: next_body.transactions,
-                    ommers: next_body.ommers.into_iter().map(|h| h.seal_slow()).collect(),
+                    ommers: next_body.ommers,
                     withdrawals: next_body.withdrawals,
                 };
 
-                if let Err(error) = self.consensus.pre_validate_block(&block) {
+                if let Err(error) = self.consensus.validate_block(&block) {
                     // Put the header back and return an error
                     let hash = block.hash();
                     self.headers.push_front(block.header);

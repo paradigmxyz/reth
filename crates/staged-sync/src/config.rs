@@ -4,7 +4,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_network::{NetworkConfigBuilder, PeersConfig};
+use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -18,6 +18,8 @@ pub struct Config {
     pub stages: StageConfig,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
+    /// Configuration for peer sessions.
+    pub sessions: SessionsConfig,
 }
 
 impl Config {
@@ -36,7 +38,10 @@ impl Config {
 
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(secret_key).peer_config(peer_config).discovery(discv4)
+        NetworkConfigBuilder::new(secret_key)
+            .sessions_config(self.sessions.clone())
+            .peer_config(peer_config)
+            .discovery(discv4)
     }
 }
 

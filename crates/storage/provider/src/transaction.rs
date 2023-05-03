@@ -754,15 +754,7 @@ where
             let mut ommers = Vec::new();
             if let Some((block_number, _)) = block_ommers.as_ref() {
                 if *block_number == main_block_number {
-                    // Seal ommers as they dont have hash.
-                    ommers = block_ommers
-                        .take()
-                        .unwrap()
-                        .1
-                        .ommers
-                        .into_iter()
-                        .map(|h| h.seal_slow())
-                        .collect();
+                    ommers = block_ommers.take().unwrap().1.ommers;
                     block_ommers = block_ommers_iter.next();
                 }
             };
@@ -924,10 +916,10 @@ where
             for (address, (account, storage)) in local_plain_state.into_iter() {
                 // revert account
                 if let Some(account) = account {
-                    plain_accounts_cursor.seek_exact(address)?;
+                    let existing_entry = plain_accounts_cursor.seek_exact(address)?;
                     if let Some(account) = account {
                         plain_accounts_cursor.upsert(address, account)?;
-                    } else {
+                    } else if existing_entry.is_some() {
                         plain_accounts_cursor.delete_current()?;
                     }
                 }
@@ -948,7 +940,7 @@ where
                     // TODO: This does not use dupsort features
                     // insert value if needed
                     if storage_value != U256::ZERO {
-                        plain_storage_cursor.insert(address, storage_entry)?;
+                        plain_storage_cursor.upsert(address, storage_entry)?;
                     }
                 }
             }
@@ -959,11 +951,9 @@ where
 
         // loop break if we are at the end of the blocks.
         for (block_number, block_body) in block_bodies.into_iter() {
-            for tx_num in block_body.tx_num_range() {
-                if let Some((receipt_tx_num, receipt)) = receipt_iter.next() {
-                    if tx_num != receipt_tx_num {
-                        block_states.entry(block_number).or_default().add_receipt(receipt);
-                    }
+            for _ in block_body.tx_num_range() {
+                if let Some((_, receipt)) = receipt_iter.next() {
+                    block_states.entry(block_number).or_default().add_receipt(receipt);
                 }
             }
         }
@@ -1034,7 +1024,7 @@ where
         &self,
         block_number: BlockNumber,
     ) -> Result<(), TransactionError> {
-        // iterate over
+        // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.cursor_write::<tables::SyncStage>()?;
         while let Some((stage_name, _)) = cursor.next()? {
             cursor.upsert(stage_name, block_number)?
@@ -1401,7 +1391,7 @@ fn unwind_storage_history_shards<DB: Database>(
 }
 
 /// An error that can occur when using the transaction container
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
 pub enum TransactionError {
     /// The transaction encountered a database error.
     #[error(transparent)]

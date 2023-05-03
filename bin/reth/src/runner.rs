@@ -75,6 +75,12 @@ impl CliRunner {
         let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
         tokio_runtime
             .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
+
+        // drop the tokio runtime on a separate thread because drop blocks until its pools
+        // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
+        // the current thread but we want to exit right away.
+        std::thread::spawn(move || drop(tokio_runtime));
+
         Ok(())
     }
 }

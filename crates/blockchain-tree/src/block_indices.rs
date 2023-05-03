@@ -59,6 +59,14 @@ impl BlockIndices {
         &self.blocks_to_chain
     }
 
+    /// Returns the hash and number of the pending block (the first block in the
+    /// [Self::pending_blocks]) set.
+    pub fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
+        let canonical_tip = self.canonical_tip();
+        let hash = self.fork_to_child.get(&canonical_tip.hash)?.iter().next().copied()?;
+        Some(BlockNumHash { number: canonical_tip.number + 1, hash })
+    }
+
     /// Return all pending block hashes. Pending blocks are considered blocks
     /// that are extending that canonical tip by one block number.
     pub fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
@@ -118,11 +126,15 @@ impl BlockIndices {
     pub fn update_block_hashes(
         &mut self,
         hashes: BTreeMap<u64, BlockHash>,
-    ) -> BTreeSet<BlockChainId> {
-        let mut new_hashes = hashes.iter();
+    ) -> (BTreeSet<BlockChainId>, Vec<BlockNumHash>) {
+        // set new canonical hashes.
+        self.canonical_chain = hashes.clone();
+
+        let mut new_hashes = hashes.into_iter();
         let mut old_hashes = self.canonical_chain().clone().into_iter();
 
-        let mut remove = Vec::new();
+        let mut removed = Vec::new();
+        let mut added = Vec::new();
 
         let mut new_hash = new_hashes.next();
         let mut old_hash = old_hashes.next();
@@ -130,6 +142,11 @@ impl BlockIndices {
         loop {
             let Some(old_block_value) = old_hash else {
                 // end of old_hashes canonical chain. New chain has more block then old chain.
+                while let Some(new) = new_hash {
+                    // add new blocks to added list.
+                    added.push(new.into());
+                    new_hash = new_hashes.next();
+                }
                 break
             };
             let Some(new_block_value) = new_hash else  {
@@ -137,7 +154,7 @@ impl BlockIndices {
                 // remove all present block.
                 // this is mostly not going to happen as reorg should make new chain in Tree.
                 while let Some(rem) = old_hash {
-                    remove.push(rem);
+                    removed.push(rem);
                     old_hash = old_hashes.next();
                 }
                 break;
@@ -146,29 +163,34 @@ impl BlockIndices {
             match new_block_value.0.cmp(&old_block_value.0) {
                 std::cmp::Ordering::Less => {
                     // new chain has more past blocks than old chain
+                    added.push(new_block_value.into());
                     new_hash = new_hashes.next();
                 }
                 std::cmp::Ordering::Equal => {
-                    if *new_block_value.1 != old_block_value.1 {
+                    if new_block_value.1 != old_block_value.1 {
                         // remove block hash as it is different
-                        remove.push(old_block_value);
+                        removed.push(old_block_value);
+                        added.push(new_block_value.into());
                     }
                     new_hash = new_hashes.next();
                     old_hash = old_hashes.next();
                 }
                 std::cmp::Ordering::Greater => {
                     // old chain has more past blocks that new chain
-                    remove.push(old_block_value);
+                    removed.push(old_block_value);
                     old_hash = old_hashes.next()
                 }
             }
         }
-        self.canonical_chain = hashes;
 
-        remove.into_iter().fold(BTreeSet::new(), |mut fold, (number, hash)| {
-            fold.extend(self.remove_block(number, hash));
-            fold
-        })
+        // remove childs of removed blocks
+        (
+            removed.into_iter().fold(BTreeSet::new(), |mut fold, (number, hash)| {
+                fold.extend(self.remove_block(number, hash));
+                fold
+            }),
+            added,
+        )
     }
 
     /// Remove chain from indices and return dependent chains that needs to be removed.
@@ -266,7 +288,7 @@ impl BlockIndices {
     /// this is function that is going to remove N number of last canonical hashes.
     ///
     /// NOTE: This is not safe standalone, as it will not disconnect
-    /// blocks that deppends on unwinded canonical chain. And should be
+    /// blocks that depends on unwinded canonical chain. And should be
     /// used when canonical chain is reinserted inside Tree.
     pub(crate) fn unwind_canonical_chain(&mut self, unwind_to: BlockNumber) {
         // this will remove all blocks numbers that are going to be replaced.
@@ -316,8 +338,8 @@ impl BlockIndices {
     }
 
     /// get canonical hash
-    pub fn canonical_hash(&self, block_number: &BlockNumber) -> Option<BlockHash> {
-        self.canonical_chain.get(block_number).cloned()
+    pub fn canonical_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
+        self.canonical_chain.get(&block_number).cloned()
     }
 
     /// get canonical tip

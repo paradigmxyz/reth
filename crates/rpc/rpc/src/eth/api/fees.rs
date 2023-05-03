@@ -19,6 +19,23 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
+    /// Returns a suggestion for a gas price for legacy transactions.
+    ///
+    /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
+    pub(crate) async fn gas_price(&self) -> EthResult<U256> {
+        let header = self.block(BlockNumberOrTag::Latest);
+        let suggested_tip = self.suggested_priority_fee();
+        let (header, suggested_tip) = futures::try_join!(header, suggested_tip)?;
+        let base_fee = header.and_then(|h| h.base_fee_per_gas).unwrap_or_default();
+        Ok(suggested_tip + U256::from(base_fee))
+    }
+
+    /// Returns a suggestion for the priority fee (the tip)
+    pub(crate) async fn suggested_priority_fee(&self) -> EthResult<U256> {
+        // TODO: properly implement sampling https://github.com/ethereum/pm/issues/328#issuecomment-853234014
+        Ok(U256::from(1e9 as u64))
+    }
+
     /// Reports the fee history, for the given amount of blocks, up until the newest block
     /// provided.
     pub(crate) async fn fee_history(

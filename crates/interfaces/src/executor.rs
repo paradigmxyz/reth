@@ -1,4 +1,4 @@
-use reth_primitives::{BlockHash, BlockNumber, Bloom, H256};
+use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, Bloom, H256};
 use thiserror::Error;
 
 /// BlockExecutor Errors
@@ -39,17 +39,11 @@ pub enum Error {
     #[error(
         "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
-    AppendChainDoesntConnect { chain_tip: (u64, H256), other_chain_fork: (u64, H256) },
+    AppendChainDoesntConnect { chain_tip: BlockNumHash, other_chain_fork: BlockNumHash },
     #[error("Canonical chain header #{block_hash} can't be found ")]
     CanonicalChain { block_hash: BlockHash },
     #[error("Can't insert #{block_number} {block_hash} as last finalized block number is {last_finalized}")]
     PendingBlockIsFinalized {
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        last_finalized: BlockNumber,
-    },
-    #[error("Block #{block_number} ({block_hash:?}) too far into the future. Last finalized block is #{last_finalized}")]
-    PendingBlockIsInFuture {
         block_hash: BlockHash,
         block_number: BlockNumber,
         last_finalized: BlockNumber,

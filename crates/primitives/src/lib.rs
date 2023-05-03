@@ -10,6 +10,7 @@
 //! This crate contains Ethereum primitive types and helper functions.
 
 mod account;
+pub mod basefee;
 mod bits;
 mod block;
 pub mod bloom;
@@ -25,6 +26,7 @@ mod hardfork;
 mod header;
 mod hex_bytes;
 mod integer_list;
+pub mod listener;
 mod log;
 mod net;
 mod peer;
@@ -69,11 +71,12 @@ pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::StorageEntry;
 pub use transaction::{
-    util::secp256k1::sign_message, AccessList, AccessListItem, AccessListWithGasUsed,
-    FromRecoveredTransaction, IntoRecoveredTransaction, InvalidTransactionError, Signature,
-    Transaction, TransactionKind, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxEip1559, TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    util::secp256k1::{recover_signer, sign_message},
+    AccessList, AccessListItem, AccessListWithGasUsed, FromRecoveredTransaction,
+    IntoRecoveredTransaction, InvalidTransactionError, Signature, Transaction, TransactionKind,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
+    TxEip1559, TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;
 

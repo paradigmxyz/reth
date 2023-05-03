@@ -81,17 +81,66 @@ pub(crate) fn get_filter_block_range(
     let mut from_block_number = start_block;
     let mut to_block_number = info.best_number;
 
-    // from block is maximum of block from last poll or `from_block` of filter
+    // if a `from_block` argument is provided then the `from_block_number` is the converted value or
+    // the start block if the converted value is larger than the start block, since `from_block`
+    // can't be a future block: `min(head, from_block)`
     if let Some(filter_from_block) = from_block.and_then(|num| info.convert_block_number(num)) {
-        from_block_number = start_block.max(filter_from_block)
+        from_block_number = start_block.min(filter_from_block)
     }
 
-    // to block is max the best number
+    // upper end of the range is the converted `to_block` argument, restricted by the best block:
+    // `min(best_number,to_block_number)`
     if let Some(filter_to_block) = to_block.and_then(|num| info.convert_block_number(num)) {
-        to_block_number = filter_to_block;
-        if to_block_number > info.best_number {
-            to_block_number = info.best_number;
-        }
+        to_block_number = info.best_number.min(filter_to_block);
     }
+
     (from_block_number, to_block_number)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_log_range_from_and_to() {
+        let from: BlockNumberOrTag = 14000000u64.into();
+        let to: BlockNumberOrTag = 14000100u64.into();
+        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let range = get_filter_block_range(Some(from), Some(to), info.best_number, info);
+        assert_eq!(range, (from.as_number().unwrap(), to.as_number().unwrap()));
+    }
+
+    #[test]
+    fn test_log_range_higher() {
+        let from: BlockNumberOrTag = 15000001u64.into();
+        let to: BlockNumberOrTag = 15000002u64.into();
+        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let range = get_filter_block_range(Some(from), Some(to), info.best_number, info.clone());
+        assert_eq!(range, (info.best_number, info.best_number));
+    }
+
+    #[test]
+    fn test_log_range_from() {
+        let from: BlockNumberOrTag = 14000000u64.into();
+        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let range = get_filter_block_range(Some(from), None, info.best_number, info.clone());
+        assert_eq!(range, (from.as_number().unwrap(), info.best_number));
+    }
+
+    #[test]
+    fn test_log_range_to() {
+        let to: BlockNumberOrTag = 14000000u64.into();
+        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let range = get_filter_block_range(None, Some(to), info.best_number, info.clone());
+        assert_eq!(range, (info.best_number, to.as_number().unwrap()));
+    }
+
+    #[test]
+    fn test_log_range_empty() {
+        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let range = get_filter_block_range(None, None, info.best_number, info.clone());
+
+        // no range given -> head
+        assert_eq!(range, (info.best_number, info.best_number));
+    }
 }

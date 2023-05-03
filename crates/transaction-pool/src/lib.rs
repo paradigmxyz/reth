@@ -4,7 +4,8 @@
     rust_2018_idioms,
     unreachable_pub,
     missing_debug_implementations,
-    rustdoc::broken_intra_doc_links
+    rustdoc::broken_intra_doc_links,
+    unused_crate_dependencies
 )]
 #![doc(test(
     no_crate_inject,
@@ -83,8 +84,9 @@ pub use crate::{
     config::PoolConfig,
     ordering::{CostOrdering, TransactionOrdering},
     traits::{
-        BestTransactions, OnNewBlockEvent, PoolTransaction, PooledTransaction, PropagateKind,
-        PropagatedTransactions, TransactionOrigin, TransactionPool,
+        BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount, PoolTransaction,
+        PooledTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin,
+        TransactionPool,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
@@ -96,14 +98,17 @@ use crate::{
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
+use aquamarine as _;
 use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
+use tracing::{instrument, trace};
 
 mod config;
 pub mod error;
 mod identifier;
+pub mod maintain;
 pub mod metrics;
 mod ordering;
 pub mod pool;
@@ -159,6 +164,13 @@ where
     /// Get the config the pool was configured with.
     pub fn config(&self) -> &PoolConfig {
         self.inner().config()
+    }
+
+    /// Sets the current block info for the pool.
+    #[instrument(skip(self), target = "txpool")]
+    pub fn set_block_info(&self, info: BlockInfo) {
+        trace!(target: "txpool", "updating pool block info");
+        self.pool.set_block_info(info)
     }
 
     /// Returns future that validates all transaction in the given iterator.
@@ -225,12 +237,16 @@ where
 {
     type Transaction = T::Transaction;
 
-    fn status(&self) -> PoolSize {
+    fn pool_size(&self) -> PoolSize {
         self.pool.size()
     }
 
-    fn on_new_block(&self, event: OnNewBlockEvent) {
-        self.pool.on_new_block(event);
+    fn block_info(&self) -> BlockInfo {
+        self.pool.block_info()
+    }
+
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        self.pool.on_canonical_state_change(update);
     }
 
     async fn add_transaction(

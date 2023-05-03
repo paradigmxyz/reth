@@ -2,7 +2,7 @@ use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindI
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{listener::EventListeners, BlockNumber, H256};
 use reth_provider::Transaction;
 use std::{
     fmt::{Debug, Formatter},
@@ -81,7 +81,8 @@ use sync_metrics::*;
 pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     stages: Vec<BoxedStage<DB>>,
     max_block: Option<BlockNumber>,
-    listeners: PipelineEventListeners,
+    continuous: bool,
+    listeners: EventListeners<PipelineEvent>,
     sync_state_updater: Option<U>,
     progress: PipelineProgress,
     tip_tx: Option<watch::Sender<H256>>,
@@ -100,7 +101,8 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
         Self {
             stages: Vec::new(),
             max_block: None,
-            listeners: PipelineEventListeners::default(),
+            continuous: false,
+            listeners: EventListeners::default(),
             sync_state_updater: None,
             progress: PipelineProgress::default(),
             tip_tx: None,
@@ -147,7 +149,7 @@ where
     }
 
     /// Registers progress metrics for each registered stage
-    fn register_metrics(&mut self, db: Arc<DB>) {
+    pub fn register_metrics(&mut self, db: Arc<DB>) {
         for stage in &self.stages {
             let stage_id = stage.id();
             self.metrics.stage_checkpoint(
@@ -159,14 +161,18 @@ where
         }
     }
 
-    /// Consume the pipeline and run it. Return the pipeline and its result as a future.
+    /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
+    /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, db: Arc<DB>, tip: H256) -> PipelineFut<DB, U> {
+    pub fn run_as_fut(mut self, db: Arc<DB>, tip: Option<H256>) -> PipelineFut<DB, U> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         self.register_metrics(db.clone());
         Box::pin(async move {
-            self.set_tip(tip);
+            // NOTE: the tip should only be None if we are in continuous sync mode.
+            if let Some(tip) = tip {
+                self.set_tip(tip);
+            }
             let result = self.run_loop(db).await;
             trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
             (self, result)
@@ -328,6 +334,8 @@ where
                 warn!(
                     target: "sync::pipeline",
                     stage = %stage_id,
+                    max_block = self.max_block,
+                    prev_block = prev_progress,
                     "Stage reached maximum block, skipping."
                 );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });

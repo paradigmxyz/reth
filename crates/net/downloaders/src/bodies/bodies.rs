@@ -584,11 +584,7 @@ mod tests {
             .map(|block| {
                 (
                     block.hash(),
-                    BlockBody {
-                        transactions: block.body,
-                        ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
-                        withdrawals: None,
-                    },
+                    BlockBody { transactions: block.body, ommers: block.ommers, withdrawals: None },
                 )
             })
             .collect::<HashMap<_, _>>();

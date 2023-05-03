@@ -532,6 +532,7 @@ async fn test_shutdown() {
     let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
 
     let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+    let mut listener1 = NetworkEventStream::new(handle1.event_listener());
 
     // Before shutting down, we have two connected peers
     let peer1 = listener0.next_session_established().await.unwrap();
@@ -549,10 +550,13 @@ async fn test_shutdown() {
     assert!(expected_connections.remove(&peer1));
     assert!(expected_connections.remove(&peer2));
 
-    // New connections are rejected
+    // Connected peers receive a shutdown signal
+    let (_peer, reason) = listener1.next_session_closed().await.unwrap();
+    assert_eq!(reason, Some(DisconnectReason::ClientQuitting));
+
+    // New connections ignored
     handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-    let (_peer, reason) = listener0.next_session_closed().await.unwrap();
-    assert_eq!(reason, Some(DisconnectReason::DisconnectRequested));
+    assert_eq!(handle0.num_connected_peers(), 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

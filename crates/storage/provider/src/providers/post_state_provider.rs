@@ -1,4 +1,7 @@
-use crate::{AccountProvider, BlockHashProvider, PostStateDataProvider, StateProvider};
+use crate::{
+    AccountProvider, BlockHashProvider, PostState, PostStateDataProvider, StateProvider,
+    StateRootProvider,
+};
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256, U256};
 
@@ -6,9 +9,9 @@ use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256, U256
 /// underlying state provider.
 pub struct PostStateProvider<SP: StateProvider, PSDP: PostStateDataProvider> {
     /// The inner state provider.
-    pub state_provider: SP,
+    pub(crate) state_provider: SP,
     /// Post state data,
-    pub post_state_data_provider: PSDP,
+    pub(crate) post_state_data_provider: PSDP,
 }
 
 impl<SP: StateProvider, PSDP: PostStateDataProvider> PostStateProvider<SP, PSDP> {
@@ -48,6 +51,16 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> AccountProvider
     }
 }
 
+impl<SP: StateProvider, PSDP: PostStateDataProvider> StateRootProvider
+    for PostStateProvider<SP, PSDP>
+{
+    fn state_root(&self, post_state: PostState) -> Result<H256> {
+        let mut state = self.post_state_data_provider.state().clone();
+        state.extend(post_state);
+        self.state_provider.state_root(state)
+    }
+}
+
 impl<SP: StateProvider, PSDP: PostStateDataProvider> StateProvider for PostStateProvider<SP, PSDP> {
     fn storage(
         &self,
@@ -59,7 +72,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> StateProvider for PostState
                 storage.storage.get(&U256::from_be_bytes(storage_key.to_fixed_bytes()))
             {
                 return Ok(Some(*value))
-            } else if storage.wiped {
+            } else if storage.wiped() {
                 return Ok(Some(U256::ZERO))
             }
         }
@@ -81,6 +94,6 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> StateProvider for PostState
         _address: Address,
         _keys: &[H256],
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
-        Err(ProviderError::HistoryStateRoot.into())
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }

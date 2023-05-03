@@ -40,7 +40,7 @@ use reth_eth_wire::{
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{NodeRecord, PeerId, H256};
+use reth_primitives::{listener::EventListeners, NodeRecord, PeerId, H256};
 use reth_provider::BlockProvider;
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
@@ -94,7 +94,7 @@ pub struct NetworkManager<C> {
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport>,
     /// All listeners for high level network events.
-    event_listeners: NetworkEventListeners,
+    event_listeners: EventListeners<NetworkEvent>,
     /// Sender half to send events to the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
     to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
@@ -494,7 +494,7 @@ where
     fn on_handle_message(&mut self, msg: NetworkHandleMessage) {
         match msg {
             NetworkHandleMessage::EventListener(tx) => {
-                self.event_listeners.listeners.push(tx);
+                self.event_listeners.push_listener(tx);
             }
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
                 if self.handle.mode().is_stake() {
@@ -515,7 +515,10 @@ where
                 .sessions_mut()
                 .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
             NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
-                self.swarm.state_mut().add_peer_kind(peer, kind, addr);
+                // only add peer if we are not shutting down
+                if !self.swarm.is_shutting_down() {
+                    self.swarm.state_mut().add_peer_kind(peer, kind, addr);
+                }
             }
             NetworkHandleMessage::RemovePeer(peer_id, kind) => {
                 self.swarm.state_mut().remove_peer(peer_id, kind);
@@ -536,6 +539,9 @@ where
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);
+            }
+            NetworkHandleMessage::GetReputationById(peer_id, tx) => {
+                let _ = tx.send(self.swarm.state_mut().peers().get_reputation(&peer_id));
             }
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
@@ -637,6 +643,7 @@ where
                         SwarmEvent::SessionEstablished {
                             peer_id,
                             remote_addr,
+                            client_version,
                             capabilities,
                             version,
                             messages,
@@ -649,11 +656,12 @@ where
                             info!(
                                 target : "net",
                                 ?remote_addr,
+                                %client_version,
                                 ?peer_id,
                                 ?total_active,
                                 "Session established"
                             );
-                            debug!(target: "net", peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
+                            debug!(target: "net", kind=%direction, peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
 
                             if direction.is_incoming() {
                                 this.swarm
@@ -661,8 +669,10 @@ where
                                     .peers_mut()
                                     .on_incoming_session_established(peer_id, remote_addr);
                             }
-                            this.event_listeners.send(NetworkEvent::SessionEstablished {
+                            this.event_listeners.notify(NetworkEvent::SessionEstablished {
                                 peer_id,
+                                remote_addr,
+                                client_version,
                                 capabilities,
                                 version,
                                 status,
@@ -671,14 +681,14 @@ where
                         }
                         SwarmEvent::PeerAdded(peer_id) => {
                             trace!(target: "net", ?peer_id, "Peer added");
-                            this.event_listeners.send(NetworkEvent::PeerAdded(peer_id));
+                            this.event_listeners.notify(NetworkEvent::PeerAdded(peer_id));
                             this.metrics
                                 .tracked_peers
                                 .set(this.swarm.state().peers().num_known_peers() as f64);
                         }
                         SwarmEvent::PeerRemoved(peer_id) => {
                             trace!(target: "net", ?peer_id, "Peer dropped");
-                            this.event_listeners.send(NetworkEvent::PeerRemoved(peer_id));
+                            this.event_listeners.notify(NetworkEvent::PeerRemoved(peer_id));
                             this.metrics
                                 .tracked_peers
                                 .set(this.swarm.state().peers().num_known_peers() as f64);
@@ -724,8 +734,12 @@ where
                             if let Some(reason) = reason {
                                 this.disconnect_metrics.increment(reason);
                             }
+                            this.metrics.backed_off_peers.set(
+                                this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
+                                    as f64,
+                            );
                             this.event_listeners
-                                .send(NetworkEvent::SessionClosed { peer_id, reason });
+                                .notify(NetworkEvent::SessionClosed { peer_id, reason });
                         }
                         SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                             warn!(
@@ -754,6 +768,10 @@ where
                             this.metrics
                                 .incoming_connections
                                 .set(this.swarm.state().peers().num_inbound_connections() as f64);
+                            this.metrics.backed_off_peers.set(
+                                this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
+                                    as f64,
+                            );
                         }
                         SwarmEvent::OutgoingPendingSessionClosed {
                             remote_addr,
@@ -788,6 +806,10 @@ where
                             this.metrics
                                 .outgoing_connections
                                 .set(this.swarm.state().peers().num_outbound_connections() as f64);
+                            this.metrics.backed_off_peers.set(
+                                this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
+                                    as f64,
+                            );
                         }
                         SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                             trace!(
@@ -807,6 +829,10 @@ where
                             this.metrics
                                 .outgoing_connections
                                 .set(this.swarm.state().peers().num_outbound_connections() as f64);
+                            this.metrics.backed_off_peers.set(
+                                this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
+                                    as f64,
+                            );
                         }
                         SwarmEvent::BadMessage { peer_id } => {
                             this.swarm.state_mut().peers_mut().apply_reputation_change(
@@ -855,6 +881,10 @@ pub enum NetworkEvent {
     SessionEstablished {
         /// The identifier of the peer to which a session was established.
         peer_id: PeerId,
+        /// The remote addr of the peer to which a session was established.
+        remote_addr: SocketAddr,
+        /// The client version of the peer to which a session was established.
+        client_version: Arc<String>,
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
@@ -868,28 +898,4 @@ pub enum NetworkEvent {
     PeerAdded(PeerId),
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
-}
-
-/// Bundles all listeners for [`NetworkEvent`]s.
-#[derive(Default)]
-struct NetworkEventListeners {
-    /// All listeners for an event
-    listeners: Vec<mpsc::UnboundedSender<NetworkEvent>>,
-}
-
-// === impl NetworkEventListeners ===
-
-impl NetworkEventListeners {
-    /// Sends  the event to all listeners.
-    ///
-    /// Remove channels that got closed.
-    fn send(&mut self, event: NetworkEvent) {
-        self.listeners.retain(|listener| {
-            let open = listener.send(event.clone()).is_ok();
-            if !open {
-                trace!(target : "net", "event listener channel closed",);
-            }
-            open
-        });
-    }
 }
