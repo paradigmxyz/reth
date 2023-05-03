@@ -5,7 +5,7 @@ use jsonrpsee::core::Error as JsonRpseeError;
 use std::{io, io::ErrorKind};
 
 /// Rpc server kind.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ServerKind {
     /// Http.
     Http(SocketAddr),

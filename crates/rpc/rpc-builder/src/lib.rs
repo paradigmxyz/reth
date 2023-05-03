@@ -1060,7 +1060,7 @@ impl RpcServerConfig {
                 builder,
                 http_socket_addr,
                 self.http_cors_domains.take(),
-                ServerKind::Http(ws_socket_addr),
+                ServerKind::Http(http_socket_addr),
             )
             .await?;
             http_local_addr = Some(addr);
