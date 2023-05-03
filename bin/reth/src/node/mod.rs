@@ -239,14 +239,8 @@ impl Command {
 
         let default_peers_path = data_dir.known_peers_path();
 
-        let res = get_secret_key(secret_key_path);
-        let secret_key = match res {
-            Ok(key) => key,
-            Err(e) => {
-                error!(target: "reth::cli", path = secret_key_path.to_str(), error = %e, "Error creating p2p-secret-key");
-                return Err(eyre::eyre!("Error creating p2p-secret-key"))
-            }
-        };
+        info!(target: "reth::cli", path = secret_key_path.to_str(), "Loading p2p-secret-key");
+        let secret_key = get_secret_key(secret_key_path)?;
 
         let network_config = self.load_network_config(
             &config,
