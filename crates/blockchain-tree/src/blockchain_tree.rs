@@ -21,7 +21,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
-use tracing::{info, trace};
+use tracing::{error, info, trace};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Tree of chains and its identifications.
@@ -417,13 +417,17 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Insert a chain into the tree.
     ///
     /// Inserts a chain into the tree and builds the block indices.
-    fn insert_chain(&mut self, chain: AppendableChain) -> BlockChainId {
+    fn insert_chain(&mut self, chain: AppendableChain) -> Option<BlockChainId> {
+        if chain.is_empty() {
+            return None
+        }
         let chain_id = self.block_chain_id_generator;
         self.block_chain_id_generator += 1;
+
         self.block_indices.insert_chain(chain_id, &chain);
         // add chain_id -> chain index
         self.chains.insert(chain_id, chain);
-        chain_id
+        Some(chain_id)
     }
 
     /// Insert a new block in the tree.
@@ -715,17 +719,23 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
             let old_canon_chain = self.revert_canonical(canon_fork.number)?;
 
-            // state action
-            chain_action = CanonStateNotification::Reorg {
-                old: Arc::new(old_canon_chain.clone()),
-                new: Arc::new(new_canon_chain.clone()),
-            };
-
             // commit new canonical chain.
-            self.commit_canonical(new_canon_chain)?;
+            self.commit_canonical(new_canon_chain.clone())?;
 
-            // insert old canon chain
-            self.insert_chain(AppendableChain::new(old_canon_chain));
+            if let Some(old_canon_chain) = old_canon_chain {
+                // state action
+                chain_action = CanonStateNotification::Reorg {
+                    old: Arc::new(old_canon_chain.clone()),
+                    new: Arc::new(new_canon_chain.clone()),
+                };
+                // insert old canon chain
+                self.insert_chain(AppendableChain::new(old_canon_chain));
+            } else {
+                // error here to confirm that we are reverting nothing from db.
+                error!("Reverting nothing from db on block: #{:?}", block_hash);
+
+                chain_action = CanonStateNotification::Commit { new: Arc::new(new_canon_chain) };
+            }
         }
 
         // send notification
@@ -765,12 +775,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let old_canon_chain = self.revert_canonical(unwind_to)?;
 
         // check if there is block in chain
-        if old_canon_chain.blocks().is_empty() {
-            return Ok(())
+        if let Some(old_canon_chain) = old_canon_chain {
+            self.block_indices.unwind_canonical_chain(unwind_to);
+            // insert old canonical chain to BlockchainTree.
+            self.insert_chain(AppendableChain::new(old_canon_chain));
         }
-        self.block_indices.unwind_canonical_chain(unwind_to);
-        // insert old canonical chain to BlockchainTree.
-        self.insert_chain(AppendableChain::new(old_canon_chain));
 
         Ok(())
     }
@@ -778,7 +787,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Revert canonical blocks from the database and return them.
     ///
     /// The block, `revert_until`, is non-inclusive, i.e. `revert_until` stays in the database.
-    fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Chain, Error> {
+    fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Option<Chain>, Error> {
         // read data that is needed for new sidechain
 
         let mut tx = Transaction::new(&self.externals.db)?;
@@ -794,7 +803,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         tx.commit()?;
 
-        Ok(Chain::new(blocks_and_execution))
+        if blocks_and_execution.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(Chain::new(blocks_and_execution)))
+        }
     }
 }
 
