@@ -229,9 +229,25 @@ impl Command {
         }
 
         info!(target: "reth::cli", "Connecting to P2P network");
+        let secret_key_path = self.p2p_secret_key.clone().unwrap_or_default();
         let default_secret_key_path = data_dir.p2p_secret_path();
+
+        let mut secret_key_path = secret_key_path.as_path();
+        if secret_key_path.to_str() == Some("") {
+            secret_key_path = default_secret_key_path.as_path();
+        }
+
         let default_peers_path = data_dir.known_peers_path();
-        let secret_key = get_secret_key(&default_secret_key_path)?;
+
+        let res = get_secret_key(secret_key_path);
+        let secret_key = match res {
+            Ok(key) => key,
+            Err(e) => {
+                error!(target: "reth::cli", path = secret_key_path.to_str(), error = %e, "Error creating p2p-secret-key");
+                return Err(eyre::eyre!("Error creating p2p-secret-key"))
+            }
+        };
+
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),

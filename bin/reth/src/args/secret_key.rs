@@ -28,12 +28,12 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
         Ok(false) => {
             if let Some(dir) = secret_key_path.parent() {
                 // Create parent directory
-                std::fs::create_dir_all(dir)?
+                std::fs::create_dir_all(dir).map_err(SecretKeyError::IOError)?;
             }
 
             let secret = rng_secret_key();
             let hex = hex_encode(secret.as_ref());
-            std::fs::write(secret_key_path, hex)?;
+            std::fs::write(secret_key_path, hex).map_err(SecretKeyError::IOError)?;
             Ok(secret)
         }
         Err(e) => Err(SecretKeyError::IOError(e)),
