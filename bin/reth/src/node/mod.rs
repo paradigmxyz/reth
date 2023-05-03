@@ -425,7 +425,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         db: Arc<Env<WriteMap>>,
         task_executor: &TaskExecutor,
-    ) -> eyre::Result<Pipeline<Env<WriteMap>, NetworkHandle>>
+    ) -> eyre::Result<Pipeline<Env<WriteMap>>>
     where
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
@@ -633,7 +633,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
-    ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
+    ) -> eyre::Result<Pipeline<Env<WriteMap>>>
     where
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,

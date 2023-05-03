@@ -1,7 +1,7 @@
 use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_interfaces::sync::{SyncState, SyncStateUpdater};
+use reth_interfaces::sync::{NoopSyncStateUpdate, SyncState, SyncStateUpdater};
 use reth_primitives::{listener::EventListeners, BlockNumber, H256};
 use reth_provider::Transaction;
 use std::{
@@ -78,12 +78,12 @@ use sync_metrics::*;
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
-pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
+pub struct Pipeline<DB: Database> {
     stages: Vec<BoxedStage<DB>>,
     max_block: Option<BlockNumber>,
     continuous: bool,
     listeners: EventListeners<PipelineEvent>,
-    sync_state_updater: Option<U>,
+    sync_state_updater: Box<dyn SyncStateUpdater>,
     progress: PipelineProgress,
     tip_tx: Option<watch::Sender<H256>>,
     metrics: Metrics,
@@ -91,19 +91,19 @@ pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [Pipeline::run_as_fut].
-pub type PipelineFut<DB, U> = Pin<Box<dyn Future<Output = PipelineWithResult<DB, U>> + Send>>;
+pub type PipelineFut<DB> = Pin<Box<dyn Future<Output = PipelineWithResult<DB>> + Send>>;
 
 /// The pipeline type itself with the result of [Pipeline::run_as_fut]
-pub type PipelineWithResult<DB, U> = (Pipeline<DB, U>, Result<ControlFlow, PipelineError>);
+pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineError>);
 
-impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
+impl<DB: Database> Default for Pipeline<DB> {
     fn default() -> Self {
         Self {
             stages: Vec::new(),
             max_block: None,
             continuous: false,
             listeners: EventListeners::default(),
-            sync_state_updater: None,
+            sync_state_updater: Box::<NoopSyncStateUpdate>::default(),
             progress: PipelineProgress::default(),
             tip_tx: None,
             metrics: Metrics::default(),
@@ -111,7 +111,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
     }
 }
 
-impl<DB: Database, U: SyncStateUpdater> Debug for Pipeline<DB, U> {
+impl<DB: Database> Debug for Pipeline<DB> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
@@ -120,13 +120,12 @@ impl<DB: Database, U: SyncStateUpdater> Debug for Pipeline<DB, U> {
     }
 }
 
-impl<DB, U> Pipeline<DB, U>
+impl<DB> Pipeline<DB>
 where
     DB: Database + 'static,
-    U: SyncStateUpdater + 'static,
 {
     /// Construct a pipeline using a [`PipelineBuilder`].
-    pub fn builder() -> PipelineBuilder<DB, U> {
+    pub fn builder() -> PipelineBuilder<DB> {
         PipelineBuilder::default()
     }
 
@@ -164,7 +163,7 @@ where
     /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
     /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, db: Arc<DB>, tip: Option<H256>) -> PipelineFut<DB, U> {
+    pub fn run_as_fut(mut self, db: Arc<DB>, tip: Option<H256>) -> PipelineFut<DB> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         self.register_metrics(db.clone());
@@ -220,12 +219,10 @@ where
             let stage_id = stage.id();
 
             // Update sync state
-            if let Some(ref updater) = self.sync_state_updater {
-                if stage_id.is_finish() {
-                    updater.update_sync_state(SyncState::Idle);
-                } else {
-                    updater.update_sync_state(SyncState::Syncing);
-                }
+            if stage_id.is_finish() {
+                self.sync_state_updater.update_sync_state(SyncState::Idle);
+            } else {
+                self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
 
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
@@ -245,9 +242,7 @@ where
                 ControlFlow::Continue { progress } => self.progress.update(progress),
                 ControlFlow::Unwind { target, bad_block } => {
                     // reset the sync state
-                    if let Some(ref updater) = self.sync_state_updater {
-                        updater.update_sync_state(SyncState::Syncing);
-                    }
+                    self.sync_state_updater.update_sync_state(SyncState::Syncing);
                     self.unwind(db.as_ref(), target, bad_block).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
@@ -427,7 +422,7 @@ mod tests {
     use crate::{test_utils::TestStage, StageId, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
-    use reth_interfaces::{consensus, provider::ProviderError, sync::NoopSyncStateUpdate};
+    use reth_interfaces::{consensus, provider::ProviderError};
     use tokio_stream::StreamExt;
 
     #[test]
@@ -462,7 +457,7 @@ mod tests {
     async fn run_pipeline() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline: Pipeline<_> = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { stage_progress: 20, done: true })),
@@ -503,7 +498,7 @@ mod tests {
     async fn unwind_pipeline() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { stage_progress: 100, done: true }))
@@ -586,7 +581,7 @@ mod tests {
     async fn unwind_pipeline_with_intermediate_progress() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { stage_progress: 100, done: true }))
@@ -655,7 +650,7 @@ mod tests {
     async fn run_pipeline_with_unwind() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
@@ -718,7 +713,7 @@ mod tests {
     async fn pipeline_error_handling() {
         // Non-fatal
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
@@ -731,7 +726,7 @@ mod tests {
 
         // Fatal
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndices { number: 5 }),
             )))
