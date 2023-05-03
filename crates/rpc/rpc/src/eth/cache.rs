@@ -441,6 +441,7 @@ enum CacheAction {
     CacheNewBlock { block_hash: H256, block: Block },
 }
 
+/// Adding new blocks to the cache
 async fn add_new_blocks_to_cache<St>(eth_state_cache: &EthStateCache, mut events: St)
 where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
@@ -471,6 +472,7 @@ where
                         warn!("Failed to add block into cache: {}", err);
                     });
             }
+            // Old blocks will be taken care of by the LRU cache
             _ => {}
         }
     }
