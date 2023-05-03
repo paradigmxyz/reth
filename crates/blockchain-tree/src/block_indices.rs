@@ -337,9 +337,22 @@ impl BlockIndices {
         lose_chains
     }
 
-    /// get canonical hash
+    /// Returns the block hash of the canonical block with the given number.
     pub fn canonical_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
         self.canonical_chain.get(&block_number).cloned()
+    }
+
+    /// Returns the block number of the canonical block with the given hash.
+    pub fn canonical_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
+        self.canonical_chain.iter().find_map(
+            |(number, hash)| {
+                if *hash == block_hash {
+                    Some(*number)
+                } else {
+                    None
+                }
+            },
+        )
     }
 
     /// get canonical tip
