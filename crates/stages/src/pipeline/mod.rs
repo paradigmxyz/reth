@@ -422,7 +422,7 @@ mod tests {
     use crate::{test_utils::TestStage, StageId, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
-    use reth_interfaces::{consensus, provider::ProviderError, sync::NoopSyncStateUpdate};
+    use reth_interfaces::{consensus, provider::ProviderError};
     use tokio_stream::StreamExt;
 
     #[test]
