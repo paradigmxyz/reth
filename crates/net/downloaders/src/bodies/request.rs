@@ -83,7 +83,7 @@ where
 
     fn on_error(&mut self, error: DownloadError, peer_id: Option<PeerId>) {
         self.metrics.increment_errors(&error);
-        tracing::error!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
+        tracing::debug!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
         if let Some(peer_id) = peer_id {
             self.client.report_bad_message(peer_id);
         }
