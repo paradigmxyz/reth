@@ -20,6 +20,7 @@ use tokio::sync::{
     oneshot,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::warn;
 
 /// The type that can send the response to a requested [Block]
 type BlockResponseSender = oneshot::Sender<Result<Option<Block>>>;
@@ -440,7 +441,7 @@ enum CacheAction {
     CacheNewBlock { block_hash: H256, block: Block },
 }
 
-async fn check_for_new_blocks<St>(eth_state_cache: &EthStateCache, mut events: St)
+async fn add_new_blocks_to_cache<St>(eth_state_cache: &EthStateCache, mut events: St)
 where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
 {
@@ -448,17 +449,27 @@ where
         match event {
             CanonStateNotification::Commit { new } => {
                 let sealed_block_with_senders = new.tip();
-                let _ = eth_state_cache.to_service.send(CacheAction::CacheNewBlock {
-                    block_hash: sealed_block_with_senders.hash,
-                    block: sealed_block_with_senders.block.clone().into(),
-                });
+                eth_state_cache
+                    .to_service
+                    .send(CacheAction::CacheNewBlock {
+                        block_hash: sealed_block_with_senders.hash,
+                        block: sealed_block_with_senders.block.clone().into(),
+                    })
+                    .unwrap_or_else(|err| {
+                        warn!("Failed to add block into cache: {}", err);
+                    });
             }
             CanonStateNotification::Reorg { old: _, new } => {
                 let sealed_block_with_senders = new.tip();
-                let _ = eth_state_cache.to_service.send(CacheAction::CacheNewBlock {
-                    block_hash: sealed_block_with_senders.hash,
-                    block: sealed_block_with_senders.block.clone().into(),
-                });
+                eth_state_cache
+                    .to_service
+                    .send(CacheAction::CacheNewBlock {
+                        block_hash: sealed_block_with_senders.hash,
+                        block: sealed_block_with_senders.block.clone().into(),
+                    })
+                    .unwrap_or_else(|err| {
+                        warn!("Failed to add block into cache: {}", err);
+                    });
             }
             _ => {}
         }
