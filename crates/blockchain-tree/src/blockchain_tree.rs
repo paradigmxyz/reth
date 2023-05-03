@@ -450,7 +450,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
-    /// Validate if block is correct and if i
+    /// Validate if block is correct and meets all consensus rules that can be validated with only
+    /// the block.
     fn validate_block(&self, block: &SealedBlockWithSenders) -> Result<(), Error> {
         if let Err(e) =
             self.externals.consensus.validate_header_with_total_difficulty(block, U256::MAX)
@@ -529,7 +530,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
         }
 
-        // validate block hashes
+        // validate block
         self.validate_block(&block)?;
 
         // try to insert block
