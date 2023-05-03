@@ -11,7 +11,6 @@
 //!
 //! ```no_run
 //! # use reth_db::mdbx::{Env, WriteMap};
-//! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::Factory;
@@ -20,7 +19,7 @@
 //!
 //! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! // Build a pipeline with all offline stages.
-//! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
+//! # let pipeline: Pipeline<Env<WriteMap>> =
 //! Pipeline::builder().add_stages(OfflineStages::new(factory)).build();
 //! ```
 //!

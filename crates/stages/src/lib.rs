@@ -25,7 +25,6 @@
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
-//! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient, TestStatusUpdater};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::{PeerId, MAINNET, H256};
@@ -47,7 +46,7 @@
 //! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! # let (status_updater, _) = TestStatusUpdater::new();
 //! // Create a pipeline that can fully sync
-//! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
+//! # let pipeline: Pipeline<Env<WriteMap>> =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
 //!     .add_stages(
