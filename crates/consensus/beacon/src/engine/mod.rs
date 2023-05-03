@@ -5,7 +5,6 @@ use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
     consensus::ForkchoiceState,
     executor::Error as ExecutorError,
-    sync::SyncStateUpdater,
     Error,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
@@ -135,11 +134,10 @@ impl BeaconConsensusEngineHandle {
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, TS, U, BT>
+pub struct BeaconConsensusEngine<DB, TS, BT>
 where
     DB: Database,
     TS: TaskSpawner,
-    U: SyncStateUpdater,
     BT: BlockchainTreeEngine,
 {
     /// The database handle.
@@ -149,7 +147,7 @@ where
     /// The current state of the pipeline.
     /// Must always be [Some] unless the state is being reevaluated.
     /// The pipeline is used for historical sync by setting the current forkchoice head.
-    pipeline_state: Option<PipelineState<DB, U>>,
+    pipeline_state: Option<PipelineState<DB>>,
     /// The blockchain tree used for live sync and reorg tracking.
     blockchain_tree: BT,
     /// The Engine API message receiver.
@@ -178,18 +176,17 @@ where
     metrics: Metrics,
 }
 
-impl<DB, TS, U, BT> BeaconConsensusEngine<DB, TS, U, BT>
+impl<DB, TS, BT> BeaconConsensusEngine<DB, TS, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner,
-    U: SyncStateUpdater + 'static,
     BT: BlockchainTreeEngine + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
     pub fn new(
         db: Arc<DB>,
         task_spawner: TS,
-        pipeline: Pipeline<DB, U>,
+        pipeline: Pipeline<DB>,
         blockchain_tree: BT,
         max_block: Option<BlockNumber>,
         continuous: bool,
@@ -215,7 +212,7 @@ where
     pub fn with_channel(
         db: Arc<DB>,
         task_spawner: TS,
-        pipeline: Pipeline<DB, U>,
+        pipeline: Pipeline<DB>,
         blockchain_tree: BT,
         max_block: Option<BlockNumber>,
         continuous: bool,
@@ -553,9 +550,9 @@ where
     /// Resets the next action to the default value.
     fn next_pipeline_state(
         &mut self,
-        pipeline: Pipeline<DB, U>,
+        pipeline: Pipeline<DB>,
         forkchoice_state: ForkchoiceState,
-    ) -> PipelineState<DB, U> {
+    ) -> PipelineState<DB> {
         let next_action = std::mem::take(&mut self.next_action);
 
         let (tip, should_run_pipeline) = match next_action {
@@ -639,11 +636,10 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, TS, U, BT> Future for BeaconConsensusEngine<DB, TS, U, BT>
+impl<DB, TS, BT> Future for BeaconConsensusEngine<DB, TS, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner + Unpin,
-    U: SyncStateUpdater + Unpin + 'static,
     BT: BlockchainTreeEngine + Unpin + 'static,
 {
     type Output = Result<(), BeaconEngineError>;
@@ -805,7 +801,7 @@ mod tests {
         BlockchainTree, ShareableBlockchainTree,
     };
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
-    use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
+    use reth_interfaces::test_utils::TestConsensus;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::{test_utils::TestExecutorFactory, Transaction};
@@ -820,7 +816,6 @@ mod tests {
     type TestBeaconConsensusEngine = BeaconConsensusEngine<
         Env<WriteMap>,
         TokioTaskExecutor,
-        NoopSyncStateUpdate,
         ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
     >;
 

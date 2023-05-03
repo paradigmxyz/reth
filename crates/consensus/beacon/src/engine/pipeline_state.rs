@@ -1,5 +1,4 @@
 use reth_db::database::Database;
-use reth_interfaces::sync::SyncStateUpdater;
 use reth_stages::{Pipeline, PipelineWithResult};
 use tokio::sync::oneshot;
 
@@ -12,14 +11,14 @@ use tokio::sync::oneshot;
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-pub enum PipelineState<DB: Database, U: SyncStateUpdater> {
+pub enum PipelineState<DB: Database> {
     /// Pipeline is idle.
-    Idle(Pipeline<DB, U>),
+    Idle(Pipeline<DB>),
     /// Pipeline is running.
-    Running(oneshot::Receiver<PipelineWithResult<DB, U>>),
+    Running(oneshot::Receiver<PipelineWithResult<DB>>),
 }
 
-impl<DB: Database, U: SyncStateUpdater> PipelineState<DB, U> {
+impl<DB: Database> PipelineState<DB> {
     /// Returns `true` if the state matches idle.
     pub fn is_idle(&self) -> bool {
         matches!(self, PipelineState::Idle(_))
