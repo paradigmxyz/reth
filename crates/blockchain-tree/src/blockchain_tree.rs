@@ -5,7 +5,10 @@ use crate::{
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
-    blockchain_tree::BlockStatus, consensus::Consensus, executor::Error as ExecError, Error,
+    blockchain_tree::BlockStatus,
+    consensus::{Consensus, ConsensusError},
+    executor::Error as ExecError,
+    Error,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, SealedBlock, SealedBlockWithSenders,
@@ -309,8 +312,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             return status
         }
 
+        let canonical_parent_block = self.block_indices.canonical_hash(parent.number);
+
         // if not found, check if the parent can be found inside canonical chain.
-        if Some(parent.hash) == self.block_indices.canonical_hash(parent.number) {
+        if Some(parent.hash) == canonical_parent_block {
             // create new chain that points to that block
             //return self.fork_canonical_chain(block.clone());
             // TODO save pending block to database
@@ -354,6 +359,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             return Ok(block_status)
         }
 
+        // this is another check to ensure that if the block points to a canonical block its block
+        // is valid
+        if let Some(canonical_parent_number) =
+            self.block_indices.canonical_number(block.parent_hash)
+        {
+            // we found the parent block in canonical chain
+            if canonical_parent_number != parent.number {
+                return Err(Error::Consensus(ConsensusError::ParentBlockNumberMismatch {
+                    parent_block_number: canonical_parent_number,
+                    block_number: block.number,
+                }))
+            }
+        }
+
         // if there is a parent inside the buffer, validate against it.
         if let Some(buffered_parent) = self.buffered_blocks.block(parent) {
             self.externals.consensus.validate_header_against_parent(&block, buffered_parent)?
@@ -361,7 +380,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // insert block inside unconnected block buffer. Delaying it execution.
         self.buffered_blocks.insert_block(block);
-
         Ok(BlockStatus::Disconnected)
     }
 
