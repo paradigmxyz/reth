@@ -11,9 +11,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
-use reth_interfaces::{
-    consensus::Consensus, p2p::headers::client::NoopStatusUpdater, sync::SyncStateUpdater,
-};
+use reth_interfaces::{consensus::Consensus, p2p::headers::client::NoopStatusUpdater};
 use reth_primitives::{ChainSpec, H256};
 use reth_staged_sync::{
     utils::{
@@ -131,7 +129,7 @@ impl ImportCommand {
         db: Arc<Env<WriteMap>>,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
-    ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
+    ) -> eyre::Result<(Pipeline<Env<WriteMap>>, impl Stream<Item = NodeEvent>)>
     where
         C: Consensus + 'static,
     {
