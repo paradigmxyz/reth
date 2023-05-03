@@ -141,7 +141,8 @@ pub trait EthTransactions: Send + Sync {
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
-    /// Before the transaction is traced, all previous transaction in the block are applied to the state by executing them first
+    /// Before the transaction is traced, all previous transaction in the block are applied to the
+    /// state by executing them first
     async fn trace_transaction_in_block<F, R>(
         &self,
         hash: H256,
