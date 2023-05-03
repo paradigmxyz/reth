@@ -5496,9 +5496,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "3.2.0"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "764e81b1a98e1df07a304c9bd28ed5632e85647e5124117ce87634f66fe86783"
+checksum = "f293f351c4c203d321744e54ed7eed3d2b6eef4c140228910dde3ac9a5ea8031"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -5507,9 +5507,9 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f408c834f251dc33ca424b027c132f2cfe541335c5d9895e04d2987f9cfd071"
+checksum = "a53980a26f9b5a66d13511c35074d4b53631e157850a1d7cf1af4efc2c2b72c9"
 dependencies = [
  "derive_more",
  "enumn",
@@ -5536,9 +5536,9 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "180427e1169b860ab63eaa5bcff158010073646abf3312aed11a1d7aa1aa8291"
+checksum = "304d998f466ffef72d76c7f20b05bf08a96801736a6fb1fdef47d49a292618df"
 dependencies = [
  "arbitrary",
  "auto_impl",
@@ -5637,8 +5637,8 @@ dependencies = [
 
 [[package]]
 name = "ruint"
-version = "1.7.0"
-source = "git+https://github.com/paradigmxyz/uint#f496239f58dcaa11cf275f292f50c971bbccfbad"
+version = "1.8.0"
+source = "git+https://github.com/paradigmxyz/uint#38f565ff907ccaf2a2c57d395ed7c2b8905ae1ab"
 dependencies = [
  "arbitrary",
  "derive_more",
@@ -5654,7 +5654,7 @@ dependencies = [
 [[package]]
 name = "ruint-macro"
 version = "1.0.2"
-source = "git+https://github.com/paradigmxyz/uint#f496239f58dcaa11cf275f292f50c971bbccfbad"
+source = "git+https://github.com/paradigmxyz/uint#38f565ff907ccaf2a2c57d395ed7c2b8905ae1ab"
 
 [[package]]
 name = "rustc-demangle"
