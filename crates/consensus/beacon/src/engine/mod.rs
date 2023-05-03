@@ -275,9 +275,20 @@ where
         parent_hash: H256,
         tree_error: Option<&Error>,
     ) -> Option<H256> {
-        // check pre merge block error
-        if let Some(Error::Execution(ExecutorError::BlockPreMerge { .. })) = tree_error {
-            return Some(H256::zero())
+        // handle errors that require zero hash
+        if let Some(err) = tree_error {
+            match err {
+                Error::Execution(ExecutorError::BlockPreMerge { .. }) => {
+                    // check pre merge block error
+                    return Some(H256::zero())
+                }
+                Error::Consensus(_) => {
+                   // terminal block conditions are not satisfied
+                   // > {status: INVALID, latestValidHash: 0x0000000000000000000000000000000000000000000000000000000000000000, validationError: errorMessage | null} if terminal block conditions are not satisfied
+                   return Some(H256::zero())
+               }
+                _ => {}
+            }
         }
 
         self.blockchain_tree.find_canonical_ancestor(parent_hash)
