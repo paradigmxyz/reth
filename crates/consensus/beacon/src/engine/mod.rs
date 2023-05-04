@@ -20,7 +20,6 @@ use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{
@@ -141,7 +140,7 @@ where
     BT: BlockchainTreeEngine,
 {
     /// The database handle.
-    db: Arc<DB>,
+    db: DB,
     /// Task spawner for spawning the pipeline.
     task_spawner: TS,
     /// The current state of the pipeline.
@@ -184,7 +183,7 @@ where
 {
     /// Create a new instance of the [BeaconConsensusEngine].
     pub fn new(
-        db: Arc<DB>,
+        db: DB,
         task_spawner: TS,
         pipeline: Pipeline<DB>,
         blockchain_tree: BT,
@@ -210,7 +209,7 @@ where
     /// the [BeaconEngineMessage] communication channel.
     #[allow(clippy::too_many_arguments)]
     pub fn with_channel(
-        db: Arc<DB>,
+        db: DB,
         task_spawner: TS,
         pipeline: Pipeline<DB>,
         blockchain_tree: BT,
@@ -570,11 +569,10 @@ where
             self.metrics.pipeline_runs.increment(1);
             trace!(target: "consensus::engine", ?tip, continuous = tip.is_none(), "Starting the pipeline");
             let (tx, rx) = oneshot::channel();
-            let db = self.db.clone();
             self.task_spawner.spawn_critical_blocking(
                 "pipeline",
                 Box::pin(async move {
-                    let result = pipeline.run_as_fut(db, tip).await;
+                    let result = pipeline.run_as_fut(tip).await;
                     let _ = tx.send(result);
                 }),
             );
@@ -768,7 +766,7 @@ enum PipelineTarget {
     Safe,
 }
 
-/// Keeps track of invalid headerst.
+/// Keeps track of invalid headers.
 struct InvalidHeaderCache {
     headers: LruMap<H256, Header>,
 }
@@ -807,20 +805,20 @@ mod tests {
     use reth_provider::{test_utils::TestExecutorFactory, Transaction};
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
-    use std::{collections::VecDeque, time::Duration};
+    use std::{collections::VecDeque, sync::Arc, time::Duration};
     use tokio::sync::{
         oneshot::{self, error::TryRecvError},
         watch,
     };
 
     type TestBeaconConsensusEngine = BeaconConsensusEngine<
-        Env<WriteMap>,
+        Arc<Env<WriteMap>>,
         TokioTaskExecutor,
         ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
     >;
 
     struct TestEnv<DB> {
-        db: Arc<DB>,
+        db: DB,
         // Keep the tip receiver around, so it's not dropped.
         #[allow(dead_code)]
         tip_rx: watch::Receiver<H256>,
@@ -829,7 +827,7 @@ mod tests {
 
     impl<DB> TestEnv<DB> {
         fn new(
-            db: Arc<DB>,
+            db: DB,
             tip_rx: watch::Receiver<H256>,
             engine_handle: BeaconConsensusEngineHandle,
         ) -> Self {
@@ -883,7 +881,7 @@ mod tests {
         chain_spec: Arc<ChainSpec>,
         pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
         executor_results: Vec<PostState>,
-    ) -> (TestBeaconConsensusEngine, TestEnv<Env<WriteMap>>) {
+    ) -> (TestBeaconConsensusEngine, TestEnv<Arc<Env<WriteMap>>>) {
         reth_tracing::init_test_tracing();
         let db = create_test_rw_db();
         let consensus = TestConsensus::default();
@@ -897,7 +895,7 @@ mod tests {
         let pipeline = Pipeline::builder()
             .add_stages(TestStages::new(pipeline_exec_outputs, Default::default()))
             .with_tip_sender(tip_tx)
-            .build();
+            .build(db.clone());
 
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
