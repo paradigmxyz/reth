@@ -6,7 +6,8 @@ use clap::{crate_version, Parser};
 use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
-use reth_db::mdbx::{Env, WriteMap};
+
+use reth_db::database::Database;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
@@ -104,7 +105,7 @@ impl ImportCommand {
         info!(target: "reth::cli", "Chain file imported");
 
         let (mut pipeline, events) =
-            self.build_import_pipeline(config, db.clone(), &consensus, file_client).await?;
+            self.build_import_pipeline(config, db, &consensus, file_client).await?;
 
         // override the tip
         pipeline.set_tip(tip);
@@ -115,7 +116,7 @@ impl ImportCommand {
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
         tokio::select! {
-            res = pipeline.run(db.clone()) => res?,
+            res = pipeline.run() => res?,
             _ = tokio::signal::ctrl_c() => {},
         };
 
@@ -123,14 +124,15 @@ impl ImportCommand {
         Ok(())
     }
 
-    async fn build_import_pipeline<C>(
+    async fn build_import_pipeline<DB, C>(
         &self,
         config: Config,
-        db: Arc<Env<WriteMap>>,
+        db: DB,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
-    ) -> eyre::Result<(Pipeline<Env<WriteMap>>, impl Stream<Item = NodeEvent>)>
+    ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
+        DB: Database + Clone + Unpin + 'static,
         C: Consensus + 'static,
     {
         if !file_client.has_canonical_blocks() {
@@ -142,7 +144,7 @@ impl ImportCommand {
             .into_task();
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(file_client.clone(), consensus.clone(), db)
+            .build(file_client.clone(), consensus.clone(), db.clone())
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
@@ -171,7 +173,7 @@ impl ImportCommand {
                 })
                 .set(ExecutionStage::new(factory, config.stages.execution.commit_threshold)),
             )
-            .build();
+            .build(db);
 
         let events = pipeline.events().map(Into::into);
 

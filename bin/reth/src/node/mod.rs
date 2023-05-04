@@ -412,22 +412,23 @@ impl Command {
     }
 
     /// Constructs a [Pipeline] that's wired to the network
-    async fn build_networked_pipeline<Client>(
+    async fn build_networked_pipeline<DB, Client>(
         &self,
         config: &mut Config,
         network: NetworkHandle,
         client: Client,
         consensus: Arc<dyn Consensus>,
-        db: Arc<Env<WriteMap>>,
+        db: DB,
         task_executor: &TaskExecutor,
-    ) -> eyre::Result<Pipeline<Env<WriteMap>>>
+    ) -> eyre::Result<Pipeline<DB>>
     where
+        DB: Database + Unpin + Clone + 'static,
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(db.clone(), &client, tip).await?)
+            Some(self.lookup_or_fetch_tip(&db, &client, tip).await?)
         } else {
             None
         };
@@ -443,6 +444,7 @@ impl Command {
 
         let pipeline = self
             .build_pipeline(
+                db,
                 config,
                 header_downloader,
                 body_downloader,
@@ -541,13 +543,14 @@ impl Command {
     /// If it doesn't exist, download the header and return the block number.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn lookup_or_fetch_tip<Client>(
+    async fn lookup_or_fetch_tip<DB, Client>(
         &self,
-        db: Arc<Env<WriteMap>>,
+        db: &DB,
         client: Client,
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error>
     where
+        DB: Database,
         Client: HeadersClient,
     {
         Ok(self.fetch_tip(db, client, BlockHashOrNumber::Hash(tip)).await?.number)
@@ -556,13 +559,14 @@ impl Command {
     /// Attempt to look up the block with the given number and return the header.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn fetch_tip<Client>(
+    async fn fetch_tip<DB, Client>(
         &self,
-        db: Arc<Env<WriteMap>>,
+        db: &DB,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error>
     where
+        DB: Database,
         Client: HeadersClient,
     {
         let header = db.view(|tx| -> Result<Option<Header>, reth_db::Error> {
@@ -619,8 +623,9 @@ impl Command {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn build_pipeline<H, B, U>(
+    async fn build_pipeline<DB, H, B, U>(
         &self,
+        db: DB,
         config: &Config,
         header_downloader: H,
         body_downloader: B,
@@ -628,8 +633,9 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
-    ) -> eyre::Result<Pipeline<Env<WriteMap>>>
+    ) -> eyre::Result<Pipeline<DB>>
     where
+        DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
         U: SyncStateUpdater + StatusUpdater + Clone + 'static,
@@ -687,7 +693,7 @@ impl Command {
                 .disable_if(MERKLE_UNWIND, || self.auto_mine)
                 .disable_if(MERKLE_EXECUTION, || self.auto_mine),
             )
-            .build();
+            .build(db);
 
         Ok(pipeline)
     }

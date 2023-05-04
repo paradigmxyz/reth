@@ -10,17 +10,18 @@
 //! # Examples
 //!
 //! ```no_run
-//! # use reth_db::mdbx::{Env, WriteMap};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
 //! # use std::sync::Arc;
+//! use reth_db::mdbx::test_utils::create_test_rw_db;
 //!
 //! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let db = create_test_rw_db();
 //! // Build a pipeline with all offline stages.
-//! # let pipeline: Pipeline<Env<WriteMap>> =
-//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build();
+//! # let pipeline =
+//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db);
 //! ```
 //!
 //! ```ignore
