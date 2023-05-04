@@ -10,7 +10,6 @@
 //! # Examples
 //!
 //! ```no_run
-//! # use reth_db::mdbx::{Env, WriteMap};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::Factory;
