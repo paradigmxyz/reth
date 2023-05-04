@@ -97,13 +97,6 @@ pub struct Command {
     #[arg(long, value_name = "PATH", verbatim_doc_comment)]
     db: Option<PathBuf>,
 
-    /// Secret key to use for this node.
-    ///
-    /// This will also deterministically set the peer ID. If not specified, it will be set in the
-    /// data dir for the chain being used.
-    #[arg(long, value_name = "PATH", global = true, required = false)]
-    p2p_secret_key: Option<PathBuf>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -229,9 +222,11 @@ impl Command {
         }
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let default_secret_key_path = data_dir.p2p_secret_path();
+        let network_secret_path =
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
+        let secret_key = get_secret_key(&network_secret_path)?;
         let default_peers_path = data_dir.known_peers_path();
-        let secret_key = get_secret_key(&default_secret_key_path)?;
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
@@ -377,7 +372,7 @@ impl Command {
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
-        // extract the jwt secret from the the args if possible
+        // extract the jwt secret from the args if possible
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
