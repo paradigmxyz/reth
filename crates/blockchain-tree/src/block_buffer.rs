@@ -11,9 +11,10 @@ pub type BufferedBlocks = BTreeMap<BlockNumber, HashMap<BlockHash, SealedBlockWi
 /// It allows us to store unconnected blocks for potential inclusion.
 ///
 /// It has three main functionality:
-/// * `insert_block` for inserting blocks inside the buffer.
-/// * `take_all_childrens` for connecting blocks if the parent gets received and inserted.
-/// * `clean_old_blocks` to clear old blocks that are below finalized line.
+/// * [BlockBuffer::insert_block] for inserting blocks inside the buffer.
+/// * [BlockBuffer::take_all_children] for connecting blocks if the parent gets received and
+///   inserted.
+/// * [BlockBuffer::clean_old_blocks] to clear old blocks that are below finalized line.
 ///
 /// Note: Buffer is limited by number of blocks that it can contains and eviction of the block
 /// is done by last recently used block.
@@ -67,7 +68,7 @@ impl BlockBuffer {
     ///
     /// Note: that order of returned blocks is important and the blocks with lower block number
     /// in the chain will come first so that they can be executed in the correct order.
-    pub fn take_all_childrens(&mut self, parent: BlockNumHash) -> Vec<SealedBlockWithSenders> {
+    pub fn take_all_children(&mut self, parent: BlockNumHash) -> Vec<SealedBlockWithSenders> {
         // remove parent block if present
         let mut taken = Vec::new();
         if let Some(block) = self.remove_from_blocks(&parent) {
@@ -211,7 +212,7 @@ mod tests {
         buffer.insert_block(block4);
 
         assert_eq!(buffer.len(), 4);
-        assert_eq!(buffer.take_all_childrens(main_parent), vec![block1, block2, block3]);
+        assert_eq!(buffer.take_all_children(main_parent), vec![block1, block2, block3]);
         assert_eq!(buffer.len(), 1);
     }
 
@@ -233,7 +234,7 @@ mod tests {
         assert_eq!(buffer.len(), 4);
         assert_eq!(
             buffer
-                .take_all_childrens(main_parent)
+                .take_all_children(main_parent)
                 .into_iter()
                 .map(|b| (b.hash, b))
                 .collect::<HashMap<_, _>>(),
@@ -265,7 +266,7 @@ mod tests {
         assert_eq!(buffer.len(), 4);
         assert_eq!(
             buffer
-                .take_all_childrens(block1.num_hash())
+                .take_all_children(block1.num_hash())
                 .into_iter()
                 .map(|b| (b.hash, b))
                 .collect::<HashMap<_, _>>(),

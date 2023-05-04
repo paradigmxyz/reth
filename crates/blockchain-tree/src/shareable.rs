@@ -92,7 +92,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
 
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
         trace!(target: "blockchain_tree", "Returning canonical blocks in tree");
-        self.tree.read().block_indices().canonical_chain().clone()
+        self.tree.read().block_indices().canonical_chain().inner().clone()
     }
 
     fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {

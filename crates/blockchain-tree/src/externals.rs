@@ -17,13 +17,13 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct TreeExternals<DB, C, EF> {
     /// The database, used to commit the canonical chain, or unwind it.
-    pub db: DB,
+    pub(crate) db: DB,
     /// The consensus engine.
-    pub consensus: C,
+    pub(crate) consensus: C,
     /// The executor factory to execute blocks with.
-    pub executor_factory: EF,
+    pub(crate) executor_factory: EF,
     /// The chain spec.
-    pub chain_spec: Arc<ChainSpec>,
+    pub(crate) chain_spec: Arc<ChainSpec>,
 }
 
 impl<DB, C, EF> TreeExternals<DB, C, EF> {

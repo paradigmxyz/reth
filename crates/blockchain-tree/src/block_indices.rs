@@ -1,6 +1,7 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
 use super::chain::BlockChainId;
+use crate::canonical_chain::CanonicalChain;
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
 use reth_provider::Chain;
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
@@ -18,7 +19,7 @@ pub struct BlockIndices {
     /// Canonical chain. Contains N number (depends on `finalization_depth`) of blocks.
     /// These blocks are found in fork_to_child but not inside `blocks_to_chain` or
     /// `number_to_block` as those are chain specific indices.
-    canonical_chain: BTreeMap<BlockNumber, BlockHash>,
+    canonical_chain: CanonicalChain,
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
     /// NOTE: It contains just a blocks that are forks as a key and not all blocks.
     fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
@@ -37,7 +38,7 @@ impl BlockIndices {
     ) -> Self {
         Self {
             last_finalized_block,
-            canonical_chain,
+            canonical_chain: CanonicalChain::new(canonical_chain),
             fork_to_child: Default::default(),
             blocks_to_chain: Default::default(),
             index_number_to_block: Default::default(),
@@ -83,7 +84,7 @@ impl BlockIndices {
 
     /// Check if block hash belongs to canonical chain.
     pub fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
-        self.canonical_chain.range(self.last_finalized_block..).any(|(_, &h)| h == *block_hash)
+        self.canonical_chain.is_block_hash_canonical(self.last_finalized_block, block_hash)
     }
 
     /// Last finalized block
@@ -92,7 +93,7 @@ impl BlockIndices {
     }
 
     /// Insert non fork block.
-    pub fn insert_non_fork_block(
+    pub(crate) fn insert_non_fork_block(
         &mut self,
         block_number: BlockNumber,
         block_hash: BlockHash,
@@ -103,7 +104,7 @@ impl BlockIndices {
     }
 
     /// Insert block to chain and fork child indices of the new chain
-    pub fn insert_chain(&mut self, chain_id: BlockChainId, chain: &Chain) {
+    pub(crate) fn insert_chain(&mut self, chain_id: BlockChainId, chain: &Chain) {
         for (number, block) in chain.blocks().iter() {
             // add block -> chain_id index
             self.blocks_to_chain.insert(block.hash(), chain_id);
@@ -116,19 +117,19 @@ impl BlockIndices {
     }
 
     /// Get the chain ID the block belongs to
-    pub fn get_blocks_chain_id(&self, block: &BlockHash) -> Option<BlockChainId> {
+    pub(crate) fn get_blocks_chain_id(&self, block: &BlockHash) -> Option<BlockChainId> {
         self.blocks_to_chain.get(block).cloned()
     }
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
     /// them. Remove all missmatches, disconnect them and return all chains that needs to be
     /// removed.
-    pub fn update_block_hashes(
+    pub(crate) fn update_block_hashes(
         &mut self,
         hashes: BTreeMap<u64, BlockHash>,
     ) -> (BTreeSet<BlockChainId>, Vec<BlockNumHash>) {
         // set new canonical hashes.
-        self.canonical_chain = hashes.clone();
+        self.canonical_chain.replace(hashes.clone());
 
         let mut new_hashes = hashes.into_iter();
         let mut old_hashes = self.canonical_chain().clone().into_iter();
@@ -249,7 +250,7 @@ impl BlockIndices {
         let first_number = *blocks.first_key_value().unwrap().0;
 
         // this will remove all blocks numbers that are going to be replaced.
-        self.canonical_chain.retain(|num, _| *num < first_number);
+        self.canonical_chain.retain(|&number, _| number < first_number);
 
         // remove them from block to chain_id index
         blocks.iter().map(|(_, b)| (b.number, b.hash(), b.parent_hash)).for_each(
@@ -308,8 +309,8 @@ impl BlockIndices {
         let finalized_blocks: Vec<BlockHash> = self
             .canonical_chain
             .iter()
-            .filter(|(&number, _)| number >= self.last_finalized_block && number < finalized_block)
-            .map(|(_, hash)| *hash)
+            .filter(|(number, _)| *number >= self.last_finalized_block && *number < finalized_block)
+            .map(|(_, hash)| hash)
             .collect();
 
         // remove unneeded canonical hashes.
@@ -338,33 +339,26 @@ impl BlockIndices {
     }
 
     /// Returns the block hash of the canonical block with the given number.
-    pub fn canonical_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
-        self.canonical_chain.get(&block_number).cloned()
+    #[inline]
+    pub fn canonical_hash(&self, block_number: &BlockNumber) -> Option<BlockHash> {
+        self.canonical_chain.canonical_hash(block_number)
     }
 
     /// Returns the block number of the canonical block with the given hash.
+    #[inline]
     pub fn canonical_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
-        self.canonical_chain.iter().find_map(
-            |(number, hash)| {
-                if *hash == block_hash {
-                    Some(*number)
-                } else {
-                    None
-                }
-            },
-        )
+        self.canonical_chain.canonical_number(block_hash)
     }
 
     /// get canonical tip
+    #[inline]
     pub fn canonical_tip(&self) -> BlockNumHash {
-        self.canonical_chain
-            .last_key_value()
-            .map(|(&number, &hash)| BlockNumHash { number, hash })
-            .unwrap_or_default()
+        self.canonical_chain.tip()
     }
 
     /// Canonical chain needed for execution of EVM. It should contains last 256 block hashes.
-    pub fn canonical_chain(&self) -> &BTreeMap<BlockNumber, BlockHash> {
+    #[inline]
+    pub(crate) fn canonical_chain(&self) -> &CanonicalChain {
         &self.canonical_chain
     }
 }
