@@ -448,18 +448,7 @@ where
 {
     while let Some(event) = events.next().await {
         match event {
-            CanonStateNotification::Commit { new } => {
-                let sealed_block_with_senders = new.tip();
-                eth_state_cache
-                    .to_service
-                    .send(CacheAction::CacheNewBlock {
-                        block_hash: sealed_block_with_senders.hash,
-                        block: sealed_block_with_senders.block.clone().into(),
-                    })
-                    .unwrap_or_else(|err| {
-                        warn!("Failed to add block into cache: {}", err);
-                    });
-            }
+            CanonStateNotification::Commit { new } |
             CanonStateNotification::Reorg { old: _, new } => {
                 let sealed_block_with_senders = new.tip();
                 eth_state_cache
