@@ -1,23 +1,25 @@
-use crate::{Pipeline, Stage, StageSet};
+use crate::{pipeline::BoxedStage, Pipeline, Stage, StageId, StageSet};
 use reth_db::database::Database;
-use reth_interfaces::sync::SyncStateUpdater;
+use reth_interfaces::sync::{NoopSyncStateUpdate, SyncStateUpdater};
 use reth_primitives::{BlockNumber, H256};
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
-#[derive(Debug)]
 #[must_use = "call `build` to construct the pipeline"]
 pub struct PipelineBuilder<DB>
 where
     DB: Database,
 {
-    pipeline: Pipeline<DB>,
-}
-
-impl<DB: Database> Default for PipelineBuilder<DB> {
-    fn default() -> Self {
-        Self { pipeline: Pipeline::default() }
-    }
+    /// All configured stages in the order they will be executed.
+    stages: Vec<BoxedStage<DB>>,
+    /// The maximum block number to sync to.
+    max_block: Option<BlockNumber>,
+    /// Used for emitting updates about whether the pipeline is running or not.
+    sync_state_updater: Box<dyn SyncStateUpdater>,
+    /// A receiver for the current chain tip to sync to
+    ///
+    /// Note: this is only used for debugging purposes.
+    tip_tx: Option<watch::Sender<H256>>,
 }
 
 impl<DB> PipelineBuilder<DB>
@@ -29,7 +31,7 @@ where
     where
         S: Stage<DB> + 'static,
     {
-        self.pipeline.stages.push(Box::new(stage));
+        self.stages.push(Box::new(stage));
         self
     }
 
@@ -42,7 +44,7 @@ where
     /// [`StageSetBuilder`][crate::StageSetBuilder].
     pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Self {
         for stage in set.builder().build() {
-            self.pipeline.stages.push(stage);
+            self.stages.push(stage);
         }
         self
     }
@@ -51,24 +53,57 @@ where
     ///
     /// Once this block is reached, the pipeline will stop.
     pub fn with_max_block(mut self, block: BlockNumber) -> Self {
-        self.pipeline.max_block = Some(block);
+        self.max_block = Some(block);
         self
     }
 
     /// Set the tip sender.
     pub fn with_tip_sender(mut self, tip_tx: watch::Sender<H256>) -> Self {
-        self.pipeline.tip_tx = Some(tip_tx);
+        self.tip_tx = Some(tip_tx);
         self
     }
 
     /// Set a [SyncStateUpdater].
     pub fn with_sync_state_updater<U: SyncStateUpdater>(mut self, updater: U) -> Self {
-        self.pipeline.sync_state_updater = Box::new(updater);
+        self.sync_state_updater = Box::new(updater);
         self
     }
 
-    /// Builds the final [`Pipeline`].
-    pub fn build(self) -> Pipeline<DB> {
-        self.pipeline
+    /// Builds the final [`Pipeline`] using the given database.
+    ///
+    /// Note: it's expected that this is either an [Arc](std::sync::Arc) or an Arc wrapper type.
+    pub fn build(self, db: DB) -> Pipeline<DB> {
+        let Self { stages, max_block, sync_state_updater, tip_tx } = self;
+        Pipeline {
+            db,
+            stages,
+            max_block,
+            sync_state_updater,
+            tip_tx,
+            listeners: Default::default(),
+            progress: Default::default(),
+            metrics: Default::default(),
+        }
+    }
+}
+
+impl<DB: Database> Default for PipelineBuilder<DB> {
+    fn default() -> Self {
+        Self {
+            stages: Vec::new(),
+            max_block: None,
+            sync_state_updater: Box::<NoopSyncStateUpdate>::default(),
+            tip_tx: None,
+        }
+    }
+}
+
+impl<DB: Database> std::fmt::Debug for PipelineBuilder<DB> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PipelineBuilder")
+            .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
+            .field("max_block", &self.max_block)
+            .field("sync_state_updater", &self.sync_state_updater)
+            .finish()
     }
 }
