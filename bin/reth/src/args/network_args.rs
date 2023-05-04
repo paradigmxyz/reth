@@ -36,6 +36,13 @@ pub struct NetworkArgs {
     #[arg(long, value_name = "FILE", verbatim_doc_comment, conflicts_with = "no_persist_peers")]
     pub peers_file: Option<PathBuf>,
 
+    /// Secret key to use for this node.
+    ///
+    /// This will also deterministically set the peer ID. If not specified, it will be set in the
+    /// data dir for the chain being used.
+    #[arg(long, value_name = "PATH")]
+    pub p2p_secret_key: Option<PathBuf>,
+
     /// Do not persist peers.
     #[arg(long, verbatim_doc_comment)]
     pub no_persist_peers: bool,
