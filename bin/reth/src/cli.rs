@@ -205,7 +205,8 @@ mod tests {
     fn test_parse_help_all_subcommands() {
         let reth = Cli::command();
         for sub_command in reth.get_subcommands() {
-            let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"]).unwrap_err();
+            let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"]).err().unwrap_or_else(|| panic!("Failed to parse help message {}", sub_command.get_name()));
+
             // --help is treated as error, but
             // > Not a true "error" as it means --help or similar was used. The help message will be sent to stdout.
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);

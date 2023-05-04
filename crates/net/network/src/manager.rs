@@ -54,7 +54,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
@@ -742,7 +742,7 @@ where
                                 .notify(NetworkEvent::SessionClosed { peer_id, reason });
                         }
                         SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
-                            warn!(
+                            debug!(
                                 target : "net",
                                 ?remote_addr,
                                 ?error,

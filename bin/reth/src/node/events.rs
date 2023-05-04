@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 use tokio::time::Interval;
-use tracing::{info, warn};
+use tracing::{debug, info};
 
 /// The current high-level state of the node.
 struct NodeState {
@@ -67,7 +67,7 @@ impl NodeState {
             }
             NetworkEvent::SessionClosed { peer_id, reason } => {
                 let reason = reason.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
-                warn!(target: "reth::cli", connected_peers = self.num_connected_peers(), peer_id = %peer_id, %reason, "Peer disconnected.");
+                debug!(target: "reth::cli", connected_peers = self.num_connected_peers(), peer_id = %peer_id, %reason, "Peer disconnected.");
             }
             _ => (),
         }

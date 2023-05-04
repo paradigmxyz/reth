@@ -36,6 +36,11 @@ impl Chain {
         &self.state
     }
 
+    /// Return true if chain is empty and has no blocks.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
     /// Return block number of the block hash.
     pub fn block_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
         self.blocks.iter().find_map(|(num, block)| (block.hash() == block_hash).then_some(*num))
