@@ -56,12 +56,6 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    /// Secret key to use for this node.
-    ///
-    /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH", global = true, required = false)]
-    p2p_secret_key: Option<PathBuf>,
-
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
@@ -139,8 +133,12 @@ impl Command {
                     });
                 }
 
-                let default_secret_key_path = data_dir.p2p_secret_path();
-                let p2p_secret_key = get_secret_key(&default_secret_key_path)?;
+                let network_secret_path = self
+                    .network
+                    .p2p_secret_key
+                    .clone()
+                    .unwrap_or_else(|| data_dir.p2p_secret_path());
+                let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
                 let default_peers_path = data_dir.known_peers_path();
 
