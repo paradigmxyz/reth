@@ -27,7 +27,7 @@ pub struct BlockIndices {
     ///
     /// This maps all blocks with same block number to their hash.
     ///
-    /// Can be used for RPC fetch pending block(s) in chain by its number.
+    /// Can be used for RPC fetch block(s) in chain by its number.
     ///
     /// Note: This is a bijection: at all times `blocks_to_chain` and this map contain the block
     /// hashes.
