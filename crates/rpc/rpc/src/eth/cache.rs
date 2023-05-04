@@ -494,8 +494,9 @@ where
                 };
                 receipts.push(block_receipts);
             }
-            let _ =
-                eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { blocks, receipts });
+            let _ = eth_state_cache
+                .to_service
+                .send(CacheAction::CacheNewCanonicalChain { blocks, receipts });
         }
     }
 }
