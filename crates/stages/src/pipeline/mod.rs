@@ -79,12 +79,19 @@ use sync_metrics::*;
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
 pub struct Pipeline<DB: Database> {
+    /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
+    /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    continuous: bool,
+    /// All listeners for events the pipeline emits.
     listeners: EventListeners<PipelineEvent>,
+    /// Used for emitting updates about whether the pipeline is running or not.
     sync_state_updater: Box<dyn SyncStateUpdater>,
+    /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
+    /// A receiver for the current chain tip to sync to
+    ///
+    /// Note: this is only used for debugging purposes.
     tip_tx: Option<watch::Sender<H256>>,
     metrics: Metrics,
 }
@@ -101,7 +108,6 @@ impl<DB: Database> Default for Pipeline<DB> {
         Self {
             stages: Vec::new(),
             max_block: None,
-            continuous: false,
             listeners: EventListeners::default(),
             sync_state_updater: Box::<NoopSyncStateUpdate>::default(),
             progress: PipelineProgress::default(),

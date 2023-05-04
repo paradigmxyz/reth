@@ -55,13 +55,6 @@ where
         self
     }
 
-    /// Tell the pipeline to continuously run the pipeline, to accomodate continuous syncing /
-    /// downloading.
-    pub fn with_continuous(mut self) -> Self {
-        self.pipeline.continuous = true;
-        self
-    }
-
     /// Set the tip sender.
     pub fn with_tip_sender(mut self, tip_tx: watch::Sender<H256>) -> Self {
         self.pipeline.tip_tx = Some(tip_tx);
