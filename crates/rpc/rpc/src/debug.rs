@@ -1,7 +1,7 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult},
-        revm_utils::inspect,
+        revm_utils::{inspect, replay_transactions_until},
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
@@ -95,7 +95,7 @@ where
         let transactions = transactions.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
         // replay all transactions of the block
-        self.eth_api.with_state_at(at, move |state| {
+        self.eth_api.with_state_at_block(at, move |state| {
             let mut results = Vec::with_capacity(transactions.len());
             let mut db = SubState::new(State::new(state));
 
@@ -125,13 +125,21 @@ where
             Some(res) => res,
         };
 
-        let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
+        let block_env = self.eth_api.evm_env_at(at);
+        let block_txs = self.eth_api.transactions_by_block_id(at);
+        let (block_env, block_txs) = futures::try_join!(block_env, block_txs)?;
+        let block_txs = block_txs.unwrap_or_default();
+        let (cfg, block_env, at) = block_env;
 
-        self.eth_api.with_state_at(at, |state| {
+        self.eth_api.with_state_at_block(at, |state| {
+            // configure env for the target transaction
             let tx = transaction.into_recovered();
-            let tx = tx_env_with_recovered(&tx);
-            let env = Env { cfg, block, tx };
+
             let mut db = SubState::new(State::new(state));
+            // replay all transactions prior to the targeted transaction
+            replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
+
+            let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
             trace_transaction(opts, env, &mut db)
         })
     }
