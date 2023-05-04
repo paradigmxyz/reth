@@ -2,7 +2,7 @@
 
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{Block, Receipt, TransactionSigned, H256};
+use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, H256};
 use reth_provider::{BlockProvider, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -20,7 +20,6 @@ use tokio::sync::{
     oneshot,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::warn;
 
 /// The type that can send the response to a requested [Block]
 type BlockResponseSender = oneshot::Sender<Result<Option<Block>>>;
@@ -225,6 +224,49 @@ pub(crate) struct EthStateCacheService<
     action_task_spawner: Tasks,
 }
 
+impl<Client, Tasks> EthStateCacheService<Client, Tasks>
+where
+    Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
+{
+    fn on_new_block(&mut self, block_hash: H256, res: Result<Option<Block>>) {
+        if let Some(queued) = self.full_block_cache.queued.remove(&block_hash) {
+            // send the response to queued senders
+            for tx in queued {
+                match tx {
+                    Either::Left(block_tx) => {
+                        let _ = block_tx.send(res.clone());
+                    }
+                    Either::Right(transaction_tx) => {
+                        let _ = transaction_tx.send(
+                            res.clone().map(|maybe_block| maybe_block.map(|block| block.body)),
+                        );
+                    }
+                }
+            }
+        }
+
+        // cache good block
+        if let Ok(Some(block)) = res {
+            self.full_block_cache.cache.insert(block_hash, block);
+        }
+    }
+
+    fn on_new_receipts(&mut self, block_hash: H256, res: Result<Option<Vec<Receipt>>>) {
+        if let Some(queued) = self.receipts_cache.queued.remove(&block_hash) {
+            // send the response to queued senders
+            for tx in queued {
+                let _ = tx.send(res.clone());
+            }
+        }
+
+        // cache good receipts
+        if let Ok(Some(receipts)) = res {
+            self.receipts_cache.cache.insert(block_hash, receipts);
+        }
+    }
+}
+
 impl<Client, Tasks> Future for EthStateCacheService<Client, Tasks>
 where
     Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
@@ -326,39 +368,10 @@ where
                             }
                         }
                         CacheAction::BlockResult { block_hash, res } => {
-                            if let Some(queued) = this.full_block_cache.queued.remove(&block_hash) {
-                                // send the response to queued senders
-                                for tx in queued {
-                                    match tx {
-                                        Either::Left(block_tx) => {
-                                            let _ = block_tx.send(res.clone());
-                                        }
-                                        Either::Right(transaction_tx) => {
-                                            let _ = transaction_tx.send(res.clone().map(
-                                                |maybe_block| maybe_block.map(|block| block.body),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-
-                            // cache good block
-                            if let Ok(Some(block)) = res {
-                                this.full_block_cache.cache.insert(block_hash, block);
-                            }
+                            this.on_new_block(block_hash, res);
                         }
                         CacheAction::ReceiptsResult { block_hash, res } => {
-                            if let Some(queued) = this.receipts_cache.queued.remove(&block_hash) {
-                                // send the response to queued senders
-                                for tx in queued {
-                                    let _ = tx.send(res.clone());
-                                }
-                            }
-
-                            // cache good receipts
-                            if let Ok(Some(receipts)) = res {
-                                this.receipts_cache.cache.insert(block_hash, receipts);
-                            }
+                            this.on_new_receipts(block_hash, res);
                         }
                         CacheAction::EnvResult { block_hash, res } => {
                             let res = *res;
@@ -374,8 +387,17 @@ where
                                 this.evm_env_cache.cache.insert(block_hash, data);
                             }
                         }
-                        CacheAction::CacheNewBlock { block_hash, block } => {
-                            this.full_block_cache.cache.insert(block_hash, block);
+                        CacheAction::CacheNewCanonicalChain { blocks, receipts } => {
+                            for block in blocks {
+                                this.on_new_block(block.hash, Ok(Some(block.unseal())));
+                            }
+
+                            for block_receipts in receipts {
+                                this.on_new_receipts(
+                                    block_receipts.block_hash,
+                                    Ok(Some(block_receipts.receipts)),
+                                );
+                            }
                         }
                     }
                 }
@@ -438,31 +460,42 @@ enum CacheAction {
     BlockResult { block_hash: H256, res: Result<Option<Block>> },
     ReceiptsResult { block_hash: H256, res: Result<Option<Vec<Receipt>>> },
     EnvResult { block_hash: H256, res: Box<Result<(CfgEnv, BlockEnv)>> },
-    CacheNewBlock { block_hash: H256, block: Block },
+    CacheNewCanonicalChain { blocks: Vec<SealedBlock>, receipts: Vec<BlockReceipts> },
 }
 
-/// Adding new blocks to the cache
-async fn add_new_blocks_to_cache<St>(eth_state_cache: &EthStateCache, mut events: St)
+struct BlockReceipts {
+    block_hash: H256,
+    receipts: Vec<Receipt>,
+}
+
+/// Awaits for new chain events and directly inserts them into the cache so they're available
+/// immediately before they need to be fetched from disk.
+pub async fn cache_new_blocks_task<St>(eth_state_cache: EthStateCache, mut events: St)
 where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
 {
     while let Some(event) = events.next().await {
-        match event {
-            CanonStateNotification::Commit { new } |
-            CanonStateNotification::Reorg { old: _, new } => {
-                let sealed_block_with_senders = new.tip();
-                eth_state_cache
-                    .to_service
-                    .send(CacheAction::CacheNewBlock {
-                        block_hash: sealed_block_with_senders.hash,
-                        block: sealed_block_with_senders.block.clone().into(),
-                    })
-                    .unwrap_or_else(|err| {
-                        warn!("Failed to add block into cache: {}", err);
-                    });
+        if let Some(committed) = event.committed() {
+            // we're only interested in new committed blocks
+            let (blocks, state) = committed.inner();
+
+            let blocks = blocks.iter().map(|(_, block)| block.block.clone()).collect::<Vec<_>>();
+
+            let mut receipts = Vec::new();
+
+            // TODO ideally we can map all receipts to their respective blocks
+
+            // we only have 1 block in the new chain, so we know all the receipts belong to the
+            // block
+            if blocks.len() == 1 {
+                let block_receipts = BlockReceipts {
+                    block_hash: blocks[0].hash,
+                    receipts: state.receipts().to_vec(),
+                };
+                receipts.push(block_receipts);
             }
-            // Old blocks will be taken care of by the LRU cache
-            _ => {}
+            let _ =
+                eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { blocks, receipts });
         }
     }
 }
