@@ -15,6 +15,8 @@ pub use block_id::BlockIdProvider;
 mod evm_env;
 pub use evm_env::EvmEnvProvider;
 
+mod fork_choice_update;
+
 mod header;
 pub use header::HeaderProvider;
 
