@@ -21,13 +21,19 @@ pub struct BlockIndices {
     /// `number_to_block` as those are chain specific indices.
     canonical_chain: CanonicalChain,
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
-    /// NOTE: It contains just a blocks that are forks as a key and not all blocks.
+    /// NOTE: It contains just blocks that are forks as a key and not all blocks.
     fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
+    /// Utility index for Block number to block hash(s).
+    ///
+    /// This maps all blocks with same block number to their hash.
+    ///
+    /// Can be used for RPC fetch block(s) in chain by its number.
+    ///
+    /// Note: This is a bijection: at all times `blocks_to_chain` and this map contain the block
+    /// hashes.
+    block_number_to_block_hashes: BTreeMap<BlockNumber, HashSet<BlockHash>>,
     /// Block hashes and side chain they belong
     blocks_to_chain: HashMap<BlockHash, BlockChainId>,
-    /// Utility index. Block number to block hash. Can be used for
-    /// RPC to fetch all pending block in chain by its number.
-    index_number_to_block: BTreeMap<BlockNumber, HashSet<BlockHash>>,
 }
 
 impl BlockIndices {
@@ -41,13 +47,16 @@ impl BlockIndices {
             canonical_chain: CanonicalChain::new(canonical_chain),
             fork_to_child: Default::default(),
             blocks_to_chain: Default::default(),
-            index_number_to_block: Default::default(),
+            block_number_to_block_hashes: Default::default(),
         }
     }
 
-    /// Return internal index that maps all pending block number to their hash.
-    pub fn index_of_number_to_pending_blocks(&self) -> &BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        &self.index_number_to_block
+    /// Return internal index that maps all pending block number to their hashes.
+    ///
+    /// This essentially contains all possible branches. Given a parent block, then the child block
+    /// number as the key has all possible block hashes as the value.
+    pub fn block_number_to_block_hashes(&self) -> &BTreeMap<BlockNumber, HashSet<BlockHash>> {
+        &self.block_number_to_block_hashes
     }
 
     /// Return fork to child indices
@@ -62,14 +71,16 @@ impl BlockIndices {
 
     /// Returns the hash and number of the pending block (the first block in the
     /// [Self::pending_blocks]) set.
-    pub fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
+    pub(crate) fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         let canonical_tip = self.canonical_tip();
         let hash = self.fork_to_child.get(&canonical_tip.hash)?.iter().next().copied()?;
         Some(BlockNumHash { number: canonical_tip.number + 1, hash })
     }
 
-    /// Return all pending block hashes. Pending blocks are considered blocks
-    /// that are extending that canonical tip by one block number.
+    /// Returns all pending block hashes.
+    ///
+    /// Pending blocks are considered blocks that are extending the canonical tip by one block
+    /// number and have their parent hash set to the canonical tip.
     pub fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
         let canonical_tip = self.canonical_tip();
         let pending_blocks = self
@@ -99,7 +110,7 @@ impl BlockIndices {
         block_hash: BlockHash,
         chain_id: BlockChainId,
     ) {
-        self.index_number_to_block.entry(block_number).or_default().insert(block_hash);
+        self.block_number_to_block_hashes.entry(block_number).or_default().insert(block_hash);
         self.blocks_to_chain.insert(block_hash, chain_id);
     }
 
@@ -109,7 +120,7 @@ impl BlockIndices {
             // add block -> chain_id index
             self.blocks_to_chain.insert(block.hash(), chain_id);
             // add number -> block
-            self.index_number_to_block.entry(*number).or_default().insert(block.hash());
+            self.block_number_to_block_hashes.entry(*number).or_default().insert(block.hash());
         }
         let first = chain.first();
         // add parent block -> block index
@@ -213,7 +224,7 @@ impl BlockIndices {
     ) -> BTreeSet<BlockChainId> {
         // rm number -> block
         if let btree_map::Entry::Occupied(mut entry) =
-            self.index_number_to_block.entry(block_number)
+            self.block_number_to_block_hashes.entry(block_number)
         {
             let set = entry.get_mut();
             set.remove(&block_hash);
@@ -260,7 +271,7 @@ impl BlockIndices {
 
                 // rm number -> block
                 if let btree_map::Entry::Occupied(mut entry) =
-                    self.index_number_to_block.entry(number)
+                    self.block_number_to_block_hashes.entry(number)
                 {
                     let set = entry.get_mut();
                     set.remove(&hash);

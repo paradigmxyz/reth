@@ -195,7 +195,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         self.block_indices.canonical_chain()
     }
 
-    /// Returns the block with matching hash.
+    /// Returns the block with matching hash from any side-chain.
+    ///
+    /// Caution: This will not return blocks from the canonical chain.
     pub fn block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
         let id = self.block_indices.get_blocks_chain_id(&block_hash)?;
         let chain = self.chains.get(&id)?;
