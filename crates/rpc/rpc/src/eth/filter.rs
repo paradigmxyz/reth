@@ -21,9 +21,6 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tracing::trace;
 
-/// The default maximum of logs in a single response.
-const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 2_000;
-
 /// `Eth` filter RPC implementation.
 #[derive(Debug, Clone)]
 pub struct EthFilter<Client, Pool> {
@@ -33,13 +30,23 @@ pub struct EthFilter<Client, Pool> {
 
 impl<Client, Pool> EthFilter<Client, Pool> {
     /// Creates a new, shareable instance.
-    pub fn new(client: Client, pool: Pool, eth_cache: EthStateCache) -> Self {
+    ///
+    /// This uses the given pool to get notified about new transactions, the client to interact with
+    /// the blockchain, the cache to fetch cacheable data, like the logs and the
+    /// max_logs_per_response to limit the amount of logs returned in a single response
+    /// `eth_getLogs`
+    pub fn new(
+        client: Client,
+        pool: Pool,
+        eth_cache: EthStateCache,
+        max_logs_per_response: usize,
+    ) -> Self {
         let inner = EthFilterInner {
             client,
             active_filters: Default::default(),
             pool,
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
-            max_logs_in_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
+            max_logs_per_response,
             eth_cache,
         };
         Self { inner: Arc::new(inner) }
@@ -188,7 +195,7 @@ struct EthFilterInner<Client, Pool> {
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
     /// Maximum number of logs that can be returned in a response
-    max_logs_in_response: usize,
+    max_logs_per_response: usize,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
 }
@@ -303,9 +310,9 @@ where
                         );
 
                         // size check
-                        if all_logs.len() > self.max_logs_in_response {
+                        if all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
-                                self.max_logs_in_response,
+                                self.max_logs_per_response,
                             ))
                         }
                     }

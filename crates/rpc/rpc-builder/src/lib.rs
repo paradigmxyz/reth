@@ -798,7 +798,12 @@ where
                 self.network.clone(),
                 cache.clone(),
             );
-            let filter = EthFilter::new(self.client.clone(), self.pool.clone(), cache.clone());
+            let filter = EthFilter::new(
+                self.client.clone(),
+                self.pool.clone(),
+                cache.clone(),
+                self.config.eth.max_logs_per_response,
+            );
 
             let pubsub = EthPubSub::new(
                 self.client.clone(),
