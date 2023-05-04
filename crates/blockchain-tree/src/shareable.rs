@@ -82,7 +82,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
 {
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
         trace!(target: "blockchain_tree", "Returning all blocks in blockchain tree");
-        self.tree.read().block_indices().index_of_number_to_pending_blocks().clone()
+        self.tree.read().block_indices().block_number_to_block_hashes().clone()
     }
 
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
