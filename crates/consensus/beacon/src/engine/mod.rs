@@ -360,6 +360,13 @@ where
                     PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
+                    if let Error::Execution(ref err) = error {
+                        if err.is_fatal() {
+                            tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
+                            return Err(BeaconEngineError::Common(error))
+                        }
+                    }
+
                     self.on_failed_canonical_forkchoice_update(&state, error, is_first_forkchoice)
                 }
             }

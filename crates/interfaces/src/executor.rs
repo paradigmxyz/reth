@@ -63,3 +63,10 @@ pub enum Error {
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
 }
+
+impl Error {
+    /// Returns `true` if the error is fatal.
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
+    }
+}
