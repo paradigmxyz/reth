@@ -1,6 +1,7 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
 use super::chain::BlockChainId;
+use crate::canonical_chain::CanonicalChain;
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
 use reth_provider::Chain;
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
@@ -249,7 +250,7 @@ impl BlockIndices {
         let first_number = *blocks.first_key_value().unwrap().0;
 
         // this will remove all blocks numbers that are going to be replaced.
-        self.canonical_chain.chain.retain(|&number, _| number < first_number);
+        self.canonical_chain.retain(|&number, _| number < first_number);
 
         // remove them from block to chain_id index
         blocks.iter().map(|(_, b)| (b.number, b.hash(), b.parent_hash)).for_each(
@@ -292,7 +293,7 @@ impl BlockIndices {
     /// used when canonical chain is reinserted inside Tree.
     pub(crate) fn unwind_canonical_chain(&mut self, unwind_to: BlockNumber) {
         // this will remove all blocks numbers that are going to be replaced.
-        self.canonical_chain.chain.retain(|num, _| *num <= unwind_to);
+        self.canonical_chain.retain(|num, _| *num <= unwind_to);
     }
 
     /// Used for finalization of block.
@@ -315,7 +316,7 @@ impl BlockIndices {
         // remove unneeded canonical hashes.
         let remove_until =
             finalized_block.saturating_sub(num_of_additional_canonical_hashes_to_retain);
-        self.canonical_chain.chain.retain(|&number, _| number >= remove_until);
+        self.canonical_chain.retain(|&number, _| number >= remove_until);
 
         let mut lose_chains = BTreeSet::new();
 
@@ -359,82 +360,5 @@ impl BlockIndices {
     #[inline]
     pub(crate) fn canonical_chain(&self) -> &CanonicalChain {
         &self.canonical_chain
-    }
-}
-
-/// This keeps track of all blocks of the canonical chain.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct CanonicalChain {
-    /// All blocks of the canonical chain in order.
-    chain: BTreeMap<BlockNumber, BlockHash>,
-}
-
-impl CanonicalChain {
-    fn new(chain: BTreeMap<BlockNumber, BlockHash>) -> Self {
-        Self { chain }
-    }
-
-    /// Replaces the current chain with the given one.
-    #[inline]
-    fn replace(&mut self, chain: BTreeMap<BlockNumber, BlockHash>) {
-        self.chain = chain;
-    }
-
-    /// Returns the block hash of the canonical block with the given number.
-    #[inline]
-    pub(crate) fn canonical_hash(&self, number: &BlockNumber) -> Option<BlockHash> {
-        self.chain.get(number).cloned()
-    }
-
-    /// Returns the block number of the canonical block with the given hash.
-    #[inline]
-    pub(crate) fn canonical_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
-        self.chain.iter().find_map(
-            |(number, hash)| {
-                if *hash == block_hash {
-                    Some(*number)
-                } else {
-                    None
-                }
-            },
-        )
-    }
-
-    /// Check if block hash belongs to canonical chain.
-    #[inline]
-    fn is_block_hash_canonical(
-        &self,
-        last_finalized_block: BlockNumber,
-        block_hash: &BlockHash,
-    ) -> bool {
-        self.chain.range(last_finalized_block..).any(|(_, &h)| h == *block_hash)
-    }
-
-    #[inline]
-    fn extend(&mut self, blocks: impl Iterator<Item = (BlockNumber, BlockHash)>) {
-        self.chain.extend(blocks)
-    }
-
-    #[inline]
-    pub(crate) fn inner(&self) -> &BTreeMap<BlockNumber, BlockHash> {
-        &self.chain
-    }
-
-    #[inline]
-    pub(crate) fn tip(&self) -> BlockNumHash {
-        self.chain
-            .last_key_value()
-            .map(|(&number, &hash)| BlockNumHash { number, hash })
-            .unwrap_or_default()
-    }
-
-    #[inline]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (BlockNumber, BlockHash)> + '_ {
-        self.chain.iter().map(|(&number, &hash)| (number, hash))
-    }
-
-    #[inline]
-    fn into_iter(self) -> impl Iterator<Item = (BlockNumber, BlockHash)> {
-        self.chain.into_iter()
     }
 }

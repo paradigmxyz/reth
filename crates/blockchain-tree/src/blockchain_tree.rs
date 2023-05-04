@@ -1,7 +1,7 @@
 //! Implementation of [`BlockchainTree`]
 use crate::{
-    block_indices::CanonicalChain, chain::BlockChainId, AppendableChain, BlockBuffer, BlockIndices,
-    BlockchainTreeConfig, PostStateData, TreeExternals,
+    canonical_chain::CanonicalChain, chain::BlockChainId, AppendableChain, BlockBuffer,
+    BlockIndices, BlockchainTreeConfig, PostStateData, TreeExternals,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
