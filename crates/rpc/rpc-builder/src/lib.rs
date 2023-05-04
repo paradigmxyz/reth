@@ -535,6 +535,15 @@ pub enum RethRpcModule {
     Web3,
 }
 
+// === impl RethRpcModule ===
+
+impl RethRpcModule {
+    /// Returns all variants of the enum
+    pub const fn all_variants() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
 impl fmt::Display for RethRpcModule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad(self.as_ref())
