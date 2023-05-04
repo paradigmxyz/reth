@@ -2,7 +2,7 @@
 
 use futures::{future::Either, StreamExt};
 use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{Block, Receipt, TransactionSigned, H256};
+use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -147,6 +147,13 @@ impl EthStateCache {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlock { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
+
+    /// Requests the [Block] for the block hash, sealed with the given block hash.
+    ///
+    /// Returns `None` if the block does not exist.
+    pub(crate) async fn get_sealed_block(&self, block_hash: H256) -> Result<Option<SealedBlock>> {
+        Ok(self.get_block(block_hash).await?.map(|block| block.seal(block_hash)))
     }
 
     /// Requests the transactions of the [Block]
