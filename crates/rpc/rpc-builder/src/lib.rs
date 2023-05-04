@@ -146,6 +146,7 @@ pub use crate::eth::{EthConfig, EthHandlers};
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError};
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use reth_rpc::eth::cache::cache_new_blocks_task;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Client, Pool, Network, Tasks, Events>(
@@ -773,6 +774,15 @@ where
                 self.config.eth.cache.clone(),
                 self.executor.clone(),
             );
+            let new_canonical_blocks = self.events.canonical_state_stream();
+            let c = cache.clone();
+            self.executor.spawn_critical(
+                "cache canonical blocks task",
+                Box::pin(async move {
+                    cache_new_blocks_task(c, new_canonical_blocks).await;
+                }),
+            );
+
             let api = EthApi::new(
                 self.client.clone(),
                 self.pool.clone(),
