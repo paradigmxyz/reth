@@ -123,7 +123,7 @@ impl Signature {
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
-        secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
+        secp256k1::recover_signer(&sig, hash.as_fixed_bytes()).ok()
     }
 
     /// Turn this signature into its byte
@@ -140,11 +140,9 @@ impl Signature {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use bytes::BytesMut;
-
     use crate::{Address, Signature, H256, U256};
+    use bytes::BytesMut;
+    use std::str::FromStr;
 
     #[test]
     fn test_payload_len_with_eip155_chain_id() {

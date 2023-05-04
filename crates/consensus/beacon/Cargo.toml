@@ -27,6 +27,7 @@ futures = "0.3"
 tracing = "0.1"
 thiserror = "1.0"
 metrics = "0.20.1"
+schnellru = "0.2"
 
 [dev-dependencies]
 # reth

@@ -1,12 +1,13 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadBuilderHandle,
-    PayloadBuilderService, PayloadJob, PayloadJobGenerator,
+    error::PayloadBuilderError, traits::KeepPayloadJobAlive, BuiltPayload,
+    PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
+    PayloadJobGenerator,
 };
-use futures_core::Stream;
 use reth_primitives::{Block, U256};
 use std::{
+    future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -47,20 +48,28 @@ pub struct TestPayloadJob {
     attr: PayloadBuilderAttributes,
 }
 
-impl Stream for TestPayloadJob {
-    type Item = Result<Arc<BuiltPayload>, PayloadBuilderError>;
+impl Future for TestPayloadJob {
+    type Output = Result<(), PayloadBuilderError>;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Pending
     }
 }
 
 impl PayloadJob for TestPayloadJob {
-    fn best_payload(&self) -> Arc<BuiltPayload> {
-        Arc::new(BuiltPayload::new(
+    type ResolvePayloadFuture =
+        futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+
+    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
+        Ok(Arc::new(BuiltPayload::new(
             self.attr.payload_id(),
             Block::default().seal_slow(),
             U256::ZERO,
-        ))
+        )))
+    }
+
+    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        let fut = futures_util::future::ready(self.best_payload());
+        (fut, KeepPayloadJobAlive::No)
     }
 }

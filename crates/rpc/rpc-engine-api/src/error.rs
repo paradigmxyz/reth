@@ -1,5 +1,6 @@
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_beacon_consensus::{BeaconEngineError, BeaconForkChoiceUpdateError};
+use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{H256, U256};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -75,6 +76,9 @@ pub enum EngineApiError {
     /// Failed to send message due ot closed channel
     #[error("Closed channel")]
     ChannelClosed,
+    /// Fetching the payload failed
+    #[error(transparent)]
+    GetPayloadError(#[from] PayloadBuilderError),
 }
 
 impl<T> From<mpsc::error::SendError<T>> for EngineApiError {

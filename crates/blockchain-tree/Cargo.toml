@@ -13,7 +13,7 @@ normal = [
 ]
 
 [dependencies]
-# reth 
+# reth
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-db = { path = "../storage/db" }
@@ -21,6 +21,8 @@ reth-provider = { path = "../storage/provider" }
 
 # common
 parking_lot = { version = "0.12"}
+lru = "0.10"
+tracing = "0.1"
 
 # mics
 aquamarine = "0.3.0"

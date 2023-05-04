@@ -1,20 +1,23 @@
-use crate::engine::metrics::Metrics;
+use crate::engine::{message::OnForkChoiceUpdated, metrics::Metrics};
 use futures::{Future, FutureExt, StreamExt, TryFutureExt};
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
     consensus::ForkchoiceState,
     executor::Error as ExecutorError,
-    sync::SyncStateUpdater,
     Error,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
-use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
+use reth_primitives::{
+    listener::EventListeners, BlockNumber, Header, SealedBlock, SealedHeader, H256, U256,
+};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
 };
 use reth_stages::{stages::FINISH, Pipeline};
 use reth_tasks::TaskSpawner;
+use schnellru::{ByLength, LruMap};
 use std::{
     pin::Pin,
     sync::Arc,
@@ -35,9 +38,16 @@ mod error;
 pub use error::{BeaconEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
 
 mod metrics;
+
 mod pipeline_state;
-use crate::engine::message::OnForkChoiceUpdated;
+
 pub use pipeline_state::PipelineState;
+
+mod event;
+pub use event::BeaconConsensusEngineEvent;
+
+/// The maximum number of invalid headers that can be tracked by the engine.
+const MAX_INVALID_HEADERS: u32 = 512u32;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
@@ -98,6 +108,13 @@ impl BeaconConsensusEngineHandle {
         });
         rx
     }
+
+    /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
+    pub fn event_listener(&self) -> UnboundedReceiverStream<BeaconConsensusEngineEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::EventListener(tx));
+        UnboundedReceiverStream::new(rx)
+    }
 }
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
@@ -117,11 +134,10 @@ impl BeaconConsensusEngineHandle {
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, TS, U, BT>
+pub struct BeaconConsensusEngine<DB, TS, BT>
 where
     DB: Database,
     TS: TaskSpawner,
-    U: SyncStateUpdater,
     BT: BlockchainTreeEngine,
 {
     /// The database handle.
@@ -131,7 +147,7 @@ where
     /// The current state of the pipeline.
     /// Must always be [Some] unless the state is being reevaluated.
     /// The pipeline is used for historical sync by setting the current forkchoice head.
-    pipeline_state: Option<PipelineState<DB, U>>,
+    pipeline_state: Option<PipelineState<DB>>,
     /// The blockchain tree used for live sync and reorg tracking.
     blockchain_tree: BT,
     /// The Engine API message receiver.
@@ -146,26 +162,34 @@ where
     /// Max block after which the consensus engine would terminate the sync. Used for debugging
     /// purposes.
     max_block: Option<BlockNumber>,
+    /// If true, the engine will run the pipeline continuously, regardless of whether or not there
+    /// is a new fork choice state.
+    continuous: bool,
     /// The payload store.
     payload_builder: PayloadBuilderHandle,
+    /// Listeners for engine events.
+    listeners: EventListeners<BeaconConsensusEngineEvent>,
+    /// Tracks the header of invalid payloads that were rejected by the engine because they're
+    /// invalid.
+    invalid_headers: InvalidHeaderCache,
     /// Consensus engine metrics.
     metrics: Metrics,
 }
 
-impl<DB, TS, U, BT> BeaconConsensusEngine<DB, TS, U, BT>
+impl<DB, TS, BT> BeaconConsensusEngine<DB, TS, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner,
-    U: SyncStateUpdater + 'static,
     BT: BlockchainTreeEngine + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
     pub fn new(
         db: Arc<DB>,
         task_spawner: TS,
-        pipeline: Pipeline<DB, U>,
+        pipeline: Pipeline<DB>,
         blockchain_tree: BT,
         max_block: Option<BlockNumber>,
+        continuous: bool,
         payload_builder: PayloadBuilderHandle,
     ) -> (Self, BeaconConsensusEngineHandle) {
         let (to_engine, rx) = mpsc::unbounded_channel();
@@ -175,6 +199,7 @@ where
             pipeline,
             blockchain_tree,
             max_block,
+            continuous,
             payload_builder,
             to_engine,
             rx,
@@ -187,9 +212,10 @@ where
     pub fn with_channel(
         db: Arc<DB>,
         task_spawner: TS,
-        pipeline: Pipeline<DB, U>,
+        pipeline: Pipeline<DB>,
         blockchain_tree: BT,
         max_block: Option<BlockNumber>,
+        continuous: bool,
         payload_builder: PayloadBuilderHandle,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
@@ -205,7 +231,10 @@ where
             forkchoice_state: None,
             next_action: BeaconEngineAction::None,
             max_block,
+            continuous,
             payload_builder,
+            listeners: EventListeners::default(),
+            invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: Metrics::default(),
         };
 
@@ -231,6 +260,60 @@ where
         self.next_action = BeaconEngineAction::RunPipeline(target);
     }
 
+    /// If validation fails, the response MUST contain the latest valid hash:
+    ///
+    ///   - The block hash of the ancestor of the invalid payload satisfying the following two
+    ///    conditions:
+    ///     - It is fully validated and deemed VALID
+    ///     - Any other ancestor of the invalid payload with a higher blockNumber is INVALID
+    ///   - 0x0000000000000000000000000000000000000000000000000000000000000000 if the above
+    ///    conditions are satisfied by a PoW block.
+    ///   - null if client software cannot determine the ancestor of the invalid payload satisfying
+    ///    the above conditions.
+    fn latest_valid_hash_for_invalid_payload(
+        &self,
+        parent_hash: H256,
+        tree_error: Option<&Error>,
+    ) -> Option<H256> {
+        // check pre merge block error
+        if let Some(Error::Execution(ExecutorError::BlockPreMerge { .. })) = tree_error {
+            return Some(H256::zero())
+        }
+
+        self.blockchain_tree.find_canonical_ancestor(parent_hash)
+    }
+
+    /// Loads the header for the given `block_number` from the database.
+    fn load_header(&self, block_number: u64) -> Result<Option<Header>, Error> {
+        Ok(self.db.view(|tx| tx.get::<tables::Headers>(block_number))??)
+    }
+
+    /// Checks if the given `head` points to an invalid header, which requires a specific response
+    /// to a forkchoice update.
+    fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
+        // check if the head was previously marked as invalid
+        let (parent_hash, parent_number) = {
+            let header = self.invalid_headers.get(&head)?;
+            (header.parent_hash, header.number.saturating_sub(1))
+        };
+        let mut latest_valid_hash = parent_hash;
+
+        // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
+        // PoW block, which we need to identify by looking at the parent's block difficulty
+        if let Ok(Some(parent)) = self.load_header(parent_number) {
+            if parent.difficulty != U256::ZERO {
+                latest_valid_hash = H256::zero();
+            }
+        }
+
+        let status = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+            validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+        })
+        .with_latest_valid_hash(latest_valid_hash);
+
+        Some(status)
+    }
+
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
     /// valid chain.
     ///
@@ -241,7 +324,7 @@ where
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
     ) -> Result<OnForkChoiceUpdated, BeaconEngineError> {
-        trace!(target: "consensus::engine", ?state, "Received new forkchoice state");
+        trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
@@ -267,42 +350,18 @@ where
                         self.require_pipeline_run(PipelineTarget::Head);
                     }
 
-                    // get header for further validation
-                    let header = self
-                        .db
-                        .view(|tx| tx.get::<tables::Headers>(head_block_number))??
-                        .expect("was canonicalized, so it exists");
-
                     if let Some(attrs) = attrs {
+                        // get header for further validation
+                        let header = self
+                            .load_header(head_block_number)?
+                            .expect("was canonicalized, so it exists");
                         return Ok(self.process_payload_attributes(attrs, header, state))
                     }
 
-                    // TODO: most recent valid block in the branch defined by payload and its
-                    // ancestors, not necessarily the head <https://github.com/paradigmxyz/reth/issues/2126>
                     PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
-                    warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
-                    // If this is the first forkchoice received, start downloading from safe block
-                    // hash.
-                    let target = if is_first_forkchoice &&
-                        !state.safe_block_hash.is_zero() &&
-                        self.get_block_number(state.safe_block_hash)?.is_none()
-                    {
-                        PipelineTarget::Safe
-                    } else {
-                        PipelineTarget::Head
-                    };
-                    self.require_pipeline_run(target);
-                    match error {
-                        Error::Execution(error @ ExecutorError::BlockPreMerge { .. }) => {
-                            PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                                validation_error: error.to_string(),
-                            })
-                            .with_latest_valid_hash(H256::zero())
-                        }
-                        _ => PayloadStatus::from_status(PayloadStatusEnum::Syncing),
-                    }
+                    self.on_failed_canonical_forkchoice_update(&state, error, is_first_forkchoice)
                 }
             }
         } else {
@@ -310,15 +369,60 @@ where
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
 
+        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
         trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Handler for a failed a forkchoice update due to a canonicalization error.
+    ///
+    /// This will determine if the state's head is invalid, and if so, return immediately.
+    ///
+    /// If the newest head is not invalid, then this will trigger a new pipeline run to sync the gap
+    ///
+    /// See [Self::on_forkchoice_updated] and [BlockchainTreeEngine::make_canonical].
+    fn on_failed_canonical_forkchoice_update(
+        &mut self,
+        state: &ForkchoiceState,
+        error: Error,
+        is_first_forkchoice: bool,
+    ) -> PayloadStatus {
+        warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
+
+        // check if the new head was previously invalidated, if so then we deem this FCU
+        // as invalid
+        if let Some(invalid_ancestor) = self.check_invalid_ancestor(state.head_block_hash) {
+            debug!(target: "consensus::engine", head=?state.head_block_hash, "Head was previously marked as invalid");
+            return invalid_ancestor
+        }
+
+        // If this is the first forkchoice received, start downloading from safe block
+        // hash, if we have that block.
+        let target = if is_first_forkchoice &&
+            !state.safe_block_hash.is_zero() &&
+            self.get_block_number(state.safe_block_hash).ok().flatten().is_none()
+        {
+            PipelineTarget::Safe
+        } else {
+            PipelineTarget::Head
+        };
+        self.require_pipeline_run(target);
+        match error {
+            Error::Execution(error @ ExecutorError::BlockPreMerge { .. }) => {
+                PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                    validation_error: error.to_string(),
+                })
+                .with_latest_valid_hash(H256::zero())
+            }
+            _ => PayloadStatus::from_status(PayloadStatusEnum::Syncing),
+        }
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
     fn process_payload_attributes(
         &self,
         attrs: PayloadAttributes,
-        header: Header,
+        head: Header,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
         // 7. Client software MUST ensure that payloadAttributes.timestamp is
@@ -327,7 +431,7 @@ where
         //    software MUST respond with -38003: `Invalid payload attributes` and
         //    MUST NOT begin a payload build process. In such an event, the
         //    forkchoiceState update MUST NOT be rolled back.
-        if attrs.timestamp <= header.timestamp.into() {
+        if attrs.timestamp <= head.timestamp.into() {
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 
@@ -336,7 +440,7 @@ where
         //    if payloadAttributes is not null and the forkchoice state has been
         //    updated successfully. The build process is specified in the Payload
         //    building section.
-        let attributes = PayloadBuilderAttributes::new(header.parent_hash, attrs);
+        let attributes = PayloadBuilderAttributes::new(state.head_block_hash, attrs);
 
         // send the payload to the builder and return the receiver for the pending payload id,
         // initiating payload job is handled asynchronously
@@ -371,42 +475,71 @@ where
     fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
         let block_number = payload.block_number.as_u64();
         let block_hash = payload.block_hash;
+        let parent_hash = payload.parent_hash;
+
         trace!(target: "consensus::engine", ?block_hash, block_number, "Received new payload");
         let block = match SealedBlock::try_from(payload) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
-                return error.into()
+
+                let mut latest_valid_hash = None;
+                if !error.is_block_hash_mismatch() {
+                    // Engine-API rule:
+                    // > `latestValidHash: null` if the blockHash validation has failed
+                    latest_valid_hash =
+                        self.latest_valid_hash_for_invalid_payload(parent_hash, None);
+                }
+                let status = PayloadStatusEnum::from(error);
+
+                return PayloadStatus::new(status, latest_valid_hash)
             }
         };
 
+        let header = block.header.clone();
+
         let status = if self.is_pipeline_idle() {
-            let block_hash = block.hash;
-            match self.blockchain_tree.insert_block(block) {
+            match self.blockchain_tree.insert_block_without_senders(block) {
                 Ok(status) => {
-                    let latest_valid_hash =
-                        matches!(status, BlockStatus::Valid).then_some(block_hash);
+                    let mut latest_valid_hash = None;
                     let status = match status {
-                        BlockStatus::Valid => PayloadStatusEnum::Valid,
-                        BlockStatus::Accepted => PayloadStatusEnum::Accepted,
+                        BlockStatus::Valid => {
+                            latest_valid_hash = Some(block_hash);
+                            self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                                block_number,
+                                block_hash,
+                            ));
+                            PayloadStatusEnum::Valid
+                        }
+                        BlockStatus::Accepted => {
+                            self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(
+                                block_number,
+                                block_hash,
+                            ));
+                            PayloadStatusEnum::Accepted
+                        }
                         BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
                     };
                     PayloadStatus::new(status, latest_valid_hash)
                 }
                 Err(error) => {
+                    // payload is deemed invalid, insert it into the cache
+                    self.invalid_headers.insert(header);
+
                     let latest_valid_hash =
-                        matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. }))
-                            .then_some(H256::zero());
-                    let status = match error {
-                        Error::Execution(ExecutorError::PendingBlockIsInFuture { .. }) => {
-                            PayloadStatusEnum::Syncing
-                        }
-                        error => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
-                    };
+                        self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
+                    let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
                     PayloadStatus::new(status, latest_valid_hash)
                 }
             }
+        } else if let Err(error) = self.blockchain_tree.buffer_block_without_sender(block) {
+            // received a new payload while we're still syncing to the target
+            let latest_valid_hash =
+                self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
+            let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+            PayloadStatus::new(status, latest_valid_hash)
         } else {
+            // successfully buffered the block
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
         trace!(target: "consensus::engine", ?block_hash, block_number, ?status, "Returning payload status");
@@ -417,17 +550,25 @@ where
     /// Resets the next action to the default value.
     fn next_pipeline_state(
         &mut self,
-        pipeline: Pipeline<DB, U>,
+        pipeline: Pipeline<DB>,
         forkchoice_state: ForkchoiceState,
-    ) -> PipelineState<DB, U> {
+    ) -> PipelineState<DB> {
         let next_action = std::mem::take(&mut self.next_action);
-        if let BeaconEngineAction::RunPipeline(target) = next_action {
+
+        let (tip, should_run_pipeline) = match next_action {
+            BeaconEngineAction::RunPipeline(target) => {
+                let tip = match target {
+                    PipelineTarget::Head => forkchoice_state.head_block_hash,
+                    PipelineTarget::Safe => forkchoice_state.safe_block_hash,
+                };
+                (Some(tip), true)
+            }
+            BeaconEngineAction::None => (None, self.continuous),
+        };
+
+        if should_run_pipeline {
             self.metrics.pipeline_runs.increment(1);
-            let tip = match target {
-                PipelineTarget::Head => forkchoice_state.head_block_hash,
-                PipelineTarget::Safe => forkchoice_state.safe_block_hash,
-            };
-            trace!(target: "consensus::engine", ?tip, "Starting the pipeline");
+            trace!(target: "consensus::engine", ?tip, continuous = tip.is_none(), "Starting the pipeline");
             let (tx, rx) = oneshot::channel();
             let db = self.db.clone();
             self.task_spawner.spawn_critical_blocking(
@@ -495,11 +636,10 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, TS, U, BT> Future for BeaconConsensusEngine<DB, TS, U, BT>
+impl<DB, TS, BT> Future for BeaconConsensusEngine<DB, TS, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner + Unpin,
-    U: SyncStateUpdater + Unpin + 'static,
     BT: BlockchainTreeEngine + Unpin + 'static,
 {
     type Output = Result<(), BeaconEngineError>;
@@ -537,6 +677,9 @@ where
                         this.metrics.new_payload_messages.increment(1);
                         let status = this.on_new_payload(payload);
                         let _ = tx.send(Ok(status));
+                    }
+                    BeaconEngineMessage::EventListener(tx) => {
+                        this.listeners.push_listener(tx);
                     }
                 }
             }
@@ -625,24 +768,43 @@ enum PipelineTarget {
     Safe,
 }
 
+/// Keeps track of invalid headerst.
+struct InvalidHeaderCache {
+    headers: LruMap<H256, Header>,
+}
+
+impl InvalidHeaderCache {
+    fn new(max_length: u32) -> Self {
+        Self { headers: LruMap::new(ByLength::new(max_length)) }
+    }
+
+    /// Returns the header if it exists in the cache.
+    fn get(&mut self, hash: &H256) -> Option<&Header> {
+        self.headers.get(hash).map(|h| &*h)
+    }
+
+    /// Inserts a new header into the map.
+    fn insert(&mut self, header: SealedHeader) {
+        let hash = header.hash;
+        let header = header.unseal();
+        self.headers.insert(hash, header);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::error::BeaconForkChoiceUpdateError;
     use assert_matches::assert_matches;
     use reth_blockchain_tree::{
-        blockchain_tree::{
-            config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
-            ShareableBlockchainTree,
-        },
-        post_state::PostState,
-        test_utils::TestExecutorFactory,
+        config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
+        BlockchainTree, ShareableBlockchainTree,
     };
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
-    use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
+    use reth_interfaces::test_utils::TestConsensus;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
-    use reth_provider::Transaction;
+    use reth_provider::{test_utils::TestExecutorFactory, Transaction};
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, time::Duration};
@@ -654,7 +816,6 @@ mod tests {
     type TestBeaconConsensusEngine = BeaconConsensusEngine<
         Env<WriteMap>,
         TokioTaskExecutor,
-        NoopSyncStateUpdate,
         ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
     >;
 
@@ -740,7 +901,7 @@ mod tests {
 
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
-        let config = BlockchainTreeConfig::new(1, 2, 3);
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, canon_state_notification_sender, config)
@@ -752,6 +913,7 @@ mod tests {
             pipeline,
             tree,
             None,
+            false,
             payload_builder,
         );
 

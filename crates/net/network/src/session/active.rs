@@ -37,7 +37,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 /// Constants for timeout updating
 
@@ -415,7 +415,7 @@ impl ActiveSession {
         for (id, req) in self.inflight_requests.iter_mut() {
             if req.is_timed_out(now) {
                 if req.is_waiting() {
-                    warn!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");
+                    debug!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");
                     req.timeout();
                 } else if now - req.timestamp > self.protocol_breach_request_timeout {
                     return true
@@ -585,7 +585,7 @@ impl Future for ActiveSession {
                                 }
                             }
                             Err(err) => {
-                                error!(target: "net::session", ?err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
+                                debug!(target: "net::session", ?err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
                                 this.close_on_error(err);
                                 return Poll::Ready(())
                             }

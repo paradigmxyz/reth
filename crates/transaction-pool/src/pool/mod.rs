@@ -65,23 +65,31 @@
 //!    transactions are _currently_ waiting for state changes that eventually move them into
 //!    category (2.) and become pending.
 
-#![allow(dead_code)] // TODO(mattsse): remove once remaining checks implemented
-
 use crate::{
     error::{PoolError, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
-    pool::{listener::PoolEventBroadcast, state::SubPool, txpool::TxPool},
+    pool::{
+        listener::PoolEventBroadcast,
+        state::SubPool,
+        txpool::{SenderInfo, TxPool},
+    },
     traits::{
-        NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions, TransactionOrigin,
+        BlockInfo, NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions,
+        TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    OnNewBlockEvent, PoolConfig, TransactionOrdering, TransactionValidator,
+    CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
 pub use events::TransactionEvent;
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{Address, TxHash, H256};
-use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::Arc,
+    time::Instant,
+};
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -138,9 +146,34 @@ where
         self.pool.read().size()
     }
 
+    /// Returns the currently tracked block
+    pub(crate) fn block_info(&self) -> BlockInfo {
+        self.pool.read().block_info()
+    }
+    /// Returns the currently tracked block
+    pub(crate) fn set_block_info(&self, info: BlockInfo) {
+        self.pool.write().set_block_info(info)
+    }
+
     /// Returns the internal `SenderId` for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
+    }
+
+    /// Converts the changed accounts to a map of sender ids to sender info (internal identifier
+    /// used for accounts)
+    fn changed_senders(
+        &self,
+        accs: impl Iterator<Item = ChangedAccount>,
+    ) -> HashMap<SenderId, SenderInfo> {
+        let mut identifiers = self.identifiers.write();
+        accs.into_iter()
+            .map(|acc| {
+                let ChangedAccount { address, nonce, balance } = acc;
+                let sender_id = identifiers.sender_id_or_create(address);
+                (sender_id, SenderInfo { state_nonce: nonce, balance })
+            })
+            .collect()
     }
 
     /// Get the config the pool was configured with.
@@ -183,9 +216,26 @@ where
     }
 
     /// Updates the entire pool after a new block was executed.
-    pub(crate) fn on_new_block(&self, block: OnNewBlockEvent) {
-        let outcome = self.pool.write().on_new_block(block);
-        self.notify_on_new_block(outcome);
+    pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        let CanonicalStateUpdate {
+            hash,
+            number,
+            pending_block_base_fee,
+            changed_accounts,
+            mined_transactions,
+        } = update;
+        let changed_senders = self.changed_senders(changed_accounts.into_iter());
+        let block_info = BlockInfo {
+            last_seen_block_hash: hash,
+            last_seen_block_number: number,
+            pending_basefee: pending_block_base_fee,
+        };
+        let outcome = self.pool.write().on_canonical_state_change(
+            block_info,
+            mined_transactions,
+            changed_senders,
+        );
+        self.notify_on_new_state(outcome);
     }
 
     /// Add a single validated transaction into the pool.
@@ -313,8 +363,8 @@ where
     }
 
     /// Notifies transaction listeners about changes after a block was processed.
-    fn notify_on_new_block(&self, outcome: OnNewBlockOutcome) {
-        let OnNewBlockOutcome { mined, promoted, discarded, block_hash } = outcome;
+    fn notify_on_new_state(&self, outcome: OnNewCanonicalStateOutcome) {
+        let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
 
         let mut listener = self.event_listener.write();
 
@@ -433,13 +483,6 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
     discarded: Vec<TxHash>,
 }
 
-impl<T: PoolTransaction> AddedPendingTransaction<T> {
-    /// Create a new, empty transaction.
-    fn new(transaction: Arc<ValidPoolTransaction<T>>) -> Self {
-        Self { transaction, promoted: Default::default(), discarded: Default::default() }
-    }
-}
-
 /// Represents a transaction that was added into the pool and its state
 #[derive(Debug, Clone)]
 pub enum AddedTransaction<T: PoolTransaction> {
@@ -486,9 +529,9 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 }
 
-/// Contains all state changes after a [`OnNewBlockEvent`] was processed
+/// Contains all state changes after a [`CanonicalStateUpdate`] was processed
 #[derive(Debug)]
-pub(crate) struct OnNewBlockOutcome {
+pub(crate) struct OnNewCanonicalStateOutcome {
     /// Hash of the block.
     pub(crate) block_hash: H256,
     /// All mined transactions.

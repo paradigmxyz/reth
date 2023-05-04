@@ -7,8 +7,12 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{
-    bloom::logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, BlockNumber, Bloom,
-    Bytecode, Log, Receipt, StorageEntry, H256, U256,
+    bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
+    BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
+};
+use reth_trie::{
+    hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
+    StateRoot, StateRootError,
 };
 use std::collections::BTreeMap;
 
@@ -23,23 +27,43 @@ pub type AccountChanges = BTreeMap<BlockNumber, BTreeMap<Address, Option<Account
 
 /// A mapping of `block -> account -> slot -> old value` that represents what slots were changed,
 /// and what their values were prior to that change.
-pub type StorageChanges = BTreeMap<BlockNumber, BTreeMap<Address, Storage>>;
+pub type StorageChanges = BTreeMap<BlockNumber, BTreeMap<Address, ChangedStorage>>;
 
-/// Storage for an account.
+/// Changed storage state for the account.
 ///
 /// # Wiped Storage
 ///
 /// The field `wiped` denotes whether the pre-existing storage in the database should be cleared or
 /// not.
-///
-/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
-/// in `storage` should be the only values written to the database.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub struct Storage {
+pub struct ChangedStorage {
     /// Whether the storage was wiped or not.
     pub wiped: bool,
     /// The storage slots.
     pub storage: BTreeMap<U256, U256>,
+}
+
+/// Latest storage state for the account.
+///
+/// # Wiped Storage
+///
+/// The `times_wiped` field indicates the number of times the storage was wiped in this poststate.
+///
+/// If `times_wiped` is greater than 0, then the account was selfdestructed at some point, and the
+/// values contained in `storage` should be the only values written to the database.
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct Storage {
+    /// The number of times the storage was wiped.
+    pub times_wiped: u64,
+    /// The storage slots.
+    pub storage: BTreeMap<U256, U256>,
+}
+
+impl Storage {
+    /// Returns `true` if the storage was wiped at any point.
+    pub fn wiped(&self) -> bool {
+        self.times_wiped > 0
+    }
 }
 
 // todo: rewrite all the docs for this
@@ -173,8 +197,81 @@ impl PostState {
     }
 
     /// Returns the receipt root for all recorded receipts.
+    /// TODO: This function hides an expensive operation (bloom). We should probably make it more
+    /// explicit.
     pub fn receipts_root(&self) -> H256 {
-        calculate_receipt_root_ref(self.receipts().iter().map(Into::into))
+        calculate_receipt_root_ref(self.receipts())
+    }
+
+    /// Hash all changed accounts and storage entries that are currently stored in the post state.
+    ///
+    /// # Returns
+    ///
+    /// The hashed post state.
+    pub fn hash_state_slow(&self) -> HashedPostState {
+        let mut accounts = BTreeMap::default();
+        for (address, account) in self.accounts() {
+            accounts.insert(keccak256(address), *account);
+        }
+
+        let mut storages = BTreeMap::default();
+        for (address, storage) in self.storage() {
+            let mut hashed_storage = BTreeMap::default();
+            for (slot, value) in &storage.storage {
+                hashed_storage.insert(keccak256(H256(slot.to_be_bytes())), *value);
+            }
+            storages.insert(
+                keccak256(address),
+                HashedStorage { wiped: storage.wiped(), storage: hashed_storage },
+            );
+        }
+
+        HashedPostState { accounts, storages }
+    }
+
+    /// Calculate the state root for this [PostState].
+    /// Internally, function calls [Self::hash_state_slow] to obtain the [HashedPostState].
+    /// Afterwards, it retrieves the prefixsets from the [HashedPostState] and uses them to
+    /// calculate the incremental state root.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use reth_primitives::{Address, Account};
+    /// use reth_provider::PostState;
+    /// use reth_db::{mdbx::{EnvKind, WriteMap, test_utils::create_test_db}, database::Database};
+    ///
+    /// // Initialize the database
+    /// let db = create_test_db::<WriteMap>(EnvKind::RW);
+    ///
+    /// // Initialize the post state
+    /// let mut post_state = PostState::new();
+    ///
+    /// // Create an account
+    /// let block_number = 1;
+    /// let address = Address::random();
+    /// post_state.create_account(1, address, Account { nonce: 1, ..Default::default() });
+    ///
+    /// // Calculate the state root
+    /// let tx = db.tx().expect("failed to create transaction");
+    /// let state_root = post_state.state_root_slow(&tx);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The state root for this [PostState].
+    pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
+        &self,
+        tx: &'a TX,
+    ) -> Result<H256, StateRootError> {
+        let hashed_post_state = self.hash_state_slow();
+        let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
+        StateRoot::new(tx)
+            .with_hashed_cursor_factory(&hashed_cursor_factory)
+            .with_changed_account_prefixes(account_prefix_set)
+            .with_changed_storage_prefixes(storage_prefix_set)
+            .root()
     }
 
     // todo: note overwrite behavior, i.e. changes in `other` take precedent
@@ -184,8 +281,8 @@ impl PostState {
         self.accounts.extend(other.accounts);
         for (address, their_storage) in other.storage {
             let our_storage = self.storage.entry(address).or_default();
-            if their_storage.wiped {
-                our_storage.wiped = true;
+            if their_storage.wiped() {
+                our_storage.times_wiped += their_storage.times_wiped;
                 our_storage.storage.clear();
             }
             our_storage.storage.extend(their_storage.storage);
@@ -224,7 +321,7 @@ impl PostState {
         self.bytecode.extend(other.bytecode);
     }
 
-    /// Reverts each change up to and including any change that is part of `block_number`.
+    /// Reverts each change up to the `target_block_number` (excluding).
     ///
     /// The reverted changes are removed from this post-state, and their effects are reverted.
     pub fn revert_to(&mut self, target_block_number: BlockNumber) {
@@ -253,7 +350,9 @@ impl PostState {
         for (_, storages) in storage_changes_to_revert.into_iter().rev() {
             for (address, storage) in storages {
                 self.storage.entry(address).and_modify(|head_storage| {
-                    head_storage.wiped = storage.wiped;
+                    if storage.wiped {
+                        head_storage.times_wiped -= 1;
+                    }
                     head_storage.storage.extend(storage.clone().storage);
                 });
             }
@@ -330,7 +429,7 @@ impl PostState {
             .entry(address)
             .or_insert(Some(account));
         let storage = self.storage.entry(address).or_default();
-        storage.wiped = true;
+        storage.times_wiped += 1;
         storage.storage.clear();
         let storage_changes =
             self.storage_changes.entry(block_number).or_default().entry(address).or_default();
@@ -418,7 +517,7 @@ impl PostState {
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
             // If the storage was wiped, remove all previous entries from the database.
-            if storage.wiped {
+            if storage.wiped() {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
@@ -486,6 +585,8 @@ mod tests {
         mdbx::{test_utils, Env, EnvKind, WriteMap},
         transaction::DbTx,
     };
+    use reth_primitives::proofs::EMPTY_ROOT;
+    use reth_trie::test_utils::state_root;
     use std::sync::Arc;
 
     // Ensure that the transition id is not incremented if postate is extended by another empty
@@ -755,7 +856,7 @@ mod tests {
 
         // All the storage of account A has to be deleted in the database (wiped)
         assert!(
-            state.account_storage(&address_a).expect("Account A should have some storage").wiped,
+            state.account_storage(&address_a).expect("Account A should have some storage").wiped(),
             "The wiped flag should be set to discard all pre-existing storage from the database"
         );
         // Then, we must ensure that *only* the storage from the last transition will be written
@@ -791,6 +892,50 @@ mod tests {
             state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
             1
         );
+    }
+
+    #[test]
+    fn wiped_revert() {
+        let address = Address::random();
+
+        let init_block_number = 1;
+        let init_account = Account { balance: U256::from(3), ..Default::default() };
+        let init_slot = U256::from(1);
+
+        // Create init state for demonstration purposes
+        // Block 1
+        // Account: exists
+        // Storage: 0x01: 1
+        let mut init_state = PostState::new();
+        init_state.create_account(init_block_number, address, init_account);
+        init_state.change_storage(
+            init_block_number,
+            address,
+            BTreeMap::from([(init_slot, (U256::ZERO, U256::from(1)))]),
+        );
+
+        let mut post_state = PostState::new();
+        // Block 2
+        // Account: destroyed
+        // Storage: wiped
+        post_state.destroy_account(2, address, init_account);
+        assert!(post_state.storage.get(&address).unwrap().wiped());
+
+        // Block 3
+        // Account: recreated
+        // Storage: wiped, then 0x01: 2
+        let recreated_account = Account { balance: U256::from(4), ..Default::default() };
+        post_state.create_account(3, address, recreated_account);
+        post_state.change_storage(
+            3,
+            address,
+            BTreeMap::from([(init_slot, (U256::ZERO, U256::from(2)))]),
+        );
+        assert!(post_state.storage.get(&address).unwrap().wiped());
+
+        // Revert to block 2
+        post_state.revert_to(2);
+        assert!(post_state.storage.get(&address).unwrap().wiped());
     }
 
     /// Checks that if an account is touched multiple times in the same block,
@@ -906,7 +1051,7 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    Storage {
+                    ChangedStorage {
                         storage: BTreeMap::from([
                             (U256::from(0), U256::from(0)),
                             (U256::from(1), U256::from(3))
@@ -931,7 +1076,7 @@ mod tests {
                         (U256::from(0), U256::from(2)),
                         (U256::from(1), U256::from(5))
                     ]),
-                    wiped: false
+                    times_wiped: 0,
                 }
             )]),
             "The latest state of the storage is incorrect"
@@ -978,7 +1123,7 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    Storage {
+                    ChangedStorage {
                         storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
                         wiped: false,
                     }
@@ -1021,7 +1166,7 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    Storage {
+                    ChangedStorage {
                         storage: BTreeMap::from([(U256::from(0), U256::from(1)),]),
                         wiped: false,
                     }
@@ -1055,7 +1200,7 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    Storage {
+                    ChangedStorage {
                         storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
                         wiped: false,
                     }
@@ -1077,10 +1222,182 @@ mod tests {
                 address,
                 Storage {
                     storage: BTreeMap::from([(U256::from(0), U256::from(2)),]),
-                    wiped: false
+                    times_wiped: 0,
                 }
             )]),
             "The latest state of the storage is incorrect in the merged state"
+        );
+    }
+
+    #[test]
+    fn empty_post_state_state_root() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx().unwrap();
+
+        let post_state = PostState::new();
+        let state_root = post_state.state_root_slow(&tx).expect("Could not get state root");
+        assert_eq!(state_root, EMPTY_ROOT);
+    }
+
+    #[test]
+    fn post_state_state_root() {
+        let mut state: BTreeMap<Address, (Account, BTreeMap<H256, U256>)> = (0..10)
+            .map(|key| {
+                let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
+                let storage =
+                    (0..10).map(|key| (H256::from_low_u64_be(key), U256::from(key))).collect();
+                (Address::from_low_u64_be(key), (account, storage))
+            })
+            .collect();
+
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // insert initial state to the database
+        db.update(|tx| {
+            for (address, (account, storage)) in state.iter() {
+                let hashed_address = keccak256(address);
+                tx.put::<tables::HashedAccount>(hashed_address, *account).unwrap();
+                for (slot, value) in storage {
+                    tx.put::<tables::HashedStorage>(
+                        hashed_address,
+                        StorageEntry { key: keccak256(slot), value: *value },
+                    )
+                    .unwrap();
+                }
+            }
+
+            let (_, updates) = StateRoot::new(tx).root_with_updates().unwrap();
+            updates.flush(tx).unwrap();
+        })
+        .unwrap();
+
+        let block_number = 1;
+        let tx = db.tx().unwrap();
+        let mut post_state = PostState::new();
+
+        // database only state root is correct
+        assert_eq!(
+            post_state.state_root_slow(&tx).unwrap(),
+            state_root(
+                state
+                    .clone()
+                    .into_iter()
+                    .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+            )
+        );
+
+        // destroy account 1
+        let address_1 = Address::from_low_u64_be(1);
+        let account_1_old = state.remove(&address_1).unwrap();
+        post_state.destroy_account(block_number, address_1, account_1_old.0);
+        assert_eq!(
+            post_state.state_root_slow(&tx).unwrap(),
+            state_root(
+                state
+                    .clone()
+                    .into_iter()
+                    .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+            )
+        );
+
+        // change slot 2 in account 2
+        let address_2 = Address::from_low_u64_be(2);
+        let slot_2 = U256::from(2);
+        let slot_2_key = H256(slot_2.to_be_bytes());
+        let address_2_slot_2_old_value =
+            *state.get(&address_2).unwrap().1.get(&slot_2_key).unwrap();
+        let address_2_slot_2_new_value = U256::from(100);
+        state.get_mut(&address_2).unwrap().1.insert(slot_2_key, address_2_slot_2_new_value);
+        post_state.change_storage(
+            block_number,
+            address_2,
+            BTreeMap::from([(slot_2, (address_2_slot_2_old_value, address_2_slot_2_new_value))]),
+        );
+        assert_eq!(
+            post_state.state_root_slow(&tx).unwrap(),
+            state_root(
+                state
+                    .clone()
+                    .into_iter()
+                    .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+            )
+        );
+
+        // change balance of account 3
+        let address_3 = Address::from_low_u64_be(3);
+        let address_3_account_old = state.get(&address_3).unwrap().0;
+        let address_3_account_new = Account { balance: U256::from(24), ..address_3_account_old };
+        state.get_mut(&address_3).unwrap().0.balance = address_3_account_new.balance;
+        post_state.change_account(
+            block_number,
+            address_3,
+            address_3_account_old,
+            address_3_account_new,
+        );
+        assert_eq!(
+            post_state.state_root_slow(&tx).unwrap(),
+            state_root(
+                state
+                    .clone()
+                    .into_iter()
+                    .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+            )
+        );
+
+        // change nonce of account 4
+        let address_4 = Address::from_low_u64_be(4);
+        let address_4_account_old = state.get(&address_4).unwrap().0;
+        let address_4_account_new = Account { nonce: 128, ..address_4_account_old };
+        state.get_mut(&address_4).unwrap().0.nonce = address_4_account_new.nonce;
+        post_state.change_account(
+            block_number,
+            address_4,
+            address_4_account_old,
+            address_4_account_new,
+        );
+        assert_eq!(
+            post_state.state_root_slow(&tx).unwrap(),
+            state_root(
+                state
+                    .clone()
+                    .into_iter()
+                    .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+            )
+        );
+
+        // recreate account 1
+        let account_1_new =
+            Account { nonce: 56, balance: U256::from(123), bytecode_hash: Some(H256::random()) };
+        state.insert(address_1, (account_1_new, BTreeMap::default()));
+        post_state.create_account(block_number, address_1, account_1_new);
+        assert_eq!(
+            post_state.state_root_slow(&tx).unwrap(),
+            state_root(
+                state
+                    .clone()
+                    .into_iter()
+                    .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+            )
+        );
+
+        // update storage for account 1
+        let slot_20 = U256::from(20);
+        let slot_20_key = H256(slot_20.to_be_bytes());
+        let account_1_slot_20_value = U256::from(12345);
+        state.get_mut(&address_1).unwrap().1.insert(slot_20_key, account_1_slot_20_value);
+        post_state.change_storage(
+            block_number,
+            address_1,
+            BTreeMap::from([(slot_20, (U256::from(0), account_1_slot_20_value))]),
+        );
+        assert_eq!(
+            post_state.state_root_slow(&tx).unwrap(),
+            state_root(
+                state
+                    .clone()
+                    .into_iter()
+                    .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+            )
         );
     }
 }

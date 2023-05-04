@@ -36,7 +36,19 @@ impl Block {
         SealedBlock {
             header: self.header.seal_slow(),
             body: self.body,
-            ommers: self.ommers.into_iter().map(|o| o.seal_slow()).collect(),
+            ommers: self.ommers,
+            withdrawals: self.withdrawals,
+        }
+    }
+
+    /// Seal the block with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    pub fn seal(self, hash: H256) -> SealedBlock {
+        SealedBlock {
+            header: self.header.seal(hash),
+            body: self.body,
+            ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
     }
@@ -105,7 +117,7 @@ pub struct SealedBlock {
     /// Transactions with signatures.
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
-    pub ommers: Vec<SealedHeader>,
+    pub ommers: Vec<Header>,
     /// Block withdrawals.
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
@@ -117,7 +129,7 @@ impl SealedBlock {
     }
 
     /// Splits the sealed block into underlying components
-    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<SealedHeader>) {
+    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
         (self.header, self.body, self.ommers)
     }
 
@@ -137,9 +149,15 @@ impl SealedBlock {
         Block {
             header: self.header.unseal(),
             body: self.body,
-            ommers: self.ommers.into_iter().map(|o| o.unseal()).collect(),
+            ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
+    }
+}
+
+impl From<SealedBlock> for Block {
+    fn from(block: SealedBlock) -> Self {
+        block.unseal()
     }
 }
 
@@ -644,7 +662,7 @@ impl AsRef<H256> for RpcBlockHash {
 }
 
 /// Block number and hash.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, Default, PartialEq, Eq)]
 pub struct BlockNumHash {
     /// Block number
     pub number: BlockNumber,

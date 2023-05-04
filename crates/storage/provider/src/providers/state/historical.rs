@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
-    ProviderError, StateProvider,
+    PostState, ProviderError, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -92,6 +92,12 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for HistoricalStateProviderRef<'a, 
     }
 }
 
+impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 'b, TX> {
+    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
+    }
+}
+
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get storage.
     fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
@@ -143,7 +149,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
         _address: Address,
         _keys: &[H256],
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
-        Err(ProviderError::HistoryStateRoot.into())
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
 

@@ -1,12 +1,15 @@
 use super::BlockHashProvider;
 use reth_interfaces::Result;
-use reth_primitives::{BlockId, BlockNumberOrTag, ChainInfo, H256};
+use reth_primitives::{BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, H256};
 
 /// Client trait for transforming [BlockId].
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockIdProvider: BlockHashProvider + Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
+
+    /// Returns the best block number in the chain.
+    fn best_block_number(&self) -> Result<BlockNumber>;
 
     /// Converts the `BlockNumberOrTag` variants.
     fn convert_block_number(

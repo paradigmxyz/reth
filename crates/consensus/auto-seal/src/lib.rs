@@ -50,7 +50,11 @@ impl AutoSealConsensus {
 }
 
 impl Consensus for AutoSealConsensus {
-    fn pre_validate_header(
+    fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
+        Ok(())
+    }
+
+    fn validate_header_against_parent(
         &self,
         _header: &SealedHeader,
         _parent: &SealedHeader,
@@ -58,15 +62,15 @@ impl Consensus for AutoSealConsensus {
         Ok(())
     }
 
-    fn validate_header(
+    fn validate_header_with_total_difficulty(
         &self,
-        _header: &SealedHeader,
+        _header: &Header,
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }
 
-    fn pre_validate_block(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
         Ok(())
     }
 }

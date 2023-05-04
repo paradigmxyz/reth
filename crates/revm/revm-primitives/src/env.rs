@@ -1,7 +1,7 @@
 use crate::config::revm_spec;
 use reth_primitives::{
-    Address, ChainSpec, Head, Header, Transaction, TransactionKind, TransactionSignedEcRecovered,
-    TxEip1559, TxEip2930, TxLegacy, U256,
+    recover_signer, Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, U256,
 };
 use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, SpecId, TransactTo, TxEnv};
 
@@ -15,7 +15,7 @@ pub fn fill_cfg_and_block_env(
 ) {
     fill_cfg_env(cfg, chain_spec, header, total_difficulty);
     let after_merge = cfg.spec_id >= SpecId::MERGE;
-    fill_block_env(block_env, header, after_merge);
+    fill_block_env(block_env, chain_spec, header, after_merge);
 }
 
 /// Fill [CfgEnv] fields according to the chain spec and given header
@@ -42,9 +42,14 @@ pub fn fill_cfg_env(
     cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 }
 /// Fill block environment from Block.
-pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bool) {
+pub fn fill_block_env(
+    block_env: &mut BlockEnv,
+    chain_spec: &ChainSpec,
+    header: &Header,
+    after_merge: bool,
+) {
     block_env.number = U256::from(header.number);
-    block_env.coinbase = header.beneficiary;
+    block_env.coinbase = block_coinbase(chain_spec, header, after_merge);
     block_env.timestamp = U256::from(header.timestamp);
     if after_merge {
         block_env.prevrandao = Some(header.mix_hash);
@@ -55,6 +60,31 @@ pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bo
     }
     block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
     block_env.gas_limit = U256::from(header.gas_limit);
+}
+
+/// Return the coinbase address for the given header and chain spec.
+pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool) -> Address {
+    if chain_spec.chain == Chain::goerli() && !after_merge {
+        recover_header_signer(header).expect("failed to recover signer")
+    } else {
+        header.beneficiary
+    }
+}
+
+/// Recover the account from signed header per clique consensus rules.
+pub fn recover_header_signer(header: &Header) -> Option<Address> {
+    let extra_data_len = header.extra_data.len();
+    // Fixed number of extra-data suffix bytes reserved for signer signature.
+    // 65 bytes fixed as signatures are based on the standard secp256k1 curve.
+    // Filled with zeros on genesis block.
+    let signature_start_byte = extra_data_len - 65;
+    let signature: [u8; 65] = header.extra_data[signature_start_byte..].try_into().ok()?;
+    let seal_hash = {
+        let mut header_to_seal = header.clone();
+        header_to_seal.extra_data = Bytes::from(&header.extra_data[..signature_start_byte]);
+        header_to_seal.hash_slow()
+    };
+    recover_signer(&signature, seal_hash.as_fixed_bytes()).ok()
 }
 
 /// Returns a new [TxEnv] filled with the transaction's data.

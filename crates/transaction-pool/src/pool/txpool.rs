@@ -10,11 +10,10 @@ use crate::{
         pending::PendingPool,
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate},
-        AddedPendingTransaction, AddedTransaction, OnNewBlockOutcome,
+        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
-    traits::{PoolSize, StateDiff},
-    OnNewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
-    ValidPoolTransaction, U256,
+    traits::{BlockInfo, PoolSize},
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{constants::MIN_PROTOCOL_BASE_FEE, TxHash, H256};
@@ -120,12 +119,61 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Updates the pool based on the changed base fee.
+    /// Returns the currently tracked block values
+    pub(crate) fn block_info(&self) -> BlockInfo {
+        BlockInfo {
+            last_seen_block_hash: self.all_transactions.last_seen_block_hash,
+            last_seen_block_number: self.all_transactions.last_seen_block_number,
+            pending_basefee: self.all_transactions.pending_basefee,
+        }
+    }
+
+    /// Updates the tracked basefee
     ///
-    /// This enforces the dynamic fee requirement.
-    pub(crate) fn update_base_fee(&mut self, _new_base_fee: U256) {
-        // TODO update according to the changed base_fee
-        todo!()
+    /// Depending on the change in direction of the basefee, this will promote or demote
+    /// transactions from the basefee pool.
+    fn update_basefee(&mut self, pending_basefee: u128) {
+        match pending_basefee.cmp(&self.all_transactions.pending_basefee) {
+            Ordering::Equal => {
+                // fee unchanged, nothing to update
+            }
+            Ordering::Greater => {
+                // increased base fee: recheck pending pool and remove all that are no longer valid
+                for tx in self.pending_pool.enforce_basefee(pending_basefee) {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
+                }
+            }
+            Ordering::Less => {
+                // decreased base fee: recheck basefee pool and promote all that are now valid
+                for tx in self.basefee_pool.enforce_basefee(pending_basefee) {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
+                }
+            }
+        }
+    }
+
+    /// Sets the current block info for the pool.
+    ///
+    /// This will also apply updates to the pool based on the new base fee
+    pub(crate) fn set_block_info(&mut self, info: BlockInfo) {
+        let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_basefee } = info;
+        self.all_transactions.last_seen_block_hash = last_seen_block_hash;
+        self.all_transactions.last_seen_block_number = last_seen_block_number;
+        self.update_basefee(pending_basefee)
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
@@ -166,27 +214,34 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This removes all mined transactions, updates according to the new base fee and rechecks
     /// sender allowance.
-    pub(crate) fn on_new_block(&mut self, event: OnNewBlockEvent) -> OnNewBlockOutcome {
+    pub(crate) fn on_canonical_state_change(
+        &mut self,
+        block_info: BlockInfo,
+        mined_transactions: Vec<TxHash>,
+        changed_senders: HashMap<SenderId, SenderInfo>,
+    ) -> OnNewCanonicalStateOutcome {
+        // track changed accounts
+        self.sender_info.extend(changed_senders.clone());
+
+        // update block info
+        let block_hash = block_info.last_seen_block_hash;
+        self.all_transactions.set_block_info(block_info);
+
         // Remove all transaction that were included in the block
-        for tx_hash in &event.mined_transactions {
-            self.remove_transaction_by_hash(tx_hash);
-            // Update removed transactions metric
-            self.metrics.removed_transactions.increment(1);
+        for tx_hash in mined_transactions.iter() {
+            if self.prune_transaction_by_hash(tx_hash).is_some() {
+                // Update removed transactions metric
+                self.metrics.removed_transactions.increment(1);
+            }
         }
 
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
-        let updates =
-            self.all_transactions.update(event.pending_block_base_fee, &event.state_changes);
+        let updates = self.all_transactions.update(changed_senders);
 
         // Process the sub-pool updates
         let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
-        OnNewBlockOutcome {
-            block_hash: event.hash,
-            mined: event.mined_transactions,
-            promoted,
-            discarded,
-        }
+        OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
     }
 
     /// Adds the transaction into the pool.
@@ -249,7 +304,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // Update invalid transactions metric
                 self.metrics.invalid_transactions.increment(1);
                 match e {
-                    InsertErr::Underpriced { existing, .. } => {
+                    InsertErr::Underpriced { existing, transaction: _ } => {
                         Err(PoolError::ReplacementUnderpriced(existing))
                     }
                     InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => Err(
@@ -308,6 +363,9 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Removes and returns all matching transactions from the pool.
+    ///
+    /// Note: this does not advance any descendants of the removed transactions and does not apply
+    /// any additional updates.
     pub(crate) fn remove_transactions(
         &mut self,
         hashes: impl IntoIterator<Item = TxHash>,
@@ -337,6 +395,19 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.remove_from_subpool(pool, tx.id())
     }
 
+    /// This removes the transaction from the pool and advances any descendant state inside the
+    /// subpool.
+    ///
+    /// This is intended to be used when a transaction is included in a block,
+    /// [Self::on_canonical_state_change]
+    fn prune_transaction_by_hash(
+        &mut self,
+        tx_hash: &H256,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
+        self.prune_from_subpool(pool, tx.id())
+    }
+
     /// Removes the transaction from the given pool.
     ///
     /// Caution: this only removes the tx from the sub-pool and not from the pool itself
@@ -348,6 +419,20 @@ impl<T: TransactionOrdering> TxPool<T> {
         match pool {
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
+            SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
+        }
+    }
+
+    /// Removes the transaction from the given pool and advance sub-pool internal state, with the
+    /// expectation that the given transaction is included in a block.
+    fn prune_from_subpool(
+        &mut self,
+        pool: SubPool,
+        tx: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        match pool {
+            SubPool::Queued => self.queued_pool.remove_transaction(tx),
+            SubPool::Pending => self.pending_pool.prune_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
         }
     }
@@ -489,8 +574,6 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
 pub(crate) struct AllTransactions<T: PoolTransaction> {
-    /// Expected base fee for the pending block.
-    pending_basefee: u128,
     /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
@@ -505,6 +588,12 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FnvHashMap<SenderId, usize>,
+    /// The current block number the pool keeps track of.
+    last_seen_block_number: u64,
+    /// The current block hash the pool keeps track of.
+    last_seen_block_hash: H256,
+    /// Expected base fee for the pending block.
+    pending_basefee: u128,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
@@ -554,6 +643,15 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
     }
 
+    /// Updates the block specific info
+    fn set_block_info(&mut self, block_info: BlockInfo) {
+        let BlockInfo { last_seen_block_hash, last_seen_block_number, pending_basefee } =
+            block_info;
+        self.last_seen_block_number = last_seen_block_number;
+        self.last_seen_block_hash = last_seen_block_hash;
+        self.pending_basefee = pending_basefee;
+    }
+
     /// Rechecks all transactions in the pool against the changes.
     ///
     /// Possible changes are:
@@ -571,14 +669,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
-        pending_block_base_fee: u128,
-        _state_diffs: &StateDiff,
+        changed_accounts: HashMap<SenderId, SenderInfo>,
     ) -> Vec<PoolUpdate> {
-        // update new basefee
-        self.pending_basefee = pending_block_base_fee;
-
-        // TODO(mattsse): probably good idea to allocate some capacity here.
-        let mut updates = Vec::new();
+        // pre-allocate a few updates
+        let mut updates = Vec::with_capacity(64);
 
         let mut iter = self.txs.iter_mut().peekable();
 
@@ -591,8 +685,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // The `unique_sender` loop will process the first transaction of all senders, update its
         // state and internally update all consecutive transactions
-        'unique_sender: while let Some((id, tx)) = iter.next() {
-            // Advances the iterator to the next sender
+        'transactions: while let Some((id, tx)) = iter.next() {
             macro_rules! next_sender {
                 ($iter:ident) => {
                     'this: while let Some((peek, _)) = iter.peek() {
@@ -603,36 +696,84 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 };
             }
-            // If there's a nonce gap, we can shortcircuit, because there's nothing to update.
-            if tx.state.has_nonce_gap() {
-                next_sender!(iter);
-                continue
+            // tracks the balance if the sender was changed in the block
+            let mut changed_balance = None;
+
+            // check if this is a changed account
+            if let Some(info) = changed_accounts.get(&id.sender) {
+                // discard all transactions with a nonce lower than the current state nonce
+                if id.nonce < info.state_nonce {
+                    updates.push(PoolUpdate {
+                        id: *tx.transaction.id(),
+                        hash: *tx.transaction.hash(),
+                        current: tx.subpool,
+                        destination: Destination::Discard,
+                    });
+                    continue 'transactions
+                }
+
+                let ancestor = TransactionId::ancestor(id.nonce, info.state_nonce, id.sender);
+                // If there's no ancestor then this is the next transaction.
+                if ancestor.is_none() {
+                    tx.state.insert(TxState::NO_NONCE_GAPS);
+                    tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                    tx.cumulative_cost = U256::ZERO;
+                    if tx.transaction.cost > info.balance {
+                        // sender lacks sufficient funds to pay for this transaction
+                        tx.state.remove(TxState::ENOUGH_BALANCE);
+                    } else {
+                        tx.state.insert(TxState::ENOUGH_BALANCE);
+                    }
+                }
+
+                changed_balance = Some(info.balance);
             }
 
-            // TODO(mattsse): if account has balance changes or mined transactions the balance needs
-            // to be checked here
+            // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
+            if tx.state.has_nonce_gap() {
+                next_sender!(iter);
+                continue 'transactions
+            }
 
             // Since this is the first transaction of the sender, it has no parked ancestors
             tx.state.insert(TxState::NO_PARKED_ANCESTORS);
 
             // Update the first transaction of this sender.
-            Self::update_base_fee(&pending_block_base_fee, tx);
+            Self::update_tx_base_fee(&self.pending_basefee, tx);
             // Track if the transaction's sub-pool changed.
             Self::record_subpool_update(&mut updates, tx);
 
             // Track blocking transactions.
             let mut has_parked_ancestor = !tx.state.is_pending();
 
+            let mut cumulative_cost = tx.next_cumulative_cost();
+
             // Update all consecutive transaction of this sender
             while let Some((peek, ref mut tx)) = iter.peek_mut() {
                 if peek.sender != id.sender {
                     // Found the next sender
-                    continue 'unique_sender
+                    continue 'transactions
                 }
 
+                // can short circuit
                 if tx.state.has_nonce_gap() {
                     next_sender!(iter);
-                    continue 'unique_sender
+                    continue 'transactions
+                }
+
+                // update cumulative cost
+                tx.cumulative_cost = cumulative_cost;
+                // Update for next transaction
+                cumulative_cost = tx.next_cumulative_cost();
+
+                // If the account changed in the block, check the balance.
+                if let Some(changed_balance) = changed_balance {
+                    if cumulative_cost > changed_balance {
+                        // sender lacks sufficient funds to pay for this transaction
+                        tx.state.remove(TxState::ENOUGH_BALANCE);
+                    } else {
+                        tx.state.insert(TxState::ENOUGH_BALANCE);
+                    }
                 }
 
                 // Update ancestor condition.
@@ -644,7 +785,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 has_parked_ancestor = !tx.state.is_pending();
 
                 // Update and record sub-pool changes.
-                Self::update_base_fee(&pending_block_base_fee, tx);
+                Self::update_tx_base_fee(&self.pending_basefee, tx);
                 Self::record_subpool_update(&mut updates, tx);
 
                 // Advance iterator
@@ -673,16 +814,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Rechecks the transaction's dynamic fee condition.
-    fn update_base_fee(pending_block_base_fee: &u128, tx: &mut PoolInternalTransaction<T>) {
+    fn update_tx_base_fee(pending_block_base_fee: &u128, tx: &mut PoolInternalTransaction<T>) {
         // Recheck dynamic fee condition.
-        if let Some(fee_cap) = tx.transaction.max_fee_per_gas() {
-            match fee_cap.cmp(pending_block_base_fee) {
-                Ordering::Greater | Ordering::Equal => {
-                    tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                }
-                Ordering::Less => {
-                    tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
-                }
+        match tx.transaction.max_fee_per_gas().cmp(pending_block_base_fee) {
+            Ordering::Greater | Ordering::Equal => {
+                tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+            }
+            Ordering::Less => {
+                tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
             }
         }
     }
@@ -723,20 +862,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns all transactions that _follow_ after the given id but have the same sender.
     ///
-    /// NOTE: The range is _exclusive_
-    pub(crate) fn descendant_txs_exclusive_mut<'a, 'b: 'a>(
-        &'a mut self,
-        id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
-        self.txs
-            .range_mut((Excluded(id), Unbounded))
-            .take_while(|(other, _)| id.sender == other.sender)
-    }
-
-    /// Returns all transactions that _follow_ after the given id but have the same sender.
-    ///
     /// NOTE: The range is _inclusive_: if the transaction that belongs to `id` it field be the
     /// first value.
+    #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn descendant_txs<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
@@ -837,25 +966,22 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut cumulative_cost = U256::ZERO;
         let mut updates = Vec::new();
 
-        let predecessor =
+        let ancestor =
             TransactionId::ancestor(transaction.transaction.nonce(), on_chain_nonce, tx_id.sender);
 
-        // If there's no predecessor then this is the next transaction.
-        if predecessor.is_none() {
+        // If there's no ancestor tx then this is the next transaction.
+        if ancestor.is_none() {
             state.insert(TxState::NO_NONCE_GAPS);
             state.insert(TxState::NO_PARKED_ANCESTORS);
         }
 
         // Check dynamic fee
-        if let Some(fee_cap) = transaction.max_fee_per_gas() {
-            if fee_cap < self.minimal_protocol_basefee {
-                return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
-            }
-            if fee_cap >= self.pending_basefee {
-                state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-            }
-        } else {
-            // legacy transactions always satisfy the condition
+        let fee_cap = transaction.max_fee_per_gas();
+
+        if fee_cap < self.minimal_protocol_basefee {
+            return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
+        }
+        if fee_cap >= self.pending_basefee {
             state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
         }
 
@@ -909,7 +1035,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
             // We need to find out if the next transaction of the sender is considered pending
             //
-            let mut has_parked_ancestor = if predecessor.is_none() {
+            let mut has_parked_ancestor = if ancestor.is_none() {
                 // the new transaction is the next one
                 false
             } else {
@@ -1010,12 +1136,14 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
             max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
-            pending_basefee: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: 30_000_000,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
+            last_seen_block_number: 0,
+            last_seen_block_hash: Default::default(),
+            pending_basefee: Default::default(),
         }
     }
 }
@@ -1027,7 +1155,11 @@ pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 #[derive(Debug)]
 pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
-    Underpriced { transaction: Arc<ValidPoolTransaction<T>>, existing: TxHash },
+    Underpriced {
+        #[allow(unused)]
+        transaction: Arc<ValidPoolTransaction<T>>,
+        existing: TxHash,
+    },
     /// The transactions feeCap is lower than the chain's minimum fee requirement.
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
@@ -1052,6 +1184,7 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
     /// Where to move the transaction to.
     move_to: SubPool,
     /// Current state of the inserted tx.
+    #[allow(unused)]
     state: TxState,
     /// The transaction that was replaced by this.
     replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,
@@ -1061,6 +1194,7 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
 
 /// The internal transaction typed used by `AllTransactions` which also additional info used for
 /// determining the current state of the transaction.
+#[derive(Debug)]
 pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     /// The actual transaction object.
     pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
@@ -1124,21 +1258,16 @@ impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
 
 /// Stores relevant context about a sender.
 #[derive(Debug, Clone, Default)]
-struct SenderInfo {
+pub(crate) struct SenderInfo {
     /// current nonce of the sender.
-    state_nonce: u64,
+    pub(crate) state_nonce: u64,
     /// Balance of the sender at the current point.
-    balance: U256,
+    pub(crate) balance: U256,
 }
 
 // === impl SenderInfo ===
 
 impl SenderInfo {
-    /// Creates a new entry for an incoming, not yet tracked sender.
-    fn new_incoming(state_nonce: u64, balance: U256) -> Self {
-        Self { state_nonce, balance }
-    }
-
     /// Updates the info with the new values.
     fn update(&mut self, state_nonce: u64, balance: U256) {
         *self = Self { state_nonce, balance };
@@ -1416,5 +1545,25 @@ mod tests {
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce),
             Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
         ));
+    }
+
+    #[test]
+    fn update_basefee_subpools() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx = MockTransaction::eip1559().inc_price_by(10);
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        pool.update_basefee(tx.max_fee_per_gas() + 1);
+
+        assert!(pool.pending_pool.is_empty());
+        assert_eq!(pool.basefee_pool.len(), 1);
+
+        assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
     }
 }

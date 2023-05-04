@@ -2,7 +2,7 @@
 use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
-    Chain, ChainSpec, Hardfork, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256,
+    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256,
 };
 use std::sync::Arc;
 
@@ -23,20 +23,23 @@ impl BeaconConsensus {
 }
 
 impl Consensus for BeaconConsensus {
-    fn pre_validate_header(
+    fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
+        validation::validate_header_standalone(header, &self.chain_spec)?;
+        Ok(())
+    }
+
+    fn validate_header_against_parent(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validation::validate_header_standalone(header, &self.chain_spec)?;
         validation::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
-
         Ok(())
     }
 
-    fn validate_header(
+    fn validate_header_with_total_difficulty(
         &self,
-        header: &SealedHeader,
+        header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
@@ -76,7 +79,7 @@ impl Consensus for BeaconConsensus {
         Ok(())
     }
 
-    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         validation::validate_block_standalone(block, &self.chain_spec)
     }
 }
@@ -85,7 +88,7 @@ impl Consensus for BeaconConsensus {
 ///
 /// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
 /// This must be 32 bytes or fewer; formally Hx.
-fn validate_header_extradata(header: &SealedHeader) -> Result<(), ConsensusError> {
+fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
     if header.extra_data.len() > 32 {
         Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
     } else {

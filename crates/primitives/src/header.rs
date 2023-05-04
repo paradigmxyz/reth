@@ -1,7 +1,8 @@
 use crate::{
+    basefee::calculate_next_block_base_fee,
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
+    BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use ethers_core::types::{Block, H256 as EthersH256, H64};
@@ -117,6 +118,11 @@ impl Default for Header {
 }
 
 impl Header {
+    /// Retuen paret block number and hash
+    pub fn parent_num_hash(&self) -> BlockNumHash {
+        BlockNumHash { number: self.number.saturating_sub(1), hash: self.parent_hash }
+    }
+
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use [`Header::seal`], [`SealedHeader`] and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> H256 {
@@ -143,6 +149,13 @@ impl Header {
     /// Check if the transaction root equals to empty root.
     pub fn transaction_root_is_empty(&self) -> bool {
         self.transactions_root == EMPTY_ROOT
+    }
+
+    /// Calculate base fee for next block according to the EIP-1559 spec.
+    ///
+    /// Returns a `None` if no base fee is set, no EIP-1559 support
+    pub fn next_block_base_fee(&self) -> Option<u64> {
+        Some(calculate_next_block_base_fee(self.gas_used, self.gas_limit, self.base_fee_per_gas?))
     }
 
     /// Seal the header with a known hash.
@@ -301,8 +314,8 @@ impl SealedHeader {
     }
 
     /// Return the number hash tuple.
-    pub fn num_hash(&self) -> (BlockNumber, BlockHash) {
-        (self.number, self.hash)
+    pub fn num_hash(&self) -> BlockNumHash {
+        BlockNumHash::new(self.number, self.hash)
     }
 }
 

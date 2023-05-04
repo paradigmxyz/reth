@@ -1,20 +1,60 @@
 //! Canonical chain state notification trait and types.
 use crate::{chain::BlockReceipts, Chain};
 use auto_impl::auto_impl;
-use std::sync::Arc;
-use tokio::sync::broadcast::{Receiver, Sender};
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{ready, Context, Poll},
+};
+use tokio::sync::broadcast;
+use tokio_stream::{wrappers::BroadcastStream, Stream};
+use tracing::debug;
 
 /// Type alias for a receiver that receives [CanonStateNotification]
-pub type CanonStateNotifications = Receiver<CanonStateNotification>;
+pub type CanonStateNotifications = broadcast::Receiver<CanonStateNotification>;
 
 /// Type alias for a sender that sends [CanonStateNotification]
-pub type CanonStateNotificationSender = Sender<CanonStateNotification>;
+pub type CanonStateNotificationSender = broadcast::Sender<CanonStateNotification>;
 
 /// A type that allows to register chain related event subscriptions.
 #[auto_impl(&, Arc)]
 pub trait CanonStateSubscriptions: Send + Sync {
-    /// Get notified when a new block was imported.
-    fn subscribe_canon_state(&self) -> CanonStateNotifications;
+    /// Get notified when a new canonical chain was imported.
+    ///
+    /// A canonical chain be one or more blocks, a reorg or a revert.
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications;
+
+    /// Convenience method to get a stream of [`CanonStateNotification`].
+    fn canonical_state_stream(&self) -> CanonStateNotificationStream {
+        CanonStateNotificationStream {
+            st: BroadcastStream::new(self.subscribe_to_canonical_state()),
+        }
+    }
+}
+
+/// A Stream of [CanonStateNotification].
+#[derive(Debug)]
+#[pin_project::pin_project]
+pub struct CanonStateNotificationStream {
+    #[pin]
+    st: BroadcastStream<CanonStateNotification>,
+}
+
+impl Stream for CanonStateNotificationStream {
+    type Item = CanonStateNotification;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            return match ready!(self.as_mut().project().st.poll_next(cx)) {
+                Some(Ok(notification)) => Poll::Ready(Some(notification)),
+                Some(Err(err)) => {
+                    debug!(%err, "canonical state notification stream lagging behind");
+                    continue
+                }
+                None => Poll::Ready(None),
+            }
+        }
+    }
 }
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
@@ -26,6 +66,8 @@ pub enum CanonStateNotification {
     /// Chain reorgs and both old and new chain are returned.
     Reorg { old: Arc<Chain>, new: Arc<Chain> },
     /// Chain got reverted without reorg and only old chain is returned.
+    ///
+    /// This reverts the chain's tip to the first block of the chain.
     Revert { old: Arc<Chain> },
     /// Chain got extended without reorg and only new chain is returned.
     Commit { new: Arc<Chain> },

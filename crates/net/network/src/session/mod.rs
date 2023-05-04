@@ -232,33 +232,36 @@ impl SessionManager {
 
     /// Starts a new pending session from the local node to the given remote node.
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_peer_id: PeerId) {
-        let session_id = self.next_id();
-        let (disconnect_tx, disconnect_rx) = oneshot::channel();
-        let pending_events = self.pending_sessions_tx.clone();
-        let secret_key = self.secret_key;
-        let hello_message = self.hello_message.clone();
-        let fork_filter = self.fork_filter.clone();
-        let status = self.status;
-        let band_with_meter = self.bandwidth_meter.clone();
-        self.spawn(start_pending_outbound_session(
-            disconnect_rx,
-            pending_events,
-            session_id,
-            remote_addr,
-            remote_peer_id,
-            secret_key,
-            hello_message,
-            status,
-            fork_filter,
-            band_with_meter,
-        ));
+        // The error can be dropped because no dial will be made if it would exceed the limit
+        if self.counter.ensure_pending_outbound().is_ok() {
+            let session_id = self.next_id();
+            let (disconnect_tx, disconnect_rx) = oneshot::channel();
+            let pending_events = self.pending_sessions_tx.clone();
+            let secret_key = self.secret_key;
+            let hello_message = self.hello_message.clone();
+            let fork_filter = self.fork_filter.clone();
+            let status = self.status;
+            let band_with_meter = self.bandwidth_meter.clone();
+            self.spawn(start_pending_outbound_session(
+                disconnect_rx,
+                pending_events,
+                session_id,
+                remote_addr,
+                remote_peer_id,
+                secret_key,
+                hello_message,
+                status,
+                fork_filter,
+                band_with_meter,
+            ));
 
-        let handle = PendingSessionHandle {
-            disconnect_tx: Some(disconnect_tx),
-            direction: Direction::Outgoing(remote_peer_id),
-        };
-        self.pending_sessions.insert(session_id, handle);
-        self.counter.inc_pending_outbound();
+            let handle = PendingSessionHandle {
+                disconnect_tx: Some(disconnect_tx),
+                direction: Direction::Outgoing(remote_peer_id),
+            };
+            self.pending_sessions.insert(session_id, handle);
+            self.counter.inc_pending_outbound();
+        }
     }
 
     /// Initiates a shutdown of the channel.
@@ -454,6 +457,7 @@ impl SessionManager {
 
                 self.spawn(session);
 
+                let client_version = Arc::new(client_id);
                 let handle = ActiveSessionHandle {
                     direction,
                     session_id,
@@ -462,7 +466,7 @@ impl SessionManager {
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
                     commands_to_session,
-                    client_version: client_id,
+                    client_version: Arc::clone(&client_version),
                     remote_addr,
                 };
 
@@ -472,6 +476,7 @@ impl SessionManager {
                 Poll::Ready(SessionEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
+                    client_version,
                     version,
                     capabilities,
                     status,
@@ -588,6 +593,7 @@ pub(crate) enum SessionEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
+        client_version: Arc<String>,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
@@ -688,6 +694,15 @@ impl Direction {
     /// Returns `true` if this an incoming connection.
     pub(crate) fn is_incoming(&self) -> bool {
         matches!(self, Direction::Incoming)
+    }
+}
+
+impl std::fmt::Display for Direction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Direction::Incoming => write!(f, "incoming"),
+            Direction::Outgoing(_) => write!(f, "outgoing"),
+        }
     }
 }
 

@@ -74,8 +74,6 @@ pub enum ProviderError {
     /// Some error occurred while interacting with the state tree.
     #[error("Unknown error occurred while interacting with the state trie.")]
     StateTrie,
-    #[error("History state root, can't be calculated")]
-    HistoryStateRoot,
     /// Thrown when required header related data was not found but was required.
     #[error("requested data not found")]
     HeaderNotFound,
@@ -91,4 +89,7 @@ pub enum ProviderError {
     /// Thrown when we failed to lookup a block for the pending state
     #[error("Unknown block hash: {0:}")]
     UnknownBlockHash(H256),
+    /// Unable to compute state root on top of historical block
+    #[error("Unable to compute state root on top of historical block")]
+    StateRootNotAvailableForHistoricalBlock,
 }

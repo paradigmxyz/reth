@@ -1,14 +1,15 @@
-use crate::{
+use super::{
     nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode},
-    Nibbles,
+    BranchNodeCompact, Nibbles, TrieMask,
 };
-use reth_primitives::{
-    keccak256,
-    proofs::EMPTY_ROOT,
-    trie::{BranchNodeCompact, HashBuilderState, HashBuilderValue, TrieMask},
-    H256,
-};
+use crate::{keccak256, proofs::EMPTY_ROOT, H256};
 use std::{collections::HashMap, fmt::Debug};
+
+mod state;
+pub use state::HashBuilderState;
+
+mod value;
+pub use value::HashBuilderValue;
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder
 /// is to build the Merkle proof that is essential for verifying the integrity and authenticity of
@@ -46,6 +47,8 @@ pub struct HashBuilder {
     stored_in_database: bool,
 
     updated_branch_nodes: Option<HashMap<Nibbles, BranchNodeCompact>>,
+
+    rlp_buf: Vec<u8>,
 }
 
 impl From<HashBuilderState> for HashBuilder {
@@ -59,6 +62,7 @@ impl From<HashBuilderState> for HashBuilder {
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
             updated_branch_nodes: None,
+            rlp_buf: Vec::with_capacity(32),
         }
     }
 }
@@ -241,8 +245,13 @@ impl HashBuilder {
                     HashBuilderValue::Bytes(leaf_value) => {
                         let leaf_node = LeafNode::new(&short_node_key, leaf_value);
                         tracing::debug!(target: "trie::hash_builder", ?leaf_node, "pushing leaf node");
-                        tracing::trace!(target: "trie::hash_builder", rlp = hex::encode(&leaf_node.rlp()), "leaf node rlp");
-                        self.stack.push(leaf_node.rlp());
+                        tracing::trace!(target: "trie::hash_builder", rlp = {
+                            self.rlp_buf.clear();
+                            hex::encode(&leaf_node.rlp(&mut self.rlp_buf))
+                        }, "leaf node rlp");
+
+                        self.rlp_buf.clear();
+                        self.stack.push(leaf_node.rlp(&mut self.rlp_buf));
                     }
                     HashBuilderValue::Hash(hash) => {
                         tracing::debug!(target: "trie::hash_builder", ?hash, "pushing branch node hash");
@@ -266,8 +275,12 @@ impl HashBuilder {
                     self.stack.pop().expect("there should be at least one stack item; qed");
                 let extension_node = ExtensionNode::new(&short_node_key, &stack_last);
                 tracing::debug!(target: "trie::hash_builder", ?extension_node, "pushing extension node");
-                tracing::trace!(target: "trie::hash_builder", rlp = hex::encode(&extension_node.rlp()), "extension node rlp");
-                self.stack.push(extension_node.rlp());
+                tracing::trace!(target: "trie::hash_builder", rlp = {
+                    self.rlp_buf.clear();
+                    hex::encode(&extension_node.rlp(&mut self.rlp_buf))
+                }, "extension node rlp");
+                self.rlp_buf.clear();
+                self.stack.push(extension_node.rlp(&mut self.rlp_buf));
                 self.resize_masks(len_from);
             }
 
@@ -315,7 +328,9 @@ impl HashBuilder {
         let hash_mask = self.hash_masks[len];
         let branch_node = BranchNode::new(&self.stack);
         let children = branch_node.children(state_mask, hash_mask).collect();
-        let rlp = branch_node.rlp(state_mask);
+
+        self.rlp_buf.clear();
+        let rlp = branch_node.rlp(state_mask, &mut self.rlp_buf);
 
         // Clears the stack from the branch node elements
         let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
@@ -400,8 +415,8 @@ impl HashBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{hex_literal::hex, proofs::KeccakHasher, H256, U256};
     use proptest::prelude::*;
-    use reth_primitives::{hex_literal::hex, proofs::KeccakHasher, H256, U256};
     use std::collections::{BTreeMap, HashMap};
 
     fn trie_root<I, K, V>(iter: I) -> H256
@@ -574,7 +589,7 @@ mod tests {
         // Manually create the branch node that should be there after the first 2 leaves are added.
         // Skip the 0th element given in this example they have a common prefix and will
         // collapse to a Branch node.
-        use reth_primitives::bytes::BytesMut;
+        use crate::bytes::BytesMut;
         use reth_rlp::Encodable;
         let leaf1 = LeafNode::new(&Nibbles::unpack(&raw_input[0].0[1..]), input[0].1);
         let leaf2 = LeafNode::new(&Nibbles::unpack(&raw_input[1].0[1..]), input[1].1);

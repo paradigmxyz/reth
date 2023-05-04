@@ -3,6 +3,7 @@ use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
 };
+use reth_network_api::NetworkInfo;
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{
@@ -17,6 +18,17 @@ fn is_addr_in_use_kind(err: NetworkError, kind: ServiceKind) -> bool {
         }
         _ => false,
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_is_default_syncing() {
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let config = NetworkConfigBuilder::new(secret_key)
+        .disable_discovery()
+        .listener_port(0)
+        .build(NoopProvider::default());
+    let network = NetworkManager::new(config).await.unwrap();
+    assert!(network.handle().is_syncing());
 }
 
 #[tokio::test(flavor = "multi_thread")]

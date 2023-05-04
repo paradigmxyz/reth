@@ -4,7 +4,7 @@ mod account;
 pub use account::AccountProvider;
 
 mod block;
-pub use block::BlockProvider;
+pub use block::{BlockProvider, BlockSource};
 
 mod block_hash;
 pub use block_hash::BlockHashProvider;
@@ -24,7 +24,7 @@ pub use receipts::ReceiptProvider;
 mod state;
 pub use state::{
     BlockchainTreePendingStateProvider, PostStateDataProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    StateProviderFactory, StateRootProvider,
 };
 
 mod transactions;

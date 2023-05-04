@@ -56,6 +56,12 @@ impl<K: Key> RawKey<K> {
     }
 }
 
+impl<K: Key> From<K> for RawKey<K> {
+    fn from(key: K) -> Self {
+        RawKey::new(key)
+    }
+}
+
 impl AsRef<[u8]> for RawKey<Vec<u8>> {
     fn as_ref(&self) -> &[u8] {
         &self.key
