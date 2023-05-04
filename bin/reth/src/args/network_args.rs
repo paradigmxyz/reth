@@ -47,7 +47,8 @@ pub struct NetworkArgs {
     #[arg(long, verbatim_doc_comment)]
     pub no_persist_peers: bool,
 
-    /// NAT resolution method.
+    #[allow(rustdoc::invalid_html_tags)]
+    /// NAT resolution method (any|none|upnp|publicip|extip:<IP>)
     #[arg(long, default_value = "any")]
     pub nat: NatResolver,
 
@@ -129,5 +130,27 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
         network_config_builder
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[clap(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn parse_nat_args() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--nat", "none"]).args;
+        assert_eq!(args.nat, NatResolver::None);
+
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--nat", "extip:0.0.0.0"]).args;
+        assert_eq!(args.nat, NatResolver::ExternalIp("0.0.0.0".parse().unwrap()));
     }
 }
