@@ -120,18 +120,18 @@ where
         tx_hash: H256,
         opts: GethDebugTracingOptions,
     ) -> EthResult<GethTraceFrame> {
-        let (transaction, at) = match self.eth_api.transaction_by_hash_at(tx_hash).await? {
+        let (transaction, block) = match self.eth_api.transaction_and_block(tx_hash).await? {
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
+        let (cfg, block_env, _) = self.eth_api.evm_env_at(block.hash.into()).await?;
 
-        let block_env = self.eth_api.evm_env_at(at);
-        let block_txs = self.eth_api.transactions_by_block_id(at);
-        let (block_env, block_txs) = futures::try_join!(block_env, block_txs)?;
-        let block_txs = block_txs.unwrap_or_default();
-        let (cfg, block_env, at) = block_env;
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let parent_block = block.parent_hash;
+        let block_txs = block.body;
 
-        self.eth_api.with_state_at_block(at, |state| {
+        self.eth_api.with_state_at_block(parent_block.into(), |state| {
             // configure env for the target transaction
             let tx = transaction.into_recovered();
 

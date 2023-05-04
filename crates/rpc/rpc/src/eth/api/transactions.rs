@@ -8,10 +8,11 @@ use crate::{
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
+
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
-    Receipt, Transaction as PrimitiveTransaction,
+    Receipt, SealedBlock, Transaction as PrimitiveTransaction,
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
     TxLegacy, H256, U128, U256, U64,
@@ -73,10 +74,18 @@ pub trait EthTransactions: Send + Sync {
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>>;
 
     /// Returns the transaction by including its corresponding [BlockId]
+    ///
+    /// Note: this supports pending transactions
     async fn transaction_by_hash_at(
         &self,
         hash: H256,
     ) -> EthResult<Option<(TransactionSource, BlockId)>>;
+
+    /// Returns the _historical_ transaction and the block it was mined in
+    async fn historical_transaction_by_hash_at(
+        &self,
+        hash: H256,
+    ) -> EthResult<Option<(TransactionSource, H256)>>;
 
     /// Returns the transaction receipt for the given hash.
     ///
@@ -138,6 +147,12 @@ pub trait EthTransactions: Send + Sync {
     ) -> EthResult<R>
     where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>;
+
+    /// Fetches the transaction and the transaction's block
+    async fn transaction_and_block(
+        &self,
+        hash: H256,
+    ) -> EthResult<Option<(TransactionSource, SealedBlock)>>;
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
@@ -260,6 +275,16 @@ where
                 };
                 Ok(Some(res))
             }
+        }
+    }
+
+    async fn historical_transaction_by_hash_at(
+        &self,
+        hash: H256,
+    ) -> EthResult<Option<(TransactionSource, H256)>> {
+        match self.transaction_by_hash_at(hash).await? {
+            None => Ok(None),
+            Some((tx, at)) => Ok(at.as_block_hash().map(|hash| (tx, hash))),
         }
     }
 
@@ -424,6 +449,24 @@ where
         })
     }
 
+    async fn transaction_and_block(
+        &self,
+        hash: H256,
+    ) -> EthResult<Option<(TransactionSource, SealedBlock)>> {
+        let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+
+        // Note: this is always either hash or pending
+        let block_hash = match at {
+            BlockId::Hash(hash) => hash.block_hash,
+            _ => return Ok(None),
+        };
+        let block = self.cache().get_block(block_hash).await?;
+        Ok(block.map(|block| (transaction, block.seal(block_hash))))
+    }
+
     async fn trace_transaction_in_block<F, R>(
         &self,
         hash: H256,
@@ -433,19 +476,20 @@ where
     where
         F: FnOnce(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
     {
-        let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
+        let (transaction, block) = match self.transaction_and_block(hash).await? {
             None => return Ok(None),
             Some(res) => res,
         };
         let (tx, tx_info) = transaction.split();
 
-        let block_env = self.evm_env_at(at);
-        let block_txs = self.transactions_by_block_id(at);
-        let (block_env, block_txs) = futures::try_join!(block_env, block_txs)?;
-        let block_txs = block_txs.unwrap_or_default();
-        let (cfg, block_env, at) = block_env;
+        let (cfg, block_env, _) = self.evm_env_at(block.hash.into()).await?;
 
-        self.with_state_at_block(at, |state| {
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let parent_block = block.parent_hash;
+        let block_txs = block.body;
+
+        self.with_state_at_block(parent_block.into(), |state| {
             let mut db = SubState::new(State::new(state));
 
             // replay all transactions prior to the targeted transaction
