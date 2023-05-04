@@ -37,11 +37,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
 {
     fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
         let mut tree = self.tree.write();
-        tree.ensure_block_is_in_range(&block)?;
+        // check if block is known before recovering all senders.
+        if let Some(status) = tree.is_block_known(block.num_hash())? {
+            return Ok(status)
+        }
         let block = block
             .seal_with_senders()
             .ok_or(reth_interfaces::executor::Error::SenderRecoveryError)?;
-        tree.insert_in_range_block_with_senders(block)
+        tree.insert_block_inner(block, true)
     }
 
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), Error> {
@@ -50,7 +53,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
 
     fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, Error> {
         trace!(target: "blockchain_tree", ?block, "Inserting block");
-        self.tree.write().insert_block_with_senders(block)
+        self.tree.write().insert_block(block)
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
@@ -89,7 +92,23 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
 
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
         trace!(target: "blockchain_tree", "Returning canonical blocks in tree");
-        self.tree.read().block_indices().canonical_chain().clone()
+        self.tree.read().block_indices().canonical_chain().inner().clone()
+    }
+
+    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
+        let mut parent = hash;
+        let tree = self.tree.read();
+
+        // walk up the tree and check if the parent is in the sidechain
+        while let Some(block) = tree.block_by_hash(parent) {
+            parent = block.parent_hash;
+        }
+
+        if tree.block_indices().is_block_hash_canonical(&parent) {
+            return Some(parent)
+        }
+
+        None
     }
 
     fn canonical_tip(&self) -> BlockNumHash {
@@ -102,10 +121,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         self.tree.read().block_indices().pending_blocks()
     }
 
-    fn pending_block(&self) -> Option<BlockNumHash> {
+    fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         trace!(target: "blockchain_tree", "Returning first pending block");
-        let (number, blocks) = self.tree.read().block_indices().pending_blocks();
-        blocks.first().map(|&hash| BlockNumHash { number, hash })
+        self.tree.read().block_indices().pending_block_num_hash()
+    }
+
+    fn pending_block(&self) -> Option<SealedBlock> {
+        trace!(target: "blockchain_tree", "Returning first pending block");
+        self.tree.read().pending_block().cloned()
     }
 }
 

@@ -1,4 +1,4 @@
-use reth_primitives::{keccak256, H256};
+use crate::{keccak256, H256};
 use reth_rlp::EMPTY_STRING_CODE;
 use std::ops::Range;
 
@@ -6,7 +6,11 @@ mod branch;
 mod extension;
 mod leaf;
 
-pub use self::{branch::BranchNode, extension::ExtensionNode, leaf::LeafNode};
+pub use self::{
+    branch::{BranchNode, BranchNodeCompact},
+    extension::ExtensionNode,
+    leaf::LeafNode,
+};
 
 /// The range of valid child indexes.
 pub const CHILD_INDEX_RANGE: Range<u8> = 0..16;

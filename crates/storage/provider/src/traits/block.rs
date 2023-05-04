@@ -1,6 +1,6 @@
 use crate::{BlockIdProvider, HeaderProvider, ReceiptProvider, TransactionsProvider};
 use reth_interfaces::Result;
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, Header, H256};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, Header, SealedBlock, H256};
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -52,6 +52,12 @@ pub trait BlockProvider:
     ///
     /// Returns `None` if block is not found.
     fn block(&self, id: BlockId) -> Result<Option<Block>>;
+
+    /// Returns the pending block if available
+    ///
+    /// Note: This returns a [SealedBlock] because it's expected that this is sealed by the provider
+    /// and the caller does not know the hash.
+    fn pending_block(&self) -> Result<Option<SealedBlock>>;
 
     /// Returns the ommers/uncle headers of the given block from the database.
     ///

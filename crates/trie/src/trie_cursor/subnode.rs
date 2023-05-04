@@ -1,6 +1,5 @@
-use crate::{nodes::CHILD_INDEX_RANGE, Nibbles};
 use reth_primitives::{
-    trie::{BranchNodeCompact, StoredSubNode},
+    trie::{nodes::CHILD_INDEX_RANGE, BranchNodeCompact, Nibbles, StoredSubNode},
     H256,
 };
 

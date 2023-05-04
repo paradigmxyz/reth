@@ -153,7 +153,7 @@ where
                     header.transactions_root = if transactions.is_empty() {
                         EMPTY_TRANSACTIONS
                     } else {
-                        proofs::calculate_transaction_root(transactions.iter())
+                        proofs::calculate_transaction_root(&transactions)
                     };
 
                     let block =
@@ -186,7 +186,7 @@ where
                                     .iter()
                                     .map(|r| r.clone().into())
                                     .collect::<Vec<ReceiptWithBloom>>();
-                                proofs::calculate_receipt_root(receipts_with_bloom.iter())
+                                proofs::calculate_receipt_root(&receipts_with_bloom)
                             };
                             let transactions = body.clone();
                             let body =

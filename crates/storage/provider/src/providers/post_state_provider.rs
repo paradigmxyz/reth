@@ -72,7 +72,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> StateProvider for PostState
                 storage.storage.get(&U256::from_be_bytes(storage_key.to_fixed_bytes()))
             {
                 return Ok(Some(*value))
-            } else if storage.wiped {
+            } else if storage.wiped() {
                 return Ok(Some(U256::ZERO))
             }
         }

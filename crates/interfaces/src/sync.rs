@@ -16,7 +16,7 @@ pub trait SyncStateProvider: Send + Sync {
 /// Eventually the node reaches the `Finish` stage and will transition to [`SyncState::Idle`], it
 /// which point the node is considered fully synced.
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait SyncStateUpdater: SyncStateProvider {
+pub trait SyncStateUpdater: Send + Sync + 'static {
     /// Notifies about an [SyncState] update.
     fn update_sync_state(&self, state: SyncState);
 }

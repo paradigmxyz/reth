@@ -36,6 +36,13 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 # used for forkid
 crc = "3"
 
+# tracing
+tracing = "0.1"
+
+# tokio
+tokio = { version = "1", default-features = false, features = ["sync"] }
+tokio-stream = "0.1"
+
 # misc
 bytes = "1.4"
 serde = "1.0"
@@ -95,4 +102,8 @@ test-utils = []
 
 [[bench]]
 name = "recover_ecdsa_crit"
+harness = false
+
+[[bench]]
+name = "trie_root"
 harness = false

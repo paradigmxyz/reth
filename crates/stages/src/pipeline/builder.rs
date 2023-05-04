@@ -1,30 +1,28 @@
 use crate::{Pipeline, Stage, StageSet};
 use reth_db::database::Database;
-use reth_interfaces::sync::{NoopSyncStateUpdate, SyncStateUpdater};
+use reth_interfaces::sync::SyncStateUpdater;
 use reth_primitives::{BlockNumber, H256};
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
 #[derive(Debug)]
 #[must_use = "call `build` to construct the pipeline"]
-pub struct PipelineBuilder<DB, U = NoopSyncStateUpdate>
+pub struct PipelineBuilder<DB>
 where
     DB: Database,
-    U: SyncStateUpdater,
 {
-    pipeline: Pipeline<DB, U>,
+    pipeline: Pipeline<DB>,
 }
 
-impl<DB: Database, U: SyncStateUpdater> Default for PipelineBuilder<DB, U> {
+impl<DB: Database> Default for PipelineBuilder<DB> {
     fn default() -> Self {
         Self { pipeline: Pipeline::default() }
     }
 }
 
-impl<DB, U> PipelineBuilder<DB, U>
+impl<DB> PipelineBuilder<DB>
 where
     DB: Database,
-    U: SyncStateUpdater,
 {
     /// Add a stage to the pipeline.
     pub fn add_stage<S>(mut self, stage: S) -> Self
@@ -71,13 +69,13 @@ where
     }
 
     /// Set a [SyncStateUpdater].
-    pub fn with_sync_state_updater(mut self, updater: U) -> Self {
-        self.pipeline.sync_state_updater = Some(updater);
+    pub fn with_sync_state_updater<U: SyncStateUpdater>(mut self, updater: U) -> Self {
+        self.pipeline.sync_state_updater = Box::new(updater);
         self
     }
 
     /// Builds the final [`Pipeline`].
-    pub fn build(self) -> Pipeline<DB, U> {
+    pub fn build(self) -> Pipeline<DB> {
         self.pipeline
     }
 }

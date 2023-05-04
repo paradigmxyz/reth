@@ -1,5 +1,4 @@
 use super::PrefixSet;
-use crate::Nibbles;
 use derive_more::Deref;
 use reth_db::{
     cursor::DbCursorRO,
@@ -8,7 +7,7 @@ use reth_db::{
     transaction::DbTx,
     Error,
 };
-use reth_primitives::{keccak256, BlockNumber, StorageEntry, H256};
+use reth_primitives::{keccak256, trie::Nibbles, BlockNumber, StorageEntry, H256};
 use std::{collections::HashMap, ops::RangeInclusive};
 
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
