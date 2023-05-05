@@ -57,7 +57,7 @@ impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir: crate::dirs::ChainPath<DataDirPath> = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         std::fs::create_dir_all(&db_path)?;
 
