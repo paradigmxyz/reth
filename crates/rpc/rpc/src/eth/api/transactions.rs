@@ -234,11 +234,12 @@ where
                 let transaction =
                     tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-                let tx = TransactionSource::Database {
+                let tx = TransactionSource::Block {
                     transaction,
                     index: meta.index,
                     block_hash: meta.block_hash,
                     block_number: meta.block_number,
+                    base_fee: meta.base_fee,
                 };
                 Ok(Some(tx))
             }
@@ -256,18 +257,20 @@ where
                     tx @ TransactionSource::Pool(_) => {
                         (tx, BlockId::Number(BlockNumberOrTag::Pending))
                     }
-                    TransactionSource::Database {
+                    TransactionSource::Block {
                         transaction,
                         index,
                         block_hash,
                         block_number,
+                        base_fee,
                     } => {
                         let at = BlockId::Hash(block_hash.into());
-                        let tx = TransactionSource::Database {
+                        let tx = TransactionSource::Block {
                             transaction,
                             index,
                             block_hash,
                             block_number,
+                            base_fee,
                         };
                         (tx, at)
                     }
@@ -548,6 +551,7 @@ where
                     tx,
                     block_hash,
                     block.header.number,
+                    block.header.base_fee_per_gas,
                     index.into(),
                 )))
             }
@@ -644,8 +648,10 @@ where
 pub enum TransactionSource {
     /// Transaction exists in the pool (Pending)
     Pool(TransactionSignedEcRecovered),
-    /// Transaction already executed
-    Database {
+    /// Transaction already included in a block
+    ///
+    /// This can be a historical block or a pending block (received from the CL)
+    Block {
         /// Transaction fetched via provider
         transaction: TransactionSignedEcRecovered,
         /// Index of the transaction in the block
@@ -654,6 +660,8 @@ pub enum TransactionSource {
         block_hash: H256,
         /// Number of the block.
         block_number: u64,
+        /// base fee of the block.
+        base_fee: Option<u64>,
     },
 }
 
@@ -677,10 +685,11 @@ impl TransactionSource {
                         index: None,
                         block_hash: None,
                         block_number: None,
+                        base_fee: None,
                     },
                 )
             }
-            TransactionSource::Database { transaction, index, block_hash, block_number } => {
+            TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let hash = transaction.hash();
                 (
                     transaction,
@@ -689,6 +698,7 @@ impl TransactionSource {
                         index: Some(index),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
+                        base_fee,
                     },
                 )
             }
@@ -700,7 +710,7 @@ impl From<TransactionSource> for TransactionSignedEcRecovered {
     fn from(value: TransactionSource) -> Self {
         match value {
             TransactionSource::Pool(tx) => tx,
-            TransactionSource::Database { transaction, .. } => transaction,
+            TransactionSource::Block { transaction, .. } => transaction,
         }
     }
 }
@@ -709,11 +719,12 @@ impl From<TransactionSource> for Transaction {
     fn from(value: TransactionSource) -> Self {
         match value {
             TransactionSource::Pool(tx) => Transaction::from_recovered(tx),
-            TransactionSource::Database { transaction, index, block_hash, block_number } => {
+            TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
                 Transaction::from_recovered_with_block_context(
                     transaction,
                     block_hash,
                     block_number,
+                    base_fee,
                     U256::from(index),
                 )
             }

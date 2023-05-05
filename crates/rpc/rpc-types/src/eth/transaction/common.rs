@@ -14,4 +14,6 @@ pub struct TransactionInfo {
     pub block_hash: Option<H256>,
     /// Number of the block.
     pub block_number: Option<u64>,
+    /// Base fee of the block.
+    pub base_fee: Option<u64>,
 }

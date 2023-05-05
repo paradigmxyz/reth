@@ -64,7 +64,7 @@ impl ParityTraceBuilder {
         info: TransactionInfo,
     ) -> impl Iterator<Item = LocalizedTransactionTrace> {
         self.into_transaction_traces_iter().map(move |trace| {
-            let TransactionInfo { hash, index, block_hash, block_number } = info;
+            let TransactionInfo { hash, index, block_hash, block_number, .. } = info;
             LocalizedTransactionTrace {
                 trace,
                 transaction_position: index,
