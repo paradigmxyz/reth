@@ -369,7 +369,7 @@ impl Transaction {
     /// transactions is returned.
     ///
     /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> Option<u128> {
+    pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
         if let Some(base_fee) = base_fee {
             let max_fee_per_gas = self.max_fee_per_gas();
             if max_fee_per_gas < base_fee as u128 {
@@ -398,6 +398,19 @@ impl Transaction {
                 *max_priority_fee_per_gas
             }
         }
+    }
+
+    /// Returns the effective gas price for the given base fee.
+    ///
+    /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        let dynamic_tx = match self {
+            Transaction::Legacy(tx) => return tx.gas_price,
+            Transaction::Eip2930(tx) => return tx.gas_price,
+            Transaction::Eip1559(dynamic_tx) => dynamic_tx,
+        };
+
+        dynamic_tx.effective_gas_price(base_fee)
     }
 
     /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
@@ -628,6 +641,26 @@ impl Encodable for Transaction {
                 let payload_length = self.fields_len();
                 // 'transaction type byte length' + 'header length' + 'payload length'
                 1 + length_of_length(payload_length) + payload_length
+            }
+        }
+    }
+}
+
+impl TxEip1559 {
+    /// Returns the effective gas price for the given `base_fee`.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas - base_fee as u128;
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
             }
         }
     }

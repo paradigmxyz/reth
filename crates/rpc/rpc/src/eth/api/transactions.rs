@@ -596,10 +596,7 @@ where
             gas_used: Some(U256::from(gas_used)),
             contract_address: None,
             logs: Vec::with_capacity(receipt.logs.len()),
-            effective_gas_price: transaction
-                .effective_gas_price(meta.base_fee)
-                .map(U128::from)
-                .unwrap_or(U128::ZERO),
+            effective_gas_price: U128::from(transaction.effective_gas_price(meta.base_fee)),
             transaction_type: tx.transaction.tx_type().into(),
             // TODO pre-byzantium receipts have a post-transaction state root
             state_root: None,
