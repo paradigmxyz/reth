@@ -5,14 +5,16 @@ use reth_primitives::{bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
     geth::StructLog,
     parity::{
-        Action, ActionType, CallAction, CallOutput, CallType, CreateAction, CreateOutput,
-        SelfdestructAction, TraceOutput,
+        Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
+        CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TraceResult,
+        TransactionTrace,
     },
 };
 use revm::interpreter::{
     CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::btree_map::Entry;
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -26,6 +28,13 @@ pub enum CallKind {
     DelegateCall,
     Create,
     Create2,
+}
+
+impl CallKind {
+    /// Returns true if the call is a create
+    pub fn is_any_create(&self) -> bool {
+        matches!(self, CallKind::Create | CallKind::Create2)
+    }
 }
 
 impl From<CallScheme> for CallKind {
@@ -160,6 +169,68 @@ impl CallTraceNode {
         self.trace.status
     }
 
+    /// Updates the values of the state diff
+    pub(crate) fn parity_update_state_diff(&self, diff: &mut StateDiff) {
+        let addr = self.trace.address;
+        let acc = diff.entry(addr).or_default();
+
+        if self.kind().is_any_create() {
+            let code = self.trace.output.clone();
+            if acc.code == Delta::Unchanged {
+                acc.code = Delta::Added(code.into())
+            }
+        }
+
+        // TODO: track nonce and balance changes
+
+        // iterate over all storage diffs
+        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
+            let StorageChange { key, value, had_value } = change;
+            let value = H256::from(value);
+            match acc.storage.entry(key.into()) {
+                Entry::Vacant(entry) => {
+                    if let Some(had_value) = had_value {
+                        entry.insert(Delta::Changed(ChangedType {
+                            from: had_value.into(),
+                            to: value,
+                        }));
+                    } else {
+                        entry.insert(Delta::Added(value));
+                    }
+                }
+                Entry::Occupied(mut entry) => {
+                    let value = match entry.get() {
+                        Delta::Unchanged => Delta::Added(value),
+                        Delta::Added(added) => {
+                            if added == &value {
+                                Delta::Added(*added)
+                            } else {
+                                Delta::Changed(ChangedType { from: *added, to: value })
+                            }
+                        }
+                        Delta::Removed(_) => Delta::Added(value),
+                        Delta::Changed(c) => {
+                            Delta::Changed(ChangedType { from: c.from, to: value })
+                        }
+                    };
+                    entry.insert(value);
+                }
+            }
+        }
+    }
+
+    /// Converts this node into a parity `TransactionTrace`
+    pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
+        let action = self.parity_action();
+        let output = TraceResult::parity_success(self.parity_trace_output());
+        TransactionTrace {
+            action,
+            result: Some(output),
+            trace_address,
+            subtraces: self.children.len(),
+        }
+    }
+
     /// Returns the `Output` for a parity trace
     pub(crate) fn parity_trace_output(&self) -> TraceOutput {
         match self.kind() {
@@ -252,7 +323,7 @@ pub struct CallTraceStep {
     /// Gas cost of step execution
     pub gas_cost: u64,
     /// Change of the contract state after step execution (effect of the SLOAD/SSTORE instructions)
-    pub state_diff: Option<(U256, U256)>,
+    pub storage_change: Option<StorageChange>,
     /// Final status of the call
     pub status: InstructionResult,
 }
@@ -289,4 +360,12 @@ impl From<&CallTraceStep> for StructLog {
             memory_size: step.memory_size as u64,
         }
     }
+}
+
+/// Represents a storage change during execution
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StorageChange {
+    pub key: U256,
+    pub value: U256,
+    pub had_value: Option<U256>,
 }
