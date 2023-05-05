@@ -222,7 +222,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size() as u64) {
                 info!(target: "sync::stages::execution", ?block_number, "Threshold hit, committing.");
-                break;
+                break
             }
 
             // Merge state changes
@@ -296,7 +296,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let block_range = input.unwind_to + 1..=input.stage_progress;
 
         if block_range.is_empty() {
-            return Ok(UnwindOutput { stage_progress: input.unwind_to });
+            return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
@@ -337,7 +337,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
         while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
             if block_num < *block_range.start() {
-                break;
+                break
             }
             // delete all changesets
             tx.delete::<tables::AccountChangeSet>(block_num, None)?;
@@ -346,7 +346,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
             if key.block_number() < *block_range.start() {
-                break;
+                break
             }
             // delete all changesets
             tx.delete::<tables::StorageChangeSet>(key, None)?;
@@ -391,8 +391,8 @@ impl ExecutionStageThresholds {
     /// Check if the batch thresholds have been hit.
     #[inline]
     pub fn is_end_of_batch(&self, blocks_processed: u64, changes_processed: u64) -> bool {
-        blocks_processed >= self.max_blocks.unwrap_or(u64::MAX)
-            || changes_processed >= self.max_changes.unwrap_or(u64::MAX)
+        blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
+            changes_processed >= self.max_changes.unwrap_or(u64::MAX)
     }
 
     /// Check if the history write threshold has been hit.

@@ -247,7 +247,7 @@ where
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
         if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
         {
-            return Ok(Some(TransactionSource::Pool(tx)));
+            return Ok(Some(TransactionSource::Pool(tx)))
         }
 
         match self.client().transaction_by_hash_with_meta(hash)? {
@@ -548,7 +548,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                };
+                }
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -576,7 +576,7 @@ where
                     block.header.number,
                     block.header.base_fee_per_gas,
                     index.into(),
-                )));
+                )))
             }
         }
 
