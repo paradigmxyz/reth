@@ -95,11 +95,6 @@ pub struct Command {
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
 
-    /// The path to the database folder. If not specified, it will be set in the data dir for the
-    /// chain being used.
-    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
-    db: Option<PathBuf>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -155,9 +150,7 @@ impl Command {
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
-        // use the overridden db path if specified
-        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
-
+        let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
         info!(target: "reth::cli", "Database opened");
@@ -807,12 +800,12 @@ mod tests {
     fn parse_db_path() {
         let cmd = Command::try_parse_from(["reth", "--db", "my/path/to/db"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        let db_path = data_dir.db_path();
         assert_eq!(db_path, Path::new("my/path/to/db"));
 
         let cmd = Command::try_parse_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        let db_path = data_dir.db_path();
         assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
     }
 }
