@@ -1,7 +1,10 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, InvalidTransactionError};
-use reth_primitives::{AccessList, Address, U256};
+use reth_primitives::{
+    AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
+};
+use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     CallRequest,
@@ -12,8 +15,44 @@ use revm::{
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
 };
-use revm_primitives::{db::DatabaseRef, Bytecode};
+use revm_primitives::{
+    db::{DatabaseCommit, DatabaseRef},
+    Bytecode,
+};
 use tracing::trace;
+
+/// Helper type to work with different transaction types when configuring the EVM env.
+///
+/// This makes it easier to handle errors.
+pub(crate) trait FillableTransaction {
+    fn hash(&self) -> TxHash;
+
+    /// Fill the transaction environment with the given transaction.
+    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()>;
+}
+
+impl FillableTransaction for TransactionSignedEcRecovered {
+    fn hash(&self) -> TxHash {
+        self.hash
+    }
+
+    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
+        fill_tx_env_with_recovered(tx_env, self);
+        Ok(())
+    }
+}
+impl FillableTransaction for TransactionSigned {
+    fn hash(&self) -> TxHash {
+        self.hash
+    }
+
+    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
+        let signer =
+            self.recover_signer().ok_or_else(|| EthApiError::InvalidTransactionSignature)?;
+        fill_tx_env(tx_env, self, signer);
+        Ok(())
+    }
+}
 
 /// Returns the addresses of the precompiles corresponding to the SpecId.
 pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
@@ -39,10 +78,10 @@ pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn transact<S>(db: S, env: Env) -> EthResult<(ResultAndState, Env)>
+pub(crate) fn transact<DB>(db: DB, env: Env) -> EthResult<(ResultAndState, Env)>
 where
-    S: Database,
-    <S as Database>::Error: Into<EthApiError>,
+    DB: Database,
+    <DB as Database>::Error: Into<EthApiError>,
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
@@ -61,6 +100,41 @@ where
     evm.database(db);
     let res = evm.inspect(inspector)?;
     Ok((res, evm.env))
+}
+
+/// Replays all the transactions until the target transaction is found.
+///
+/// All transactions before the target transaction are executed and their changes are written to the
+/// _runtime_ db ([CacheDB]).
+///
+/// Note: This assumes the target transaction is in the given iterator.
+pub(crate) fn replay_transactions_until<DB, I, Tx>(
+    db: &mut CacheDB<DB>,
+    cfg: CfgEnv,
+    block_env: BlockEnv,
+    transactions: I,
+    target_tx_hash: H256,
+) -> EthResult<()>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+    I: IntoIterator<Item = Tx>,
+    Tx: FillableTransaction,
+{
+    let env = Env { cfg, block: block_env, tx: TxEnv::default() };
+    let mut evm = revm::EVM::with_env(env);
+    evm.database(db);
+    for tx in transactions.into_iter() {
+        if tx.hash() == target_tx_hash {
+            // reached the target transaction
+            break
+        }
+
+        tx.try_fill_tx_env(&mut evm.env.tx)?;
+        let res = evm.transact()?;
+        evm.db.as_mut().expect("is set").commit(res.state)
+    }
+    Ok(())
 }
 
 /// Prepares the [Env] for execution.

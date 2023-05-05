@@ -365,6 +365,7 @@ where
     length_of_length(payload_length) + payload_length
 }
 
+/// RLP encode the list of items.
 pub fn encode_list<E, K>(v: &[K], out: &mut dyn BufMut)
 where
     E: Encodable + ?Sized,
@@ -377,6 +378,10 @@ where
     }
 }
 
+/// RLP encode an iterator over items.
+///
+/// NOTE: This function clones the iterator. If the items are expensive to clone, consider
+/// using [encode_list] instead.
 pub fn encode_iter<K>(i: impl Iterator<Item = K> + Clone, out: &mut dyn BufMut)
 where
     K: Encodable,

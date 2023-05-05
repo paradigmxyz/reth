@@ -1,25 +1,30 @@
-use crate::dirs::{DbPath, MaybePlatformPath};
+use crate::dirs::{DataDirPath, MaybePlatformPath};
 use clap::Parser;
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{
     chainspec::genesis_value_parser,
     init::{init_db, init_genesis},
 };
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
 pub struct InitCommand {
-    /// The path to the database folder.
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    datadir: MaybePlatformPath<DataDirPath>,
+
+    /// The path to the database folder. If not specified, it will be set in the data dir for the
+    /// chain being used.
+    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
+    db: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -44,10 +49,13 @@ impl InitCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth init starting");
 
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
 
-        info!(target: "reth::cli", path = %db_path, "Opening database");
+        // use the overridden db path if specified
+        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
+
+        info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
         info!(target: "reth::cli", "Database opened");
 

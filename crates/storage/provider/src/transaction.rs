@@ -584,7 +584,7 @@ where
             let (state_root, trie_updates) =
                 StateRoot::incremental_root_with_updates(self.deref_mut(), range.clone())?;
             if state_root != expected_state_root {
-                return Err(TransactionError::StateTrieRootMismatch {
+                return Err(TransactionError::StateRootMismatch {
                     got: state_root,
                     expected: expected_state_root,
                     block_number: *range.end(),
@@ -985,7 +985,7 @@ where
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
                 let parent_hash = self.get_block_hash(parent_number)?;
-                return Err(TransactionError::StateTrieRootMismatch {
+                return Err(TransactionError::UnwindStateRootMismatch {
                     got: new_state_root,
                     expected: parent_state_root,
                     block_number: parent_number,
@@ -1391,7 +1391,7 @@ fn unwind_storage_history_shards<DB: Database>(
 }
 
 /// An error that can occur when using the transaction container
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
 pub enum TransactionError {
     /// The transaction encountered a database error.
     #[error(transparent)]
@@ -1403,13 +1403,25 @@ pub enum TransactionError {
     #[error(transparent)]
     TrieError(#[from] StateRootError),
     /// Root mismatch
-    #[error("Merkle trie root mismatch on block: #{block_number:?} {block_hash:?}. got: {got:?} expected:{expected:?}")]
-    StateTrieRootMismatch {
+    #[error("Merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
+    StateRootMismatch {
         /// Expected root
         expected: H256,
         /// Calculated root
         got: H256,
         /// Block number
+        block_number: BlockNumber,
+        /// Block hash
+        block_hash: BlockHash,
+    },
+    /// Root mismatch during unwind
+    #[error("Unwind merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
+    UnwindStateRootMismatch {
+        /// Expected root
+        expected: H256,
+        /// Calculated root
+        got: H256,
+        /// Target block number
         block_number: BlockNumber,
         /// Block hash
         block_hash: BlockHash,

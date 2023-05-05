@@ -109,7 +109,9 @@ where
         let num = match num {
             BlockNumberOrTag::Latest => self.chain_info()?.best_number,
             BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Pending => return Ok(self.tree.pending_block().map(|b| b.number)),
+            BlockNumberOrTag::Pending => {
+                return Ok(self.tree.pending_block_num_hash().map(|b| b.number))
+            }
             BlockNumberOrTag::Finalized => return Ok(self.chain_info()?.last_finalized),
             BlockNumberOrTag::Safe => return Ok(self.chain_info()?.safe_finalized),
             BlockNumberOrTag::Earliest => 0,
@@ -122,7 +124,7 @@ where
             BlockId::Hash(hash) => Ok(Some(hash.into())),
             BlockId::Number(num) => match num {
                 BlockNumberOrTag::Latest => Ok(Some(self.chain_info()?.best_hash)),
-                BlockNumberOrTag::Pending => Ok(self.tree.pending_block().map(|b| b.hash)),
+                BlockNumberOrTag::Pending => Ok(self.tree.pending_block_num_hash().map(|b| b.hash)),
                 _ => self
                     .convert_block_number(num)?
                     .map(|num| self.block_hash(num))
@@ -162,7 +164,14 @@ where
     }
 
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
+        if id.is_pending() {
+            return Ok(self.tree.pending_block().map(SealedBlock::unseal))
+        }
         self.database.block(id)
+    }
+
+    fn pending_block(&self) -> Result<Option<SealedBlock>> {
+        Ok(self.tree.pending_block())
     }
 
     fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
@@ -314,7 +323,7 @@ where
     fn pending(&self) -> Result<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 
-        if let Some(block) = self.tree.pending_block() {
+        if let Some(block) = self.tree.pending_block_num_hash() {
             let pending = self.tree.pending_state_provider(block.hash)?;
             return self.pending_with_provider(pending)
         }
@@ -381,6 +390,10 @@ where
         self.tree.canonical_blocks()
     }
 
+    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
+        self.tree.find_canonical_ancestor(hash)
+    }
+
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
     }
@@ -389,8 +402,8 @@ where
         self.tree.pending_blocks()
     }
 
-    fn pending_block(&self) -> Option<BlockNumHash> {
-        self.tree.pending_block()
+    fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
+        self.tree.pending_block_num_hash()
     }
 }
 

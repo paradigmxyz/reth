@@ -1,12 +1,11 @@
-use crate::{prefix_set::PrefixSet, Nibbles};
-
 use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
+use crate::prefix_set::PrefixSet;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
     transaction::{DbTx, DbTxGAT},
 };
-use reth_primitives::{Account, StorageEntry, H256, U256};
+use reth_primitives::{trie::Nibbles, Account, StorageEntry, H256, U256};
 use std::collections::{BTreeMap, HashMap};
 
 /// The post state account storage with hashed slots.

@@ -129,7 +129,7 @@ where
         let (cfg, block_env, at) = self.eth_api.evm_env_at(at).await?;
 
         // execute all transactions on top of each other and record the traces
-        self.eth_api.with_state_at(at, move |state| {
+        self.eth_api.with_state_at_block(at, move |state| {
             let mut results = Vec::with_capacity(calls.len());
             let mut db = SubState::new(State::new(state));
 
@@ -155,7 +155,7 @@ where
     ) -> EthResult<TraceResults> {
         let config = tracing_config(&trace_types);
         self.eth_api
-            .trace_transaction(hash, config, |_, inspector, res| {
+            .trace_transaction_in_block(hash, config, |_, inspector, res| {
                 let trace_res =
                     inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
                 Ok(trace_res)
@@ -191,7 +191,7 @@ where
         let _permit = self.acquire_trace_permit().await;
 
         self.eth_api
-            .trace_transaction(
+            .trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
                 |tx_info, inspector, _| {
@@ -226,7 +226,7 @@ where
 
         // replay all transactions of the block
         self.eth_api
-            .with_state_at(at, move |state| {
+            .with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = SubState::new(State::new(state));
 

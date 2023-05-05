@@ -139,10 +139,10 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             .iter()
             .map(|tx| TransactionSigned::decode(&mut tx.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
-        let transactions_root = proofs::calculate_transaction_root(transactions.iter());
+        let transactions_root = proofs::calculate_transaction_root(&transactions);
 
         let withdrawals_root =
-            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w.iter()));
+            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
         let header = Header {
             parent_hash: payload.parent_hash,
@@ -208,6 +208,13 @@ pub enum PayloadError {
     Decode(#[from] reth_rlp::DecodeError),
 }
 
+impl PayloadError {
+    /// Returns `true` if the error is caused by invalid extra data.
+    pub fn is_block_hash_mismatch(&self) -> bool {
+        matches!(self, PayloadError::BlockHash { .. })
+    }
+}
+
 /// This structure contains a body of an execution payload.
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
@@ -269,6 +276,11 @@ impl PayloadStatus {
         self
     }
 
+    pub fn maybe_latest_valid_hash(mut self, latest_valid_hash: Option<H256>) -> Self {
+        self.latest_valid_hash = latest_valid_hash;
+        self
+    }
+
     /// Returns true if the payload status is syncing.
     pub fn is_syncing(&self) -> bool {
         self.status.is_syncing()
@@ -298,17 +310,13 @@ impl Serialize for PayloadStatus {
     }
 }
 
-impl From<PayloadError> for PayloadStatus {
+impl From<PayloadError> for PayloadStatusEnum {
     fn from(error: PayloadError) -> Self {
         match error {
             error @ PayloadError::BlockHash { .. } => {
-                PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
-                    validation_error: error.to_string(),
-                })
+                PayloadStatusEnum::InvalidBlockHash { validation_error: error.to_string() }
             }
-            _ => PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: error.to_string(),
-            }),
+            _ => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
         }
     }
 }
@@ -378,6 +386,22 @@ impl PayloadStatusEnum {
     pub fn is_invalid(&self) -> bool {
         matches!(self, PayloadStatusEnum::Invalid { .. })
     }
+
+    /// Returns true if the payload status is invalid block hash.
+    pub fn is_invalid_block_hash(&self) -> bool {
+        matches!(self, PayloadStatusEnum::InvalidBlockHash { .. })
+    }
+}
+
+/// Various validation errors
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PayloadValidationError {
+    /// Thrown when a forkchoice update's head links to a previously rejected payload.
+    #[error("links to previously rejected block")]
+    LinksToRejectedPayload,
+    /// Thrown when a new payload contains a wrong block number.
+    #[error("invalid block number")]
+    InvalidBlockNumber,
 }
 
 #[cfg(test)]
@@ -398,8 +422,8 @@ mod tests {
         let mut transformed: Block = f(unsealed);
         // Recalculate roots
         transformed.header.transactions_root =
-            proofs::calculate_transaction_root(transformed.body.iter());
-        transformed.header.ommers_hash = proofs::calculate_ommers_root(transformed.ommers.iter());
+            proofs::calculate_transaction_root(&transformed.body);
+        transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
         SealedBlock {
             header: transformed.header.seal_slow(),
             body: transformed.body,

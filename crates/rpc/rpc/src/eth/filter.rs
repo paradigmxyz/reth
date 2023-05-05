@@ -1,12 +1,18 @@
 use super::cache::EthStateCache;
 use crate::{
-    eth::{error::EthApiError, logs_utils},
+    eth::{
+        error::{EthApiError, EthResult},
+        logs_utils,
+    },
     result::{internal_rpc_err, rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::filter::{Filter, FilterBlockOption, FilteredParams};
+use reth_primitives::{
+    filter::{Filter, FilterBlockOption, FilteredParams},
+    SealedBlock,
+};
 use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{FilterChanges, FilterId, Log};
@@ -14,9 +20,6 @@ use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tracing::trace;
-
-/// The default maximum of logs in a single response.
-const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 2_000;
 
 /// `Eth` filter RPC implementation.
 #[derive(Debug, Clone)]
@@ -27,13 +30,23 @@ pub struct EthFilter<Client, Pool> {
 
 impl<Client, Pool> EthFilter<Client, Pool> {
     /// Creates a new, shareable instance.
-    pub fn new(client: Client, pool: Pool, eth_cache: EthStateCache) -> Self {
+    ///
+    /// This uses the given pool to get notified about new transactions, the client to interact with
+    /// the blockchain, the cache to fetch cacheable data, like the logs and the
+    /// max_logs_per_response to limit the amount of logs returned in a single response
+    /// `eth_getLogs`
+    pub fn new(
+        client: Client,
+        pool: Pool,
+        eth_cache: EthStateCache,
+        max_logs_per_response: usize,
+    ) -> Self {
         let inner = EthFilterInner {
             client,
             active_filters: Default::default(),
             pool,
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
-            max_logs_in_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
+            max_logs_per_response,
             eth_cache,
         };
         Self { inner: Arc::new(inner) }
@@ -77,7 +90,7 @@ where
 
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
-            let mut filter = filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id))?;
+            let filter = filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id))?;
 
             // update filter
             // we fetch all changes from [filter.block..best_block], so we advance the filter's
@@ -118,9 +131,11 @@ where
                     }
                 };
 
-                self.inner
+                let logs = self
+                    .inner
                     .get_logs_in_block_range(&filter, from_block_number, to_block_number)
-                    .map(FilterChanges::Logs)
+                    .await?;
+                Ok(FilterChanges::Logs(logs))
             }
         }
     }
@@ -180,7 +195,7 @@ struct EthFilterInner<Client, Pool> {
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
     /// Maximum number of logs that can be returned in a response
-    max_logs_in_response: usize,
+    max_logs_per_response: usize,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
 }
@@ -221,7 +236,9 @@ where
                 let start_block = info.best_number;
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from_block, to_block, start_block, info);
-                self.get_logs_in_block_range(&filter, from_block_number, to_block_number)
+                Ok(self
+                    .get_logs_in_block_range(&filter, from_block_number, to_block_number)
+                    .await?)
             }
         }
     }
@@ -242,17 +259,27 @@ where
         Ok(id)
     }
 
+    /// Returns the block with the given block number if it exists.
+    async fn block_by_number(&self, num: u64) -> EthResult<Option<SealedBlock>> {
+        match self.client.block_hash(num)? {
+            Some(hash) => Ok(self.eth_cache.get_sealed_block(hash).await?),
+            None => Ok(None),
+        }
+    }
+
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
     /// Returns an error if:
     ///  - underlying database error
     ///  - amount of matches exceeds configured limit
-    fn get_logs_in_block_range(
+    async fn get_logs_in_block_range(
         &self,
         filter: &Filter,
         from_block: u64,
         to_block: u64,
-    ) -> RpcResult<Vec<Log>> {
+    ) -> Result<Vec<Log>, FilterError> {
+        trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
+
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
@@ -265,16 +292,14 @@ where
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
         for block_number in from_block..=to_block {
-            if let Some(block) = self.client.block_by_number(block_number).to_rpc_result()? {
+            if let Some(block) = self.block_by_number(block_number).await? {
                 // only if filter matches
                 if FilteredParams::matches_address(block.header.logs_bloom, &address_filter) &&
                     FilteredParams::matches_topics(block.header.logs_bloom, &topics_filter)
                 {
                     // get receipts for the block
-                    if let Some(receipts) =
-                        self.client.receipts_by_block(block.number.into()).to_rpc_result()?
-                    {
-                        let block_hash = block.hash_slow();
+                    if let Some(receipts) = self.eth_cache.get_receipts(block.hash).await? {
+                        let block_hash = block.hash;
 
                         logs_utils::append_matching_block_logs(
                             &mut all_logs,
@@ -285,11 +310,10 @@ where
                         );
 
                         // size check
-                        if all_logs.len() > self.max_logs_in_response {
+                        if all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
-                                self.max_logs_in_response,
-                            )
-                            .into())
+                                self.max_logs_per_response,
+                            ))
                         }
                     }
                 }
@@ -325,12 +349,14 @@ enum FilterKind {
 }
 
 /// Errors that can occur in the handler implementation
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum FilterError {
     #[error("filter not found")]
     FilterNotFound(FilterId),
     #[error("Query exceeds max results {0}")]
     QueryExceedsMaxResults(usize),
+    #[error(transparent)]
+    EthAPIError(#[from] EthApiError),
 }
 
 // convert the error
@@ -341,9 +367,16 @@ impl From<FilterError> for jsonrpsee::core::Error {
                 jsonrpsee::types::error::INVALID_PARAMS_CODE,
                 "filter not found",
             ),
+            FilterError::EthAPIError(err) => err.into(),
             err @ FilterError::QueryExceedsMaxResults(_) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
+    }
+}
+
+impl From<reth_interfaces::Error> for FilterError {
+    fn from(err: reth_interfaces::Error) -> Self {
+        FilterError::EthAPIError(err.into())
     }
 }

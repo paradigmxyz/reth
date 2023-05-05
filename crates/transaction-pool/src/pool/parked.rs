@@ -13,6 +13,7 @@ use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
 ///
 /// Note: This type is generic over [ParkedPool] which enforces that the underlying transaction type
 /// is [ValidPoolTransaction] wrapped in an [Arc].
+#[derive(Clone)]
 pub(crate) struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
     ///
@@ -98,6 +99,41 @@ impl<T: ParkedOrd> ParkedPool<T> {
     #[allow(unused)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
+    }
+}
+
+impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
+    /// Removes all transactions and their dependent transaction from the subpool that no longer
+    /// satisfy the given basefee.
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    pub(crate) fn enforce_basefee(&mut self, basefee: u128) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let mut to_remove = Vec::new();
+
+        {
+            let mut iter = self.by_id.iter().peekable();
+
+            while let Some((id, tx)) = iter.next() {
+                if tx.transaction.transaction.max_fee_per_gas() < basefee {
+                    // still parked -> skip descendant transactions
+                    'this: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'this
+                        }
+                        iter.next();
+                    }
+                } else {
+                    to_remove.push(*id);
+                }
+            }
+        }
+
+        let mut removed = Vec::with_capacity(to_remove.len());
+        for id in to_remove {
+            removed.push(self.remove_transaction(&id).expect("transaction exists"));
+        }
+
+        removed
     }
 }
 
@@ -225,12 +261,7 @@ impl_ord_wrapper!(BasefeeOrd);
 
 impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (self.0.transaction.max_fee_per_gas(), other.0.transaction.max_fee_per_gas()) {
-            (Some(fee), Some(other)) => fee.cmp(&other),
-            (None, Some(_)) => Ordering::Less,
-            (Some(_), None) => Ordering::Greater,
-            _ => Ordering::Equal,
-        }
+        self.0.transaction.max_fee_per_gas().cmp(&other.0.transaction.max_fee_per_gas())
     }
 }
 
@@ -254,5 +285,65 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
         self.cost.cmp(&other.cost).then_with(||
             // Lower timestamp is better
             other.timestamp.cmp(&self.timestamp))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{MockTransaction, MockTransactionFactory};
+
+    #[test]
+    fn test_enforce_parked_basefee() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
+        pool.add_transaction(tx.clone());
+
+        assert!(pool.by_id.contains_key(tx.id()));
+        assert_eq!(pool.len(), 1);
+
+        let removed = pool.enforce_basefee(u128::MAX);
+        assert!(removed.is_empty());
+
+        let removed = pool.enforce_basefee(tx.max_fee_per_gas() - 1);
+        assert_eq!(removed.len(), 1);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_enforce_parked_basefee_descendant() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        let t = MockTransaction::eip1559().inc_price_by(10);
+        let root_tx = f.validated_arc(t.clone());
+        pool.add_transaction(root_tx.clone());
+
+        let descendant_tx = f.validated_arc(t.inc_nonce().inc_price());
+        pool.add_transaction(descendant_tx.clone());
+
+        assert!(pool.by_id.contains_key(root_tx.id()));
+        assert!(pool.by_id.contains_key(descendant_tx.id()));
+        assert_eq!(pool.len(), 2);
+
+        let removed = pool.enforce_basefee(u128::MAX);
+        assert!(removed.is_empty());
+
+        // two dependent tx in the pool with decreasing fee
+
+        {
+            let mut pool2 = pool.clone();
+            let removed = pool2.enforce_basefee(descendant_tx.max_fee_per_gas());
+            assert_eq!(removed.len(), 1);
+            assert_eq!(pool2.len(), 1);
+            // descendant got popped
+            assert!(pool2.by_id.contains_key(root_tx.id()));
+            assert!(!pool2.by_id.contains_key(descendant_tx.id()));
+        }
+
+        // remove root transaction via root tx fee
+        let removed = pool.enforce_basefee(root_tx.max_fee_per_gas());
+        assert_eq!(removed.len(), 2);
+        assert!(pool.is_empty());
     }
 }

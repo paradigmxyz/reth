@@ -1,7 +1,7 @@
 //! P2P Debugging tool
 use crate::{
     args::{get_secret_key, DiscoveryArgs},
-    dirs::{ConfigPath, PlatformPath, SecretKeyPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
@@ -15,14 +15,14 @@ use reth_staged_sync::{
     utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
     Config,
 };
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: PlatformPath<ConfigPath>,
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -41,11 +41,21 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
+    /// The path to the data dir for all reth files and subdirectories.
+    ///
+    /// Defaults to the OS-specific data directory:
+    ///
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    datadir: MaybePlatformPath<DataDirPath>,
+
     /// Secret key to use for this node.
     ///
     /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
-    p2p_secret_key: PlatformPath<SecretKeyPath>,
+    #[arg(long, value_name = "PATH")]
+    p2p_secret_key: Option<PathBuf>,
 
     /// Disable the discovery service.
     #[command(flatten)]
@@ -92,7 +102,11 @@ impl Command {
         let tempdir = tempfile::TempDir::new()?;
         let noop_db = Arc::new(Env::<WriteMap>::open(&tempdir.into_path(), EnvKind::RW)?);
 
-        let mut config: Config = confy::load_path(&self.config).unwrap_or_default();
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+
+        let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
         if let Some(peer) = self.trusted_peer {
             config.peers.trusted_nodes.insert(peer);
@@ -104,7 +118,9 @@ impl Command {
 
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
-        let p2p_secret_key = get_secret_key(&self.p2p_secret_key)?;
+        let default_secret_key_path = data_dir.p2p_secret_path();
+        let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
+        let p2p_secret_key = get_secret_key(&secret_key_path)?;
 
         let mut network_config_builder =
             config.network_config(self.nat, None, p2p_secret_key).chain_spec(self.chain.clone());

@@ -29,8 +29,16 @@ where
         index: Index,
     ) -> EthResult<Option<RichBlock>> {
         let block_id = block_id.into();
+
+        let uncles = if block_id.is_pending() {
+            // Pending block can be fetched directly without need for caching
+            self.client().pending_block()?.map(|block| block.ommers)
+        } else {
+            self.client().ommers(block_id)?
+        }
+        .unwrap_or_default();
+
         let index = usize::from(index);
-        let uncles = self.client().ommers(block_id)?.unwrap_or_default();
         let uncle = uncles
             .into_iter()
             .nth(index)
@@ -46,7 +54,11 @@ where
         block_id: impl Into<BlockId>,
     ) -> EthResult<Option<usize>> {
         let block_id = block_id.into();
-        // TODO support pending block
+
+        if block_id.is_pending() {
+            // Pending block can be fetched directly without need for caching
+            return Ok(self.client().pending_block()?.map(|block| block.body.len()))
+        }
 
         let block_hash = match self.client().block_hash_for_id(block_id)? {
             Some(block_hash) => block_hash,
@@ -56,30 +68,52 @@ where
         Ok(self.cache().get_block_transactions(block_hash).await?.map(|txs| txs.len()))
     }
 
-    /// Returns the rpc block object for the given block id.
-    ///
-    /// If `full` is true, the block object will contain all transaction objects, otherwise it will
-    /// only contain the transaction hashes.
+    /// Returns the block header for the given block id.
+    pub(crate) async fn header(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> EthResult<Option<reth_primitives::SealedHeader>> {
+        Ok(self.block(block_id).await?.map(|block| block.header))
+    }
+
+    /// Returns the block object for the given block id.
     pub(crate) async fn block(
         &self,
         block_id: impl Into<BlockId>,
-        full: bool,
-    ) -> EthResult<Option<RichBlock>> {
+    ) -> EthResult<Option<reth_primitives::SealedBlock>> {
         let block_id = block_id.into();
-        // TODO support pending block
+
+        if block_id.is_pending() {
+            // Pending block can be fetched directly without need for caching
+            return Ok(self.client().pending_block()?)
+        }
+
         let block_hash = match self.client().block_hash_for_id(block_id)? {
             Some(block_hash) => block_hash,
             None => return Ok(None),
         };
 
-        let block = match self.cache().get_block(block_hash).await? {
+        Ok(self.cache().get_block(block_hash).await?.map(|block| block.seal(block_hash)))
+    }
+
+    /// Returns the populated rpc block object for the given block id.
+    ///
+    /// If `full` is true, the block object will contain all transaction objects, otherwise it will
+    /// only contain the transaction hashes.
+    pub(crate) async fn rpc_block(
+        &self,
+        block_id: impl Into<BlockId>,
+        full: bool,
+    ) -> EthResult<Option<RichBlock>> {
+        let block = match self.block(block_id).await? {
             Some(block) => block,
             None => return Ok(None),
         };
-
+        let block_hash = block.hash;
         let total_difficulty =
             self.client().header_td(&block_hash)?.ok_or(EthApiError::UnknownBlockNumber)?;
-        let block = Block::from_block(block, total_difficulty, full.into(), Some(block_hash))?;
+        let block =
+            Block::from_block(block.into(), total_difficulty, full.into(), Some(block_hash))?;
         Ok(Some(block.into()))
     }
 }

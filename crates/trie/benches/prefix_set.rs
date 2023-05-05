@@ -6,7 +6,8 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::{basic_result_cache, TestRunner},
 };
-use reth_trie::{prefix_set::PrefixSet, Nibbles};
+use reth_primitives::trie::Nibbles;
+use reth_trie::prefix_set::PrefixSet;
 use std::collections::BTreeSet;
 
 pub trait PrefixSetAbstraction: Default {
@@ -101,7 +102,7 @@ fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
 
     let expected = input
         .iter()
-        .map(|prefix| preload.iter().any(|key| key.has_prefix(&prefix)))
+        .map(|prefix| preload.iter().any(|key| key.has_prefix(prefix)))
         .collect::<Vec<_>>();
     (preload, input, expected)
 }
@@ -204,7 +205,7 @@ mod implementations {
                 self.sorted = true;
             }
 
-            let prefix = prefix.into();
+            let prefix = prefix;
 
             while self.index > 0 && self.keys[self.index] > prefix {
                 self.index -= 1;
@@ -227,7 +228,7 @@ mod implementations {
 
         fn insert(&mut self, nibbles: Nibbles) {
             self.sorted = false;
-            self.keys.push(nibbles.into());
+            self.keys.push(nibbles);
         }
     }
 
