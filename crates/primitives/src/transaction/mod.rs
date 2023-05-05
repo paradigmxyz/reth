@@ -400,6 +400,26 @@ impl Transaction {
         }
     }
 
+    // impls for non dynamic:
+    // func (tx *LegacyTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
+    // 	return dst.Set(tx.GasPrice)
+    // }
+    //
+    // func (tx *AccessListTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
+    // 	return dst.Set(tx.GasPrice)
+    // }
+
+    /// Returns the effective gas price for the given base fee
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        let dynamic_tx = match self {
+            Transaction::Legacy(tx) => return tx.gas_price,
+            Transaction::Eip2930(tx) => return tx.gas_price,
+            Transaction::Eip1559(dynamic_tx) => dynamic_tx,
+        };
+
+        dynamic_tx.effective_gas_price(base_fee)
+    }
+
     /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
     ///
     /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
@@ -628,6 +648,43 @@ impl Encodable for Transaction {
                 let payload_length = self.fields_len();
                 // 'transaction type byte length' + 'header length' + 'payload length'
                 1 + length_of_length(payload_length) + payload_length
+            }
+        }
+    }
+}
+
+impl TxEip1559 {
+    // go function we need to impl for dynamic fee txs
+    // func (tx *DynamicFeeTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
+    // 	if baseFee == nil {
+    // 		return dst.Set(tx.GasFeeCap)
+    // 	}
+    //
+    // 	// tip = tx.GasFeeCap - baseFee
+    // 	tip := dst.Sub(tx.GasFeeCap, baseFee)
+    // 	if tip.Cmp(tx.GasTipCap) > 0 {
+    // 		tip.Set(tx.GasTipCap)
+    // 		// ends up returning tx.GasTipCap + baseFee
+    // 	}
+    //
+    // 	// if tip < tx.GasTipCap, tip = tx.GasFeeCap - baseFee + baseFee = tx.GasFeeCap
+    // 	return tip.Add(tip, baseFee)
+    // }
+
+    /// Returns the effective gas price for the given `base_fee`.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas - base_fee as u128;
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
             }
         }
     }
