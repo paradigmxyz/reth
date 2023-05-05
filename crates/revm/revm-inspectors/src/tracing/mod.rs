@@ -21,6 +21,7 @@ mod fourbyte;
 mod opcount;
 mod types;
 mod utils;
+use crate::tracing::types::StorageChange;
 pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
@@ -190,7 +191,7 @@ impl TracingInspector {
 
             // fields will be populated end of call
             gas_cost: 0,
-            state_diff: None,
+            storage_change: None,
             status: InstructionResult::Continue,
         });
     }
@@ -221,15 +222,16 @@ impl TracingInspector {
                     .expect("exists; initialized with vec")
                     .last();
 
-                step.state_diff = match (op, journal_entry) {
+                step.storage_change = match (op, journal_entry) {
                     (
                         opcode::SLOAD | opcode::SSTORE,
-                        Some(JournalEntry::StorageChange { address, key, .. }),
+                        Some(JournalEntry::StorageChange { address, key, had_value }),
                     ) => {
                         // SAFETY: (Address,key) exists if part if StorageChange
                         let value =
                             data.journaled_state.state[address].storage[key].present_value();
-                        Some((*key, value))
+                        let change = StorageChange { key: *key, value, had_value: *had_value };
+                        Some(change)
                     }
                     _ => None,
                 };
