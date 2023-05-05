@@ -29,14 +29,14 @@ operating system:
 
 With Rust and the dependencies installed, you're ready to build Reth. First, clone the repository:
 
-```console
+```bash
 git clone https://github.com/paradigmxyz/reth
 cd reth
 ```
 
 Then, install Reth into your path directly via:
 
-```
+```bash
 cargo install --locked --path bin/reth --bin reth
 ```
 
@@ -44,7 +44,7 @@ The binary will now be accessible as `reth` via the command line, and exist unde
 
 Alternatively, you can build yourself with:
 
-```
+```bash
 cargo build --release
 ```
 
@@ -52,7 +52,7 @@ This will place the reth binary under `./target/release/reth`, and you can copy 
 
 You can also build Reth with the following rustflags for utilizing faster CPU instructions available on your machine:
 
-```
+```bash
 RUSTFLAGS="-C target-cpu=native" cargo build --release
 ```
 
@@ -68,7 +68,7 @@ You can update Reth to a specific version by running the commands below. The `re
 directory will be the location you cloned reth to during the installation process.
 `${VERSION}` will be the version you wish to build in the format `vX.X.X`.
 
-```
+```bash
 cd reth
 git fetch
 git checkout ${VERSION}
@@ -91,7 +91,7 @@ Reth includes several profiles which can be selected via the `--profile` cargo p
 You can also use `RUSTFLAGS="-C target-cpu=native"` to enable CPU-specific optimisations. In order to get
 the highest performance out of your build:
 
-```
+```bash
 RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 ```
 
