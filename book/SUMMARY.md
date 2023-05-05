@@ -1,17 +1,27 @@
 # Reth Book
 
-## Getting Started
-- [Introduction](./README.md)
-- [System requirements](./getting_started/system_requirements.md)
-- [Installation](./getting_started/installation.md)
-- [Running Reth](./getting_started/running.md)
-
-## Fundamentals
-- [Node](./fundamentals/node.md)
-- [Command-Line Options](./fundamentals/command-line_options.md)
-- [Logs](./fundamentals/logs.md)
-
-## Monitoring
-- [Metrics](./monitoring/metrics.md)
-
-## [FAQ](./faq/README.md)
+1. [Introduction](./intro.md)
+1. [Installation](./installation/installation.md)
+    1. [Pre-Built Binaries](./installation/binaries.md)
+    1. [Docker](./installation/docker.md)
+    1. [Build from Source](./installation/source.md)
+1. [Run a Node](./run/run-a-node.md)
+    1. [Mainnet or official Testnets](./run/mainnet.md)
+    1. [Local Testnet](./run/local_testnet.md)
+    1. [Observability with Prometheus & Grafana](./run/observability.md)
+    1. [Configuring reth.toml](./run/config.md)
+1. [Interacting with Reth over JSON-RPC](./jsonrpc/intro.md)
+    1. [admin](./jsonrpc/admin.md)
+    1. [eth](./jsonrpc/eth.md)
+    1. [engine](./jsonrpc/engine.md)
+    1. [tracing](./jsonrpc/tracing.md)
+1. [CLI Reference](./cli/cli.md)
+    1. [reth node](./cli/node.md) -->
+    1. [reth db](./cli/db.md)
+    1. [reth p2p](./cli/p2p.md)
+    1. [reth stage](./cli/stage.md)
+    1. [reth dump-stage](./cli/dump-stage.md)
+    1. [reth drop-stage](./cli/drop-stage.md)
+1. [Developers](./developers/developers.md)
+    1. [Contribute](./developers/contribute.md)
+    1. [Architecture](./developers/architecture.md)
