@@ -23,7 +23,10 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage},
+    stages::{
+        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
+        TotalDifficultyStage,
+    },
 };
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
@@ -171,7 +174,14 @@ impl ImportCommand {
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(factory, config.stages.execution.commit_threshold)),
+                .set(ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: config.stages.execution.max_blocks,
+                        max_changes: config.stages.execution.max_changes,
+                        max_changesets: config.stages.execution.max_changesets,
+                    },
+                )),
             )
             .build(db);
 

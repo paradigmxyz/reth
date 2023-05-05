@@ -5160,6 +5160,7 @@ name = "reth-provider"
 version = "0.1.0"
 dependencies = [
  "auto_impl",
+ "derive_more",
  "itertools",
  "parking_lot 0.12.1",
  "pin-project",
