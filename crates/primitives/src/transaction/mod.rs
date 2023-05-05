@@ -409,7 +409,9 @@ impl Transaction {
     // 	return dst.Set(tx.GasPrice)
     // }
 
-    /// Returns the effective gas price for the given base fee
+    /// Returns the effective gas price for the given base fee.
+    ///
+    /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
     pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         let dynamic_tx = match self {
             Transaction::Legacy(tx) => return tx.gas_price,
