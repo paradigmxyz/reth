@@ -92,4 +92,9 @@ pub enum ProviderError {
     /// Unable to compute state root on top of historical block
     #[error("Unable to compute state root on top of historical block")]
     StateRootNotAvailableForHistoricalBlock,
+
+    #[error("Safe tag currently unsupported")]
+    SafeTagUnsupported,
+    #[error("Finalized tag currently unsupported")]
+    FinalizedTagUnsupported,
 }
