@@ -237,6 +237,7 @@ where
                         index: Some(idx as u64),
                         block_hash: Some(block_hash),
                         block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),
+                        base_fee: Some(block_env.basefee.try_into().unwrap_or(u64::MAX)),
                     };
 
                     let tx = tx_env_with_recovered(&tx);
