@@ -12,10 +12,9 @@ use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
-    Receipt, SealedBlock, Transaction as PrimitiveTransaction,
+    Receipt, SealedBlock,
     TransactionKind::{Call, Create},
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
-    TxLegacy, H256, U128, U256, U64,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
@@ -575,25 +574,6 @@ where
             None => return Err(EthApiError::UnknownBlockNumber),
         };
 
-        let mut res_receipt = TransactionReceipt {
-            transaction_hash: Some(meta.tx_hash),
-            transaction_index: Some(U256::from(meta.index)),
-            block_hash: Some(meta.block_hash),
-            block_number: Some(U256::from(meta.block_number)),
-            from: transaction.signer(),
-            to: None,
-            cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
-            gas_used: None,
-            contract_address: None,
-            logs: vec![],
-            effective_gas_price: U128::from(0),
-            transaction_type: U256::from(0),
-            // TODO: set state root after the block
-            state_root: None,
-            logs_bloom: receipt.bloom_slow(),
-            status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
-        };
-
         // get the previous transaction cumulative gas used
         let gas_used = if meta.index == 0 {
             receipt.cumulative_gas_used
@@ -604,7 +584,28 @@ where
                 .map(|prev_receipt| receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used)
                 .unwrap_or_default()
         };
-        res_receipt.gas_used = Some(U256::from(gas_used));
+
+        let mut res_receipt = TransactionReceipt {
+            transaction_hash: Some(meta.tx_hash),
+            transaction_index: Some(U256::from(meta.index)),
+            block_hash: Some(meta.block_hash),
+            block_number: Some(U256::from(meta.block_number)),
+            from: transaction.signer(),
+            to: None,
+            cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
+            gas_used: Some(U256::from(gas_used)),
+            contract_address: None,
+            logs: Vec::with_capacity(receipt.logs.len()),
+            effective_gas_price: transaction
+                .effective_gas_price(meta.base_fee)
+                .map(U128::from)
+                .unwrap_or(U128::ZERO),
+            transaction_type: tx.transaction.tx_type().into(),
+            // TODO pre-byzantium receipts have a post-transaction state root
+            state_root: None,
+            logs_bloom: receipt.bloom_slow(),
+            status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
+        };
 
         match tx.transaction.kind() {
             Create => {
@@ -613,26 +614,6 @@ where
             }
             Call(addr) => {
                 res_receipt.to = Some(*addr);
-            }
-        }
-
-        match tx.transaction {
-            PrimitiveTransaction::Legacy(TxLegacy { gas_price, .. }) => {
-                res_receipt.transaction_type = U256::from(0);
-                res_receipt.effective_gas_price = U128::from(gas_price);
-            }
-            PrimitiveTransaction::Eip2930(TxEip2930 { gas_price, .. }) => {
-                res_receipt.transaction_type = U256::from(1);
-                res_receipt.effective_gas_price = U128::from(gas_price);
-            }
-            PrimitiveTransaction::Eip1559(TxEip1559 {
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                ..
-            }) => {
-                res_receipt.transaction_type = U256::from(2);
-                res_receipt.effective_gas_price =
-                    U128::from(max_fee_per_gas + max_priority_fee_per_gas)
             }
         }
 

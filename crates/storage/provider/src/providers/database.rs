@@ -252,8 +252,8 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                         if let Some(block_number) =
                             transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
                         {
-                            if let Some(block_hash) =
-                                tx.get::<tables::CanonicalHeaders>(block_number)?
+                            if let Some((header, block_hash)) =
+                                read_sealed_header(tx, block_number)?
                             {
                                 if let Some(block_body) =
                                     tx.get::<tables::BlockBodyIndices>(block_number)?
@@ -269,6 +269,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                                         index,
                                         block_hash,
                                         block_number,
+                                        base_fee: header.base_fee_per_gas,
                                     };
 
                                     return Ok(Some((transaction.into(), meta)))
@@ -461,6 +462,25 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
             self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
+    }
+}
+
+/// Fetches Header and its hash
+#[inline]
+fn read_sealed_header<'a, TX>(
+    tx: &TX,
+    block_number: u64,
+) -> std::result::Result<Option<(Header, BlockHash)>, reth_interfaces::db::Error>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    let block_hash = match tx.get::<tables::CanonicalHeaders>(block_number)? {
+        Some(block_hash) => block_hash,
+        None => return Ok(None),
+    };
+    match tx.get::<tables::Headers>(block_number)? {
+        Some(header) => Ok(Some((header, block_hash))),
+        None => Ok(None),
     }
 }
 
