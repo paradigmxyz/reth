@@ -80,18 +80,27 @@ impl Transaction {
         tx: TransactionSignedEcRecovered,
         block_hash: H256,
         block_number: BlockNumber,
+        base_fee: Option<u64>,
         tx_index: U256,
     ) -> Self {
-        let mut tx = Self::from_recovered(tx);
-        tx.block_hash = Some(block_hash);
-        tx.block_number = Some(U256::from(block_number));
-        tx.transaction_index = Some(tx_index);
-        tx
+        Self::fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
     }
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
     pub fn from_recovered(tx: TransactionSignedEcRecovered) -> Self {
+        Self::fill(tx, None, None, None, None)
+    }
+
+    /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
+    /// environment related fields to `None`.
+    fn fill(
+        tx: TransactionSignedEcRecovered,
+        block_hash: Option<H256>,
+        block_number: Option<BlockNumber>,
+        base_fee: Option<u64>,
+        transaction_index: Option<U256>,
+    ) -> Self {
         let signer = tx.signer();
         let signed_tx = tx.into_signed();
 
@@ -103,7 +112,17 @@ impl Transaction {
         let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
             TxType::Legacy => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
             TxType::EIP2930 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
-            TxType::EIP1559 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
+            TxType::EIP1559 => {
+                // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
+                // baseFee`
+                let gas_price = base_fee
+                    .and_then(|base_fee| {
+                        signed_tx.effective_tip_per_gas(base_fee).map(|tip| tip + base_fee as u128)
+                    })
+                    .unwrap_or_else(|| signed_tx.max_fee_per_gas());
+
+                (Some(U128::from(gas_price)), Some(U128::from(signed_tx.max_fee_per_gas())))
+            }
         };
 
         let chain_id = signed_tx.chain_id().map(U64::from);
@@ -154,9 +173,9 @@ impl Transaction {
             transaction_type: Some(U64::from(signed_tx.tx_type() as u8)),
 
             // These fields are set to None because they are not stored as part of the transaction
-            block_hash: None,
-            block_number: None,
-            transaction_index: None,
+            block_hash,
+            block_number: block_number.map(U256::from),
+            transaction_index,
         }
     }
 }
