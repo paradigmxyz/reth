@@ -7,8 +7,9 @@ use reth_provider::Transaction;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
 use reth_stages::{
     stages::{
-        AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage, ACCOUNT_HASHING,
-        EXECUTION, MERKLE_EXECUTION, SENDER_RECOVERY, STORAGE_HASHING,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
+        StorageHashingStage, ACCOUNT_HASHING, EXECUTION, MERKLE_EXECUTION, SENDER_RECOVERY,
+        STORAGE_HASHING,
     },
     ExecInput, Stage,
 };
@@ -82,7 +83,14 @@ impl Command {
                 MERKLE_EXECUTION.get_progress(tx.deref())?.unwrap_or_default());
 
         let factory = reth_revm::Factory::new(self.chain.clone());
-        let mut execution_stage = ExecutionStage::new(factory, 1);
+        let mut execution_stage = ExecutionStage::new(
+            factory,
+            ExecutionStageThresholds {
+                max_blocks: Some(1),
+                max_changes: None,
+                max_changesets: None,
+            },
+        );
 
         let mut account_hashing_stage = AccountHashingStage::default();
         let mut storage_hashing_stage = StorageHashingStage::default();
