@@ -11,4 +11,6 @@ pub struct TransactionMeta {
     pub block_hash: H256,
     /// Number of the block.
     pub block_number: u64,
+    /// Base fee of the block.
+    pub base_fee: Option<u64>,
 }

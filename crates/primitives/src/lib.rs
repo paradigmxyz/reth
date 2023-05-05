@@ -108,7 +108,10 @@ pub use ethers_core::{
     utils as rpc_utils,
 };
 pub use revm_primitives::{B160 as H160, B256 as H256, U256};
-pub use ruint::{aliases::U128, UintTryTo};
+pub use ruint::{
+    aliases::{U128, U8},
+    UintTryTo,
+};
 
 #[doc(hidden)]
 mod __reexport {
