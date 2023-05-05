@@ -400,15 +400,6 @@ impl Transaction {
         }
     }
 
-    // impls for non dynamic:
-    // func (tx *LegacyTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
-    // 	return dst.Set(tx.GasPrice)
-    // }
-    //
-    // func (tx *AccessListTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
-    // 	return dst.Set(tx.GasPrice)
-    // }
-
     /// Returns the effective gas price for the given base fee.
     ///
     /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
@@ -656,23 +647,6 @@ impl Encodable for Transaction {
 }
 
 impl TxEip1559 {
-    // go function we need to impl for dynamic fee txs
-    // func (tx *DynamicFeeTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
-    // 	if baseFee == nil {
-    // 		return dst.Set(tx.GasFeeCap)
-    // 	}
-    //
-    // 	// tip = tx.GasFeeCap - baseFee
-    // 	tip := dst.Sub(tx.GasFeeCap, baseFee)
-    // 	if tip.Cmp(tx.GasTipCap) > 0 {
-    // 		tip.Set(tx.GasTipCap)
-    // 		// ends up returning tx.GasTipCap + baseFee
-    // 	}
-    //
-    // 	// if tip < tx.GasTipCap, tip = tx.GasFeeCap - baseFee + baseFee = tx.GasFeeCap
-    // 	return tip.Add(tip, baseFee)
-    // }
-
     /// Returns the effective gas price for the given `base_fee`.
     pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match base_fee {
