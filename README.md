@@ -43,15 +43,11 @@ See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how 
 
 ### Build & Test
 
-Rust minimum required version to build this project is 1.65.0 published 02.11.2022
+Rust minimum required version to build this project is 1.65.0 published 02.11.2022. 
 
-Prerequisites:
-- Debian
-  - `libclang`
-  - `libclang-dev`
+See the book for detailed instructions on how to build from [source](https://paradigmxyz.github.io/reth/installation/source.html).
 
 To fully test Reth, you will need to have [Geth installed](https://geth.ethereum.org/docs/getting-started/installing-geth), but it is possible to run a subset of tests without Geth.
-
 
 First, clone the repository:
 
