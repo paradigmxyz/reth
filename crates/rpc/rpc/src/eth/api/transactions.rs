@@ -654,7 +654,6 @@ where
                 block_number: Some(U256::from(meta.block_number)),
                 transaction_hash: Some(meta.tx_hash),
                 transaction_index: Some(U256::from(meta.index)),
-                transaction_log_index: Some(U256::from(tx_log_idx)),
                 log_index: Some(U256::from(num_logs + tx_log_idx)),
                 removed: false,
             };

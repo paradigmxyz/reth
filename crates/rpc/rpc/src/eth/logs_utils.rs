@@ -44,7 +44,6 @@ pub(crate) fn append_matching_block_logs<I>(
                     transaction_hash: Some(transaction_hash),
                     transaction_index: Some(U256::from(transaction_idx)),
                     log_index: Some(U256::from(log_index)),
-                    transaction_log_index: Some(U256::from(transaction_log_idx)),
                     removed,
                 };
                 all_logs.push(log);
