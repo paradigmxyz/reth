@@ -5455,6 +5455,8 @@ version = "0.1.0"
 dependencies = [
  "dyn-clone",
  "futures-util",
+ "metrics",
+ "reth-metrics-derive",
  "thiserror",
  "tokio",
  "tracing",
