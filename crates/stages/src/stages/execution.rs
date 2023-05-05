@@ -195,7 +195,6 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         let (range, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
-        let unwind_progress = *range.start() - 1;
 
         if range.is_empty() {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -254,6 +253,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
 
+        let unwind_progress = *range.start() - 1;
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { stage_progress: unwind_progress })
     }

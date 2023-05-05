@@ -279,9 +279,6 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        // There is no threshold on account unwind, we will always take changesets and
-        // apply past values to HashedAccount table.
-
         let (range, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
         let unwind_progress = *range.start() - 1;
