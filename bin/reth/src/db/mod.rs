@@ -10,7 +10,7 @@ use human_bytes::human_bytes;
 use reth_db::{database::Database, tables};
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::chainspec::genesis_value_parser;
-use std::{sync::Arc};
+use std::sync::Arc;
 use tracing::error;
 
 /// DB List TUI

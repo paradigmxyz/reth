@@ -17,7 +17,7 @@ use reth_stages::stages::{
     ACCOUNT_HASHING, EXECUTION, INDEX_ACCOUNT_HISTORY, INDEX_STORAGE_HISTORY, MERKLE_EXECUTION,
     MERKLE_UNWIND, STORAGE_HASHING,
 };
-use std::{sync::Arc};
+use std::sync::Arc;
 use tracing::info;
 
 /// `reth drop-stage` command

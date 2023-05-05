@@ -17,7 +17,7 @@ pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
         let is_opt = is_optional(field);
         if is_opt {
             if !supports_trailing_opt {
-                return Err(Error::new_spanned(field, "Optional fields are disabled. Add `#[rlp(trailing)]` attribute to the struct in order to enable"))
+                return Err(Error::new_spanned(field, "Optional fields are disabled. Add `#[rlp(trailing)]` attribute to the struct in order to enable"));
             }
             encountered_opt_item = true;
         } else if encountered_opt_item && !attributes_include(&field.attrs, "default") {
