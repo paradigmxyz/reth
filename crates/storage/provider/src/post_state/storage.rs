@@ -86,7 +86,7 @@ impl StorageChanges {
         let mut evicted = BTreeMap::new();
         self.inner.retain(|block_number, storages| {
             if *block_number > target_block {
-                // TODO: fix this with Storage::size
+                // This is fine, because it's called only on post state splits
                 self.size -=
                     storages.iter().fold(0, |acc, (_, storage)| acc + storage.storage.len());
                 evicted.insert(*block_number, storages.clone());
@@ -104,7 +104,7 @@ impl StorageChanges {
             if *block_number > target_block {
                 true
             } else {
-                // TODO: fix this with Storage::size
+                // This is fine, because it's called only on post state splits
                 self.size -=
                     storages.iter().fold(0, |acc, (_, storage)| acc + storage.storage.len());
                 false
