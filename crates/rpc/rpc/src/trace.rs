@@ -213,20 +213,26 @@ where
     where
         F: Fn(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
     {
-        let block_hash = match self.client.block_hash_for_id(block_id)? {
-            Some(hash) => hash,
+        let ((cfg, block_env, _), block) = futures::try_join!(
+            self.eth_api.evm_env_at(block_id),
+            self.eth_api.block_by_id(block_id),
+        )?;
+
+        let block = match block {
+            Some(block) => block,
             None => return Ok(None),
         };
 
-        let ((cfg, block_env, at), transactions) = futures::try_join!(
-            self.eth_api.evm_env_at(block_hash.into()),
-            self.eth_api.transactions_by_block(block_hash),
-        )?;
-        let transactions = transactions.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        // we need to get the state of the parent block because we're replaying this block on top of
+        // its parent block's state
+        let state_at = block.parent_hash;
+
+        let block_hash = block.hash;
+        let transactions = block.body;
 
         // replay all transactions of the block
         self.eth_api
-            .with_state_at_block(at, move |state| {
+            .with_state_at_block(state_at.into(), move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = SubState::new(State::new(state));
 
