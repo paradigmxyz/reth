@@ -33,7 +33,7 @@ pub(crate) fn append_matching_block_logs<I>(
     let mut log_index: u32 = 0;
     for (transaction_idx, (transaction_hash, receipt)) in tx_and_receipts.into_iter().enumerate() {
         let logs = receipt.logs;
-        for (transaction_log_idx, log) in logs.into_iter().enumerate() {
+        for log in logs.into_iter() {
             if log_matches_filter(block, &log, filter) {
                 let log = Log {
                     address: log.address,
