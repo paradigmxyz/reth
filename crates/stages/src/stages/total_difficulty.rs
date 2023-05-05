@@ -93,11 +93,11 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     ) -> Result<UnwindOutput, StageError> {
         let (range, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
-        tx.unwind_table_by_num::<tables::HeaderTD>(*range.start())?;
+        let unwind_to = *range.start() - 1;
+        tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
-        let unwind_progress = *range.start() - 1;
-        info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_progress })
+        info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_to })
     }
 }
 
