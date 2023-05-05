@@ -570,7 +570,7 @@ where
             tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
         // get all receipts for the block
-        let all_receipts = match self.client().receipts_by_block((meta.block_number).into())? {
+        let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
             Some(recpts) => recpts,
             None => return Err(EthApiError::UnknownBlockNumber),
         };
