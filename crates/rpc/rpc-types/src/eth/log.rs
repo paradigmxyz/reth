@@ -21,8 +21,6 @@ pub struct Log {
     pub transaction_index: Option<U256>,
     /// Log Index in Block
     pub log_index: Option<U256>,
-    /// Log Index in Transaction
-    pub transaction_log_index: Option<U256>,
     /// Geth Compatibility Field: whether this log was removed
     #[serde(default)]
     pub removed: bool,
@@ -40,7 +38,6 @@ impl Log {
             transaction_hash: None,
             transaction_index: None,
             log_index: None,
-            transaction_log_index: None,
             removed: false,
         }
     }
@@ -61,13 +58,12 @@ mod tests {
             transaction_hash: Some(H256::from_low_u64_be(0x1234)),
             transaction_index: Some(U256::from(0x1234)),
             log_index: Some(U256::from(0x1234)),
-            transaction_log_index: Some(U256::from(0x1234)),
             removed: false,
         };
         let serialized = serde_json::to_string(&log).unwrap();
         assert_eq!(
             serialized,
-            r#"{"address":"0x0000000000000000000000000000000000001234","topics":["0x0000000000000000000000000000000000000000000000000000000000001234"],"data":"0x1234","blockHash":"0x0000000000000000000000000000000000000000000000000000000000001234","blockNumber":"0x1234","transactionHash":"0x0000000000000000000000000000000000000000000000000000000000001234","transactionIndex":"0x1234","logIndex":"0x1234","transactionLogIndex":"0x1234","removed":false}"#
+            r#"{"address":"0x0000000000000000000000000000000000001234","topics":["0x0000000000000000000000000000000000000000000000000000000000001234"],"data":"0x1234","blockHash":"0x0000000000000000000000000000000000000000000000000000000000001234","blockNumber":"0x1234","transactionHash":"0x0000000000000000000000000000000000000000000000000000000000001234","transactionIndex":"0x1234","logIndex":"0x1234","removed":false}"#
         );
 
         let deserialized: Log = serde_json::from_str(&serialized).unwrap();
