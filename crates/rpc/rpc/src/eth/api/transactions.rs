@@ -11,15 +11,15 @@ use async_trait::async_trait;
 
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
-    Receipt, SealedBlock,
+    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
+    IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
-    env::tx_env_with_recovered,
+    env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -32,7 +32,7 @@ use revm::{
     primitives::{BlockEnv, CfgEnv},
     Inspector,
 };
-use revm_primitives::{utilities::create_address, Env, ResultAndState};
+use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
@@ -51,11 +51,21 @@ pub trait EthTransactions: Send + Sync {
     /// for.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
 
+    /// Returns the revm evm env for the raw block header
+    ///
+    /// This is used for tracing raw blocks
+    async fn evm_env_for_raw_block(&self, at: &Header) -> EthResult<(CfgEnv, BlockEnv)>;
+
     /// Get all transactions in the block with the given hash.
     ///
     /// Returns `None` if block does not exist.
     async fn transactions_by_block(&self, block: H256)
         -> EthResult<Option<Vec<TransactionSigned>>>;
+
+    /// Get the entire block for the given id.
+    ///
+    /// Returns `None` if block does not exist.
+    async fn block_by_id(&self, id: BlockId) -> EthResult<Option<SealedBlock>>;
 
     /// Get all transactions in the block with the given hash.
     ///
@@ -205,6 +215,16 @@ where
         }
     }
 
+    async fn evm_env_for_raw_block(&self, header: &Header) -> EthResult<(CfgEnv, BlockEnv)> {
+        // get the parent config first
+        let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
+
+        let after_merge = cfg.spec_id >= SpecId::MERGE;
+        fill_block_env_with_coinbase(&mut block_env, header, after_merge, header.beneficiary);
+
+        Ok((cfg, block_env))
+    }
+
     async fn transactions_by_block(
         &self,
         block: H256,
@@ -212,14 +232,15 @@ where
         Ok(self.cache().get_block_transactions(block).await?)
     }
 
+    async fn block_by_id(&self, id: BlockId) -> EthResult<Option<SealedBlock>> {
+        self.block(id).await
+    }
+
     async fn transactions_by_block_id(
         &self,
         block: BlockId,
     ) -> EthResult<Option<Vec<TransactionSigned>>> {
-        match self.client().block_hash_for_id(block)? {
-            None => Ok(None),
-            Some(hash) => self.transactions_by_block(hash).await,
-        }
+        self.block_by_id(block).await.map(|block| block.map(|block| block.body))
     }
 
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
@@ -248,9 +269,9 @@ where
 
     async fn transaction_by_hash_at(
         &self,
-        hash: H256,
+        transaction_hash: H256,
     ) -> EthResult<Option<(TransactionSource, BlockId)>> {
-        match self.transaction_by_hash(hash).await? {
+        match self.transaction_by_hash(transaction_hash).await? {
             None => return Ok(None),
             Some(tx) => {
                 let res = match tx {
