@@ -4,6 +4,9 @@ use reth_rpc::{
 };
 use serde::{Deserialize, Serialize};
 
+/// The default maximum of logs in a single response.
+pub(crate) const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 2_000;
+
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
 pub struct EthHandlers<Client, Pool, Network, Events> {
@@ -22,13 +25,18 @@ pub struct EthHandlers<Client, Pool, Network, Events> {
 pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
-
     /// The maximum number of tracing calls that can be executed in concurrently.
     pub max_tracing_requests: usize,
+    /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
+    pub max_logs_per_response: usize,
 }
 
 impl Default for EthConfig {
     fn default() -> Self {
-        Self { cache: EthStateCacheConfig::default(), max_tracing_requests: 10 }
+        Self {
+            cache: EthStateCacheConfig::default(),
+            max_tracing_requests: 10,
+            max_logs_per_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
+        }
     }
 }

@@ -16,7 +16,10 @@ use reth_staged_sync::{
     Config,
 };
 use reth_stages::{
-    stages::{BodyStage, ExecutionStage, MerkleStage, SenderRecoveryStage, TransactionLookupStage},
+    stages::{
+        BodyStage, ExecutionStage, ExecutionStageThresholds, MerkleStage, SenderRecoveryStage,
+        TransactionLookupStage,
+    },
     ExecInput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -55,12 +58,6 @@ pub struct Command {
         value_parser = chain_spec_value_parser
     )]
     chain: Arc<ChainSpec>,
-
-    /// Secret key to use for this node.
-    ///
-    /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH", global = true, required = false)]
-    p2p_secret_key: Option<PathBuf>,
 
     /// Enable Prometheus metrics.
     ///
@@ -139,8 +136,12 @@ impl Command {
                     });
                 }
 
-                let default_secret_key_path = data_dir.p2p_secret_path();
-                let p2p_secret_key = get_secret_key(&default_secret_key_path)?;
+                let network_secret_path = self
+                    .network
+                    .p2p_secret_key
+                    .clone()
+                    .unwrap_or_else(|| data_dir.p2p_secret_path());
+                let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
                 let default_peers_path = data_dir.known_peers_path();
 
@@ -183,7 +184,14 @@ impl Command {
             }
             StageEnum::Execution => {
                 let factory = reth_revm::Factory::new(self.chain.clone());
-                let mut stage = ExecutionStage::new(factory, num_blocks);
+                let mut stage = ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: Some(num_blocks),
+                        max_changes: None,
+                        max_changesets: None,
+                    },
+                );
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }

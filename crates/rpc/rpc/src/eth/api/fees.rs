@@ -129,7 +129,7 @@ where
                 let mut sorter = Vec::with_capacity(transactions.len());
                 for transaction in transactions.iter() {
                     let reward = transaction
-                        .effective_gas_price(header.base_fee_per_gas)
+                        .effective_gas_tip(header.base_fee_per_gas)
                         .ok_or(InvalidTransactionError::FeeCapTooLow)?;
 
                     sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward })

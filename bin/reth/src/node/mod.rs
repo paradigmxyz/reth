@@ -54,7 +54,10 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage, FINISH},
+    stages::{
+        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
+        TotalDifficultyStage, FINISH,
+    },
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
@@ -91,18 +94,6 @@ pub struct Command {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
-
-    /// The path to the database folder. If not specified, it will be set in the data dir for the
-    /// chain being used.
-    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
-    db: Option<PathBuf>,
-
-    /// Secret key to use for this node.
-    ///
-    /// This will also deterministically set the peer ID. If not specified, it will be set in the
-    /// data dir for the chain being used.
-    #[arg(long, value_name = "PATH", global = true, required = false)]
-    p2p_secret_key: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -159,9 +150,7 @@ impl Command {
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
-        // use the overridden db path if specified
-        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
-
+        let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
         info!(target: "reth::cli", "Database opened");
@@ -229,9 +218,11 @@ impl Command {
         }
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let default_secret_key_path = data_dir.p2p_secret_path();
+        let network_secret_path =
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
+        let secret_key = get_secret_key(&network_secret_path)?;
         let default_peers_path = data_dir.known_peers_path();
-        let secret_key = get_secret_key(&default_secret_key_path)?;
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
@@ -377,7 +368,7 @@ impl Command {
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
-        // extract the jwt secret from the the args if possible
+        // extract the jwt secret from the args if possible
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
@@ -417,22 +408,23 @@ impl Command {
     }
 
     /// Constructs a [Pipeline] that's wired to the network
-    async fn build_networked_pipeline<Client>(
+    async fn build_networked_pipeline<DB, Client>(
         &self,
         config: &mut Config,
         network: NetworkHandle,
         client: Client,
         consensus: Arc<dyn Consensus>,
-        db: Arc<Env<WriteMap>>,
+        db: DB,
         task_executor: &TaskExecutor,
-    ) -> eyre::Result<Pipeline<Env<WriteMap>>>
+    ) -> eyre::Result<Pipeline<DB>>
     where
+        DB: Database + Unpin + Clone + 'static,
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(db.clone(), &client, tip).await?)
+            Some(self.lookup_or_fetch_tip(&db, &client, tip).await?)
         } else {
             None
         };
@@ -448,6 +440,7 @@ impl Command {
 
         let pipeline = self
             .build_pipeline(
+                db,
                 config,
                 header_downloader,
                 body_downloader,
@@ -546,13 +539,14 @@ impl Command {
     /// If it doesn't exist, download the header and return the block number.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn lookup_or_fetch_tip<Client>(
+    async fn lookup_or_fetch_tip<DB, Client>(
         &self,
-        db: Arc<Env<WriteMap>>,
+        db: &DB,
         client: Client,
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error>
     where
+        DB: Database,
         Client: HeadersClient,
     {
         Ok(self.fetch_tip(db, client, BlockHashOrNumber::Hash(tip)).await?.number)
@@ -561,13 +555,14 @@ impl Command {
     /// Attempt to look up the block with the given number and return the header.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn fetch_tip<Client>(
+    async fn fetch_tip<DB, Client>(
         &self,
-        db: Arc<Env<WriteMap>>,
+        db: &DB,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error>
     where
+        DB: Database,
         Client: HeadersClient,
     {
         let header = db.view(|tx| -> Result<Option<Header>, reth_db::Error> {
@@ -624,8 +619,9 @@ impl Command {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn build_pipeline<H, B, U>(
+    async fn build_pipeline<DB, H, B, U>(
         &self,
+        db: DB,
         config: &Config,
         header_downloader: H,
         body_downloader: B,
@@ -633,8 +629,9 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
-    ) -> eyre::Result<Pipeline<Env<WriteMap>>>
+    ) -> eyre::Result<Pipeline<DB>>
     where
+        DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
         U: SyncStateUpdater + StatusUpdater + Clone + 'static,
@@ -688,11 +685,18 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold))
+                .set(ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: stage_conf.execution.max_blocks,
+                        max_changes: stage_conf.execution.max_changes,
+                        max_changesets: stage_conf.execution.max_changesets,
+                    },
+                ))
                 .disable_if(MERKLE_UNWIND, || self.auto_mine)
                 .disable_if(MERKLE_EXECUTION, || self.auto_mine),
             )
-            .build();
+            .build(db);
 
         Ok(pipeline)
     }
@@ -796,12 +800,12 @@ mod tests {
     fn parse_db_path() {
         let cmd = Command::try_parse_from(["reth", "--db", "my/path/to/db"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        let db_path = data_dir.db_path();
         assert_eq!(db_path, Path::new("my/path/to/db"));
 
         let cmd = Command::try_parse_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        let db_path = data_dir.db_path();
         assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
     }
 }

@@ -176,8 +176,6 @@ where
             ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
         );
 
-        let _last_highest_gas_limit = highest_gas_limit;
-
         trace!(target: "rpc::eth::estimate", ?env, ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
 
         // binary search

@@ -1,6 +1,9 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use clap::Args;
+use clap::{
+    builder::{PossibleValue, TypedValueParser},
+    Arg, Args, Command,
+};
 use futures::FutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
@@ -18,6 +21,7 @@ use reth_rpc_engine_api::{EngineApi, EngineApiServer};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
+    ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
 };
@@ -39,8 +43,8 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port")]
     pub http_port: Option<u16>,
 
-    /// Rpc Modules to be configured for http server
-    #[arg(long = "http.api")]
+    /// Rpc Modules to be configured for the HTTP server
+    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
@@ -63,8 +67,8 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.origins", name = "ws.origins")]
     pub ws_allowed_origins: Option<String>,
 
-    /// Rpc Modules to be configured for Ws server
-    #[arg(long = "ws.api")]
+    /// Rpc Modules to be configured for the WS server
+    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC  server
@@ -304,6 +308,38 @@ impl RpcServerArgs {
         );
 
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+    }
+}
+
+/// clap value parser for [RpcModuleSelection].
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+struct RpcModuleSelectionValueParser;
+
+impl TypedValueParser for RpcModuleSelectionValueParser {
+    type Value = RpcModuleSelection;
+
+    fn parse_ref(
+        &self,
+        _cmd: &Command,
+        arg: Option<&Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        let val =
+            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        val.parse::<RpcModuleSelection>().map_err(|err| {
+            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let possible_values = RethRpcModule::all_variants().to_vec().join(",");
+            let msg = format!(
+                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
+            );
+            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+        })
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values = RethRpcModule::all_variants().iter().map(PossibleValue::new);
+        Some(Box::new(values))
     }
 }
 

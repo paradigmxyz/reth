@@ -41,6 +41,7 @@ pub fn fill_cfg_env(
     cfg_env.perf_all_precompiles_have_balance = false;
     cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 }
+
 /// Fill block environment from Block.
 pub fn fill_block_env(
     block_env: &mut BlockEnv,
@@ -48,8 +49,20 @@ pub fn fill_block_env(
     header: &Header,
     after_merge: bool,
 ) {
+    let coinbase = block_coinbase(chain_spec, header, after_merge);
+    fill_block_env_with_coinbase(block_env, header, after_merge, coinbase);
+}
+
+/// Fill block environment with coinbase.
+#[inline]
+pub fn fill_block_env_with_coinbase(
+    block_env: &mut BlockEnv,
+    header: &Header,
+    after_merge: bool,
+    coinbase: Address,
+) {
     block_env.number = U256::from(header.number);
-    block_env.coinbase = block_coinbase(chain_spec, header, after_merge);
+    block_env.coinbase = coinbase;
     block_env.timestamp = U256::from(header.timestamp);
     if after_merge {
         block_env.prevrandao = Some(header.mix_hash);

@@ -35,7 +35,7 @@ pub enum Error {
     #[error("Provider error")]
     ProviderError,
     #[error("BlockChainId can't be found in BlockchainTree with internal index {chain_id}")]
-    BlockChainIdConsistency { chain_id: u64 },
+    BlockSideChainIdConsistency { chain_id: u64 },
     #[error(
         "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
@@ -62,4 +62,11 @@ pub enum Error {
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
+}
+
+impl Error {
+    /// Returns `true` if the error is fatal.
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
+    }
 }

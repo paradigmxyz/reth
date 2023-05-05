@@ -799,8 +799,8 @@ mod tests {
 
         // Clone and sort to make the test deterministic
         assert_eq!(
-            post_state.account_changes(),
-            &BTreeMap::from([(
+            post_state.account_changes().inner,
+            BTreeMap::from([(
                 block.number,
                 BTreeMap::from([
                     // New account
@@ -814,8 +814,8 @@ mod tests {
             "Account changeset did not match"
         );
         assert_eq!(
-            post_state.storage_changes(),
-            &BTreeMap::from([(
+            post_state.storage_changes().inner,
+            BTreeMap::from([(
                 block.number,
                 BTreeMap::from([(
                     account1,

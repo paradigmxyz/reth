@@ -50,7 +50,7 @@ pub struct BodiesDownloader<B: BodiesClient, DB> {
     consensus: Arc<dyn Consensus>,
     // TODO: make this a [HeaderProvider]
     /// The database handle
-    db: Arc<DB>,
+    db: DB,
     /// The maximum number of non-empty blocks per one request
     request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
@@ -76,7 +76,7 @@ pub struct BodiesDownloader<B: BodiesClient, DB> {
 impl<B, DB> BodiesDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    DB: Database,
+    DB: Database + Unpin + 'static,
 {
     /// Returns the next contiguous request.
     fn next_headers_request(&mut self) -> DownloadResult<Option<Vec<SealedHeader>>> {
@@ -249,7 +249,7 @@ where
 impl<B, DB> BodiesDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    DB: Database,
+    DB: Database + Unpin + 'static,
     Self: BodyDownloader + 'static,
 {
     /// Spawns the downloader task via [tokio::task::spawn]
@@ -270,7 +270,7 @@ where
 impl<B, DB> BodyDownloader for BodiesDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    DB: Database,
+    DB: Database + Unpin + 'static,
 {
     /// Set a new download range (exclusive).
     ///
@@ -315,7 +315,7 @@ where
 impl<B, DB> Stream for BodiesDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    DB: Database,
+    DB: Database + Unpin + 'static,
 {
     type Item = BodyDownloaderResult;
 
@@ -497,7 +497,7 @@ impl BodiesDownloaderBuilder {
         self,
         client: B,
         consensus: Arc<dyn Consensus>,
-        db: Arc<DB>,
+        db: DB,
     ) -> BodiesDownloader<B, DB>
     where
         B: BodiesClient + 'static,

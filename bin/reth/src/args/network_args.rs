@@ -36,11 +36,19 @@ pub struct NetworkArgs {
     #[arg(long, value_name = "FILE", verbatim_doc_comment, conflicts_with = "no_persist_peers")]
     pub peers_file: Option<PathBuf>,
 
+    /// Secret key to use for this node.
+    ///
+    /// This will also deterministically set the peer ID. If not specified, it will be set in the
+    /// data dir for the chain being used.
+    #[arg(long, value_name = "PATH")]
+    pub p2p_secret_key: Option<PathBuf>,
+
     /// Do not persist peers.
     #[arg(long, verbatim_doc_comment)]
     pub no_persist_peers: bool,
 
-    /// NAT resolution method.
+    #[allow(rustdoc::invalid_html_tags)]
+    /// NAT resolution method (any|none|upnp|publicip|extip:<IP>)
     #[arg(long, default_value = "any")]
     pub nat: NatResolver,
 
@@ -122,5 +130,27 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
         network_config_builder
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[clap(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn parse_nat_args() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--nat", "none"]).args;
+        assert_eq!(args.nat, NatResolver::None);
+
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--nat", "extip:0.0.0.0"]).args;
+        assert_eq!(args.nat, NatResolver::ExternalIp("0.0.0.0".parse().unwrap()));
     }
 }

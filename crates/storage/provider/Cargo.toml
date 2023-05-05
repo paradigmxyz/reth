@@ -30,6 +30,7 @@ auto_impl = "1.0"
 itertools = "0.10"
 pin-project = "1.0"
 schnellru = "0.2"
+derive_more = "0.99"
 
 # test-utils
 reth-rlp = { path = "../../rlp", optional = true }

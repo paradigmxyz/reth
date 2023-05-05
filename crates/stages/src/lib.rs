@@ -21,7 +21,6 @@
 //! ```
 //! # use std::sync::Arc;
 //! # use reth_db::mdbx::test_utils::create_test_rw_db;
-//! # use reth_db::mdbx::{Env, WriteMap};
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
@@ -37,22 +36,23 @@
 //! #    Arc::new(TestHeadersClient::default()),
 //! #    consensus.clone()
 //! # );
+//! # let db = create_test_rw_db();
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::zero(), vec![]).into()) }),
 //! #    consensus.clone(),
-//! #    create_test_rw_db()
+//! #    db.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(H256::default());
 //! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! # let (status_updater, _) = TestStatusUpdater::new();
 //! // Create a pipeline that can fully sync
-//! # let pipeline: Pipeline<Env<WriteMap>> =
+//! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
 //!     .add_stages(
 //!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, status_updater, factory)
 //!     )
-//!     .build();
+//!     .build(db);
 //! ```
 mod error;
 mod id;

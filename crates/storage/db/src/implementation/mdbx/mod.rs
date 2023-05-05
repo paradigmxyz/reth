@@ -280,6 +280,47 @@ mod tests {
         assert_eq!(walker.next(), None);
     }
 
+    #[test]
+    fn db_cursor_walk_range_on_dup_table() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        let address0 = Address::zero();
+        let address1 = Address::from_low_u64_be(1);
+        let address2 = Address::from_low_u64_be(2);
+
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address0, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address1, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address2, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address0, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address1, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address2, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(2, AccountBeforeTx { address: address0, info: None }) // <- should not be returned by the walker
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<AccountChangeSet>().unwrap();
+
+        let entries = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(entries.len(), 7);
+
+        let mut walker = cursor.walk_range(0..=1).unwrap();
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address0, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address1, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address2, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address0, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address1, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address2, info: None }))));
+        assert_eq!(walker.next(), None);
+    }
+
     #[allow(clippy::reversed_empty_ranges)]
     #[test]
     fn db_cursor_walk_range_invalid() {

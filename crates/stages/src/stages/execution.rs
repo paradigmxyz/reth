@@ -17,7 +17,7 @@ use reth_provider::{
 };
 use std::{
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tracing::*;
 
@@ -66,10 +66,10 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     metrics: ExecutionStageMetrics,
     /// The stage's internal executor
     executor_factory: EF,
-    /// Commit threshold
-    commit_threshold: u64,
     /// The execution cache for the executor.
     cache: Arc<Mutex<LruStateCache>>,
+    /// The commit thresholds of the execution stage.
+    thresholds: ExecutionStageThresholds,
 }
 
 /// The number of accounts to keep in the state cache.
@@ -90,11 +90,11 @@ const CACHE_BYTECODES: usize = 1024 * 16;
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
-    pub fn new(executor_factory: EF, commit_threshold: u64) -> Self {
+    pub fn new(executor_factory: EF, thresholds: ExecutionStageThresholds) -> Self {
         Self {
             metrics: ExecutionStageMetrics::default(),
             executor_factory,
-            commit_threshold,
+            thresholds,
             cache: Arc::new(Mutex::new(LruStateCache::new(
                 CACHE_ACCOUNTS,
                 CACHE_STORAGES,
@@ -107,7 +107,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     ///
     /// The commit threshold will be set to 10_000.
     pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self::new(executor_factory, 10_000)
+        Self::new(executor_factory, ExecutionStageThresholds::default())
     }
 
     // TODO: This should be in the block provider trait once we consolidate
@@ -122,44 +122,41 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let withdrawals = tx.get::<tables::BlockWithdrawals>(block_number)?.map(|v| v.withdrawals);
 
         // Get the block body
-        let body = tx
-            .get_or_take::<tables::BlockBodyIndices, false>(block_number..=block_number)?
-            .first()
-            .map(|v| v.1.clone())
-            .unwrap();
-        let first_transaction = body.first_tx_num();
-        let last_transaction = body.last_tx_num();
+        let body = tx.get::<tables::BlockBodyIndices>(block_number)?.unwrap();
+        let tx_range = body.tx_num_range();
 
         // Get the transactions in the body
-        let (transactions, senders) = if body.is_empty() {
+        let (transactions, senders) = if tx_range.is_empty() {
             (Vec::new(), Vec::new())
         } else {
             let transactions = tx
-                .get_or_take::<tables::Transactions, false>(first_transaction..=last_transaction)?
-                .into_iter()
-                .map(|tx| TransactionSigned {
-                    // TODO: This is the fastest way right now to make everything just work with a
-                    // dummy transaction hash. We don't need transaction hashes
-                    // for execution, but since we no longer store transaction hashes in the
-                    // transaction table, the usual `get_block_transactions_range` starts
-                    // calculating them on the fly, which is very slow.
-                    //
-                    // Ref: https://github.com/paradigmxyz/reth/issues/2522
-                    hash: Default::default(),
-                    signature: tx.1.signature,
-                    transaction: tx.1.transaction,
-                })
-                .collect();
+                .cursor_read::<tables::Transactions>()?
+                .walk_range(tx_range.clone())?
+                .map(|entry| entry.map(|tx| tx.1))
+                .collect::<Result<Vec<_>, _>>()?;
+
             let senders = tx
-                .get_or_take::<tables::TxSenders, false>(first_transaction..=last_transaction)?
-                .into_iter()
-                .map(|sender| sender.1)
-                .collect();
+                .cursor_read::<tables::TxSenders>()?
+                .walk_range(tx_range)?
+                .map(|entry| entry.map(|sender| sender.1))
+                .collect::<Result<Vec<_>, _>>()?;
 
             (transactions, senders)
         };
 
-        Ok((Block { header, body: transactions, ommers, withdrawals }.with_senders(senders), td))
+        let body = transactions
+            .into_iter()
+            .map(|tx| {
+                TransactionSigned {
+                    // TODO: This is the fastest way right now to make everything just work with
+                    // a dummy transaction hash.
+                    hash: Default::default(),
+                    signature: tx.signature,
+                    transaction: tx.transaction,
+                }
+            })
+            .collect();
+        Ok((Block { header, body, ommers, withdrawals }.with_senders(senders), td))
     }
 
     /// Update the state cache with the latest values from a block's [`PostState`].
@@ -182,7 +179,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        let start_block = input.stage_progress() + 1;
+        let max_block = input.previous_stage_progress();
 
         // Build executor
         let mut executor = self.executor_factory.with_sp(CachedStateProvider::new(
@@ -190,14 +188,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             LatestStateProviderRef::new(&**tx),
         ));
 
-        // Message tracking
-        let mut gas_since_last_message = 0;
-        let mut last_message_block = *range.start();
-        let mut last_message = Instant::now();
+        // Progress tracking
+        let mut progress = start_block;
 
         // Execute block range
         let mut state = PostState::default();
-        for block_number in range.clone() {
+        for block_number in start_block..=max_block {
             let (block, td) = Self::read_block_with_senders(tx, block_number)?;
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
@@ -210,62 +206,37 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Update cache
             self.update_cache(&block_state);
 
-            // Merge state changes
-            state.extend(block_state);
-
             // Gas metrics
-            gas_since_last_message += block.header.gas_used;
             self.metrics
                 .mgas_processed_total
                 .increment(block.header.gas_used as f64 / MGAS_TO_GAS as f64);
 
-            // Status messages
-            let now = Instant::now();
-            let elapsed = now - last_message;
-            if elapsed > Duration::from_secs(30) {
-                last_message = now;
-                let elapsed_secs =
-                    elapsed.as_secs_f64() + (elapsed.subsec_millis() as f64 / 1000f64);
-                let mgas_sec = gas_since_last_message as f64 / MGAS_TO_GAS as f64 / elapsed_secs;
-                let blocks_sec = (block_number - last_message_block) as f64 / elapsed_secs;
-
-                // Warn whenever a block range was really slow
-                //
-                // Note: This will also be triggered if a lot of empty blocks were processed, as
-                // they do not increment the mgas/s metric.
-                if mgas_sec < 500. {
-                    warn!(
-                        target: "sync::stages::execution",
-                        block_number,
-                        "Slow block range ({}-{}), {:.2} Mgas/sec ({:.2} Blks/sec)",
-                        last_message_block,
-                        block_number,
-                        mgas_sec,
-                        blocks_sec
-                    );
-                } else {
-                    info!(
-                        target: "sync::stages::execution",
-                        block_number,
-                        "Executed block range ({}-{}), {:.2} Mgas/sec ({:.2} Blks/sec)",
-                        last_message_block,
-                        block_number,
-                        mgas_sec,
-                        blocks_sec
-                    );
-                }
-                gas_since_last_message = 0;
-                last_message_block = block_number;
+            // Write history periodically to free up memory
+            if self.thresholds.should_write_history(state.changeset_size() as u64) {
+                info!(target: "sync::stages::execution", ?block_number, "Writing history.");
+                state.write_history_to_db(&**tx)?;
+                info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
+                // gas_since_history_write = 0;
             }
+
+            // Check if we should commit now
+            if self.thresholds.is_end_of_batch(block_number - start_block, state.size() as u64) {
+                info!(target: "sync::stages::execution", ?block_number, "Threshold hit, committing.");
+                break;
+            }
+
+            // Merge state changes
+            state.extend(block_state);
+            progress = block_number;
         }
 
-        // Write changes
+        // Write remaining changes
         let start = Instant::now();
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
         state.write_to_db(&**tx)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
-        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
+        Ok(ExecOutput { stage_progress: progress, done: progress == max_block })
     }
 }
 
@@ -325,7 +296,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let block_range = input.unwind_to + 1..=input.stage_progress;
 
         if block_range.is_empty() {
-            return Ok(UnwindOutput { stage_progress: input.unwind_to })
+            return Ok(UnwindOutput { stage_progress: input.unwind_to });
         }
 
         // get all batches for account change
@@ -366,7 +337,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
         while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
             if block_num < *block_range.start() {
-                break
+                break;
             }
             // delete all changesets
             tx.delete::<tables::AccountChangeSet>(block_num, None)?;
@@ -375,13 +346,59 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
             if key.block_number() < *block_range.start() {
-                break
+                break;
             }
             // delete all changesets
             tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
+    }
+}
+
+/// The thresholds at which the execution stage writes state changes to the database.
+///
+/// If either of the thresholds (`max_blocks` and `max_changes`) are hit, then the execution stage
+/// commits all pending changes to the database.
+///
+/// A third threshold, `max_changesets`, can be set to periodically write changesets to the
+/// current database transaction, which frees up memory.
+#[derive(Debug)]
+pub struct ExecutionStageThresholds {
+    /// The maximum number of blocks to process before the execution stage commits.
+    pub max_blocks: Option<u64>,
+    /// The maximum amount of state changes to keep in memory before the execution stage commits.
+    pub max_changes: Option<u64>,
+    /// The maximum amount of changesets to keep in memory before they are written to the pending
+    /// database transaction.
+    ///
+    /// If this is lower than `max_changes`, then history is periodically flushed to the database
+    /// transaction, which frees up memory.
+    pub max_changesets: Option<u64>,
+}
+
+impl Default for ExecutionStageThresholds {
+    fn default() -> Self {
+        Self {
+            max_blocks: Some(500_000),
+            max_changes: Some(5_000_000),
+            max_changesets: Some(1_000_000),
+        }
+    }
+}
+
+impl ExecutionStageThresholds {
+    /// Check if the batch thresholds have been hit.
+    #[inline]
+    pub fn is_end_of_batch(&self, blocks_processed: u64, changes_processed: u64) -> bool {
+        blocks_processed >= self.max_blocks.unwrap_or(u64::MAX)
+            || changes_processed >= self.max_changes.unwrap_or(u64::MAX)
+    }
+
+    /// Check if the history write threshold has been hit.
+    #[inline]
+    pub fn should_write_history(&self, history_changes: u64) -> bool {
+        history_changes >= self.max_changesets.unwrap_or(u64::MAX)
     }
 }
 
@@ -408,7 +425,14 @@ mod tests {
     fn stage() -> ExecutionStage<Factory> {
         let factory =
             Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
-        ExecutionStage::new(factory, 100)
+        ExecutionStage::new(
+            factory,
+            ExecutionStageThresholds {
+                max_blocks: Some(100),
+                max_changes: None,
+                max_changesets: None,
+            },
+        )
     }
 
     #[tokio::test]

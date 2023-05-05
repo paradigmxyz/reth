@@ -115,12 +115,8 @@ pub trait StateProviderFactory: Send + Sync {
     ) -> Result<StateProviderBox<'_>> {
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
-            BlockNumberOrTag::Finalized => {
-                todo!()
-            }
-            BlockNumberOrTag::Safe => {
-                todo!()
-            }
+            BlockNumberOrTag::Finalized => Err(ProviderError::FinalizedTagUnsupported.into()),
+            BlockNumberOrTag::Safe => Err(ProviderError::SafeTagUnsupported.into()),
             BlockNumberOrTag::Earliest => self.history_by_block_number(0),
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => self.history_by_block_number(num),

@@ -1,7 +1,7 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult},
-        revm_utils::inspect,
+        revm_utils::{inspect, replay_transactions_until},
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
@@ -9,7 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, H256, U256};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256, U256};
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{StateProviderDB, SubState},
@@ -27,6 +27,7 @@ use reth_rpc_types::{
     BlockError, CallRequest, RichBlock,
 };
 use revm::primitives::Env;
+use revm_primitives::{BlockEnv, CfgEnv};
 
 /// `debug` API implementation.
 ///
@@ -37,7 +38,6 @@ pub struct DebugApi<Client, Eth> {
     client: Client,
     /// The implementation of `eth` API
     eth_api: Eth,
-
     // restrict the number of concurrent calls to `debug_traceTransaction`
     tracing_call_guard: TracingCallGuard,
 }
@@ -58,44 +58,17 @@ where
     Client: BlockProvider + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
-    /// Replays the given block and returns the trace of each transaction.
-    ///
-    /// This expects a rlp encoded block
-    ///
-    /// Note, the parent of this block must be present, or it will fail.
-    pub async fn debug_trace_raw_block(
+    /// Trace the entire block
+    fn trace_block_with(
         &self,
-        rlp_block: Bytes,
-        _opts: GethDebugTracingOptions,
-    ) -> EthResult<Vec<TraceResult>> {
-        let block =
-            Block::decode(&mut rlp_block.as_ref()).map_err(BlockError::RlpDecodeRawBlock)?;
-        let _parent = block.parent_hash;
-
-        // TODO we need the state after the parent block
-
-        todo!()
-    }
-
-    /// Replays a block and returns the trace of each transaction.
-    pub async fn debug_trace_block(
-        &self,
-        block_id: BlockId,
+        at: BlockId,
+        transactions: Vec<TransactionSigned>,
+        cfg: CfgEnv,
+        block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
-        let block_hash = self
-            .client
-            .block_hash_for_id(block_id)?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
-        let ((cfg, block_env, at), transactions) = futures::try_join!(
-            self.eth_api.evm_env_at(block_hash.into()),
-            self.eth_api.transactions_by_block(block_hash),
-        )?;
-        let transactions = transactions.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
         // replay all transactions of the block
-        self.eth_api.with_state_at(at, move |state| {
+        self.eth_api.with_state_at_block(at, move |state| {
             let mut results = Vec::with_capacity(transactions.len());
             let mut db = SubState::new(StateProviderDB::new(state));
 
@@ -112,6 +85,50 @@ where
         })
     }
 
+    /// Replays the given block and returns the trace of each transaction.
+    ///
+    /// This expects a rlp encoded block
+    ///
+    /// Note, the parent of this block must be present, or it will fail.
+    pub async fn debug_trace_raw_block(
+        &self,
+        rlp_block: Bytes,
+        opts: GethDebugTracingOptions,
+    ) -> EthResult<Vec<TraceResult>> {
+        let block =
+            Block::decode(&mut rlp_block.as_ref()).map_err(BlockError::RlpDecodeRawBlock)?;
+
+        let (cfg, block_env) = self.eth_api.evm_env_for_raw_block(&block.header).await?;
+
+        // we trace on top the block's parent block
+        let parent = block.parent_hash;
+        self.trace_block_with(parent.into(), block.body, cfg, block_env, opts)
+    }
+
+    /// Replays a block and returns the trace of each transaction.
+    pub async fn debug_trace_block(
+        &self,
+        block_id: BlockId,
+        opts: GethDebugTracingOptions,
+    ) -> EthResult<Vec<TraceResult>> {
+        let block_hash = self
+            .client
+            .block_hash_for_id(block_id)?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+        let ((cfg, block_env, _), block) = futures::try_join!(
+            self.eth_api.evm_env_at(block_hash.into()),
+            self.eth_api.block_by_id(block_id),
+        )?;
+
+        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        // we need to get the state of the parent block because we're replaying this block on top of
+        // its parent block's state
+        let state_at = block.parent_hash;
+
+        self.trace_block_with(state_at.into(), block.body, cfg, block_env, opts)
+    }
+
     /// Trace the transaction according to the provided options.
     ///
     /// Ref: <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
@@ -120,18 +137,24 @@ where
         tx_hash: H256,
         opts: GethDebugTracingOptions,
     ) -> EthResult<GethTraceFrame> {
-        let (transaction, at) = match self.eth_api.transaction_by_hash_at(tx_hash).await? {
+        let (transaction, block) = match self.eth_api.transaction_and_block(tx_hash).await? {
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
+        let (cfg, block_env, _) = self.eth_api.evm_env_at(block.hash.into()).await?;
 
-        let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let state_at = block.parent_hash;
+        let block_txs = block.body;
 
-        self.eth_api.with_state_at(at, |state| {
+        self.eth_api.with_state_at_block(state_at.into(), |state| {
+            // configure env for the target transaction
             let tx = transaction.into_recovered();
-            let tx = tx_env_with_recovered(&tx);
-            let env = Env { cfg, block, tx };
             let mut db = SubState::new(StateProviderDB::new(state));
+            // replay all transactions prior to the targeted transaction
+            replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
+            let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
             trace_transaction(opts, env, &mut db)
         })
     }

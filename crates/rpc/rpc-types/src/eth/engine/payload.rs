@@ -399,6 +399,9 @@ pub enum PayloadValidationError {
     /// Thrown when a forkchoice update's head links to a previously rejected payload.
     #[error("links to previously rejected block")]
     LinksToRejectedPayload,
+    /// Thrown when a new payload contains a wrong block number.
+    #[error("invalid block number")]
+    InvalidBlockNumber,
 }
 
 #[cfg(test)]
