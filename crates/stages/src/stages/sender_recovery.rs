@@ -146,9 +146,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, is_final_range) =
+        let (_, unwind_to, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
-        let unwind_to = *range.start() - 1;
 
         // Lookup latest tx id that we should unwind to
         let latest_tx_id = tx.block_body_indices(unwind_to)?.last_tx_num();

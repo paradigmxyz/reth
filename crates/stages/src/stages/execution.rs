@@ -241,7 +241,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let (range, is_final_range) =
+        let (range, unwind_to, is_final_range) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
         if range.is_empty() {
@@ -285,7 +285,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         // Discard unwinded changesets
         let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
         while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
-            if block_num < *range.start() {
+            if block_num <= unwind_to {
                 break
             }
             // delete all changesets
@@ -301,9 +301,8 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
 
-        let unwind_progress = *range.start() - 1;
-        info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_progress })
+        info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_to })
     }
 }
 

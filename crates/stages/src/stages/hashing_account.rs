@@ -279,9 +279,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, is_final_range) =
+        let (range, unwind_progress, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
-        let unwind_progress = *range.start() - 1;
 
         // Aggregate all transition changesets and and make list of account that have been changed.
         tx.unwind_account_hashing(range)?;

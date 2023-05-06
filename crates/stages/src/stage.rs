@@ -74,19 +74,21 @@ impl UnwindInput {
         self.unwind_block_range_with_threshold(u64::MAX).0
     }
 
-    /// Return the next block range to unwind.
+    /// Return the next block range to unwind and the block we're unwinding to.
     pub fn unwind_block_range_with_threshold(
         &self,
         threshold: u64,
-    ) -> (RangeInclusive<BlockNumber>, bool) {
+    ) -> (RangeInclusive<BlockNumber>, BlockNumber, bool) {
         // +1 is to skip the block we're unwinding to
         let mut start = self.unwind_to + 1;
         let end = self.stage_progress;
 
         start = max(start, end.saturating_sub(threshold));
 
-        let is_final_range = start == self.unwind_to + 1;
-        (start..=end, is_final_range)
+        let unwind_to = start - 1;
+
+        let is_final_range = unwind_to == self.unwind_to;
+        (start..=end, unwind_to, is_final_range)
     }
 }
 
