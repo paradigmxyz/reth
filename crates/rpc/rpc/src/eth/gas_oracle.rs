@@ -14,25 +14,6 @@ use std::{
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-// go code to port to rust
-// const sampleNumber = 3 // Number of transactions sampled in a block
-
-// var (
-// 	DefaultMaxPrice    = big.NewInt(500 * params.GWei)
-// 	DefaultIgnorePrice = big.NewInt(2 * params.Wei)
-// )
-
-// type Config struct {
-// 	Blocks           int
-// 	Percentile       int
-// 	MaxHeaderHistory uint64
-// 	MaxBlockHistory  uint64
-// 	// starting latest price
-// 	Default          *big.Int `toml:",omitempty"`
-// 	MaxPrice         *big.Int `toml:",omitempty"`
-// 	IgnorePrice      *big.Int `toml:",omitempty"`
-// }
-
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: u32 = 3;
 
