@@ -145,7 +145,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eth::cache::EthStateCache;
+    use crate::eth::{cache::EthStateCache, gas_oracle::GasPriceOracle};
     use reth_primitives::{StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_transaction_pool::test_utils::testing_pool;
@@ -161,6 +161,7 @@ mod tests {
             pool.clone(),
             (),
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -179,6 +180,7 @@ mod tests {
             pool,
             (),
             EthStateCache::spawn(mock_provider, Default::default()),
+            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
         );
 
         let storage_key: U256 = storage_key.into();

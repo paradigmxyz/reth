@@ -364,7 +364,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{eth::cache::EthStateCache, EthApi};
+    use crate::{
+        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        EthApi,
+    };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use rand::random;
     use reth_network_api::test_utils::NoopNetwork;
@@ -381,6 +384,7 @@ mod tests {
             testing_pool(),
             NoopNetwork,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
         );
 
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
@@ -465,6 +469,7 @@ mod tests {
             testing_pool(),
             NoopNetwork,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
         );
 
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(

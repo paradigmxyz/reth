@@ -14,8 +14,8 @@ use reth_provider::{
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::cache::EthStateCache, AuthLayer, Claims, EngineEthApi, EthApi, EthFilter,
-    JwtAuthValidator, JwtSecret,
+    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -52,7 +52,9 @@ where
 {
     // spawn a new cache task
     let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor);
-    let eth_api = EthApi::new(client.clone(), pool.clone(), network, eth_cache.clone());
+    let gas_oracle = GasPriceOracle::spawn_with(client.clone(), Default::default(), executor);
+    let eth_api =
+        EthApi::new(client.clone(), pool.clone(), network, eth_cache.clone(), gas_oracle.clone());
     let eth_filter = EthFilter::new(client, pool, eth_cache.clone(), DEFAULT_MAX_LOGS_IN_RESPONSE);
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }

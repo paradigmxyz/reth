@@ -5,6 +5,7 @@
 
 use crate::eth::{
     cache::EthStateCache,
+    gas_oracle::GasPriceOracle,
     error::{EthApiError, EthResult},
     signer::EthSigner,
 };
@@ -71,8 +72,21 @@ pub struct EthApi<Client, Pool, Network> {
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     /// Creates a new, shareable instance.
-    pub fn new(client: Client, pool: Pool, network: Network, eth_cache: EthStateCache) -> Self {
-        let inner = EthApiInner { client, pool, network, signers: Default::default(), eth_cache };
+    pub fn new(
+        client: Client,
+        pool: Pool,
+        network: Network,
+        eth_cache: EthStateCache,
+        gas_oracle: GasPriceOracle,
+    ) -> Self {
+        let inner = EthApiInner {
+            client,
+            pool,
+            network,
+            signers: Default::default(),
+            eth_cache,
+            gas_oracle,
+        };
         Self {
             inner: Arc::new(inner),
             fee_history_cache: FeeHistoryCache::new(
@@ -238,4 +252,6 @@ struct EthApiInner<Client, Pool, Network> {
     signers: Vec<Box<dyn EthSigner>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
+    /// The async gas oracle frontend for gas price suggestions
+    gas_oracle: GasPriceOracle,
 }

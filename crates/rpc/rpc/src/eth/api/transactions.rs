@@ -756,7 +756,10 @@ impl From<TransactionSource> for Transaction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::cache::EthStateCache, EthApi};
+    use crate::{
+        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        EthApi,
+    };
     use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
@@ -774,6 +777,7 @@ mod tests {
             pool.clone(),
             noop_network_provider,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
