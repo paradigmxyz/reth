@@ -51,7 +51,7 @@ where
     EngineApi: EngineApiServer,
 {
     // spawn a new cache task
-    let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor);
+    let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor.clone());
     let gas_oracle = GasPriceOracle::spawn_with(client.clone(), Default::default(), executor);
     let eth_api =
         EthApi::new(client.clone(), pool.clone(), network, eth_cache.clone(), gas_oracle.clone());
