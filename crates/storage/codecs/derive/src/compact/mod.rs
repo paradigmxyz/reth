@@ -211,7 +211,7 @@ mod tests {
                 use bytes::Buf;
                 use modular_bitfield::prelude::*;
 
-                #[doc=r" Fieldset that facilitates compacting the parent type."]
+                #[doc=r" Fieldset that facilitates compacting the parent type. Unused bits: 1"]
                 #[bitfield]
                 #[derive(Clone, Copy, Debug, Default)]
                 pub struct TestStructFlags {
