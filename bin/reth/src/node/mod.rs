@@ -798,14 +798,14 @@ mod tests {
 
     #[test]
     fn parse_db_path() {
-        let cmd = Command::try_parse_from(["reth", "--db", "my/path/to/db"]).unwrap();
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = data_dir.db_path();
-        assert_eq!(db_path, Path::new("my/path/to/db"));
-
         let cmd = Command::try_parse_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
         assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
+
+        let cmd = Command::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let db_path = data_dir.db_path();
+        assert_eq!(db_path, Path::new("my/custom/path/db"));
     }
 }
