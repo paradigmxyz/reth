@@ -109,7 +109,7 @@ use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{
     eth::cache::EthStateCache, AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
-    EthSubscriptionIdProvider, NetApi, TraceApi, TracingCallGuard, Web3Api,
+    EthSubscriptionIdProvider, NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -531,6 +531,8 @@ pub enum RethRpcModule {
     Net,
     /// `trace_` module
     Trace,
+    /// `txpool_` module
+    Txpool,
     /// `web3_` module
     Web3,
 }
@@ -758,6 +760,9 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
+                        RethRpcModule::Txpool => {
+                            TxPoolApi::new(self.pool.clone()).into_rpc().into()
+                        }
                     })
                     .clone()
             })
