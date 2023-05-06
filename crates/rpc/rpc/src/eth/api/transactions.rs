@@ -368,6 +368,7 @@ where
                     chain_id: Some(chain_id),
                     access_list: request.access_list.clone(),
                     max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                    transaction_type: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
             )
