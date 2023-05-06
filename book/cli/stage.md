@@ -1,6 +1,6 @@
 # `reth stage`
 
-```
+```bash
 Run a single stage.
 
 Usage: reth stage [OPTIONS] --from <FROM> --to <TO> <STAGE>

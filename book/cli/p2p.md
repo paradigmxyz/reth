@@ -1,6 +1,6 @@
 # `reth p2p`
 
-```
+```bash
 $ reth p2p --help
 P2P Debugging utilities
 
@@ -108,7 +108,7 @@ Display:
 
 ## `reth p2p header`
 
-```
+```bash
 $ reth p2p header --help
 Download block header
 
@@ -132,7 +132,7 @@ Options:
 ## `reth p2p body`
 
 
-```
+```bash
 $ reth p2p body --help
 Download block body
 

@@ -4,7 +4,7 @@ The Reth node is operated via the CLI by running the `reth node` command. To sto
 
 However, Reth has more commands than that:
 
-```
+```bash
 reth --help
 ```
 
@@ -20,7 +20,8 @@ See below for the full list of commands.
 
 ## Commands
 
-```
+```bash
+$ reth --help
 Reth
 
 Usage: reth [OPTIONS] <COMMAND>

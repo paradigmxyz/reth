@@ -1,6 +1,6 @@
 # reth drop-stage
 
-```
+```bash
 $ reth drop-stage --help
 Drops a stage's tables from the database
 

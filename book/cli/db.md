@@ -2,7 +2,7 @@
 
 Database debugging utilities
 
-```
+```bash
 $ reth db --help
 
 Usage: reth db [OPTIONS] <COMMAND>
@@ -63,7 +63,7 @@ Display:
 
 ## `reth db stats`
 
-```
+```bash
 $ reth db stats --help
 Lists all the tables, their entry count and their size
 
@@ -75,7 +75,7 @@ Options:
 
 ## `reth db list`
 
-```
+```bash
 $ reth db list --help
 Lists the contents of a table
 
@@ -102,7 +102,7 @@ Options:
 
 ## `reth db drop`
 
-```
+```bash
 $ reth db drop --help
 Deletes all database entries
 

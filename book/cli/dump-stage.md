@@ -1,6 +1,6 @@
 # `reth dump-stage`
 
-```
+```bash
 $ reth dump-stage --help
 Dumps a stage from a range into a new database
 

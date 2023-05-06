@@ -2,7 +2,7 @@
 
 The main node operator command.
 
-```
+```bash
 $ reth node --help
 
 Start the node
