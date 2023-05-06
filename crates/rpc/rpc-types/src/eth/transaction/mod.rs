@@ -161,7 +161,7 @@ impl Transaction {
             nonce: U256::from(signed_tx.nonce()),
             from: signer,
             to,
-            value: U256::from(*signed_tx.value()),
+            value: U256::from(signed_tx.value()),
             gas_price,
             max_fee_per_gas,
             max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),

@@ -74,8 +74,8 @@ use crate::{
         txpool::{SenderInfo, TxPool},
     },
     traits::{
-        BlockInfo, NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions,
-        TransactionOrigin,
+        AllPoolTransactions, BlockInfo, NewTransactionEvent, PoolSize, PoolTransaction,
+        PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
@@ -394,6 +394,25 @@ where
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pool.read().best_transactions()
+    }
+
+    /// Returns all transactions from the pending sub-pool
+    pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().pending_transactions()
+    }
+
+    /// Returns all transactions from parked pools
+    pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().queued_transactions()
+    }
+
+    /// Returns all transactions in the pool
+    pub(crate) fn all_transactions(&self) -> AllPoolTransactions<T::Transaction> {
+        let pool = self.pool.read();
+        AllPoolTransactions {
+            pending: pool.pending_transactions(),
+            queued: pool.queued_transactions(),
+        }
     }
 
     /// Removes and returns all matching transactions from the pool.

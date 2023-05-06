@@ -84,9 +84,9 @@ pub use crate::{
     config::PoolConfig,
     ordering::{CostOrdering, TransactionOrdering},
     traits::{
-        BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount, PoolTransaction,
-        PooledTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin,
-        TransactionPool,
+        AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
+        PoolTransaction, PooledTransaction, PropagateKind, PropagatedTransactions,
+        TransactionOrigin, TransactionPool,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
@@ -311,6 +311,18 @@ where
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(self.pool.best_transactions())
+    }
+
+    fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.pending_transactions()
+    }
+
+    fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.queued_transactions()
+    }
+
+    fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction> {
+        self.pool.all_transactions()
     }
 
     fn remove_transactions(
