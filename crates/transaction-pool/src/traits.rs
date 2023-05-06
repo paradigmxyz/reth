@@ -122,6 +122,28 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
+    /// Returns all transactions that can be included in the next block.
+    ///
+    /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
+    ///
+    /// Consumer: RPC
+    fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that can be included in _future_ blocks.
+    ///
+    /// This and [Self::pending_transactions] are mutually exclusive.
+    ///
+    /// Consumer: RPC
+    fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that are currently in the pool grouped by whether they are ready
+    /// for inclusion in the next block or not.
+    ///
+    /// This is primarily used for the `txpool_` namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool>
+    ///
+    /// Consumer: RPC
+    fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction>;
+
     /// Removes all transactions corresponding to the given hashes.
     ///
     /// Also removes all _dependent_ transactions.
@@ -167,6 +189,31 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+}
+
+/// A Helper type that bundles all transactions in the pool.
+#[derive(Debug, Clone, Default)]
+pub struct AllPoolTransactions<T: PoolTransaction> {
+    /// Transactions that are ready for inclusion in the next block.
+    pub pending: Vec<Arc<ValidPoolTransaction<T>>>,
+    /// Transactions that are ready for inclusion in _future_ blocks, but are currently parked,
+    /// because they depend on other transactions that are not yet included in the pool (nonce gap)
+    /// or otherwise blocked.
+    pub queued: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+// === impl AllPoolTransactions ===
+
+impl<T: PoolTransaction> AllPoolTransactions<T> {
+    /// Returns an iterator over all pending [TransactionSignedEcRecovered] transactions.
+    pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
+        self.pending.iter().map(|tx| tx.transaction.to_recovered_transaction())
+    }
+
+    /// Returns an iterator over all queued [TransactionSignedEcRecovered] transactions.
+    pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
+        self.queued.iter().map(|tx| tx.transaction.to_recovered_transaction())
+    }
 }
 
 /// Represents a transaction that was propagated over the network.

@@ -57,6 +57,13 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.best.insert(transaction);
     }
 
+    /// Returns an iterator over all transactions in the pool
+    pub(crate) fn all(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+        self.by_id.values().map(|tx| tx.transaction.clone().into())
+    }
+
     /// Removes the transaction from the pool
     pub(crate) fn remove_transaction(
         &mut self,

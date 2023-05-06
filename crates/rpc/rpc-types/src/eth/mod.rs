@@ -14,6 +14,7 @@ pub mod state;
 mod syncing;
 pub mod trace;
 mod transaction;
+pub mod txpool;
 mod work;
 
 pub use account::*;
