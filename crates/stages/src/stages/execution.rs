@@ -213,7 +213,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 info!(target: "sync::stages::execution", ?block_number, "Writing history.");
                 state.write_history_to_db(&**tx)?;
                 info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
-                // gas_since_history_write = 0;
             }
 
             // Check if we should commit now
