@@ -16,7 +16,10 @@ use reth_staged_sync::{
     Config,
 };
 use reth_stages::{
-    stages::{BodyStage, ExecutionStage, MerkleStage, SenderRecoveryStage, TransactionLookupStage},
+    stages::{
+        BodyStage, ExecutionStage, ExecutionStageThresholds, MerkleStage, SenderRecoveryStage,
+        TransactionLookupStage,
+    },
     ExecInput, ExecOutput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -167,7 +170,14 @@ impl Command {
             StageEnum::Senders => Box::new(SenderRecoveryStage { commit_threshold: batch_size }),
             StageEnum::Execution => {
                 let factory = reth_revm::Factory::new(self.chain.clone());
-                Box::new(ExecutionStage::new(factory, batch_size))
+                Box::new(ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: Some(batch_size),
+                        max_changes: None,
+                        max_changesets: None,
+                    },
+                ))
             }
             StageEnum::TxLookup => Box::new(TransactionLookupStage::new(batch_size)),
             StageEnum::Merkle => Box::new(MerkleStage::default_execution()),

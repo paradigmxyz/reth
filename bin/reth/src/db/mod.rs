@@ -10,7 +10,7 @@ use human_bytes::human_bytes;
 use reth_db::{database::Database, tables};
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::chainspec::genesis_value_parser;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use tracing::error;
 
 /// DB List TUI
@@ -28,11 +28,6 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The path to the database folder. If not specified, it will be set in the data dir for the
-    /// chain being used.
-    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
-    db: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -95,10 +90,7 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-
-        // use the overridden db path if specified
-        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
-
+        let db_path = data_dir.db_path();
         std::fs::create_dir_all(&db_path)?;
 
         // TODO: Auto-impl for Database trait

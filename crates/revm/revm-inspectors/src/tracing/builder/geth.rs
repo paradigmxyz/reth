@@ -39,8 +39,8 @@ impl GethTraceBuilder {
             // Fill in memory and storage depending on the options
             if !opts.disable_storage.unwrap_or_default() {
                 let contract_storage = storage.entry(step.contract).or_default();
-                if let Some((key, value)) = step.state_diff {
-                    contract_storage.insert(key.into(), value.into());
+                if let Some(change) = step.storage_change {
+                    contract_storage.insert(change.key.into(), change.value.into());
                     log.storage = Some(contract_storage.clone());
                 }
             }

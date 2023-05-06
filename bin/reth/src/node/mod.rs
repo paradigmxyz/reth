@@ -54,7 +54,10 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage, FINISH},
+    stages::{
+        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
+        TotalDifficultyStage, FINISH,
+    },
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
@@ -91,11 +94,6 @@ pub struct Command {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
-
-    /// The path to the database folder. If not specified, it will be set in the data dir for the
-    /// chain being used.
-    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
-    db: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -152,9 +150,7 @@ impl Command {
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
-        // use the overridden db path if specified
-        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
-
+        let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
         info!(target: "reth::cli", "Database opened");
@@ -689,7 +685,14 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold))
+                .set(ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: stage_conf.execution.max_blocks,
+                        max_changes: stage_conf.execution.max_changes,
+                        max_changesets: stage_conf.execution.max_changesets,
+                    },
+                ))
                 .disable_if(MERKLE_UNWIND, || self.auto_mine)
                 .disable_if(MERKLE_EXECUTION, || self.auto_mine),
             )
@@ -795,14 +798,14 @@ mod tests {
 
     #[test]
     fn parse_db_path() {
-        let cmd = Command::try_parse_from(["reth", "--db", "my/path/to/db"]).unwrap();
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = cmd.db.unwrap_or(data_dir.db_path());
-        assert_eq!(db_path, Path::new("my/path/to/db"));
-
         let cmd = Command::try_parse_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = cmd.db.unwrap_or(data_dir.db_path());
+        let db_path = data_dir.db_path();
         assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
+
+        let cmd = Command::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let db_path = data_dir.db_path();
+        assert_eq!(db_path, Path::new("my/custom/path/db"));
     }
 }

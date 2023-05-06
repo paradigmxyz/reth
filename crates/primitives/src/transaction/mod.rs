@@ -363,26 +363,6 @@ impl Transaction {
         }
     }
 
-    // TODO: dedup with effective_tip_per_gas
-    /// Determine the effective gas limit for the given transaction and base fee.
-    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
-    /// transactions is returned.
-    ///
-    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> Option<u128> {
-        if let Some(base_fee) = base_fee {
-            let max_fee_per_gas = self.max_fee_per_gas();
-            if max_fee_per_gas < base_fee as u128 {
-                None
-            } else {
-                let effective_max_fee = max_fee_per_gas - base_fee as u128;
-                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
-            }
-        } else {
-            Some(self.priority_fee_or_price())
-        }
-    }
-
     /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
     /// otherwise return the gas price.
     ///
@@ -400,7 +380,41 @@ impl Transaction {
         }
     }
 
-    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
+    /// Returns the effective gas price for the given base fee.
+    ///
+    /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        let dynamic_tx = match self {
+            Transaction::Legacy(tx) => return tx.gas_price,
+            Transaction::Eip2930(tx) => return tx.gas_price,
+            Transaction::Eip1559(dynamic_tx) => dynamic_tx,
+        };
+
+        dynamic_tx.effective_gas_price(base_fee)
+    }
+
+    // TODO: dedup with effective_tip_per_gas
+    /// Determine the effective gas limit for the given transaction and base fee.
+    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
+    /// transactions is returned.
+    ///
+    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
+    pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
+        if let Some(base_fee) = base_fee {
+            let max_fee_per_gas = self.max_fee_per_gas();
+            if max_fee_per_gas < base_fee as u128 {
+                None
+            } else {
+                let effective_max_fee = max_fee_per_gas - base_fee as u128;
+                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
+            }
+        } else {
+            Some(self.priority_fee_or_price())
+        }
+    }
+
+    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee:
+    /// `min(maxFeePerGas - baseFee, maxPriorityFeePerGas)`
     ///
     /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
     pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
@@ -628,6 +642,26 @@ impl Encodable for Transaction {
                 let payload_length = self.fields_len();
                 // 'transaction type byte length' + 'header length' + 'payload length'
                 1 + length_of_length(payload_length) + payload_length
+            }
+        }
+    }
+}
+
+impl TxEip1559 {
+    /// Returns the effective gas price for the given `base_fee`.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas - base_fee as u128;
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
             }
         }
     }
