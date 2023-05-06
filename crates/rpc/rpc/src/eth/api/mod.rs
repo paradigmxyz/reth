@@ -100,6 +100,11 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
         &self.inner.eth_cache
     }
 
+    /// Returns the gas oracle frontend
+    pub(crate) fn gas_oracle(&self) -> &GasPriceOracle {
+        &self.inner.gas_oracle
+    }
+
     /// Returns the inner `Client`
     pub fn client(&self) -> &Client {
         &self.inner.client

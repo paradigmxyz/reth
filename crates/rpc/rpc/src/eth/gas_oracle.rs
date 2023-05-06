@@ -3,7 +3,7 @@
 use futures::StreamExt;
 use reth_interfaces::Result;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, H256, U256};
-use reth_provider::BlockProvider;
+use reth_provider::{BlockProvider, ProviderError};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -45,6 +45,7 @@ pub struct GasPriceOracleConfig {
     /// The maximum number of blocks to keep in the cache
     pub max_block_history: u64,
 
+    // TODO: not sure if necessary, much of this is a more direct port
     /// The default gas price to use if there are no blocks in the cache
     pub default: Option<U256>,
 
@@ -55,7 +56,19 @@ pub struct GasPriceOracleConfig {
     pub ignore_price: Option<U256>,
 }
 
-// TODO: other config defaults
+impl Default for GasPriceOracleConfig {
+    fn default() -> Self {
+        GasPriceOracleConfig {
+            blocks: 20,
+            percentile: 60,
+            max_header_history: 1024,
+            max_block_history: 1024,
+            default: None,
+            max_price: Some(DEFAULT_MAX_PRICE),
+            ignore_price: Some(DEFAULT_IGNORE_PRICE),
+        }
+    }
+}
 
 // the go code to port to rust
 // // Oracle recommends gas prices based on the content of recent
@@ -138,6 +151,14 @@ impl GasPriceOracle {
         let (this, service) = Self::create(client, executor.clone(), config);
         executor.spawn_critical("eth gas price oracle", Box::pin(service));
         this
+    }
+
+    /// Requests the suggested tip for the latest block.
+    pub(crate) async fn suggest_tip(&self) -> Result<U256> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(GasPriceAction::SuggestMaxPriorityFee { response_tx });
+        // TODO: not sure if this is the right error, just modelling after the cache
+        rx.await.map_err(|_| ProviderError::GasPriceOracleServiceUnavailable)?
     }
 }
 
