@@ -2,7 +2,7 @@
 //! previous blocks.
 use futures::StreamExt;
 use reth_interfaces::Result;
-use reth_primitives::{Block, H256, U256};
+use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, H256, U256};
 use reth_provider::BlockProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,7 @@ type MaxPriorityFeeSender = oneshot::Sender<Result<U256>>;
 /// Settings for the [GasPriceOracle]
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GasOracleConfig {
+pub struct GasPriceOracleConfig {
     /// The number of blocks to sample for gas price estimates
     pub blocks: u32,
 
@@ -85,8 +85,13 @@ pub struct GasPriceOracle {
 }
 
 /// All message variants sent to the oracle through the channel
+#[derive(Debug)]
 pub enum GasPriceAction {
-    SuggestMaxPriorityFee { response_tx: MaxPriorityFeeSender },
+    /// Command to suggest the max priority fee
+    SuggestMaxPriorityFee {
+        /// The channel for sending back the max priority fee response
+        response_tx: MaxPriorityFeeSender,
+    },
 }
 
 impl GasPriceOracle {
@@ -94,12 +99,13 @@ impl GasPriceOracle {
     fn create<Client, Tasks>(
         client: Client,
         action_task_spawner: Tasks,
-        oracle_config: GasOracleConfig,
+        oracle_config: GasPriceOracleConfig,
     ) -> (Self, GasPriceOracleService<Client, Tasks>) {
         let (to_service, rx) = unbounded_channel();
         let service = GasPriceOracleService {
             client,
             oracle_config,
+            last_price: None,
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
@@ -111,7 +117,7 @@ impl GasPriceOracle {
     /// Creates a new async gas oracle service task and spawns it to a new task via [tokio::spawn].
     ///
     /// See also [Self::spawn_with]
-    pub fn spawn<Client>(client: Client, config: GasOracleConfig) -> Self
+    pub fn spawn<Client>(client: Client, config: GasPriceOracleConfig) -> Self
     where
         Client: BlockProvider + Clone + Unpin + 'static,
     {
@@ -122,7 +128,7 @@ impl GasPriceOracle {
     /// spawner.
     pub fn spawn_with<Client, Tasks>(
         client: Client,
-        config: GasOracleConfig,
+        config: GasPriceOracleConfig,
         executor: Tasks,
     ) -> Self
     where
@@ -145,7 +151,9 @@ pub(crate) struct GasPriceOracleService<Client, Tasks> {
     /// The type used to subscribe to block events and get block info
     client: Client,
     /// The config for the oracle
-    oracle_config: GasOracleConfig,
+    oracle_config: GasPriceOracleConfig,
+    /// The latest calculated price and its block hash
+    last_price: Option<GasPriceOracleResult>,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<GasPriceAction>,
     /// Receiver half of the action channel.
@@ -159,19 +167,162 @@ where
     Client: BlockProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
-    fn on_new_block(&mut self, block_hash: H256, res: Result<Option<Block>>) {
-        todo!()
-    }
+    // go code to port to rust
+    // // SuggestTipCap returns a tip cap so that newly created transaction can have a
+    // // very high chance to be included in the following blocks.
+    // //
+    // // Note, for legacy transactions and the legacy eth_gasPrice RPC call, it will be
+    // // necessary to add the basefee to the returned number to fall back to the legacy
+    // // behavior.
+    // func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
+    // 	head, _ := oracle.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+    // 	headHash := head.Hash()
+    //
+    // 	// If the latest gasprice is still available, return it.
+    // 	oracle.cacheLock.RLock()
+    // 	lastHead, lastPrice := oracle.lastHead, oracle.lastPrice
+    // 	oracle.cacheLock.RUnlock()
+    // 	if headHash == lastHead {
+    // 		return new(big.Int).Set(lastPrice), nil
+    // 	}
+    // 	oracle.fetchLock.Lock()
+    // 	defer oracle.fetchLock.Unlock()
+    //
+    // 	// Try checking the cache again, maybe the last fetch fetched what we need
+    // 	oracle.cacheLock.RLock()
+    // 	lastHead, lastPrice = oracle.lastHead, oracle.lastPrice
+    // 	oracle.cacheLock.RUnlock()
+    // 	if headHash == lastHead {
+    // 		return new(big.Int).Set(lastPrice), nil
+    // 	}
+    // 	var (
+    // 		sent, exp int
+    // 		number    = head.Number.Uint64()
+    // 		result    = make(chan results, oracle.checkBlocks)
+    // 		quit      = make(chan struct{})
+    // 		results   []*big.Int
+    // 	)
+    // 	for sent < oracle.checkBlocks && number > 0 {
+    // 		go oracle.getBlockValues(ctx, number, sampleNumber, oracle.ignorePrice, result, quit)
+    // 		sent++
+    // 		exp++
+    // 		number--
+    // 	}
+    // 	for exp > 0 {
+    // 		res := <-result
+    // 		if res.err != nil {
+    // 			close(quit)
+    // 			return new(big.Int).Set(lastPrice), res.err
+    // 		}
+    // 		exp--
+    // 		// Nothing returned. There are two special cases here:
+    // 		// - The block is empty
+    // 		// - All the transactions included are sent by the miner itself.
+    // 		// In these cases, use the latest calculated price for sampling.
+    // 		if len(res.values) == 0 {
+    // 			res.values = []*big.Int{lastPrice}
+    // 		}
+    // 		// Besides, in order to collect enough data for sampling, if nothing
+    // 		// meaningful returned, try to query more blocks. But the maximum
+    // 		// is 2*checkBlocks.
+    // 		if len(res.values) == 1 && len(results)+1+exp < oracle.checkBlocks*2 && number > 0 {
+    // 			go oracle.getBlockValues(ctx, number, sampleNumber, oracle.ignorePrice, result, quit)
+    // 			sent++
+    // 			exp++
+    // 			number--
+    // 		}
+    // 		results = append(results, res.values...)
+    // 	}
+    // 	price := lastPrice
+    // 	if len(results) > 0 {
+    // 		sort.Sort(bigIntArray(results))
+    // 		price = results[(len(results)-1)*oracle.percentile/100]
+    // 	}
+    // 	if price.Cmp(oracle.maxPrice) > 0 {
+    // 		price = new(big.Int).Set(oracle.maxPrice)
+    // 	}
+    // 	oracle.cacheLock.Lock()
+    // 	oracle.lastHead = headHash
+    // 	oracle.lastPrice = price
+    // 	oracle.cacheLock.Unlock()
+    //
+    // 	return new(big.Int).Set(price), nil
+    // }
+    // TODO: concurrent calls for get_block_values like in the geth impl
+    fn suggest_tip_cap(&mut self) -> Result<U256> {
+        // TODO: we really shouldn't have this be None, but let's get rid of these expects?
+        let header_hash = self
+            .client
+            .block_hash_for_id(BlockId::Number(BlockNumberOrTag::Latest))?
+            .expect("a latest header always exists");
+        let header = self
+            .client
+            .header_by_hash_or_number(BlockHashOrNumber::Hash(header_hash))?
+            .expect("a latest header always exists");
 
-    //// SuggestTipCap returns a tip cap so that newly created transaction can have a
-    //// very high chance to be included in the following blocks.
-    ////
-    //// Note, for legacy transactions and the legacy eth_gasPrice RPC call, it will be
-    //// necessary to add the basefee to the returned number to fall back to the legacy
-    //// behavior.
-    //func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
-    fn suggest_tip_cap(&self) -> Result<U256> {
-        todo!()
+        // if we have stored a last price, then we check whether or not it was for the same head
+        if let Some(price) = &self.last_price {
+            if price.block_hash == header_hash {
+                return Ok(price.price)
+            }
+        }
+
+        // TODO: edge case - self.last_price is None and there are lots of empty transactions - how
+        // does geth handle this? because lastPrice in the geth code is a *big.Int, it is
+        // really more like an Option<U256> in that it can be nil
+        //
+        // When geth receives an empty response from getBlockValues, it populates the current
+        // rewards value with lastPrice, which could be nil?
+        let last_price = self.last_price.clone().expect("last price should be set");
+
+        // if all responses are empty, then we can return a maximum of 2*check_block blocks' worth
+        // of prices
+        //
+        // we only return more than check_block blocks' worth of prices if one or more return empty
+        // transactions
+        let mut current_block = header.number;
+        let mut results = Vec::new();
+        let mut populated_blocks = 0;
+
+        // we only check a maximum of 2 * max_block_history
+        for _ in 0..self.oracle_config.max_block_history * 2 {
+            // TODO - error handling
+            let block_values = self
+                .get_block_values(current_block, SAMPLE_NUMBER as usize)?
+                .expect("this means we couldn't find the block");
+            if block_values.is_empty() {
+                results.push(Some(U256::from(last_price.price)));
+            } else {
+                results.extend(block_values);
+                populated_blocks += 1;
+            }
+
+            if populated_blocks >= self.oracle_config.max_block_history {
+                break
+            }
+
+            current_block -= 1;
+        }
+
+        // sort results then take the configured percentile result
+        let mut price = last_price.price;
+        if !results.is_empty() {
+            results.sort_unstable();
+            // TODO - error handling
+            price = results
+                .get((results.len() - 1) * self.oracle_config.percentile as usize / 100)
+                .expect("this should exist")
+                .expect("this shouldn't be None");
+        }
+
+        // constrain to the max price
+        if let Some(max_price) = self.oracle_config.max_price {
+            price = max_price;
+        }
+
+        self.last_price = Some(GasPriceOracleResult { block_hash: header_hash, price });
+
+        Ok(price)
     }
 
     // go code to port to rust
@@ -189,13 +340,13 @@ where
     // 		return
     // 	}
     // 	signer := types.MakeSigner(oracle.backend.ChainConfig(), block.Number(), block.Time())
-
+    //
     // 	// Sort the transaction by effective tip in ascending sort.
     // 	txs := make([]*types.Transaction, len(block.Transactions()))
     // 	copy(txs, block.Transactions())
     // 	sorter := newSorter(txs, block.BaseFee())
     // 	sort.Sort(sorter)
-
+    //
     // 	var prices []*big.Int
     // 	for _, tx := range sorter.txs {
     // 		tip, _ := tx.EffectiveGasTip(block.BaseFee())
@@ -279,13 +430,22 @@ where
                 }
                 Some(action) => match action {
                     GasPriceAction::SuggestMaxPriorityFee { response_tx } => {
-                        todo!()
-                        // let _ = response_tx.send(result);
+                        let suggestion = this.suggest_tip_cap();
+                        let _ = response_tx.send(suggestion);
                     }
                 },
             }
         }
     }
+}
+
+/// Stores the last result that the oracle returned
+#[derive(Debug, Clone)]
+pub struct GasPriceOracleResult {
+    /// The block hash that the oracle used to calculate the price
+    pub block_hash: H256,
+    /// The price that the oracle calculated
+    pub price: U256,
 }
 
 #[cfg(test)]
