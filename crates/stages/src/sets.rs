@@ -10,18 +10,18 @@
 //! # Examples
 //!
 //! ```no_run
-//! # use reth_db::mdbx::{Env, WriteMap};
-//! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
 //! # use std::sync::Arc;
+//! use reth_db::mdbx::test_utils::create_test_rw_db;
 //!
 //! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let db = create_test_rw_db();
 //! // Build a pipeline with all offline stages.
-//! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
-//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build();
+//! # let pipeline =
+//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db);
 //! ```
 //!
 //! ```ignore
@@ -247,7 +247,7 @@ impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::default())
-            .add_stage(ExecutionStage::new(self.executor_factory, 10_000))
+            .add_stage(ExecutionStage::new_with_factory(self.executor_factory))
     }
 }
 

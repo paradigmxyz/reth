@@ -163,7 +163,7 @@ where
     ///
     /// Panics if the stage is not in this set.
     pub fn enable(mut self, stage_id: StageId) -> Self {
-        let mut entry =
+        let entry =
             self.stages.get_mut(&stage_id).expect("Cannot enable a stage that is not in the set.");
         entry.enabled = true;
         self
@@ -180,7 +180,7 @@ where
     ///
     /// Panics if the stage is not in this set.
     pub fn disable(mut self, stage_id: StageId) -> Self {
-        let mut entry =
+        let entry =
             self.stages.get_mut(&stage_id).expect("Cannot disable a stage that is not in the set.");
         entry.enabled = false;
         self

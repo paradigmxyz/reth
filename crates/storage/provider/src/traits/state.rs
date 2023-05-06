@@ -86,6 +86,16 @@ pub trait StateProvider:
 ///
 /// Note: the `pending` block is considered the block that extends the canonical chain but one and
 /// has the `latest` block as its parent.
+///
+/// All states are _inclusive_, meaning they include _all_ all changes made (executed transactions)
+/// in their respective blocks. For example [StateProviderFactory::history_by_block_number] for
+/// block number `n` will return the state after block `n` was executed (transactions, withdrawals).
+/// In other words, all states point to the end of the state's respective block, which is equivalent
+/// to state at the beginning of the child block.
+///
+/// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
+/// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
+/// to be used, since block `n` was executed on its parent block's state.
 pub trait StateProviderFactory: Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> Result<StateProviderBox<'_>>;
@@ -105,12 +115,8 @@ pub trait StateProviderFactory: Send + Sync {
     ) -> Result<StateProviderBox<'_>> {
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
-            BlockNumberOrTag::Finalized => {
-                todo!()
-            }
-            BlockNumberOrTag::Safe => {
-                todo!()
-            }
+            BlockNumberOrTag::Finalized => Err(ProviderError::FinalizedTagUnsupported.into()),
+            BlockNumberOrTag::Safe => Err(ProviderError::SafeTagUnsupported.into()),
             BlockNumberOrTag::Earliest => self.history_by_block_number(0),
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => self.history_by_block_number(num),

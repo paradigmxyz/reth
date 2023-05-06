@@ -5,7 +5,7 @@ use crate::{
     proofs::{KeccakHasher, EMPTY_ROOT},
     serde_helper::deserialize_json_u256,
     utils::serde_helpers::deserialize_stringified_u64,
-    Address, Bytes, H256, KECCAK_EMPTY, U256,
+    Account, Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
 use ethers_core::utils::GenesisAccount as EthersGenesisAccount;
 use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
@@ -189,6 +189,17 @@ impl From<EthersGenesisAccount> for GenesisAccount {
             storage: genesis_account.storage.as_ref().map(|storage| {
                 storage.clone().into_iter().map(|(k, v)| (k.0.into(), v.0.into())).collect()
             }),
+        }
+    }
+}
+
+impl From<GenesisAccount> for Account {
+    fn from(value: GenesisAccount) -> Self {
+        Account {
+            // nonce must exist, so we default to zero when converting a genesis account
+            nonce: value.nonce.unwrap_or_default(),
+            balance: value.balance,
+            bytecode_hash: value.code.map(keccak256),
         }
     }
 }

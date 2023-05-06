@@ -41,6 +41,18 @@ impl Block {
         }
     }
 
+    /// Seal the block with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    pub fn seal(self, hash: H256) -> SealedBlock {
+        SealedBlock {
+            header: self.header.seal(hash),
+            body: self.body,
+            ommers: self.ommers,
+            withdrawals: self.withdrawals,
+        }
+    }
+
     /// Transform into a [`BlockWithSenders`].
     pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
         assert_eq!(self.body.len(), senders.len(), "Unequal number of senders");
@@ -140,6 +152,12 @@ impl SealedBlock {
             ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
+    }
+}
+
+impl From<SealedBlock> for Block {
+    fn from(block: SealedBlock) -> Self {
+        block.unseal()
     }
 }
 
@@ -644,7 +662,7 @@ impl AsRef<H256> for RpcBlockHash {
 }
 
 /// Block number and hash.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, Default, PartialEq, Eq)]
 pub struct BlockNumHash {
     /// Block number
     pub number: BlockNumber,

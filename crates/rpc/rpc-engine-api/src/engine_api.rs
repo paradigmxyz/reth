@@ -127,7 +127,7 @@ where
     pub async fn get_payload_v1(&self, payload_id: PayloadId) -> EngineApiResult<ExecutionPayload> {
         Ok(self
             .payload_store
-            .get_payload(payload_id)
+            .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map(|payload| (*payload).clone().into_v1_payload())?)
@@ -146,7 +146,7 @@ where
     ) -> EngineApiResult<ExecutionPayloadEnvelope> {
         Ok(self
             .payload_store
-            .get_payload(payload_id)
+            .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map(|payload| (*payload).clone().into_v2_payload())?)

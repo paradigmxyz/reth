@@ -1,20 +1,16 @@
-use crate::{
-    dirs::{DbPath, PlatformPath},
-    dump_stage::setup,
-    utils::DbTool,
-};
+use crate::{dump_stage::setup, utils::DbTool};
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
 use reth_provider::Transaction;
 use reth_stages::{stages::StorageHashingStage, Stage, StageId, UnwindInput};
-use std::ops::DerefMut;
+use std::{ops::DerefMut, path::PathBuf};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
     from: u64,
     to: u64,
-    output_db: &PlatformPath<DbPath>,
+    output_db: &PathBuf,
     should_run: bool,
 ) -> Result<()> {
     let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;

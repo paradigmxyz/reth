@@ -4,7 +4,9 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
+
 use reth_primitives::{BlockNumber, H160, H256};
+use serde::Serialize;
 
 use super::ShardedKey;
 
@@ -17,7 +19,7 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 100;
 /// `Address | Storagekey | 200` -> data is from transition 0 to 200.
 ///
 /// `Address | StorageKey | 300` -> data is from transition 201 to 300.
-#[derive(Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq, Serialize)]
 pub struct StorageShardedKey {
     /// Storage account address.
     pub address: H160,

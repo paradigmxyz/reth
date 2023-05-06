@@ -1,8 +1,6 @@
 use crate::{
     account::EthAccount,
-    hash_builder::HashBuilder,
     hashed_cursor::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor},
-    nibbles::Nibbles,
     prefix_set::{PrefixSet, PrefixSetLoader},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie_cursor::{AccountTrieCursor, StorageTrieCursor},
@@ -11,7 +9,12 @@ use crate::{
     StateRootError, StorageRootError,
 };
 use reth_db::{tables, transaction::DbTx};
-use reth_primitives::{keccak256, proofs::EMPTY_ROOT, Address, BlockNumber, StorageEntry, H256};
+use reth_primitives::{
+    keccak256,
+    proofs::EMPTY_ROOT,
+    trie::{HashBuilder, Nibbles},
+    Address, BlockNumber, StorageEntry, H256,
+};
 use reth_rlp::Encodable;
 use std::{collections::HashMap, ops::RangeInclusive};
 
@@ -1254,12 +1257,8 @@ mod tests {
     }
 
     fn extension_node_trie(tx: &mut Transaction<'_, Env<WriteMap>>) -> H256 {
-        let a = Account {
-            nonce: 0,
-            balance: U256::from(1u64),
-            bytecode_hash: Some(H256::random()),
-            ..Default::default()
-        };
+        let a =
+            Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(H256::random()) };
         let val = encode_account(a, None);
 
         let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>().unwrap();

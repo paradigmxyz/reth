@@ -1,6 +1,7 @@
 use crate::{
     constants,
     error::{RpcError, ServerKind},
+    eth::DEFAULT_MAX_LOGS_IN_RESPONSE,
 };
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
@@ -49,7 +50,7 @@ where
     // spawn a new cache task
     let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor);
     let eth_api = EthApi::new(client.clone(), pool.clone(), network, eth_cache.clone());
-    let eth_filter = EthFilter::new(client, pool, eth_cache.clone());
+    let eth_filter = EthFilter::new(client, pool, eth_cache.clone(), DEFAULT_MAX_LOGS_IN_RESPONSE);
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 

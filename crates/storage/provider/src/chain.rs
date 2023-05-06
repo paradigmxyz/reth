@@ -4,9 +4,9 @@ use crate::PostState;
 use reth_interfaces::{executor::Error as ExecError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
-    TxHash,
+    TransactionSigned, TxHash,
 };
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 /// A chain of blocks and their final state.
 ///
@@ -34,6 +34,11 @@ impl Chain {
     /// Get post state of this chain
     pub fn state(&self) -> &PostState {
         &self.state
+    }
+
+    /// Return true if chain is empty and has no blocks.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
     }
 
     /// Return block number of the block hash.
@@ -64,27 +69,37 @@ impl Chain {
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub fn into_inner(self) -> (ChainBlocks, PostState) {
-        (ChainBlocks { blocks: self.blocks }, self.state)
+    pub fn into_inner(self) -> (ChainBlocks<'static>, PostState) {
+        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.state)
+    }
+
+    /// Destructure the chain into its inner components, the blocks and the state at the tip of the
+    /// chain.
+    pub fn inner(&self) -> (ChainBlocks<'_>, &PostState) {
+        (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
     }
 
     /// Get the block at which this chain forked.
+    #[track_caller]
     pub fn fork_block(&self) -> ForkBlock {
         let tip = self.first();
         ForkBlock { number: tip.number.saturating_sub(1), hash: tip.parent_hash }
     }
 
     /// Get the block number at which this chain forked.
+    #[track_caller]
     pub fn fork_block_number(&self) -> BlockNumber {
         self.first().number.saturating_sub(1)
     }
 
     /// Get the block hash at which this chain forked.
+    #[track_caller]
     pub fn fork_block_hash(&self) -> BlockHash {
         self.first().parent_hash
     }
 
     /// Get the first block in this chain.
+    #[track_caller]
     pub fn first(&self) -> &SealedBlockWithSenders {
         self.blocks.first_key_value().expect("Chain has at least one block for first").1
     }
@@ -94,6 +109,7 @@ impl Chain {
     /// # Note
     ///
     /// Chains always have at least one block.
+    #[track_caller]
     pub fn tip(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
     }
@@ -137,7 +153,7 @@ impl Chain {
         if chain_tip.hash != chain.fork_block_hash() {
             return Err(ExecError::AppendChainDoesntConnect {
                 chain_tip: chain_tip.num_hash(),
-                other_chain_fork: chain.fork_block().into_components(),
+                other_chain_fork: chain.fork_block(),
             }
             .into())
         }
@@ -165,6 +181,7 @@ impl Chain {
     /// The second chain only contains the changes that were reverted on the first chain; however,
     /// it retains the up to date state as if the chains were one, i.e. the second chain is an
     /// extension of the first.
+    #[track_caller]
     pub fn split(mut self, split_at: SplitAt) -> ChainSplit {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
         let block_number = match split_at {
@@ -202,16 +219,16 @@ impl Chain {
 
 /// All blocks in the chain
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ChainBlocks {
-    blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
+pub struct ChainBlocks<'a> {
+    blocks: Cow<'a, BTreeMap<BlockNumber, SealedBlockWithSenders>>,
 }
 
-impl ChainBlocks {
+impl<'a> ChainBlocks<'a> {
     /// Creates a consuming iterator over all blocks in the chain with increasing block number.
     ///
     /// Note: this always yields at least one block.
     pub fn into_blocks(self) -> impl Iterator<Item = SealedBlockWithSenders> {
-        self.blocks.into_values()
+        self.blocks.into_owned().into_values()
     }
 
     /// Creates an iterator over all blocks in the chain with increasing block number.
@@ -227,14 +244,29 @@ impl ChainBlocks {
     pub fn tip(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
     }
+
+    /// Get the _first_ block of the chain.
+    ///
+    /// # Note
+    ///
+    /// Chains always have at least one block.
+    pub fn first(&self) -> &SealedBlockWithSenders {
+        self.blocks.first_key_value().expect("Chain should have at least one block").1
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.blocks.values().flat_map(|block| block.body.iter())
+    }
 }
 
-impl IntoIterator for ChainBlocks {
+impl<'a> IntoIterator for ChainBlocks<'a> {
     type Item = (BlockNumber, SealedBlockWithSenders);
     type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, SealedBlockWithSenders>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.blocks.into_iter()
+        #[allow(clippy::unnecessary_to_owned)]
+        self.blocks.into_owned().into_iter()
     }
 }
 

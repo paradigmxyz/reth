@@ -1,5 +1,5 @@
 use crate::Log;
-use reth_primitives::{Address, Bloom, H256, U128, U256, U64};
+use reth_primitives::{Address, Bloom, H256, U128, U256, U64, U8};
 use serde::{Deserialize, Serialize};
 
 /// Transaction receipt
@@ -42,5 +42,5 @@ pub struct TransactionReceipt {
     pub effective_gas_price: U128,
     /// EIP-2718 Transaction type, Some(1) for AccessList transaction, None for Legacy
     #[serde(rename = "type")]
-    pub transaction_type: U256,
+    pub transaction_type: U8,
 }

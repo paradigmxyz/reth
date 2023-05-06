@@ -1,4 +1,4 @@
-use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, ChainSpec, Hardfork, U256};
+use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, Chain, ChainSpec, Hardfork, U256};
 
 /// Calculates the base block reward.
 ///
@@ -25,7 +25,9 @@ pub fn base_block_reward(
     block_difficulty: U256,
     total_difficulty: U256,
 ) -> Option<u128> {
-    if chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty) {
+    if chain_spec.chain == Chain::goerli() ||
+        chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
+    {
         None
     } else if chain_spec.fork(Hardfork::Petersburg).active_at_block(block_number) {
         Some(ETH_TO_WEI * 2)

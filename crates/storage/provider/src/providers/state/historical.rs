@@ -149,7 +149,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
         _address: Address,
         _keys: &[H256],
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
-        Err(ProviderError::HistoryStateRoot.into())
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
 

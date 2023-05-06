@@ -32,7 +32,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -311,10 +311,15 @@ where
             if peer.request_tx.try_send(req).is_ok() {
                 self.inflight_requests.push(GetPooledTxRequest { peer_id, response: rx })
             }
+
+            if num_already_seen > 0 {
+                self.metrics.messages_with_already_seen_hashes.increment(1);
+                debug!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
+            }
         }
 
         if num_already_seen > 0 {
-            self.report_bad_message(peer_id);
+            self.report_already_seen(peer_id);
         }
     }
 
@@ -349,7 +354,9 @@ where
                 // remove the peer
                 self.peers.remove(&peer_id);
             }
-            NetworkEvent::SessionEstablished { peer_id, messages, version, .. } => {
+            NetworkEvent::SessionEstablished {
+                peer_id, client_version, messages, version, ..
+            } => {
                 // insert a new peer into the peerset
                 self.peers.insert(
                     peer_id,
@@ -359,6 +366,7 @@ where
                         ),
                         request_tx: messages,
                         version,
+                        client_version,
                     },
                 );
 
@@ -444,10 +452,15 @@ where
                     }
                 }
             }
+
+            if num_already_seen > 0 {
+                self.metrics.messages_with_already_seen_transactions.increment(1);
+                debug!(target: "net::tx", num_txs=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
+            }
         }
 
         if has_bad_transactions || num_already_seen > 0 {
-            self.report_bad_message(peer_id);
+            self.report_already_seen(peer_id);
         }
     }
 
@@ -455,6 +468,11 @@ where
         trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
         self.metrics.reported_bad_transactions.increment(1);
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
+    }
+
+    fn report_already_seen(&self, peer_id: PeerId) {
+        trace!(target: "net::tx", ?peer_id, "Penalizing peer for already seen transaction");
+        self.network.reputation_change(peer_id, ReputationChangeKind::AlreadySeenTransaction);
     }
 
     /// Clear the transaction
@@ -685,6 +703,9 @@ struct Peer {
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
     version: EthVersion,
+    /// The peer's client version.
+    #[allow(unused)]
+    client_version: Arc<String>,
 }
 
 /// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)

@@ -284,7 +284,7 @@ where
 
     /// Checks if the node's network connection state is 'ShuttingDown'
     #[inline]
-    fn is_shutting_down(&self) -> bool {
+    pub(crate) fn is_shutting_down(&self) -> bool {
         matches!(self.net_connection_state, NetworkConnectionState::ShuttingDown)
     }
 }
@@ -393,7 +393,7 @@ pub(crate) enum SwarmEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
-        client_version: String,
+        client_version: Arc<String>,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,

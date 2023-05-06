@@ -72,7 +72,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> StateProvider for PostState
                 storage.storage.get(&U256::from_be_bytes(storage_key.to_fixed_bytes()))
             {
                 return Ok(Some(*value))
-            } else if storage.wiped {
+            } else if storage.wiped() {
                 return Ok(Some(U256::ZERO))
             }
         }
@@ -94,6 +94,6 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> StateProvider for PostState
         _address: Address,
         _keys: &[H256],
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
-        Err(ProviderError::HistoryStateRoot.into())
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }

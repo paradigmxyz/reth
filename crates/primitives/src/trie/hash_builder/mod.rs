@@ -1,14 +1,15 @@
-use crate::{
+use super::{
     nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode},
-    Nibbles,
+    BranchNodeCompact, Nibbles, TrieMask,
 };
-use reth_primitives::{
-    keccak256,
-    proofs::EMPTY_ROOT,
-    trie::{BranchNodeCompact, HashBuilderState, HashBuilderValue, TrieMask},
-    H256,
-};
+use crate::{keccak256, proofs::EMPTY_ROOT, H256};
 use std::{collections::HashMap, fmt::Debug};
+
+mod state;
+pub use state::HashBuilderState;
+
+mod value;
+pub use value::HashBuilderValue;
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder
 /// is to build the Merkle proof that is essential for verifying the integrity and authenticity of
@@ -414,8 +415,8 @@ impl HashBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{hex_literal::hex, proofs::KeccakHasher, H256, U256};
     use proptest::prelude::*;
-    use reth_primitives::{hex_literal::hex, proofs::KeccakHasher, H256, U256};
     use std::collections::{BTreeMap, HashMap};
 
     fn trie_root<I, K, V>(iter: I) -> H256
@@ -588,7 +589,7 @@ mod tests {
         // Manually create the branch node that should be there after the first 2 leaves are added.
         // Skip the 0th element given in this example they have a common prefix and will
         // collapse to a Branch node.
-        use reth_primitives::bytes::BytesMut;
+        use crate::bytes::BytesMut;
         use reth_rlp::Encodable;
         let leaf1 = LeafNode::new(&Nibbles::unpack(&raw_input[0].0[1..]), input[0].1);
         let leaf2 = LeafNode::new(&Nibbles::unpack(&raw_input[1].0[1..]), input[1].1);

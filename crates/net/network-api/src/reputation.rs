@@ -12,6 +12,16 @@ pub enum ReputationChangeKind {
     BadBlock,
     /// Peer sent a bad transaction messages. E.g. Transactions which weren't recoverable.
     BadTransactions,
+    /// Peer sent a message that included a hash or transaction that we already received from the
+    /// peer.
+    ///
+    /// According to the [Eth spec](https://github.com/ethereum/devp2p/blob/master/caps/eth.md):
+    ///
+    /// > A node should never send a transaction back to a peer that it can determine already knows
+    /// > of it (either because it was previously sent or because it was informed from this peer
+    /// > originally). This is usually achieved by remembering a set of transaction hashes recently
+    /// > relayed by the peer.
+    AlreadySeenTransaction,
     /// Peer failed to respond in time.
     Timeout,
     /// Peer does not adhere to network protocol rules.

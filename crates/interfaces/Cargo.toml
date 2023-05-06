@@ -26,7 +26,7 @@ futures = "0.3"
 tokio-stream = "0.1.11"
 rand = "0.8.5"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
-secp256k1 = { version = "0.26.0", default-features = false, features = [
+secp256k1 = { version = "0.27.0", default-features = false, features = [
     "alloc",
     "recovery",
     "rand",
@@ -40,7 +40,7 @@ tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 hex-literal = "0.3"
-secp256k1 = { version = "0.26.0", default-features = false, features = [
+secp256k1 = { version = "0.27.0", default-features = false, features = [
     "alloc",
     "recovery",
     "rand",

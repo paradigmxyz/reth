@@ -10,6 +10,7 @@
 //! This crate contains Ethereum primitive types and helper functions.
 
 mod account;
+pub mod basefee;
 mod bits;
 mod block;
 pub mod bloom;
@@ -26,6 +27,7 @@ mod hardfork;
 mod header;
 mod hex_bytes;
 mod integer_list;
+pub mod listener;
 mod log;
 mod net;
 mod peer;
@@ -108,7 +110,10 @@ pub use ethers_core::{
     utils as rpc_utils,
 };
 pub use revm_primitives::{B160 as H160, B256 as H256, U256};
-pub use ruint::{aliases::U128, UintTryTo};
+pub use ruint::{
+    aliases::{U128, U8},
+    UintTryTo,
+};
 
 #[doc(hidden)]
 mod __reexport {

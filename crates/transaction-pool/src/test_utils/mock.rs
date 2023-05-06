@@ -251,8 +251,25 @@ impl MockTransaction {
 
     /// Returns a new transaction with a higher gas price +1
     pub fn inc_price(&self) -> Self {
+        self.inc_price_by(1)
+    }
+
+    /// Returns a new transaction with a higher gas price
+    pub fn inc_price_by(&self, value: u128) -> Self {
         let mut next = self.clone();
-        let gas = self.get_gas_price().checked_add(1).unwrap();
+        let gas = self.get_gas_price().checked_add(value).unwrap();
+        next.with_gas_price(gas)
+    }
+
+    /// Returns a new transaction with a lower gas price -1
+    pub fn decr_price(&self) -> Self {
+        self.decr_price_by(1)
+    }
+
+    /// Returns a new transaction with a lower gas price
+    pub fn decr_price_by(&self, value: u128) -> Self {
+        let mut next = self.clone();
+        let gas = self.get_gas_price().checked_sub(value).unwrap();
         next.with_gas_price(gas)
     }
 
@@ -320,10 +337,10 @@ impl PoolTransaction for MockTransaction {
         self.get_gas_limit()
     }
 
-    fn max_fee_per_gas(&self) -> Option<u128> {
+    fn max_fee_per_gas(&self) -> u128 {
         match self {
-            MockTransaction::Legacy { .. } => None,
-            MockTransaction::Eip1559 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
+            MockTransaction::Legacy { gas_price, .. } => *gas_price,
+            MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
     }
 
@@ -453,6 +470,9 @@ impl MockTransactionFactory {
     pub fn validated(&mut self, transaction: MockTransaction) -> MockValidTx {
         self.validated_with_origin(TransactionOrigin::External, transaction)
     }
+    pub fn validated_arc(&mut self, transaction: MockTransaction) -> Arc<MockValidTx> {
+        Arc::new(self.validated(transaction))
+    }
 
     /// Converts the transaction into a validated transaction
     pub fn validated_with_origin(
@@ -482,7 +502,7 @@ impl MockTransactionFactory {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct MockOrdering;
 

@@ -73,7 +73,7 @@ where
     /// Handler for: `eth_getBlockByHash`
     async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
-        Ok(EthApi::block(self, hash, full).await?)
+        Ok(EthApi::rpc_block(self, hash, full).await?)
     }
 
     /// Handler for: `eth_getBlockByNumber`
@@ -83,7 +83,7 @@ where
         full: bool,
     ) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
-        Ok(EthApi::block(self, number, full).await?)
+        Ok(EthApi::rpc_block(self, number, full).await?)
     }
 
     /// Handler for: `eth_getBlockTransactionCountByHash`
@@ -248,7 +248,14 @@ where
 
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+        trace!(target: "rpc::eth", "Serving eth_gasPrice");
+        return Ok(EthApi::gas_price(self).await?)
+    }
+
+    /// Handler for: `eth_maxPriorityFeePerGas`
+    async fn max_priority_fee_per_gas(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
+        return Ok(EthApi::suggested_priority_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -269,11 +276,6 @@ where
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         return Ok(EthApi::fee_history(self, block_count.as_u64(), newest_block, reward_percentiles)
             .await?)
-    }
-
-    /// Handler for: `eth_maxPriorityFeePerGas`
-    async fn max_priority_fee_per_gas(&self) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for: `eth_mining`

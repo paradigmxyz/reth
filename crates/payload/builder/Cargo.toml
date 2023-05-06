@@ -13,7 +13,6 @@ reth-primitives = { path = "../../primitives" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-rlp = { path = "../../rlp" }
 reth-interfaces = { path = "../../interfaces" }
-reth-consensus-common = { path = "../../consensus/common" }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 
 ## ethereum
@@ -27,7 +26,6 @@ reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"
 futures-util = "0.3"
-futures-core = "0.3"
 
 ## misc
 thiserror = "1.0"

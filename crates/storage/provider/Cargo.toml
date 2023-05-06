@@ -17,6 +17,7 @@ reth-trie = { path = "../../trie" }
 
 # async
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 
 # tracing
 tracing = "0.1"
@@ -25,6 +26,8 @@ tracing = "0.1"
 thiserror = "1.0.37"
 auto_impl = "1.0"
 itertools = "0.10"
+pin-project = "1.0"
+derive_more = "0.99"
 
 # test-utils
 reth-rlp = { path = "../../rlp", optional = true }

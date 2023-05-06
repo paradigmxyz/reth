@@ -140,11 +140,9 @@ impl Signature {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use bytes::BytesMut;
-
     use crate::{Address, Signature, H256, U256};
+    use bytes::BytesMut;
+    use std::str::FromStr;
 
     #[test]
     fn test_payload_len_with_eip155_chain_id() {

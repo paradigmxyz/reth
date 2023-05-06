@@ -9,6 +9,8 @@ pub struct BlockchainTreeConfig {
     max_blocks_in_chain: u64,
     /// The number of blocks that can be re-orged (finalization windows)
     max_reorg_depth: u64,
+    /// The number of unconnected blocks that we are buffering
+    max_unconnected_blocks: usize,
     /// For EVM's "BLOCKHASH" opcode we require last 256 block hashes. So we need to specify
     /// at least `additional_canonical_block_hashes`+`max_reorg_depth`, for eth that would be
     /// 256+64.
@@ -25,6 +27,8 @@ impl Default for BlockchainTreeConfig {
             max_blocks_in_chain: 65,
             // EVM requires that last 256 block hashes are available.
             num_of_additional_canonical_block_hashes: 256,
+            // max unconnected blocks.
+            max_unconnected_blocks: 200,
         }
     }
 }
@@ -35,11 +39,17 @@ impl BlockchainTreeConfig {
         max_reorg_depth: u64,
         max_blocks_in_chain: u64,
         num_of_additional_canonical_block_hashes: u64,
+        max_unconnected_blocks: usize,
     ) -> Self {
         if max_reorg_depth > max_blocks_in_chain {
             panic!("Side chain size should be more then finalization window");
         }
-        Self { max_blocks_in_chain, max_reorg_depth, num_of_additional_canonical_block_hashes }
+        Self {
+            max_blocks_in_chain,
+            max_reorg_depth,
+            num_of_additional_canonical_block_hashes,
+            max_unconnected_blocks,
+        }
     }
 
     /// Return the maximum reorg depth.
@@ -56,5 +66,10 @@ impl BlockchainTreeConfig {
     /// in order to have enough information for EVM execution.
     pub fn num_of_additional_canonical_block_hashes(&self) -> u64 {
         self.num_of_additional_canonical_block_hashes
+    }
+
+    /// Return max number of unconnected blocks that we are buffering
+    pub fn max_unconnected_blocks(&self) -> usize {
+        self.max_unconnected_blocks
     }
 }

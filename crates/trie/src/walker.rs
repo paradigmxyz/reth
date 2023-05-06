@@ -2,10 +2,12 @@ use crate::{
     prefix_set::PrefixSet,
     trie_cursor::{CursorSubNode, TrieCursor},
     updates::TrieUpdates,
-    Nibbles,
 };
 use reth_db::{table::Key, Error};
-use reth_primitives::{trie::BranchNodeCompact, H256};
+use reth_primitives::{
+    trie::{BranchNodeCompact, Nibbles},
+    H256,
+};
 use std::marker::PhantomData;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.

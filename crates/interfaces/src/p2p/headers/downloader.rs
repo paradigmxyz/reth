@@ -77,8 +77,13 @@ pub fn validate_header_download(
     parent: &SealedHeader,
 ) -> DownloadResult<()> {
     ensure_parent(header, parent)?;
+    // validate header against parent
     consensus
-        .pre_validate_header(header, parent)
+        .validate_header_against_parent(header, parent)
+        .map_err(|error| DownloadError::HeaderValidation { hash: parent.hash(), error })?;
+    // validate header standalone
+    consensus
+        .validate_header(header)
         .map_err(|error| DownloadError::HeaderValidation { hash: parent.hash(), error })?;
     Ok(())
 }

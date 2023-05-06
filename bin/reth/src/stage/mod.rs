@@ -3,7 +3,7 @@
 //! Stage debugging tool
 use crate::{
     args::{get_secret_key, NetworkArgs, StageEnum},
-    dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath, SecretKeyPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
 };
 use clap::Parser;
@@ -16,28 +16,31 @@ use reth_staged_sync::{
     Config,
 };
 use reth_stages::{
-    stages::{BodyStage, ExecutionStage, MerkleStage, SenderRecoveryStage, TransactionLookupStage},
+    stages::{
+        BodyStage, ExecutionStage, ExecutionStageThresholds, MerkleStage, SenderRecoveryStage,
+        TransactionLookupStage,
+    },
     ExecInput, Stage, StageId, UnwindInput,
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the database folder.
+    /// The path to the configuration file to use.
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
+
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
-
-    /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: MaybePlatformPath<ConfigPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -55,12 +58,6 @@ pub struct Command {
         value_parser = chain_spec_value_parser
     )]
     chain: Arc<ChainSpec>,
-
-    /// Secret key to use for this node.
-    ///
-    /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
-    p2p_secret_key: PlatformPath<SecretKeyPath>,
 
     /// Enable Prometheus metrics.
     ///
@@ -99,9 +96,11 @@ impl Command {
         // Does not do anything on windows.
         fdlimit::raise_fd_limit();
 
-        let config: Config =
-            confy::load_path(self.config.unwrap_or_chain_default(self.chain.chain))
-                .unwrap_or_default();
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+
+        let config: Config = confy::load_path(config_path).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
         let input = ExecInput {
@@ -111,9 +110,10 @@ impl Command {
 
         let unwind = UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
 
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
+        // use the overridden db path if specified
+        let db_path = data_dir.db_path();
 
+        info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
         let mut tx = Transaction::new(db.as_ref())?;
 
@@ -136,11 +136,18 @@ impl Command {
                     });
                 }
 
-                let p2p_secret_key = get_secret_key(&self.p2p_secret_key)?;
+                let network_secret_path = self
+                    .network
+                    .p2p_secret_key
+                    .clone()
+                    .unwrap_or_else(|| data_dir.p2p_secret_path());
+                let p2p_secret_key = get_secret_key(&network_secret_path)?;
+
+                let default_peers_path = data_dir.known_peers_path();
 
                 let network = self
                     .network
-                    .network_config(&config, self.chain.clone(), p2p_secret_key)
+                    .network_config(&config, self.chain.clone(), p2p_secret_key, default_peers_path)
                     .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
                     .start_network()
                     .await?;
@@ -177,7 +184,14 @@ impl Command {
             }
             StageEnum::Execution => {
                 let factory = reth_revm::Factory::new(self.chain.clone());
-                let mut stage = ExecutionStage::new(factory, num_blocks);
+                let mut stage = ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: Some(num_blocks),
+                        max_changes: None,
+                        max_changesets: None,
+                    },
+                );
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }

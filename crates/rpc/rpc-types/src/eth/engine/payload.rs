@@ -90,7 +90,7 @@ impl From<SealedBlock> for ExecutionPayload {
             .iter()
             .map(|tx| {
                 let mut encoded = Vec::new();
-                tx.encode(&mut encoded);
+                tx.encode_enveloped(&mut encoded);
                 encoded.into()
             })
             .collect();
@@ -139,10 +139,10 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             .iter()
             .map(|tx| TransactionSigned::decode(&mut tx.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
-        let transactions_root = proofs::calculate_transaction_root(transactions.iter());
+        let transactions_root = proofs::calculate_transaction_root(&transactions);
 
         let withdrawals_root =
-            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w.iter()));
+            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
         let header = Header {
             parent_hash: payload.parent_hash,
@@ -208,6 +208,13 @@ pub enum PayloadError {
     Decode(#[from] reth_rlp::DecodeError),
 }
 
+impl PayloadError {
+    /// Returns `true` if the error is caused by invalid extra data.
+    pub fn is_block_hash_mismatch(&self) -> bool {
+        matches!(self, PayloadError::BlockHash { .. })
+    }
+}
+
 /// This structure contains a body of an execution payload.
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
@@ -269,6 +276,11 @@ impl PayloadStatus {
         self
     }
 
+    pub fn maybe_latest_valid_hash(mut self, latest_valid_hash: Option<H256>) -> Self {
+        self.latest_valid_hash = latest_valid_hash;
+        self
+    }
+
     /// Returns true if the payload status is syncing.
     pub fn is_syncing(&self) -> bool {
         self.status.is_syncing()
@@ -298,17 +310,13 @@ impl Serialize for PayloadStatus {
     }
 }
 
-impl From<PayloadError> for PayloadStatus {
+impl From<PayloadError> for PayloadStatusEnum {
     fn from(error: PayloadError) -> Self {
         match error {
             error @ PayloadError::BlockHash { .. } => {
-                PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
-                    validation_error: error.to_string(),
-                })
+                PayloadStatusEnum::InvalidBlockHash { validation_error: error.to_string() }
             }
-            _ => PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: error.to_string(),
-            }),
+            _ => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
         }
     }
 }
@@ -378,6 +386,22 @@ impl PayloadStatusEnum {
     pub fn is_invalid(&self) -> bool {
         matches!(self, PayloadStatusEnum::Invalid { .. })
     }
+
+    /// Returns true if the payload status is invalid block hash.
+    pub fn is_invalid_block_hash(&self) -> bool {
+        matches!(self, PayloadStatusEnum::InvalidBlockHash { .. })
+    }
+}
+
+/// Various validation errors
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PayloadValidationError {
+    /// Thrown when a forkchoice update's head links to a previously rejected payload.
+    #[error("links to previously rejected block")]
+    LinksToRejectedPayload,
+    /// Thrown when a new payload contains a wrong block number.
+    #[error("invalid block number")]
+    InvalidBlockNumber,
 }
 
 #[cfg(test)]
@@ -398,8 +422,8 @@ mod tests {
         let mut transformed: Block = f(unsealed);
         // Recalculate roots
         transformed.header.transactions_root =
-            proofs::calculate_transaction_root(transformed.body.iter());
-        transformed.header.ommers_hash = proofs::calculate_ommers_root(transformed.ommers.iter());
+            proofs::calculate_transaction_root(&transformed.body);
+        transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
         SealedBlock {
             header: transformed.header.seal_slow(),
             body: transformed.body,
@@ -522,5 +546,21 @@ mod tests {
         assert!(status.latest_valid_hash.is_none());
         assert!(status.status.validation_error().is_none());
         assert_eq!(serde_json::to_string(&status).unwrap(), full);
+    }
+
+    #[test]
+    fn serde_roundtrip_legacy_txs_payload() {
+        // pulled from hive tests
+        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
+        let payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+    }
+
+    #[test]
+    fn serde_roundtrip_enveloped_txs_payload() {
+        // pulled from hive tests
+        let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
+        let payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(serde_json::to_string(&payload).unwrap(), s);
     }
 }

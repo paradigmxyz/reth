@@ -76,13 +76,8 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let changeset = Self::validate_and_execute(
-            block.clone(),
-            parent_header,
-            canonical_fork,
-            state_provider,
-            externals,
-        )?;
+        let changeset =
+            Self::validate_and_execute(block.clone(), parent_header, state_provider, externals)?;
 
         Ok(Self { chain: Chain::new(vec![(block.clone(), changeset)]) })
     }
@@ -119,13 +114,8 @@ impl AppendableChain {
             canonical_block_hashes,
             canonical_fork,
         };
-        let block_state = Self::validate_and_execute(
-            block.clone(),
-            parent,
-            canonical_fork,
-            post_state_data,
-            externals,
-        )?;
+        let block_state =
+            Self::validate_and_execute(block.clone(), parent, post_state_data, externals)?;
         state.extend(block_state);
 
         let chain =
@@ -139,7 +129,6 @@ impl AppendableChain {
     fn validate_and_execute<PSDP, DB, C, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
-        canonical_fork: ForkBlock,
         post_state_data_provider: PSDP,
         externals: &TreeExternals<DB, C, EF>,
     ) -> Result<PostState, Error>
@@ -149,9 +138,8 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        externals.consensus.validate_header(&block, U256::MAX)?;
-        externals.consensus.pre_validate_header(&block, parent_block)?;
-        externals.consensus.pre_validate_block(&block)?;
+        // some checks are done before blocks comes here.
+        externals.consensus.validate_header_against_parent(&block, parent_block)?;
 
         let (unseal, senders) = block.into_components();
         let unseal = unseal.unseal();
@@ -159,6 +147,7 @@ impl AppendableChain {
         //get state provider.
         let db = externals.shareable_db();
         // TODO, small perf can check if caonical fork is the latest state.
+        let canonical_fork = post_state_data_provider.canonical_fork();
         let history_provider = db.history_by_block_number(canonical_fork.number)?;
         let state_provider = history_provider;
 
@@ -169,7 +158,7 @@ impl AppendableChain {
     }
 
     /// Validate and execute the given block, and append it to this chain.
-    pub fn append_block<DB, C, EF>(
+    pub(crate) fn append_block<DB, C, EF>(
         &mut self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
@@ -191,13 +180,8 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let block_state = Self::validate_and_execute(
-            block.clone(),
-            parent_block,
-            canonical_fork,
-            post_state_data,
-            externals,
-        )?;
+        let block_state =
+            Self::validate_and_execute(block.clone(), parent_block, post_state_data, externals)?;
         self.state.extend(block_state);
         self.blocks.insert(block.number, block);
         Ok(())

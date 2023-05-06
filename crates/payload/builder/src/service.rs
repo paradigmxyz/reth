@@ -5,9 +5,9 @@
 
 use crate::{
     error::PayloadBuilderError, metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator,
-    BuiltPayload, PayloadBuilderAttributes, PayloadJob,
+    BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
 };
-use futures_util::stream::{StreamExt, TryStreamExt};
+use futures_util::{future::FutureExt, StreamExt};
 use reth_rpc_types::engine::PayloadId;
 use std::{
     future::Future,
@@ -28,12 +28,25 @@ pub struct PayloadStore {
 // === impl PayloadStore ===
 
 impl PayloadStore {
-    /// Returns the best payload for the given identifier.
-    pub async fn get_payload(
+    /// Resolves the payload job and returns the best payload that has been built so far.
+    ///
+    /// Note: depending on the installed [PayloadJobGenerator], this may or may not terminate the
+    /// job, See [PayloadJob::resolve].
+    pub async fn resolve(
         &self,
         id: PayloadId,
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
-        self.inner.get_payload(id).await
+        self.inner.resolve(id).await
+    }
+
+    /// Returns the best payload for the given identifier.
+    ///
+    /// Note: this merely returns the best payload so far and does not resolve the job.
+    pub async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
+        self.inner.best_payload(id).await
     }
 }
 
@@ -55,13 +68,29 @@ pub struct PayloadBuilderHandle {
 // === impl PayloadBuilderHandle ===
 
 impl PayloadBuilderHandle {
-    /// Returns the best payload for the given identifier.
-    pub async fn get_payload(
+    /// Resolves the payload job and returns the best payload that has been built so far.
+    ///
+    /// Note: depending on the installed [PayloadJobGenerator], this may or may not terminate the
+    /// job, See [PayloadJob::resolve].
+    pub async fn resolve(
         &self,
         id: PayloadId,
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::GetPayload(id, tx)).ok()?;
+        self.to_service.send(PayloadServiceCommand::Resolve(id, tx)).ok()?;
+        match rx.await.transpose()? {
+            Ok(fut) => Some(fut.await),
+            Err(e) => Some(Err(e.into())),
+        }
+    }
+
+    /// Returns the best payload for the given identifier.
+    pub async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
+        let (tx, rx) = oneshot::channel();
+        self.to_service.send(PayloadServiceCommand::BestPayload(id, tx)).ok()?;
         rx.await.ok()?
     }
 
@@ -141,9 +170,26 @@ where
         self.payload_jobs.iter().any(|(_, job_id)| *job_id == id)
     }
 
-    /// Returns the best payload for the given identifier.
-    fn get_payload(&self, id: PayloadId) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
+    /// Returns the best payload for the given identifier that has been built so far.
+    fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
+    }
+
+    /// Returns the best payload for the given identifier that has been built so far and terminates
+    /// the job if requested.
+    fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture> {
+        let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
+        let (fut, keep_alive) = self.payload_jobs[job].0.resolve();
+
+        if keep_alive == KeepPayloadJobAlive::No {
+            let (_, id) = self.payload_jobs.remove(job);
+            trace!(%id, "terminated resolved job");
+        }
+
+        Some(Box::pin(fut))
     }
 }
 
@@ -161,33 +207,23 @@ where
             // we poll all jobs first, so we always have the latest payload that we can report if
             // requests
             // we don't care about the order of the jobs, so we can just swap_remove them
-            'jobs: for idx in (0..this.payload_jobs.len()).rev() {
+            for idx in (0..this.payload_jobs.len()).rev() {
                 let (mut job, id) = this.payload_jobs.swap_remove(idx);
 
                 // drain better payloads from the job
-                loop {
-                    match job.try_poll_next_unpin(cx) {
-                        Poll::Ready(Some(Ok(payload))) => {
-                            this.metrics.set_active_jobs(this.payload_jobs.len());
-                            trace!(?payload, %id, "new payload");
-                        }
-                        Poll::Ready(Some(Err(err))) => {
-                            warn!(?err, %id, "payload job failed; resolving payload");
-                            this.metrics.set_active_jobs(this.payload_jobs.len());
-                            this.metrics.inc_failed_jobs();
-                            continue 'jobs
-                        }
-                        Poll::Ready(None) => {
-                            // job is done
-                            trace!(?id, "payload job finished");
-                            this.metrics.set_active_jobs(this.payload_jobs.len());
-                            continue 'jobs
-                        }
-                        Poll::Pending => {
-                            // still pending, put it back
-                            this.payload_jobs.push((job, id));
-                            continue 'jobs
-                        }
+                match job.poll_unpin(cx) {
+                    Poll::Ready(Ok(_)) => {
+                        this.metrics.set_active_jobs(this.payload_jobs.len());
+                        trace!(%id, "payload job finished");
+                    }
+                    Poll::Ready(Err(err)) => {
+                        warn!(?err, ?id, "payload job failed; resolving payload");
+                        this.metrics.inc_failed_jobs();
+                        this.metrics.set_active_jobs(this.payload_jobs.len());
+                    }
+                    Poll::Pending => {
+                        // still pending, put it back
+                        this.payload_jobs.push((job, id));
                     }
                 }
             }
@@ -203,7 +239,9 @@ where
                         let id = attr.payload_id();
                         let mut res = Ok(id);
 
-                        if !this.contains_payload(id) {
+                        if this.contains_payload(id) {
+                            warn!(%id, parent = ?attr.parent, "payload job already in progress");
+                        } else {
                             // no job for this payload yet, create one
                             match this.generator.new_payload_job(attr) {
                                 Ok(job) => {
@@ -222,8 +260,11 @@ where
                         // return the id of the payload
                         let _ = tx.send(res);
                     }
-                    PayloadServiceCommand::GetPayload(id, tx) => {
-                        let _ = tx.send(this.get_payload(id));
+                    PayloadServiceCommand::BestPayload(id, tx) => {
+                        let _ = tx.send(this.best_payload(id));
+                    }
+                    PayloadServiceCommand::Resolve(id, tx) => {
+                        let _ = tx.send(this.resolve(id));
                     }
                 }
             }
@@ -235,14 +276,18 @@ where
     }
 }
 
+type PayloadFuture =
+    Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send>>;
+
 /// Message type for the [PayloadBuilderService].
-#[derive(Debug)]
 enum PayloadServiceCommand {
     /// Start building a new payload.
     BuildNewPayload(
         PayloadBuilderAttributes,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
-    /// Get the current payload.
-    GetPayload(PayloadId, oneshot::Sender<Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>>),
+    /// Get the best payload so far
+    BestPayload(PayloadId, oneshot::Sender<Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>>),
+    /// Resolve the payload and return the payload
+    Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture>>),
 }

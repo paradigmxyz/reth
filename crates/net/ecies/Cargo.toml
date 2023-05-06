@@ -30,7 +30,7 @@ byteorder = "1.4.3"
 rand = "0.8.5"
 ctr = "0.9.2"
 digest = "0.10.5"
-secp256k1 = { version = "0.26.0", features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
 sha2 = "0.10.6"
 sha3 = "0.10.5"
 aes = "0.8.1"

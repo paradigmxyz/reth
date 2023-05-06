@@ -1,6 +1,7 @@
 //! Support for handling events emitted by node components.
 
 use futures::Stream;
+use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::BlockNumber;
@@ -12,7 +13,7 @@ use std::{
     time::Duration,
 };
 use tokio::time::Interval;
-use tracing::{info, warn};
+use tracing::{debug, info};
 
 /// The current high-level state of the node.
 struct NodeState {
@@ -66,9 +67,23 @@ impl NodeState {
             }
             NetworkEvent::SessionClosed { peer_id, reason } => {
                 let reason = reason.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
-                warn!(target: "reth::cli", connected_peers = self.num_connected_peers(), peer_id = %peer_id, %reason, "Peer disconnected.");
+                debug!(target: "reth::cli", connected_peers = self.num_connected_peers(), peer_id = %peer_id, %reason, "Peer disconnected.");
             }
             _ => (),
+        }
+    }
+
+    fn handle_consensus_engine_event(&self, event: BeaconConsensusEngineEvent) {
+        match event {
+            BeaconConsensusEngineEvent::ForkchoiceUpdated(state) => {
+                info!(target: "reth::cli", ?state, "Forkchoice updated");
+            }
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(number, hash) => {
+                info!(target: "reth::cli", number, ?hash, "Block added to canonical chain");
+            }
+            BeaconConsensusEngineEvent::ForkBlockAdded(number, hash) => {
+                info!(target: "reth::cli", number, ?hash, "Block added to fork chain");
+            }
         }
     }
 }
@@ -80,19 +95,28 @@ pub enum NodeEvent {
     Network(NetworkEvent),
     /// A sync pipeline event.
     Pipeline(PipelineEvent),
+    /// A consensus engine event.
+    ConsensusEngine(BeaconConsensusEngineEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
-    fn from(evt: NetworkEvent) -> NodeEvent {
-        NodeEvent::Network(evt)
+    fn from(event: NetworkEvent) -> NodeEvent {
+        NodeEvent::Network(event)
     }
 }
 
 impl From<PipelineEvent> for NodeEvent {
-    fn from(evt: PipelineEvent) -> NodeEvent {
-        NodeEvent::Pipeline(evt)
+    fn from(event: PipelineEvent) -> NodeEvent {
+        NodeEvent::Pipeline(event)
     }
 }
+
+impl From<BeaconConsensusEngineEvent> for NodeEvent {
+    fn from(event: BeaconConsensusEngineEvent) -> Self {
+        NodeEvent::ConsensusEngine(event)
+    }
+}
+
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
 pub async fn handle_events(
@@ -143,6 +167,9 @@ where
                 }
                 NodeEvent::Pipeline(event) => {
                     this.state.handle_pipeline_event(event);
+                }
+                NodeEvent::ConsensusEngine(event) => {
+                    this.state.handle_consensus_engine_event(event);
                 }
             }
         }

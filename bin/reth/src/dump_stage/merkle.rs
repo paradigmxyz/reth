@@ -1,24 +1,23 @@
-use crate::{
-    dirs::{DbPath, PlatformPath},
-    dump_stage::setup,
-    utils::DbTool,
-};
+use crate::{dump_stage::setup, utils::DbTool};
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
 use reth_primitives::{BlockNumber, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{
-    stages::{AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage},
+    stages::{
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
+        StorageHashingStage,
+    },
     Stage, StageId, UnwindInput,
 };
-use std::{ops::DerefMut, sync::Arc};
+use std::{ops::DerefMut, path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
     from: BlockNumber,
     to: BlockNumber,
-    output_db: &PlatformPath<DbPath>,
+    output_db: &PathBuf,
     should_run: bool,
 ) -> Result<()> {
     let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;
@@ -62,8 +61,14 @@ async fn unwind_and_copy<DB: Database>(
     MerkleStage::default_unwind().unwind(&mut unwind_tx, unwind).await?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
-    let mut exec_stage =
-        ExecutionStage::new(reth_revm::Factory::new(Arc::new(MAINNET.clone())), u64::MAX);
+    let mut exec_stage = ExecutionStage::new(
+        reth_revm::Factory::new(Arc::new(MAINNET.clone())),
+        ExecutionStageThresholds {
+            max_blocks: Some(u64::MAX),
+            max_changes: None,
+            max_changesets: None,
+        },
+    );
 
     exec_stage
         .unwind(

@@ -10,17 +10,23 @@ use std::collections::{BTreeMap, HashSet};
 ///   finalize and commit it to db. If we dont have the block, pipeline syncing should start to
 ///   fetch the blocks from p2p. Do reorg in tables if canonical chain if needed.
 pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
-    /// Recover senders and call [`BlockchainTreeEngine::insert_block_with_senders`].
-    fn insert_block(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
+    /// Recover senders and call [`BlockchainTreeEngine::insert_block`].
+    fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
         let block = block.seal_with_senders().ok_or(ExecutionError::SenderRecoveryError)?;
-        self.insert_block_with_senders(block)
+        self.insert_block(block)
     }
 
+    /// Recover senders and call [`BlockchainTreeEngine::buffer_block`].
+    fn buffer_block_without_sender(&self, block: SealedBlock) -> Result<(), Error> {
+        let block = block.seal_with_senders().ok_or(ExecutionError::SenderRecoveryError)?;
+        self.buffer_block(block)
+    }
+
+    /// buffer block with senders
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), Error>;
+
     /// Insert block with senders
-    fn insert_block_with_senders(
-        &self,
-        block: SealedBlockWithSenders,
-    ) -> Result<BlockStatus, Error>;
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, Error>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     fn finalize_block(&self, finalized_block: BlockNumber);
@@ -37,7 +43,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// [`BlockchainTreeEngine::finalize_block`]).
     fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<(), Error>;
 
-    /// Make a block and its parent part of the canonical chain.
+    /// Make a block and its parent part of the canonical chain by committing it to the database.
     ///
     /// # Note
     ///
@@ -54,9 +60,9 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
 }
 
 /// From Engine API spec, block inclusion can be valid, accepted or invalid.
-/// Invalid case is already covered by error but we needs to make distinction
+/// Invalid case is already covered by error, but we need to make distinction
 /// between if it is valid (extends canonical chain) or just accepted (is side chain).
-/// If we dont know the block parent we are returning Disconnected status
+/// If we don't know the block parent we are returning Disconnected status
 /// as we can't make a claim if block is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
@@ -79,14 +85,24 @@ pub enum BlockStatus {
 /// * Pending blocks that extend the canonical chain but are not yet included.
 /// * Future pending blocks that extend the pending blocks.
 pub trait BlockchainTreeViewer: Send + Sync {
-    /// Returns both pending and sidechain block numbers and their hashes.
+    /// Returns both pending and side-chain block numbers and their hashes.
+    ///
+    /// Caution: This will not return blocks from the canonical chain.
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
 
-    /// Returns the block with matching hash.
+    /// Returns the block with matching hash from the tree, if it exists.
+    ///
+    /// Caution: This will not return blocks from the canonical chain.
     fn block_by_hash(&self, hash: BlockHash) -> Option<SealedBlock>;
 
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
+
+    /// Given a hash, this tries to find the last ancestor that is part of the canonical chain.
+    ///
+    /// In other words, this will walk up the (side) chain starting with the given hash and return
+    /// the first block that's canonical.
+    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash>;
 
     /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
     fn canonical_tip(&self) -> BlockNumHash;
@@ -96,8 +112,13 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// has best chance to become canonical.
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>);
 
-    /// Return block hashes that extends the canonical chain tip by one.
+    /// Return block number and hash that extends the canonical chain tip by one.
     ///
-    /// If there is no such block, return `None`.
-    fn pending_block(&self) -> Option<BlockNumHash>;
+    /// If there is no such block, this returns `None`.
+    fn pending_block_num_hash(&self) -> Option<BlockNumHash>;
+
+    /// Returns the pending block if there is one.
+    fn pending_block(&self) -> Option<SealedBlock> {
+        self.block_by_hash(self.pending_block_num_hash()?.hash)
+    }
 }

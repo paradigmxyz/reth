@@ -23,10 +23,12 @@ use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
 };
+use tracing::trace;
 
 mod database;
 mod post_state_provider;
 mod state;
+use crate::traits::BlockSource;
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
 
@@ -107,7 +109,9 @@ where
         let num = match num {
             BlockNumberOrTag::Latest => self.chain_info()?.best_number,
             BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Pending => return Ok(self.tree.pending_block().map(|b| b.number)),
+            BlockNumberOrTag::Pending => {
+                return Ok(self.tree.pending_block_num_hash().map(|b| b.number))
+            }
             BlockNumberOrTag::Finalized => return Ok(self.chain_info()?.last_finalized),
             BlockNumberOrTag::Safe => return Ok(self.chain_info()?.safe_finalized),
             BlockNumberOrTag::Earliest => 0,
@@ -120,7 +124,7 @@ where
             BlockId::Hash(hash) => Ok(Some(hash.into())),
             BlockId::Number(num) => match num {
                 BlockNumberOrTag::Latest => Ok(Some(self.chain_info()?.best_hash)),
-                BlockNumberOrTag::Pending => Ok(self.tree.pending_block().map(|b| b.hash)),
+                BlockNumberOrTag::Pending => Ok(self.tree.pending_block_num_hash().map(|b| b.hash)),
                 _ => self
                     .convert_block_number(num)?
                     .map(|num| self.block_hash(num))
@@ -140,8 +144,34 @@ where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
 {
+    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
+        let block = match source {
+            BlockSource::Any => {
+                // check pending source first
+                // Note: it's fine to return the unsealed block because the caller already has the
+                // hash
+                let mut block = self.tree.block_by_hash(hash).map(|block| block.unseal());
+                if block.is_none() {
+                    block = self.database.block_by_hash(hash)?;
+                }
+                block
+            }
+            BlockSource::Pending => self.tree.block_by_hash(hash).map(|block| block.unseal()),
+            BlockSource::Database => self.database.block_by_hash(hash)?,
+        };
+
+        Ok(block)
+    }
+
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
+        if id.is_pending() {
+            return Ok(self.tree.pending_block().map(SealedBlock::unseal))
+        }
         self.database.block(id)
+    }
+
+    fn pending_block(&self) -> Result<Option<SealedBlock>> {
+        Ok(self.tree.pending_block())
     }
 
     fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
@@ -263,30 +293,37 @@ where
 {
     /// Storage provider for latest block
     fn latest(&self) -> Result<StateProviderBox<'_>> {
+        trace!(target: "providers::blockchain", "Getting latest block state provider");
         self.database.latest()
     }
 
     fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
+        trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         self.database.history_by_block_number(block_number)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<StateProviderBox<'_>> {
+        trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         self.database.history_by_block_hash(block_hash)
     }
 
     fn state_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>> {
+        trace!(target: "providers::blockchain", ?block, "Getting state by block hash");
+
         // check tree first
         if let Some(pending) = self.tree.find_pending_state_provider(block) {
+            trace!(target: "providers::blockchain", "Returning pending state provider");
             return self.pending_with_provider(pending)
         }
-
         // not found in tree, check database
         self.history_by_block_hash(block)
     }
 
     /// Storage provider for pending state.
     fn pending(&self) -> Result<StateProviderBox<'_>> {
-        if let Some(block) = self.tree.pending_block() {
+        trace!(target: "providers::blockchain", "Getting provider for pending state");
+
+        if let Some(block) = self.tree.pending_block_num_hash() {
             let pending = self.tree.pending_state_provider(block.hash)?;
             return self.pending_with_provider(pending)
         }
@@ -298,6 +335,8 @@ where
         post_state_data: Box<dyn PostStateDataProvider>,
     ) -> Result<StateProviderBox<'_>> {
         let canonical_fork = post_state_data.canonical_fork();
+        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
+
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
         let post_state_provider = PostStateProvider::new(state_provider, post_state_data);
         Ok(Box::new(post_state_provider))
@@ -309,8 +348,12 @@ where
     DB: Send + Sync,
     Tree: BlockchainTreeEngine,
 {
-    fn insert_block_with_senders(&self, block: SealedBlockWithSenders) -> Result<BlockStatus> {
-        self.tree.insert_block_with_senders(block)
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<()> {
+        self.tree.buffer_block(block)
+    }
+
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus> {
+        self.tree.insert_block(block)
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
@@ -347,6 +390,10 @@ where
         self.tree.canonical_blocks()
     }
 
+    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
+        self.tree.find_canonical_ancestor(hash)
+    }
+
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
     }
@@ -355,8 +402,8 @@ where
         self.tree.pending_blocks()
     }
 
-    fn pending_block(&self) -> Option<BlockNumHash> {
-        self.tree.pending_block()
+    fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
+        self.tree.pending_block_num_hash()
     }
 }
 

@@ -1632,9 +1632,9 @@ dependencies = [
 
 [[package]]
 name = "enr"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb4d5fbf6f56acecd38f5988eb2e4ae412008a2a30268c748c701ec6322f39d4"
+checksum = "cf56acd72bb22d2824e66ae8e9e5ada4d0de17a69c7fd35569dde2ada8ec9116"
 dependencies = [
  "base64 0.13.1",
  "bytes",
@@ -1643,7 +1643,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "rlp",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "sha3",
  "zeroize",
@@ -1939,7 +1939,7 @@ dependencies = [
  "auto_impl",
  "base64 0.21.0",
  "bytes",
- "enr 0.8.0",
+ "enr 0.8.1",
  "ethers-core",
  "futures-channel",
  "futures-core",
@@ -2936,6 +2936,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "453ad9f582a441959e5f0d088b02ce04cfe8d51a8eaf077f12ac6d3e94164ca6"
 
 [[package]]
+name = "jemalloc-sys"
+version = "0.5.3+5.3.0-patched"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9bd5d616ea7ed58b571b2e209a65759664d7fb021a0819d7a790afc67e47ca1"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "jemallocator"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16c2514137880c52b0b4822b563fadd38257c1f380858addb74a400889696ea6"
+dependencies = [
+ "jemalloc-sys",
+ "libc",
+]
+
+[[package]]
 name = "jobserver"
 version = "0.1.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3303,6 +3323,15 @@ name = "lru"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e7d46de488603ffdd5f30afbc64fbba2378214a2c3a2fb83abf3d33126df17"
+dependencies = [
+ "hashbrown 0.13.2",
+]
+
+[[package]]
+name = "lru"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03f1160296536f10c833a82dca22267d5486734230d47bf00bf435885814ba1e"
 dependencies = [
  "hashbrown 0.13.2",
 ]
@@ -4574,6 +4603,7 @@ dependencies = [
  "hex",
  "human_bytes",
  "hyper",
+ "jemallocator",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
@@ -4606,7 +4636,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "shellexpand",
@@ -4674,6 +4704,7 @@ dependencies = [
  "reth-stages",
  "reth-tasks",
  "reth-tracing",
+ "schnellru",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -4686,12 +4717,14 @@ version = "0.1.0"
 dependencies = [
  "aquamarine",
  "assert_matches",
+ "lru 0.10.0",
  "parking_lot 0.12.1",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4747,7 +4780,7 @@ dependencies = [
  "reth-interfaces",
  "reth-libmdbx",
  "reth-primitives",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "tempfile",
@@ -4762,7 +4795,7 @@ name = "reth-discv4"
 version = "0.1.0"
 dependencies = [
  "discv5",
- "enr 0.8.0",
+ "enr 0.8.1",
  "generic-array",
  "hex",
  "rand 0.8.5",
@@ -4772,7 +4805,7 @@ dependencies = [
  "reth-rlp",
  "reth-rlp-derive",
  "reth-tracing",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "thiserror",
  "tokio",
@@ -4786,7 +4819,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "data-encoding",
- "enr 0.8.0",
+ "enr 0.8.1",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -4794,7 +4827,7 @@ dependencies = [
  "reth-rlp",
  "reth-tracing",
  "schnellru",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_with",
  "thiserror",
@@ -4850,7 +4883,7 @@ dependencies = [
  "reth-net-common",
  "reth-primitives",
  "reth-rlp",
- "secp256k1 0.26.0",
+ "secp256k1",
  "sha2 0.10.6",
  "sha3",
  "thiserror",
@@ -4882,7 +4915,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-tracing",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "smol_str",
  "snap",
@@ -4914,7 +4947,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
- "secp256k1 0.26.0",
+ "secp256k1",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -5021,7 +5054,7 @@ dependencies = [
  "aquamarine",
  "async-trait",
  "auto_impl",
- "enr 0.8.0",
+ "enr 0.8.1",
  "ethers-core",
  "ethers-middleware",
  "ethers-providers",
@@ -5054,7 +5087,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "serial_test",
@@ -5083,10 +5116,8 @@ dependencies = [
 name = "reth-payload-builder"
 version = "0.1.0"
 dependencies = [
- "futures-core",
  "futures-util",
  "metrics",
- "reth-consensus-common",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
@@ -5129,7 +5160,7 @@ dependencies = [
  "reth-rlp-derive",
  "revm-primitives",
  "ruint",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "serde_with",
@@ -5138,6 +5169,9 @@ dependencies = [
  "test-fuzz",
  "thiserror",
  "tiny-keccak",
+ "tokio",
+ "tokio-stream",
+ "tracing",
  "triehash",
  "url",
  "zstd",
@@ -5148,8 +5182,10 @@ name = "reth-provider"
 version = "0.1.0"
 dependencies = [
  "auto_impl",
+ "derive_more",
  "itertools",
  "parking_lot 0.12.1",
+ "pin-project",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
@@ -5158,6 +5194,7 @@ dependencies = [
  "reth-trie",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
@@ -5252,7 +5289,7 @@ dependencies = [
  "revm",
  "revm-primitives",
  "schnellru",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "thiserror",
@@ -5347,7 +5384,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "confy",
- "enr 0.8.0",
+ "enr 0.8.1",
  "ethers-core",
  "ethers-middleware",
  "ethers-providers",
@@ -5365,8 +5402,9 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-staged-sync",
+ "reth-stages",
  "reth-tracing",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde_json",
  "shellexpand",
@@ -5418,6 +5456,8 @@ version = "0.1.0"
 dependencies = [
  "dyn-clone",
  "futures-util",
+ "metrics",
+ "reth-metrics-derive",
  "thiserror",
  "tokio",
  "tracing",
@@ -5448,11 +5488,11 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "rand 0.8.5",
+ "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
- "ruint",
  "serde",
  "thiserror",
  "tokio",
@@ -5463,6 +5503,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "derive_more",
  "hex",
  "proptest",
@@ -5480,9 +5521,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "3.2.0"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "764e81b1a98e1df07a304c9bd28ed5632e85647e5124117ce87634f66fe86783"
+checksum = "f293f351c4c203d321744e54ed7eed3d2b6eef4c140228910dde3ac9a5ea8031"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -5491,9 +5532,9 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f408c834f251dc33ca424b027c132f2cfe541335c5d9895e04d2987f9cfd071"
+checksum = "a53980a26f9b5a66d13511c35074d4b53631e157850a1d7cf1af4efc2c2b72c9"
 dependencies = [
  "derive_more",
  "enumn",
@@ -5512,7 +5553,7 @@ dependencies = [
  "once_cell",
  "revm-primitives",
  "ripemd",
- "secp256k1 0.27.0",
+ "secp256k1",
  "sha2 0.10.6",
  "sha3",
  "substrate-bn",
@@ -5520,9 +5561,9 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "180427e1169b860ab63eaa5bcff158010073646abf3312aed11a1d7aa1aa8291"
+checksum = "304d998f466ffef72d76c7f20b05bf08a96801736a6fb1fdef47d49a292618df"
 dependencies = [
  "arbitrary",
  "auto_impl",
@@ -5621,8 +5662,8 @@ dependencies = [
 
 [[package]]
 name = "ruint"
-version = "1.7.0"
-source = "git+https://github.com/paradigmxyz/uint#f496239f58dcaa11cf275f292f50c971bbccfbad"
+version = "1.8.0"
+source = "git+https://github.com/paradigmxyz/uint#38f565ff907ccaf2a2c57d395ed7c2b8905ae1ab"
 dependencies = [
  "arbitrary",
  "derive_more",
@@ -5638,7 +5679,7 @@ dependencies = [
 [[package]]
 name = "ruint-macro"
 version = "1.0.2"
-source = "git+https://github.com/paradigmxyz/uint#f496239f58dcaa11cf275f292f50c971bbccfbad"
+source = "git+https://github.com/paradigmxyz/uint#38f565ff907ccaf2a2c57d395ed7c2b8905ae1ab"
 
 [[package]]
 name = "rustc-demangle"
@@ -5878,22 +5919,13 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4124a35fe33ae14259c490fd70fa199a32b9ce9502f2ee6bc4f81ec06fa65894"
-dependencies = [
- "rand 0.8.5",
- "secp256k1-sys",
- "serde",
-]
-
-[[package]]
-name = "secp256k1"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25996b82292a7a57ed3508f052cfff8640d38d32018784acd714758b43da9c8f"
 dependencies = [
+ "rand 0.8.5",
  "secp256k1-sys",
+ "serde",
 ]
 
 [[package]]

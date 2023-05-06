@@ -1,16 +1,14 @@
 use crate::{keccak256, Address};
 
 pub(crate) mod secp256k1 {
-    use crate::Signature;
-
     use super::*;
+    use crate::Signature;
+    pub(crate) use ::secp256k1::Error;
     use ::secp256k1::{
         ecdsa::{RecoverableSignature, RecoveryId},
         Message, SecretKey, SECP256K1,
     };
     use revm_primitives::{B256, U256};
-
-    pub(crate) use ::secp256k1::Error;
 
     /// secp256k1 signer recovery
     pub fn recover_signer(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {

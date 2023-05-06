@@ -19,6 +19,9 @@ pub const SLOT_DURATION: Duration = Duration::from_secs(12);
 /// An EPOCH is a series of 32 slots (~6.4min).
 pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * 32);
 
+/// The default block nonce in the beacon consensus
+pub const BEACON_NONCE: u64 = 0u64;
+
 /// The minimal value the basefee can decrease to.
 ///
 /// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%.
@@ -46,6 +49,9 @@ pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
 
 /// Multiplier for converting ether to wei.
 pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
+
+/// Multiplier for converting mgas to gas.
+pub const MGAS_TO_GAS: u64 = 1_000_000u64;
 
 /// The Ethereum mainnet genesis hash.
 pub const MAINNET_GENESIS: H256 =

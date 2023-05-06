@@ -43,6 +43,11 @@ triehash = "0.8"
 proptest = "1.0"
 tokio = { version = "1.21.2", default-features = false, features = ["sync", "rt", "macros"] }
 tokio-stream = "0.1.10"
+criterion = "0.4"
 
 [features]
 test-utils = ["triehash"]
+
+[[bench]]
+name = "prefix_set"
+harness = false

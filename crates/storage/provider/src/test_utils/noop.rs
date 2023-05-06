@@ -1,13 +1,14 @@
 use crate::{
-    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, PostState, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider,
+    traits::{BlockSource, ReceiptProvider},
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, PostState, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytecode, Bytes, ChainInfo, Header,
-    Receipt, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256,
-    KECCAK_EMPTY, U256,
+    Receipt, SealedBlock, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash,
+    TxNumber, H256, KECCAK_EMPTY, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
@@ -43,7 +44,15 @@ impl BlockIdProvider for NoopProvider {
 }
 
 impl BlockProvider for NoopProvider {
+    fn find_block_by_hash(&self, hash: H256, _source: BlockSource) -> Result<Option<Block>> {
+        self.block(hash.into())
+    }
+
     fn block(&self, _id: BlockId) -> Result<Option<Block>> {
+        Ok(None)
+    }
+
+    fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(None)
     }
 

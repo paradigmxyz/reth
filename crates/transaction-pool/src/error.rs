@@ -80,8 +80,11 @@ impl PoolError {
                 false
             }
             PoolError::SpammerExceededCapacity(_, _) => {
-                // spammer detected
-                true
+                // the sender exceeded the slot capacity, we should not penalize the peer for
+                // sending the tx because we don't know if all the transactions are sent from the
+                // same peer, there's also a chance that old transactions haven't been cleared yet
+                // (pool lags behind) and old transaction still occupy a slot in the pool
+                false
             }
             PoolError::DiscardedOnInsert(_) => {
                 // valid tx but dropped due to size constraints
@@ -146,7 +149,28 @@ impl InvalidPoolTransactionError {
                         // transaction could just have arrived late/early
                         false
                     }
-                    _ => true,
+                    InvalidTransactionError::PriorityFeeMoreThenMaxFee |
+                    InvalidTransactionError::GasTooLow |
+                    InvalidTransactionError::GasTooHigh |
+                    InvalidTransactionError::TipAboveFeeCap => {
+                        // these are technically not invalid
+                        false
+                    }
+                    InvalidTransactionError::FeeCapTooLow |
+                    InvalidTransactionError::MaxFeeLessThenBaseFee => {
+                        // dynamic, but not used during validation
+                        false
+                    }
+                    InvalidTransactionError::Eip2930Disabled |
+                    InvalidTransactionError::Eip1559Disabled => {
+                        // settings
+                        false
+                    }
+                    InvalidTransactionError::OldLegacyChainId => true,
+                    InvalidTransactionError::ChainIdMismatch => true,
+                    InvalidTransactionError::GasUintOverflow => true,
+                    InvalidTransactionError::TxTypeNotSupported => true,
+                    InvalidTransactionError::SignerAccountHasBytecode => true,
                 }
             }
             InvalidPoolTransactionError::ExceedsGasLimit(_, _) => true,

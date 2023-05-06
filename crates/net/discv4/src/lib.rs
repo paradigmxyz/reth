@@ -1491,7 +1491,7 @@ impl Discv4Service {
                 match event {
                     IngressEvent::RecvError(_) => {}
                     IngressEvent::BadPacket(from, err, data) => {
-                        warn!(target : "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
+                        debug!(target : "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
                     }
                     IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => {
                         trace!( target : "discv4",  r#type=?msg.msg_type(), from=?remote_addr,"received packet");
@@ -1602,7 +1602,7 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
         let res = udp.recv_from(&mut buf).await;
         match res {
             Err(err) => {
-                warn!(target : "discv4",  ?err, "Failed to read datagram.");
+                debug!(target : "discv4",  ?err, "Failed to read datagram.");
                 send(IngressEvent::RecvError(err)).await;
             }
             Ok((read, remote_addr)) => {
@@ -1611,13 +1611,13 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                     Ok(packet) => {
                         if packet.node_id == local_id {
                             // received our own message
-                            warn!(target : "discv4", ?remote_addr,  "Received own packet.");
+                            debug!(target : "discv4", ?remote_addr,  "Received own packet.");
                             continue
                         }
                         send(IngressEvent::Packet(remote_addr, packet)).await;
                     }
                     Err(err) => {
-                        warn!( target : "discv4",  ?err,"Failed to decode packet");
+                        debug!( target : "discv4",  ?err,"Failed to decode packet");
                         send(IngressEvent::BadPacket(remote_addr, err, packet.to_vec())).await
                     }
                 }

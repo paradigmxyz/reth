@@ -492,7 +492,7 @@ pub fn verify_receipt<'a>(
 ) -> Result<(), Error> {
     // Check receipts root.
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts_with_bloom.iter());
+    let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
         return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
     }
@@ -601,7 +601,8 @@ mod tests {
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
-        post_state::Storage, AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
+        post_state::{ChangedStorage, Storage},
+        AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
@@ -799,8 +800,8 @@ mod tests {
 
         // Clone and sort to make the test deterministic
         assert_eq!(
-            post_state.account_changes(),
-            &BTreeMap::from([(
+            post_state.account_changes().inner,
+            BTreeMap::from([(
                 block.number,
                 BTreeMap::from([
                     // New account
@@ -814,12 +815,12 @@ mod tests {
             "Account changeset did not match"
         );
         assert_eq!(
-            post_state.storage_changes(),
-            &BTreeMap::from([(
+            post_state.storage_changes().inner,
+            BTreeMap::from([(
                 block.number,
                 BTreeMap::from([(
                     account1,
-                    Storage {
+                    ChangedStorage {
                         wiped: false,
                         // Slot 1 changed from 0 to 2
                         storage: BTreeMap::from([(U256::from(1), U256::ZERO)])
@@ -834,7 +835,10 @@ mod tests {
             post_state.storage(),
             &BTreeMap::from([(
                 account1,
-                Storage { wiped: false, storage: BTreeMap::from([(U256::from(1), U256::from(2))]) }
+                Storage {
+                    times_wiped: 0,
+                    storage: BTreeMap::from([(U256::from(1), U256::from(2))])
+                }
             )]),
             "Should have changed 1 storage slot"
         );
@@ -992,7 +996,7 @@ mod tests {
             "Selfdestructed account should have been deleted"
         );
         assert!(
-            out.storage().get(&address_selfdestruct).unwrap().wiped,
+            out.storage().get(&address_selfdestruct).unwrap().wiped(),
             "Selfdestructed account should have its storage wiped"
         );
     }
