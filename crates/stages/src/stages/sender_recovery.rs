@@ -136,7 +136,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             }
         }
 
-        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
     }
 

@@ -141,7 +141,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
 
         // Progress tracking
-        let mut progress = start_block;
+        let mut stage_progress = start_block;
 
         // Execute block range
         let mut state = PostState::default();
@@ -172,13 +172,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size() as u64) {
-                info!(target: "sync::stages::execution", ?block_number, "Threshold hit, committing.");
                 break
             }
 
             // Merge state changes
             state.extend(block_state);
-            progress = block_number;
+            stage_progress = block_number;
         }
 
         // Write remaining changes
@@ -186,7 +185,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
         state.write_to_db(&**tx)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
-        Ok(ExecOutput { stage_progress: progress, done: progress == max_block })
+
+        let is_final_range = stage_progress == max_block;
+        info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
+        Ok(ExecOutput { stage_progress, done: is_final_range })
     }
 }
 

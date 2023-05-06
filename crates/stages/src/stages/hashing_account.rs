@@ -255,6 +255,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             if next_address.is_some() {
                 // from block is correct here as were are iteration over state for this
                 // particular block
+                info!(target: "sync::stages::hashing_account", stage_progress = input.stage_progress(), is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
             }
         } else {
@@ -269,7 +270,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             tx.insert_account_for_hashing(accounts.into_iter())?;
         }
 
-        info!(target: "sync::stages::hashing_account", "Stage finished");
+        info!(target: "sync::stages::hashing_account", stage_progress = input.previous_stage_progress(), is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
     }
 

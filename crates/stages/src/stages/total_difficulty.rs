@@ -81,7 +81,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
                 .map_err(|error| StageError::Validation { block: header.number, error })?;
             cursor_td.append(block_number, td.into())?;
         }
-        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
     }
 

@@ -46,7 +46,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         // Insert changeset to history index
         tx.insert_account_history_index(indices)?;
 
-        info!(target: "sync::stages::index_account_history", "Stage finished");
+        info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 

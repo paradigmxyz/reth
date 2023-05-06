@@ -143,7 +143,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
-        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput { done: is_final_range, stage_progress: end_block })
     }
 

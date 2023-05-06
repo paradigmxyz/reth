@@ -46,7 +46,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;
         tx.insert_storage_history_index(indices)?;
 
-        info!(target: "sync::stages::index_storage_history", "Stage finished");
+        info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 
