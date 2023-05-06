@@ -203,9 +203,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .execute_and_verify_receipt(&block, td, Some(senders))
                 .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
 
-            // Update cache
-            self.update_cache(&block_state);
-
             // Gas metrics
             self.metrics
                 .mgas_processed_total
@@ -224,6 +221,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 info!(target: "sync::stages::execution", ?block_number, "Threshold hit, committing.");
                 break
             }
+
+            // Update cache
+            self.update_cache(&block_state);
 
             // Merge state changes
             state.extend(block_state);
