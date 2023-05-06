@@ -331,7 +331,7 @@ where
                 if matches!(err, mpsc::error::TrySendError::Full(_)) {
                     warn!(
                         target: "txpool",
-                        "[{:?}] dropping full ready transaction listener",
+                        "[{:?}] failed to send pending tx; channel full",
                         ready,
                     );
                     true
