@@ -17,6 +17,7 @@
 //!     on [PayloadAttributes](reth_rpc_types::engine::PayloadAttributes).
 //!   - [PayloadJob]: a type that can yields (better) payloads over time.
 
+pub mod database;
 pub mod error;
 mod metrics;
 mod payload;
