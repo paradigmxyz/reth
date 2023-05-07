@@ -2,7 +2,9 @@
 //! previous blocks.
 use futures::StreamExt;
 use reth_interfaces::Result;
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, H256, U256};
+use reth_primitives::{
+    constants::GWEI_TO_WEI, BlockHashOrNumber, BlockId, BlockNumberOrTag, H256, U256,
+};
 use reth_provider::{BlockProvider, ProviderError};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use serde::{Deserialize, Serialize};
@@ -45,7 +47,6 @@ pub struct GasPriceOracleConfig {
     /// The maximum number of blocks to keep in the cache
     pub max_block_history: u64,
 
-    // TODO: not sure if necessary, much of this is a more direct port
     /// The default gas price to use if there are no blocks in the cache
     pub default: Option<U256>,
 
@@ -100,7 +101,7 @@ impl GasPriceOracle {
         let service = GasPriceOracleService {
             client,
             oracle_config,
-            last_price: None,
+            last_price: Default::default(),
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
@@ -156,7 +157,7 @@ pub(crate) struct GasPriceOracleService<Client, Tasks> {
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
     /// The latest calculated price and its block hash
-    last_price: Option<GasPriceOracleResult>,
+    last_price: GasPriceOracleResult,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<GasPriceAction>,
     /// Receiver half of the action channel.
@@ -183,19 +184,9 @@ where
             .ok_or(ProviderError::BlockHash { block_hash: header_hash })?;
 
         // if we have stored a last price, then we check whether or not it was for the same head
-        if let Some(price) = &self.last_price {
-            if price.block_hash == header_hash {
-                return Ok(price.price)
-            }
+        if self.last_price.block_hash == header_hash {
+            return Ok(self.last_price.price)
         }
-
-        // TODO: edge case - self.last_price is None and there are lots of empty transactions - how
-        // does geth handle this? because lastPrice in the geth code is a *big.Int, it is
-        // really more like an Option<U256> in that it can be nil
-        //
-        // When geth receives an empty response from getBlockValues, it populates the current
-        // rewards value with lastPrice, which could be nil?
-        let last_price = self.last_price.clone().expect("last price should be set");
 
         // if all responses are empty, then we can return a maximum of 2*check_block blocks' worth
         // of prices
@@ -213,7 +204,7 @@ where
                 .get_block_values(current_block, SAMPLE_NUMBER as usize)?
                 .expect("this means we couldn't find the block");
             if block_values.is_empty() {
-                results.push(Some(U256::from(last_price.price)));
+                results.push(Some(U256::from(self.last_price.price)));
             } else {
                 results.extend(block_values);
                 populated_blocks += 1;
@@ -227,7 +218,7 @@ where
         }
 
         // sort results then take the configured percentile result
-        let mut price = last_price.price;
+        let mut price = self.last_price.price;
         if !results.is_empty() {
             results.sort_unstable();
             // TODO - error handling
@@ -242,7 +233,7 @@ where
             price = max_price;
         }
 
-        self.last_price = Some(GasPriceOracleResult { block_hash: header_hash, price });
+        self.last_price = GasPriceOracleResult { block_hash: header_hash, price };
 
         Ok(price)
     }
@@ -262,7 +253,7 @@ where
                     if tx.effective_gas_tip(block.base_fee_per_gas).map(U256::from) <
                         Some(ignore_under)
                     {
-                        return true
+                        return false
                     }
                 }
 
@@ -272,7 +263,7 @@ where
                     Some(addr) => addr == block.beneficiary,
                     // invalid signature - should not happen, but ignore?
                     // TODO: figure out this case
-                    None => true,
+                    None => false,
                 }
             })
             .collect::<Vec<_>>();
@@ -286,8 +277,8 @@ where
         });
 
         Ok(Some(
-            txs[..limit]
-                .iter()
+            txs.iter_mut()
+                .take(limit)
                 .map(|tx| tx.effective_gas_tip(block.base_fee_per_gas).map(U256::from))
                 .collect(),
         ))
@@ -327,6 +318,12 @@ pub struct GasPriceOracleResult {
     pub block_hash: H256,
     /// The price that the oracle calculated
     pub price: U256,
+}
+
+impl Default for GasPriceOracleResult {
+    fn default() -> Self {
+        Self { block_hash: H256::zero(), price: U256::from(1 * GWEI_TO_WEI) }
+    }
 }
 
 #[cfg(test)]
