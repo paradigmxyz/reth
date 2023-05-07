@@ -373,7 +373,7 @@ mod tests {
         let eth_api = EthApi::new(
             NoopProvider::default(),
             testing_pool(),
-            NoopNetwork::default(),
+            NoopNetwork,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 
@@ -457,7 +457,7 @@ mod tests {
         let eth_api = EthApi::new(
             mock_provider,
             testing_pool(),
-            NoopNetwork::default(),
+            NoopNetwork,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 
