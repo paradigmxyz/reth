@@ -180,7 +180,7 @@ where
         let header = self
             .client
             .header_by_hash_or_number(BlockHashOrNumber::Hash(header_hash))?
-            .expect("a latest header always exists");
+            .ok_or(ProviderError::BlockHash { block_hash: header_hash })?;
 
         // if we have stored a last price, then we check whether or not it was for the same head
         if let Some(price) = &self.last_price {
