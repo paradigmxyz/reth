@@ -821,7 +821,7 @@ where
                 self.pool.clone(),
                 self.network.clone(),
                 cache.clone(),
-                gas_oracle.clone(),
+                gas_oracle,
             );
             let filter = EthFilter::new(
                 self.client.clone(),
