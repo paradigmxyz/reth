@@ -110,6 +110,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Returns stats about the size of pool.
     pub(crate) fn size(&self) -> PoolSize {
         PoolSize {
+            total_transactions: self.len(),
+            total_size: self.pending_pool.size() +
+                self.basefee_pool.size() +
+                self.queued_pool.size(),
             pending: self.pending_pool.len(),
             pending_size: self.pending_pool.size(),
             basefee: self.basefee_pool.len(),
@@ -252,6 +256,17 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Process the sub-pool updates
         let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
+
+        // Compute pool metrics
+        let stats = self.size();
+        self.metrics.total_number_transactions.set(stats.total_transactions as f64);
+        self.metrics.total_size_bytes.set(stats.total_size as f64);
+        self.metrics.pending_pool_length.set(stats.pending as f64);
+        self.metrics.pending_sub_pool_size_bytes.set(stats.pending_size as f64);
+        self.metrics.basefee_pool_length.set(stats.basefee as f64);
+        self.metrics.basefee_sub_pool_size_bytes.set(stats.basefee_size as f64);
+        self.metrics.queued_pool_length.set(stats.queued as f64);
+        self.metrics.queued_sub_pool_size_bytes.set(stats.queued_size as f64);
 
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
     }
