@@ -227,6 +227,13 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Process the sub-pool updates
         let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
+        // Update the metrics
+        self.metrics.total_base_fee_pooled_transactions.set(self.basefee_pool.len() as f64);
+        self.metrics.total_num_pending_transactions.set(self.pending_pool.len() as f64);
+        self.metrics.total_num_queued_transactions.set(self.queued_pool.len() as f64);
+        self.metrics.total_num_transactions.set(self.len() as f64);
+        self.metrics.total_pool_size.set(self.size().total_txs_size() as f64);
+
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
     }
 

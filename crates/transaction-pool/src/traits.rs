@@ -524,6 +524,13 @@ pub struct PoolSize {
     pub queued_size: usize,
 }
 
+impl PoolSize {
+    /// Returns the total size of transactions in the pool.
+    pub fn total_txs_size(&self) -> usize {
+        self.pending_size + self.basefee_size + self.queued_size
+    }
+}
+
 /// Represents the current status of the pool.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockInfo {
