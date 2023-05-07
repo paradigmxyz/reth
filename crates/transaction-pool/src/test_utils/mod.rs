@@ -43,6 +43,6 @@ impl<T: PoolTransaction> TransactionValidator for NoopTransactionValidator<T> {
 
 impl<T> Default for NoopTransactionValidator<T> {
     fn default() -> Self {
-        NoopTransactionValidator(PhantomData::default())
+        NoopTransactionValidator(PhantomData)
     }
 }

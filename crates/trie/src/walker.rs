@@ -38,7 +38,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             trie_updates: None,
-            __phantom: PhantomData::default(),
+            __phantom: PhantomData,
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -59,7 +59,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             stack,
             can_skip_current_node: false,
             trie_updates: None,
-            __phantom: PhantomData::default(),
+            __phantom: PhantomData,
         };
         this.update_skip_node();
         this
