@@ -11,8 +11,8 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Block, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash,
-    TxNumber, Withdrawal, H256, U256,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
@@ -25,10 +25,11 @@ use std::{
 };
 use tracing::trace;
 
+mod chain_info;
 mod database;
 mod post_state_provider;
 mod state;
-use crate::traits::BlockSource;
+use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
 
@@ -43,12 +44,14 @@ pub struct BlockchainProvider<DB, Tree> {
     database: ShareableDatabase<DB>,
     /// The blockchain tree instance.
     tree: Tree,
+    /// Tracks the chain info wrt forkchoice updates
+    chain_info: ChainInfoTracker,
 }
 
 impl<DB, Tree> BlockchainProvider<DB, Tree> {
     /// Create new  provider instance that wraps the database and the blockchain tree.
-    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Self {
-        Self { database, tree }
+    pub fn new(database: ShareableDatabase<DB>, tree: Tree, latest: SealedHeader) -> Self {
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
     }
 }
 
