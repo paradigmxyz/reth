@@ -25,7 +25,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
 };
-use tracing::info;
+use tracing::{debug, info};
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Default)]
@@ -153,13 +153,16 @@ impl RpcServerArgs {
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 
+        let module_config = self.transport_rpc_module_config();
+        debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
+
         let (rpc_modules, auth_module) = RpcModuleBuilder::default()
             .with_client(client)
             .with_pool(pool)
             .with_network(network)
             .with_events(events)
             .with_executor(executor)
-            .build_with_auth_server(self.transport_rpc_module_config(), engine_api);
+            .build_with_auth_server(module_config, engine_api);
 
         let server_config = self.rpc_server_config();
         let has_server = server_config.has_server();

@@ -514,6 +514,16 @@ impl FromStr for RpcModuleSelection {
     }
 }
 
+impl fmt::Display for RpcModuleSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.iter_selection().map(|s| s.to_string()).collect::<Vec<_>>().join(", ")
+        )
+    }
+}
+
 /// Represents RPC modules that are supported by reth
 #[derive(
     Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, EnumString, Deserialize,
@@ -1248,6 +1258,11 @@ pub struct TransportRpcModules<Context> {
 // === impl TransportRpcModules ===
 
 impl TransportRpcModules<()> {
+    /// Returns the [TransportRpcModuleConfig] used to configure this instance.
+    pub fn module_config(&self) -> &TransportRpcModuleConfig {
+        &self.config
+    }
+
     /// Convenience function for starting a server
     pub async fn start_server(self, builder: RpcServerConfig) -> Result<RpcServerHandle, RpcError> {
         builder.start(self).await
