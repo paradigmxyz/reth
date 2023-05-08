@@ -102,6 +102,7 @@ pub(crate) mod size;
 pub(crate) mod state;
 pub mod txpool;
 mod update;
+pub use listener::TransactionEvents;
 
 /// Transaction pool internals.
 pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
@@ -290,6 +291,19 @@ where
                 Err(PoolError::Other(*tx.hash(), err))
             }
         }
+    }
+
+    pub(crate) fn add_transaction_and_subscribe(
+        &self,
+        origin: TransactionOrigin,
+        tx: TransactionValidationOutcome<T::Transaction>,
+    ) -> PoolResult<TransactionEvents> {
+        let listener = {
+            let mut listener = self.event_listener.write();
+            listener.subscribe(tx.tx_hash())
+        };
+        self.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")?;
+        Ok(listener)
     }
 
     /// Adds all transactions in the iterator to the pool, returning a list of results.
