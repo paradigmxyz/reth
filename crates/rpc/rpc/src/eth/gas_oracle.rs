@@ -197,8 +197,7 @@ where
             .collect::<Vec<_>>();
 
         // now do the sort
-        // TODO: could we cache tx effective_gas_tip? might be a lot of complexity for little use
-        txs.sort_by(|first, second| {
+        txs.sort_unstable_by(|first, second| {
             first
                 .effective_gas_tip(block.base_fee_per_gas)
                 .cmp(&second.effective_gas_tip(block.base_fee_per_gas))
