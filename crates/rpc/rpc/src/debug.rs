@@ -27,8 +27,7 @@ use reth_rpc_types::{
     BlockError, CallRequest, RichBlock,
 };
 use revm::primitives::Env;
-use revm_primitives::{BlockEnv, CfgEnv};
-use revm_primitives::db::DatabaseCommit;
+use revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv};
 
 /// `debug` API implementation.
 ///
@@ -82,7 +81,8 @@ where
                 results.push(TraceResult::Success { result });
 
                 if transactions.peek().is_some() {
-                    // need to apply the state changes of this transaction before executing the next transaction
+                    // need to apply the state changes of this transaction before executing the next
+                    // transaction
                     db.commit(state_changes)
                 }
             }
@@ -163,7 +163,7 @@ where
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
 
             let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-            trace_transaction(opts, env, &mut db).map(|(trace,_)|trace)
+            trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
         })
     }
 
@@ -358,7 +358,7 @@ fn trace_transaction(
             GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                 GethDebugBuiltInTracerType::FourByteTracer => {
                     let mut inspector = FourByteInspector::default();
-                    let (res,_) = inspect(db, env, &mut inspector)?;
+                    let (res, _) = inspect(db, env, &mut inspector)?;
                     return Ok((FourByteFrame::from(inspector).into(), res.state))
                 }
                 GethDebugBuiltInTracerType::CallTracer => {
@@ -367,7 +367,9 @@ fn trace_transaction(
                 GethDebugBuiltInTracerType::PreStateTracer => {
                     todo!()
                 }
-                GethDebugBuiltInTracerType::NoopTracer => Ok((NoopFrame::default().into(), Default::default())),
+                GethDebugBuiltInTracerType::NoopTracer => {
+                    Ok((NoopFrame::default().into(), Default::default()))
+                }
             },
             GethDebugTracerType::JsTracer(_) => {
                 Err(EthApiError::Unsupported("javascript tracers are unsupported."))
