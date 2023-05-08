@@ -23,7 +23,7 @@ use reth_transaction_pool::TransactionPool;
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 use tracing::{debug, info};
 
@@ -107,14 +107,17 @@ impl RpcServerArgs {
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
     /// jwt secret in case the `auth_jwtsecret` argument is not provided.
     pub(crate) fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        let arg = self.auth_jwtsecret.as_ref();
-        let path: Option<&Path> = arg.map(|p| p.as_ref());
-        match path {
-            Some(fpath) => JwtSecret::from_file(fpath),
+        match self.auth_jwtsecret.as_ref() {
+            Some(fpath) => {
+                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                JwtSecret::from_file(fpath)
+            }
             None => {
                 if default_jwt_path.exists() {
+                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
                     JwtSecret::from_file(&default_jwt_path)
                 } else {
+                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
                     JwtSecret::try_create(&default_jwt_path)
                 }
             }
