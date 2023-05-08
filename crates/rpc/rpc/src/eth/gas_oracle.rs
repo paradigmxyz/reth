@@ -8,6 +8,8 @@ use reth_provider::{BlockProvider, ProviderError};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use super::cache::EthStateCache;
+
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: u32 = 3;
 
@@ -62,6 +64,8 @@ impl Default for GasPriceOracleConfig {
 pub struct GasPriceOracle<Client> {
     /// The type used to subscribe to block events and get block info
     client: Client,
+    /// The cache for blocks
+    cache: EthStateCache,
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
     /// The latest calculated price and its block hash
@@ -73,8 +77,8 @@ where
     Client: BlockProvider + 'static,
 {
     /// Creates and returns the [GasPriceOracle].
-    pub fn new(client: Client, oracle_config: GasPriceOracleConfig) -> Self {
-        Self { client, oracle_config, last_price: Default::default() }
+    pub fn new(client: Client, oracle_config: GasPriceOracleConfig, cache: EthStateCache) -> Self {
+        Self { client, oracle_config, last_price: Default::default(), cache }
     }
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
@@ -147,6 +151,7 @@ where
     }
 
     fn get_block_values(&self, block_num: u64, limit: usize) -> Result<Option<Vec<Option<U256>>>> {
+        // TODO: first check the cache
         let block = match self.client.block_by_number(block_num)? {
             Some(block) => block,
             None => return Ok(None),

@@ -156,12 +156,13 @@ mod tests {
         // === Noop ===
         let pool = testing_pool();
 
+        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
         let eth_api = EthApi::new(
             NoopProvider::default(),
             pool.clone(),
             (),
-            EthStateCache::spawn(NoopProvider::default(), Default::default()),
-            GasPriceOracle::new(NoopProvider::default(), Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -175,12 +176,13 @@ mod tests {
         let account = ExtendedAccount::new(0, U256::ZERO).extend_storage(storage);
         mock_provider.add_account(address, account);
 
+        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
         let eth_api = EthApi::new(
             mock_provider.clone(),
             pool,
             (),
-            EthStateCache::spawn(mock_provider.clone(), Default::default()),
-            GasPriceOracle::new(mock_provider, Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(mock_provider, Default::default(), cache),
         );
 
         let storage_key: U256 = storage_key.into();
