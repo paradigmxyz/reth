@@ -24,7 +24,7 @@ use reth_rpc_types::{
     BlockError, CallRequest, Index, TransactionInfo,
 };
 use revm::primitives::Env;
-use revm_primitives::ResultAndState;
+use revm_primitives::{db::DatabaseCommit, ExecutionResult};
 use std::collections::HashSet;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -211,7 +211,7 @@ where
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
-        F: Fn(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
+        F: Fn(TransactionInfo, TracingInspector, ExecutionResult) -> EthResult<R> + Send,
     {
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.eth_api.evm_env_at(block_id),
@@ -236,7 +236,9 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = SubState::new(State::new(state));
 
-                for (idx, tx) in transactions.into_iter().enumerate() {
+                let mut transactions = transactions.into_iter().enumerate().peekable();
+
+                while let Some((idx, tx)) = transactions.next() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx_info = TransactionInfo {
                         hash: Some(tx.hash()),
@@ -251,7 +253,15 @@ where
 
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    results.push(f(tx_info, inspector, res)?);
+                    results.push(f(tx_info, inspector, res.result)?);
+
+                    // need to apply the state changes of this transaction before executing the next
+                    // transaction
+                    if transactions.peek().is_some() {
+                        // need to apply the state changes of this transaction before executing the
+                        // next transaction
+                        db.commit(res.state)
+                    }
                 }
 
                 Ok(results)
@@ -286,8 +296,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> EthResult<Option<Vec<TraceResultsWithTransactionHash>>> {
         self.trace_block_with(block_id, tracing_config(&trace_types), |tx_info, inspector, res| {
-            let full_trace =
-                inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
+            let full_trace = inspector.into_parity_builder().into_trace_results(res, &trace_types);
             let trace = TraceResultsWithTransactionHash {
                 transaction_hash: tx_info.hash.expect("tx hash is set"),
                 full_trace,
