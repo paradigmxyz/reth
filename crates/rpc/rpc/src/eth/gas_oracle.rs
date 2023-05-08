@@ -32,10 +32,10 @@ pub struct GasPriceOracleConfig {
     /// The maximum number of headers to keep in the cache
     pub max_header_history: u64,
 
-    /// The maximum number of blocks to keep in the cache
+    /// The maximum number of blocks for estimating gas price
     pub max_block_history: u64,
 
-    /// The default gas price to use if there are no blocks in the cache
+    /// The default gas price to use if there are no blocks to use
     pub default: Option<U256>,
 
     /// The maximum gas price to use for the estimate
@@ -59,7 +59,7 @@ impl Default for GasPriceOracleConfig {
     }
 }
 
-/// TODO: doc comment
+/// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
 pub struct GasPriceOracle<Client> {
     /// The type used to subscribe to block events and get block info
@@ -189,8 +189,7 @@ where
                 let sender = tx.recover_signer();
                 match sender {
                     Some(addr) => addr == block.beneficiary,
-                    // invalid signature - should not happen, but ignore?
-                    // TODO: figure out this case
+                    // TODO: figure out an error for this case or ignore
                     None => false,
                 }
             })
