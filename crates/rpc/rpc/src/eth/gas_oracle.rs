@@ -1,14 +1,14 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
-use reth_interfaces::Result;
+use super::{cache::EthStateCache, error::EthResult};
+use reth_interfaces::{Error as GeneralError, Result};
 use reth_primitives::{
     constants::GWEI_TO_WEI, BlockHashOrNumber, BlockId, BlockNumberOrTag, H256, U256,
 };
 use reth_provider::{BlockProvider, ProviderError};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::sync::Mutex;
-
-use super::cache::EthStateCache;
 
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: u32 = 3;
@@ -59,6 +59,14 @@ impl Default for GasPriceOracleConfig {
     }
 }
 
+/// An error that can occur when calculating the gas price estimates
+#[derive(Debug, Clone, Error)]
+pub enum GasPriceOracleError {
+    /// A transaction failed sender recovery
+    #[error("transaction failed sender recovery")]
+    InvalidSignature,
+}
+
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
 pub struct GasPriceOracle<Client> {
@@ -82,7 +90,7 @@ where
     }
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
-    pub async fn suggest_tip_cap(&self) -> Result<U256> {
+    pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
         // TODO: we really shouldn't have this be None, but let's get rid of these expects?
         let header_hash = self
             .client
@@ -91,7 +99,7 @@ where
         let header = self
             .client
             .header_by_hash_or_number(BlockHashOrNumber::Hash(header_hash))?
-            .ok_or(ProviderError::BlockHash { block_hash: header_hash })?;
+            .ok_or(GeneralError::Provider(ProviderError::BlockHash { block_hash: header_hash }))?;
 
         let mut last_price = self.last_price.lock().await;
 
