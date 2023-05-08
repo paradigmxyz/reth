@@ -113,7 +113,8 @@ where
         for _ in 0..self.oracle_config.max_block_history * 2 {
             // TODO - error handling
             let block_values = self
-                .get_block_values(current_block, SAMPLE_NUMBER as usize)?
+                .get_block_values(current_block, SAMPLE_NUMBER as usize)
+                .await?
                 .expect("this means we couldn't find the block");
             if block_values.is_empty() {
                 results.push(Some(U256::from(last_price.price)));
@@ -150,11 +151,25 @@ where
         Ok(price)
     }
 
-    fn get_block_values(&self, block_num: u64, limit: usize) -> Result<Option<Vec<Option<U256>>>> {
-        // TODO: first check the cache
-        let block = match self.client.block_by_number(block_num)? {
-            Some(block) => block,
+    async fn get_block_values(
+        &self,
+        block_num: u64,
+        limit: usize,
+    ) -> Result<Option<Vec<Option<U256>>>> {
+        // TODO: we could cache num -> hash as well as long as we invalidate the cache between
+        // forkchoice updates
+        let block_hash = match self.client.block_hash(block_num)? {
+            Some(num) => num,
             None => return Ok(None),
+        };
+
+        // check the cache
+        let block = match self.cache.get_block(block_hash).await? {
+            Some(block) => block,
+            None => match self.client.block_by_number(block_num)? {
+                Some(block) => block,
+                None => return Ok(None),
+            },
         };
 
         // sort the transactions by effective tip
