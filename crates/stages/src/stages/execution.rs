@@ -162,6 +162,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .mgas_processed_total
                 .increment(block.header.gas_used as f64 / MGAS_TO_GAS as f64);
 
+            // Merge state changes
+            state.extend(block_state);
+            progress = block_number;
+
             // Write history periodically to free up memory
             if self.thresholds.should_write_history(state.changeset_size() as u64) {
                 info!(target: "sync::stages::execution", ?block_number, "Writing history.");
@@ -175,10 +179,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 info!(target: "sync::stages::execution", ?block_number, "Threshold hit, committing.");
                 break
             }
-
-            // Merge state changes
-            state.extend(block_state);
-            progress = block_number;
         }
 
         // Write remaining changes
