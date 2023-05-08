@@ -1,9 +1,39 @@
 //! Listeners for the transaction-pool
 
 use crate::{pool::events::TransactionEvent, traits::PropagateKind};
+use futures_util::Stream;
 use reth_primitives::{TxHash, H256};
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::mpsc::UnboundedSender;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::Arc,
+};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+
+/// A Stream that receives [TransactionEvent] for the transactions
+#[derive(Debug)]
+#[must_use = "streams do nothing unless polled"]
+pub struct TransactionEvents {
+    hash: TxHash,
+    events: UnboundedReceiver<TransactionEvent>,
+}
+
+impl TransactionEvents {
+    /// The hash for this transaction
+    pub fn hash(&self) -> TxHash {
+        self.hash
+    }
+}
+
+impl Stream for TransactionEvents {
+    type Item = TransactionEvent;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.get_mut().events.poll_recv(cx)
+    }
+}
 
 type EventBroadcast = UnboundedSender<TransactionEvent>;
 
@@ -33,6 +63,21 @@ impl PoolEventBroadcast {
         if is_done {
             self.broadcasters.remove(hash);
         }
+    }
+
+    /// Create a new subscription for the given transaction hash.
+    pub(crate) fn subscribe(&mut self, tx_hash: TxHash) -> TransactionEvents {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        match self.broadcasters.entry(tx_hash) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().senders.push(tx);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(PoolEventBroadcaster { is_done: false, senders: vec![tx] });
+            }
+        };
+        TransactionEvents { hash: tx_hash, events: rx }
     }
 
     /// Notify listeners about a transaction that was added to the pending queue.

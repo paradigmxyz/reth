@@ -1,4 +1,8 @@
-use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
+use crate::{
+    error::PoolResult,
+    pool::{state::SubPool, TransactionEvents},
+    validate::ValidPoolTransaction,
+};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, H256, U256,
@@ -59,6 +63,18 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         self.add_transactions(TransactionOrigin::External, transactions).await
     }
+
+    /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
+    ///
+    /// This is the same as [TransactionPool::add_transaction] but returns an event stream for the
+    /// given transaction.
+    ///
+    /// Consumer: Custom
+    async fn add_transaction_and_subscribe(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> PoolResult<TransactionEvents>;
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
