@@ -50,7 +50,7 @@ pub(crate) fn generate_flag_struct(
     ];
 
     let docs =
-        format!("Fieldset that facilitates compacting the parent type. Unused bits: {unused_bits}");
+        format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
 
     // Generate the flag struct.
     quote! {
