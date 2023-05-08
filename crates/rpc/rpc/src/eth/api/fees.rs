@@ -30,7 +30,7 @@ where
 
     /// Returns a suggestion for the priority fee (the tip)
     pub(crate) async fn suggested_priority_fee(&self) -> EthResult<U256> {
-        Ok(self.gas_oracle().suggest_tip().await?)
+        Ok(self.gas_oracle().suggest_tip_cap().await?)
     }
 
     /// Reports the fee history, for the given amount of blocks, up until the newest block

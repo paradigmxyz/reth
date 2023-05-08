@@ -77,7 +77,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
         pool: Pool,
         network: Network,
         eth_cache: EthStateCache,
-        gas_oracle: GasPriceOracle,
+        gas_oracle: GasPriceOracle<Client>,
     ) -> Self {
         let inner = EthApiInner {
             client,
@@ -101,7 +101,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     }
 
     /// Returns the gas oracle frontend
-    pub(crate) fn gas_oracle(&self) -> &GasPriceOracle {
+    pub(crate) fn gas_oracle(&self) -> &GasPriceOracle<Client> {
         &self.inner.gas_oracle
     }
 
@@ -258,5 +258,5 @@ struct EthApiInner<Client, Pool, Network> {
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions
-    gas_oracle: GasPriceOracle,
+    gas_oracle: GasPriceOracle<Client>,
 }

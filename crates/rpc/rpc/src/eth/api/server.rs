@@ -384,7 +384,7 @@ mod tests {
             testing_pool(),
             NoopNetwork,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
-            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
+            GasPriceOracle::new(NoopProvider::default(), Default::default()),
         );
 
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
@@ -465,11 +465,11 @@ mod tests {
         gas_used_ratios.pop();
 
         let eth_api = EthApi::new(
-            mock_provider,
+            mock_provider.clone(),
             testing_pool(),
             NoopNetwork,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
-            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
+            GasPriceOracle::new(mock_provider, Default::default()),
         );
 
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(

@@ -1,23 +1,12 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
-use futures::StreamExt;
 use reth_interfaces::Result;
 use reth_primitives::{
     constants::GWEI_TO_WEI, BlockHashOrNumber, BlockId, BlockNumberOrTag, H256, U256,
 };
 use reth_provider::{BlockProvider, ProviderError};
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use serde::{Deserialize, Serialize};
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
-    oneshot,
-};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio::sync::Mutex;
 
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: u32 = 3;
@@ -27,9 +16,6 @@ pub const DEFAULT_MAX_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 
 
 /// The default minimum gas price, under which the sample will be ignored
 pub const DEFAULT_IGNORE_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
-
-/// The type that can send the response to the requested max priority fee.
-type MaxPriorityFeeSender = oneshot::Sender<Result<U256>>;
 
 /// Settings for the [GasPriceOracle]
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -71,108 +57,28 @@ impl Default for GasPriceOracleConfig {
     }
 }
 
-/// Provides async access to the gas price oracle.
-///
-/// This is the frontend for the async gas price oracle which manages gas price estimates on a
-/// different task.
-#[derive(Debug, Clone)]
-pub struct GasPriceOracle {
-    to_service: UnboundedSender<GasPriceAction>,
-}
-
-/// All message variants sent to the oracle through the channel
+/// TODO: doc comment
 #[derive(Debug)]
-pub enum GasPriceAction {
-    /// Command to suggest the max priority fee
-    SuggestMaxPriorityFee {
-        /// The channel for sending back the max priority fee response
-        response_tx: MaxPriorityFeeSender,
-    },
-}
-
-impl GasPriceOracle {
-    /// Creates and returns the [GasPriceOracle] frontend.
-    fn create<Client, Tasks>(
-        client: Client,
-        action_task_spawner: Tasks,
-        oracle_config: GasPriceOracleConfig,
-    ) -> (Self, GasPriceOracleService<Client, Tasks>) {
-        let (to_service, rx) = unbounded_channel();
-        let service = GasPriceOracleService {
-            client,
-            oracle_config,
-            last_price: Default::default(),
-            action_tx: to_service.clone(),
-            action_rx: UnboundedReceiverStream::new(rx),
-            action_task_spawner,
-        };
-        let oracle = Self { to_service };
-        (oracle, service)
-    }
-
-    /// Creates a new async gas oracle service task and spawns it to a new task via [tokio::spawn].
-    ///
-    /// See also [Self::spawn_with]
-    pub fn spawn<Client>(client: Client, config: GasPriceOracleConfig) -> Self
-    where
-        Client: BlockProvider + Clone + Unpin + 'static,
-    {
-        Self::spawn_with(client, config, TokioTaskExecutor::default())
-    }
-
-    /// Creates a new async gas oracle service task and spawns it to a new task via the given
-    /// spawner.
-    pub fn spawn_with<Client, Tasks>(
-        client: Client,
-        config: GasPriceOracleConfig,
-        executor: Tasks,
-    ) -> Self
-    where
-        Client: BlockProvider + Clone + Unpin + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-    {
-        let (this, service) = Self::create(client, executor.clone(), config);
-        executor.spawn_critical("eth gas price oracle", Box::pin(service));
-        this
-    }
-
-    /// Requests the suggested tip for the latest block.
-    pub(crate) async fn suggest_tip(&self) -> Result<U256> {
-        let (response_tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(GasPriceAction::SuggestMaxPriorityFee { response_tx });
-        // TODO: not sure if this is the right error, just modelling after the cache
-        rx.await.map_err(|_| ProviderError::GasPriceOracleServiceUnavailable)?
-    }
-}
-
-/// A task that manages gas price estimates.
-///
-/// Caution: The channel for the data is _unbounded_ it is assumed that this is mainly used by the
-/// [EthApi](crate::EthApi) which is typically invoked by the RPC server, which already uses permits
-/// to limit concurrent requests.
-#[must_use = "Type does nothing unless spawned"]
-pub(crate) struct GasPriceOracleService<Client, Tasks> {
+pub struct GasPriceOracle<Client> {
     /// The type used to subscribe to block events and get block info
     client: Client,
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
     /// The latest calculated price and its block hash
-    last_price: GasPriceOracleResult,
-    /// Sender half of the action channel.
-    action_tx: UnboundedSender<GasPriceAction>,
-    /// Receiver half of the action channel.
-    action_rx: UnboundedReceiverStream<GasPriceAction>,
-    /// The type that's used to spawn tasks that do the actual work
-    action_task_spawner: Tasks,
+    last_price: Mutex<GasPriceOracleResult>,
 }
 
-impl<Client, Tasks> GasPriceOracleService<Client, Tasks>
+impl<Client> GasPriceOracle<Client>
 where
-    Client: BlockProvider + Clone + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
+    Client: BlockProvider + 'static,
 {
-    // TODO: concurrent calls for get_block_values like in the geth impl
-    fn suggest_tip_cap(&mut self) -> Result<U256> {
+    /// Creates and returns the [GasPriceOracle].
+    pub fn new(client: Client, oracle_config: GasPriceOracleConfig) -> Self {
+        Self { client, oracle_config, last_price: Default::default() }
+    }
+
+    /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
+    pub async fn suggest_tip_cap(&self) -> Result<U256> {
         // TODO: we really shouldn't have this be None, but let's get rid of these expects?
         let header_hash = self
             .client
@@ -183,9 +89,11 @@ where
             .header_by_hash_or_number(BlockHashOrNumber::Hash(header_hash))?
             .ok_or(ProviderError::BlockHash { block_hash: header_hash })?;
 
+        let mut last_price = self.last_price.lock().await;
+
         // if we have stored a last price, then we check whether or not it was for the same head
-        if self.last_price.block_hash == header_hash {
-            return Ok(self.last_price.price)
+        if last_price.block_hash == header_hash {
+            return Ok(last_price.price)
         }
 
         // if all responses are empty, then we can return a maximum of 2*check_block blocks' worth
@@ -204,7 +112,7 @@ where
                 .get_block_values(current_block, SAMPLE_NUMBER as usize)?
                 .expect("this means we couldn't find the block");
             if block_values.is_empty() {
-                results.push(Some(U256::from(self.last_price.price)));
+                results.push(Some(U256::from(last_price.price)));
             } else {
                 results.extend(block_values);
                 populated_blocks += 1;
@@ -218,7 +126,7 @@ where
         }
 
         // sort results then take the configured percentile result
-        let mut price = self.last_price.price;
+        let mut price = last_price.price;
         if !results.is_empty() {
             results.sort_unstable();
             // TODO - error handling
@@ -233,7 +141,7 @@ where
             price = max_price;
         }
 
-        self.last_price = GasPriceOracleResult { block_hash: header_hash, price };
+        *last_price = GasPriceOracleResult { block_hash: header_hash, price };
 
         Ok(price)
     }
@@ -285,32 +193,6 @@ where
     }
 }
 
-impl<Client, Tasks> Future for GasPriceOracleService<Client, Tasks>
-where
-    Client: BlockProvider + Clone + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
-{
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-
-        loop {
-            match ready!(this.action_rx.poll_next_unpin(cx)) {
-                None => {
-                    unreachable!("can't close")
-                }
-                Some(action) => match action {
-                    GasPriceAction::SuggestMaxPriorityFee { response_tx } => {
-                        let suggestion = this.suggest_tip_cap();
-                        let _ = response_tx.send(suggestion);
-                    }
-                },
-            }
-        }
-    }
-}
-
 /// Stores the last result that the oracle returned
 #[derive(Debug, Clone)]
 pub struct GasPriceOracleResult {
@@ -322,7 +204,7 @@ pub struct GasPriceOracleResult {
 
 impl Default for GasPriceOracleResult {
     fn default() -> Self {
-        Self { block_hash: H256::zero(), price: U256::from(1 * GWEI_TO_WEI) }
+        Self { block_hash: H256::zero(), price: U256::from(GWEI_TO_WEI) }
     }
 }
 

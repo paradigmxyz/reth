@@ -776,8 +776,8 @@ mod tests {
             noop_provider,
             pool.clone(),
             noop_network_provider,
-            EthStateCache::spawn(NoopProvider::default(), Default::default()),
-            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
+            EthStateCache::spawn(noop_provider, Default::default()),
+            GasPriceOracle::new(noop_provider, Default::default()),
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

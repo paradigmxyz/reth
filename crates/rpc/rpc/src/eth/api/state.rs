@@ -161,7 +161,7 @@ mod tests {
             pool.clone(),
             (),
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
-            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
+            GasPriceOracle::new(NoopProvider::default(), Default::default()),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -179,8 +179,8 @@ mod tests {
             mock_provider.clone(),
             pool,
             (),
-            EthStateCache::spawn(mock_provider, Default::default()),
-            GasPriceOracle::spawn(NoopProvider::default(), Default::default()),
+            EthStateCache::spawn(mock_provider.clone(), Default::default()),
+            GasPriceOracle::new(mock_provider, Default::default()),
         );
 
         let storage_key: U256 = storage_key.into();

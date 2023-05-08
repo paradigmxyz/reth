@@ -802,11 +802,8 @@ where
                 self.config.eth.cache.clone(),
                 self.executor.clone(),
             );
-            let gas_oracle = GasPriceOracle::spawn_with(
-                self.client.clone(),
-                self.config.eth.gas_oracle.clone(),
-                self.executor.clone(),
-            );
+            let gas_oracle =
+                GasPriceOracle::new(self.client.clone(), self.config.eth.gas_oracle.clone());
             let new_canonical_blocks = self.events.canonical_state_stream();
             let c = cache.clone();
             self.executor.spawn_critical(
