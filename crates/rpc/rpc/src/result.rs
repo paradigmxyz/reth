@@ -164,17 +164,12 @@ pub(crate) fn rpc_err(code: i32, msg: impl Into<String>, data: Option<&[u8]>) ->
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     fn assert_rpc_result<Ok, Err, T: ToRpcResult<Ok, Err>>() {}
 
     fn to_reth_err<Ok>(o: Ok) -> reth_interfaces::Result<Ok> {
         Ok(o)
-    }
-
-    fn to_optional_reth_err<Ok>(o: Ok) -> reth_interfaces::Result<Option<Ok>> {
-        Ok(Some(o))
     }
 
     #[test]

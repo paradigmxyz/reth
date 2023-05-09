@@ -37,7 +37,8 @@ pub struct TraceApi<Client, Eth> {
     client: Client,
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
-    /// The async cache frontend for eth related data
+    /// The async cache frontend for eth-related data
+    #[allow(unused)] // we need this for trace_filter eventually
     eth_cache: EthStateCache,
     // restrict the number of concurrent calls to `trace_*`
     tracing_call_guard: TracingCallGuard,
@@ -46,6 +47,11 @@ pub struct TraceApi<Client, Eth> {
 // === impl TraceApi ===
 
 impl<Client, Eth> TraceApi<Client, Eth> {
+    /// The client that can interact with the chain.
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// Create a new instance of the [TraceApi]
     pub fn new(
         client: Client,

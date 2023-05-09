@@ -81,6 +81,7 @@ where
         Ok(H256(value.to_be_bytes()))
     }
 
+    #[allow(unused)]
     pub(crate) fn get_proof(
         &self,
         address: Address,

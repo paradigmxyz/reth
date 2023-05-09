@@ -820,12 +820,12 @@ where
                 self.config.eth.max_logs_per_response,
             );
 
-            let pubsub = EthPubSub::new(
+            let pubsub = EthPubSub::with_spawner(
                 self.client.clone(),
                 self.pool.clone(),
                 self.events.clone(),
                 self.network.clone(),
-                cache.clone(),
+                Box::new(self.executor.clone()),
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub };

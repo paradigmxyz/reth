@@ -1,5 +1,5 @@
 //! `eth_` PubSub RPC handler implementation
-use crate::eth::{cache::EthStateCache, logs_utils};
+use crate::eth::logs_utils;
 use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
 use reth_network_api::NetworkInfo;
@@ -37,21 +37,8 @@ impl<Client, Pool, Events, Network> EthPubSub<Client, Pool, Events, Network> {
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [tokio::task::spawn]
-    pub fn new(
-        client: Client,
-        pool: Pool,
-        chain_events: Events,
-        network: Network,
-        eth_cache: EthStateCache,
-    ) -> Self {
-        Self::with_spawner(
-            client,
-            pool,
-            chain_events,
-            network,
-            eth_cache,
-            Box::<TokioTaskExecutor>::default(),
-        )
+    pub fn new(client: Client, pool: Pool, chain_events: Events, network: Network) -> Self {
+        Self::with_spawner(client, pool, chain_events, network, Box::<TokioTaskExecutor>::default())
     }
 
     /// Creates a new, shareable instance.
@@ -60,10 +47,9 @@ impl<Client, Pool, Events, Network> EthPubSub<Client, Pool, Events, Network> {
         pool: Pool,
         chain_events: Events,
         network: Network,
-        eth_cache: EthStateCache,
         subscription_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
-        let inner = EthPubSubInner { client, pool, chain_events, network, eth_cache };
+        let inner = EthPubSubInner { client, pool, chain_events, network };
         Self { inner, subscription_task_spawner }
     }
 }
@@ -168,12 +154,10 @@ struct EthPubSubInner<Client, Pool, Events, Network> {
     pool: Pool,
     /// The client that can interact with the chain.
     client: Client,
-    /// A type that allows to create new event subscriptions,
+    /// A type that allows to create new event subscriptions.
     chain_events: Events,
     /// The network.
     network: Network,
-    /// The async cache frontend for eth related data
-    eth_cache: EthStateCache,
 }
 
 // == impl EthPubSubInner ===
