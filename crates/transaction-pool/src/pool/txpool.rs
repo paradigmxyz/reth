@@ -110,10 +110,6 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Returns stats about the size of pool.
     pub(crate) fn size(&self) -> PoolSize {
         PoolSize {
-            total_transactions: self.len(),
-            total_size: self.pending_pool.size() +
-                self.basefee_pool.size() +
-                self.queued_pool.size(),
             pending: self.pending_pool.len(),
             pending_size: self.pending_pool.size(),
             basefee: self.basefee_pool.len(),

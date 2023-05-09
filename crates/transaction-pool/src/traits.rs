@@ -557,10 +557,6 @@ impl IntoRecoveredTransaction for PooledTransaction {
 /// Represents the current status of the pool.
 #[derive(Debug, Clone)]
 pub struct PoolSize {
-    /// Number of transactions in the pool.
-    pub total_transactions: usize,
-    /// Reported size of transactions in the pool.
-    pub total_size: usize,
     /// Number of transactions in the _pending_ sub-pool.
     pub pending: usize,
     /// Reported size of transactions in the _pending_ sub-pool.
