@@ -33,7 +33,8 @@ where
     ///
     /// Note: this future is cancel safe
     ///
-    /// This sealed header is _not_ validated.
+    /// Caution: This does no validation of body (transactions) response but guarantees that the
+    /// [SealedHeader] matches the requested hash.
     pub fn get_full_block(&self, hash: H256) -> FetchFullBlockFuture<Client> {
         let client = self.client.clone();
         FetchFullBlockFuture {
