@@ -2,7 +2,7 @@
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 use jsonrpsee::core::Error as RpcError;
-use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U256};
+use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
@@ -390,16 +390,4 @@ pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
             Err(InvalidTransactionError::halt(reason, gas_used).into())
         }
     }
-}
-
-/// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.
-///
-/// **Note:** it's assumed the `out` buffer starts with the call's signature
-pub(crate) fn decode_revert_reason(out: impl AsRef<[u8]>) -> Option<String> {
-    use ethers_core::abi::AbiDecode;
-    let out = out.as_ref();
-    if out.len() < SELECTOR_LEN {
-        return None
-    }
-    String::decode(&out[SELECTOR_LEN..]).ok()
 }
