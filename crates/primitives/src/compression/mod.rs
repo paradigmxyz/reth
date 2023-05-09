@@ -4,10 +4,11 @@ mod transaction_dictionary;
 pub use receipt_dictionary::RECEIPT_DICTIONARY;
 pub use transaction_dictionary::TRANSACTION_DICTIONARY;
 
+use std::{cell::RefCell, thread_local};
 use zstd::bulk::{Compressor, Decompressor};
 
-use std::{cell::RefCell, thread_local};
-
+// Reason for using static compressors is that dictionaries can be quite big, and zstd-rs
+// recommends to use one context/compressor per thread. Thus the usage of `thread_local`.
 thread_local! {
     /// Thread Transaction compressor.
     pub static TRANSACTION_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(Compressor::with_dictionary(0, &TRANSACTION_DICTIONARY)
