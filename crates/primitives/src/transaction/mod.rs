@@ -770,22 +770,21 @@ impl Compact for TransactionSignedNoHash {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let before = buf.as_mut().len();
+        let start = buf.as_mut().len();
 
-        // placeholder for bitflags
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
         buf.put_u8(0);
 
         let sig_bit = self.signature.to_compact(buf) as u8;
+        let zstd_bit = self.transaction.input().len() >= 32;
 
-        let is_zstd = self.transaction.input().len() >= 32;
-
-        let tx_bits = if is_zstd {
+        let tx_bits = if zstd_bit {
             TRANSACTION_COMPRESSOR.with(|compressor| {
                 let mut compressor = compressor.borrow_mut();
                 let mut tmp = bytes::BytesMut::with_capacity(200);
                 let tx_bits = self.transaction.to_compact(&mut tmp);
 
-                // todo increase buf capacity and compress there?
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                 tx_bits as u8
             })
@@ -793,23 +792,29 @@ impl Compact for TransactionSignedNoHash {
             self.transaction.to_compact(buf) as u8
         };
 
-        // replace with actual flags. tx_bits takes two bits
-        buf.as_mut()[before] = sig_bit | (tx_bits << 1) | ((is_zstd as u8) << 3);
+        // Replace bitflags with the actual values
+        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
 
-        buf.as_mut().len() - before
+        buf.as_mut().len() - start
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        let prefix = buf.get_u8() as usize;
+        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+        let bitflags = buf.get_u8() as usize;
 
-        let (signature, buf) = Signature::from_compact(buf, prefix & 1);
+        let sig_bit = bitflags & 1;
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
 
-        let is_zstd = prefix >> 3;
-        let (transaction, buf) = if is_zstd != 0 {
+        let zstd_bit = bitflags >> 3;
+        let (transaction, buf) = if zstd_bit != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                 let mut decompressor = decompressor.borrow_mut();
                 let mut tmp: Vec<u8> = Vec::with_capacity(200);
 
+                // `decompress_to_buffer` will return an error if the output buffer doesn't have
+                // enough capacity. However we don't actually have information on the required
+                // length. So we hope for the best, and keep trying again with a fairly bigger size
+                // if it fails.
                 while let Err(err) = decompressor.decompress_to_buffer(buf, &mut tmp) {
                     let err = err.to_string();
                     if !err.contains("Destination buffer is too small") {
@@ -820,13 +825,14 @@ impl Compact for TransactionSignedNoHash {
 
                 // TODO: enforce that zstd is only present at a "top" level type
 
-                let (transaction, _) =
-                    Transaction::from_compact(tmp.as_slice(), (prefix & 0b110) >> 1);
+                let transaction_type = (bitflags & 0b110) >> 1;
+                let (transaction, _) = Transaction::from_compact(tmp.as_slice(), transaction_type);
 
                 (transaction, buf)
             })
         } else {
-            Transaction::from_compact(buf, prefix >> 1)
+            let transaction_type = bitflags >> 1;
+            Transaction::from_compact(buf, transaction_type)
         };
 
         (TransactionSignedNoHash { signature, transaction }, buf)

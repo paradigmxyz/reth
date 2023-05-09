@@ -101,6 +101,9 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
         }
     }
 
+    // If the type has compression support, then check the `__zstd` flag. Otherwise, use the default
+    // code branch. However, even if it's a type with compression support, not all values are
+    // to be compressed (thus the zstd flag). Ideally only the bigger ones.
     is_zstd
         .then(|| {
             let decompressor = format_ident!("{}_DECOMPRESSOR", ident.to_string().to_uppercase());
@@ -158,6 +161,9 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
         lines.append(&mut StructHandler::new(fields).generate_to());
     }
 
+    // Just because a type supports compression, doesn't mean all its values are to be compressed.
+    // We skip the smaller ones, and thus require a flag `__zstd` to specify if this value is
+    // compressed or not.
     if is_zstd {
         lines.push(quote! {
             let mut zstd = buffer.len() > 7;
