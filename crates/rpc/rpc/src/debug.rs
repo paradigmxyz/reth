@@ -28,6 +28,7 @@ use reth_rpc_types::{
 };
 use revm::primitives::Env;
 use revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv};
+use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
 ///
@@ -38,7 +39,7 @@ pub struct DebugApi<Client, Eth> {
     client: Client,
     /// The implementation of `eth` API
     eth_api: Eth,
-    // restrict the number of concurrent calls to `debug_traceTransaction`
+    // restrict the number of concurrent calls to tracing calls
     tracing_call_guard: TracingCallGuard,
 }
 
@@ -58,6 +59,11 @@ where
     Client: BlockProvider + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
+    /// Acquires a permit to execute a tracing call.
+    async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
+        self.tracing_call_guard.clone().acquire_owned().await
+    }
+
     /// Trace the entire block
     fn trace_block_with(
         &self,
@@ -288,6 +294,7 @@ where
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_raw_block(self, rlp_block, opts).await?)
     }
 
@@ -297,6 +304,7 @@ where
         block: H256,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_block(self, block.into(), opts).await?)
     }
 
@@ -306,6 +314,7 @@ where
         block: BlockNumberOrTag,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_block(self, block.into(), opts).await?)
     }
 
@@ -315,6 +324,7 @@ where
         tx_hash: H256,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<GethTraceFrame> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts).await?)
     }
 
@@ -325,6 +335,7 @@ where
         block_number: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
     ) -> RpcResult<GethTraceFrame> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_call(self, request, block_number, opts).await?)
     }
 }
