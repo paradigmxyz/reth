@@ -309,7 +309,7 @@ impl PostState {
             let info = removed_account_changes
                 .iter()
                 .find_map(|(_, changes)| {
-                    changes.iter().find_map(|ch| (ch.0 == &address).then(|| *ch.1))
+                    changes.iter().find_map(|ch| (ch.0 == &address).then_some(*ch.1))
                 })
                 .unwrap_or(*self.accounts.get(&address).expect("exists"));
             account_state.insert(address, info);
@@ -332,7 +332,7 @@ impl PostState {
                             changes.iter().find_map(|ch| {
                                 if ch.0 == address {
                                     match ch.1.storage.iter().find_map(|(changed_slot, value)| {
-                                        (slot == changed_slot).then(|| *value)
+                                        (slot == changed_slot).then_some(*value)
                                     }) {
                                         value @ Some(_) => Some(value),
                                         None if ch.1.wipe.is_wiped() => Some(None),
