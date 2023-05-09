@@ -4,13 +4,15 @@ use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
-    consensus::Consensus,
+    consensus::{Consensus, ForkchoiceState},
     Error,
 };
-use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{
+    BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
+};
 use reth_provider::{
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, ExecutorFactory,
-    PostStateDataProvider,
+    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateSubscriptions,
+    ExecutorFactory, PostStateDataProvider,
 };
 use std::{
     collections::{BTreeMap, HashSet},

@@ -16,6 +16,7 @@ mod evm_env;
 pub use evm_env::EvmEnvProvider;
 
 mod chain_info;
+pub use chain_info::CanonChainTracker;
 
 mod header;
 pub use header::HeaderProvider;
