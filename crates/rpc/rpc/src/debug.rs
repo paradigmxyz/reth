@@ -20,9 +20,9 @@ use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
-        BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerConfig,
-        GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame,
-        NoopFrame, TraceResult,
+        BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
+        GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame, NoopFrame,
+        TraceResult,
     },
     BlockError, CallRequest, RichBlock,
 };
@@ -193,7 +193,7 @@ where
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
-                        let (res, _) = self
+                        let (_res, _) = self
                             .eth_api
                             .inspect_call_at(call, at, state_overrides, &mut inspector)
                             .await?;
@@ -423,7 +423,7 @@ fn trace_transaction(
                         .into_geth_builder()
                         .geth_call_traces(U256::from(gas_used), call_config);
 
-                    return Ok(frame.into())
+                    return Ok((frame.into(), res.state))
                 }
                 GethDebugBuiltInTracerType::PreStateTracer => {
                     todo!()

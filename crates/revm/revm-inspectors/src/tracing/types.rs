@@ -1,7 +1,7 @@
 //! Types for representing call trace items.
 
 use crate::tracing::utils::convert_memory;
-use reth_primitives::{bytes::Bytes, Address, H256, U256, TxHash};
+use reth_primitives::{bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
     geth::StructLog,
     parity::{
@@ -14,7 +14,6 @@ use revm::interpreter::{
     CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
-use reth_rpc_types::trace::geth::CallFrame;
 use std::collections::btree_map::Entry;
 
 /// A unified representation of a call
@@ -148,12 +147,12 @@ pub(crate) struct CallTrace {
 
 impl CallTrace {
     // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
-    pub fn is_error(&self) -> bool {
+    pub(crate) fn is_error(&self) -> bool {
         self.status as u8 >= InstructionResult::Revert as u8
     }
 
     /// Returns the error message if it is an erroneous result.
-    pub fn as_error(&self) -> Option<String> {
+    pub(crate) fn as_error(&self) -> Option<String> {
         self.is_error().then(|| format!("{:?}", self.status))
     }
 }

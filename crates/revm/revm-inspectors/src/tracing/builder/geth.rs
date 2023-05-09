@@ -1,12 +1,10 @@
 //! Geth trace builder
 
 use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
-use reth_primitives::{Address, JsonU256, H256, U256, Bytes};
+use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, JsonU256, H256, U256};
 use reth_rpc_types::trace::geth::*;
 use revm::interpreter::opcode;
 use std::collections::{BTreeMap, HashMap};
-use reth_primitives::constants::SELECTOR_LEN;
-use ethers_core::types::Bytes as EthersCoreBytes;
 
 /// A type for creating geth style traces
 #[derive(Clone, Debug)]
@@ -21,14 +19,12 @@ pub struct GethTraceBuilder {
 ///
 /// **Note:** it's assumed the `out` buffer starts with the call's signature
 pub(crate) fn decode_revert_reason(out: impl AsRef<[u8]>) -> Option<String> {
-    use ethers_core::abi::AbiDecode;
     let out = out.as_ref();
     if out.len() < SELECTOR_LEN {
         return None
     }
-    String::decode(&out[SELECTOR_LEN..]).ok()
+    todo!()
 }
-
 
 impl GethTraceBuilder {
     /// Returns a new instance of the builder
@@ -122,11 +118,8 @@ impl GethTraceBuilder {
         }
     }
 
-    pub fn geth_call_traces(
-        &self,
-        receipt_gas_used: U256,
-        opts: CallConfig,
-    ) -> CallFrame {
+    /// Generate a geth-style traces for the call tracer
+    pub fn geth_call_traces(&self, receipt_gas_used: U256, opts: CallConfig) -> CallFrame {
         if self.nodes.is_empty() {
             return Default::default()
         }
@@ -161,16 +154,16 @@ impl GethTraceBuilder {
             let mut call_logs = vec![];
             for log in &main_trace_node.logs {
                 call_logs.push(CallLogFrame {
-                    address: Some(main_trace.address.into()),
+                    address: Some(main_trace.address),
                     topics: Some(log.topics.clone()),
-                    data: Some(Bytes::from(log.data.clone()))
+                    data: Some(Bytes::from(log.data.clone())),
                 });
             }
             root_call_frame.logs = Some(call_logs);
         }
 
         if opts.only_top_call.unwrap_or_default() {
-            return root_call_frame;
+            return root_call_frame
         }
 
         // TODO - recursively build the call tracker frames

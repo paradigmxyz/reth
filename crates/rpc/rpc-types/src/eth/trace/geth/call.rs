@@ -1,4 +1,4 @@
-use reth_primitives::{serde_helper::num::from_int_or_hex, Address, Bytes, H256, U256, TxHash};
+use reth_primitives::{serde_helper::num::from_int_or_hex, Address, Bytes, H256, U256};
 use serde::{Deserialize, Serialize};
 
 /// <https://github.com/ethereum/go-ethereum/blob/91cb6f863a965481e51d5d9c0e5ccd54796fd967/eth/tracers/native/call.go#L44>
@@ -33,7 +33,7 @@ pub struct CallLogFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<Address>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub topics: Option<Vec<TxHash>>,
+    pub topics: Option<Vec<H256>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<Bytes>,
 }
