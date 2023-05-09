@@ -259,8 +259,6 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Compute pool metrics
         let stats = self.size();
-        self.metrics.total_number_transactions.set(stats.total_transactions as f64);
-        self.metrics.total_size_bytes.set(stats.total_size as f64);
         self.metrics.pending_pool_length.set(stats.pending as f64);
         self.metrics.pending_sub_pool_size_bytes.set(stats.pending_size as f64);
         self.metrics.basefee_pool_length.set(stats.basefee as f64);

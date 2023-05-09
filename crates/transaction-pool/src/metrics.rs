@@ -13,10 +13,6 @@ pub struct TxPoolMetrics {
     pub(crate) invalid_transactions: Counter,
     /// Number of removed transactions from the pool
     pub(crate) removed_transactions: Counter,
-    /// Total number of transactions in the pool
-    pub(crate) total_number_transactions: Gauge,
-    /// Total amount of memory used by the transactions in the pool in bytes
-    pub(crate) total_size_bytes: Gauge,
 
     /// Number of transactions in the pending sub-pool
     pub(crate) pending_pool_length: Gauge,
