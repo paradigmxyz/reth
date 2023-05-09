@@ -534,6 +534,10 @@ impl PostState {
     }
 
     /// Write the post state to the database.
+    ///
+    /// # Panics
+    ///
+    /// If the block indices are not available for the receipts contained in the [PostState].
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(mut self, tx: &TX) -> Result<(), DbError> {
         self.write_history_to_db(tx)?;
 
@@ -588,7 +592,7 @@ impl PostState {
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
         for (block, receipts) in self.receipts {
-            let (_, body_indices) = bodies_cursor.seek_exact(block)?.unwrap(); // TODO: fix this
+            let (_, body_indices) = bodies_cursor.seek_exact(block)?.expect("body indices exist");
             let tx_range = body_indices.tx_num_range();
             assert_eq!(receipts.len(), tx_range.clone().count());
             for (tx_num, receipt) in tx_range.zip(receipts) {

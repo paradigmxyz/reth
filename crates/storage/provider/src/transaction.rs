@@ -496,9 +496,6 @@ where
         let new_tip = blocks.last().unwrap();
         let new_tip_number = new_tip.number;
 
-        // Write state and changesets to the database
-        state.write_to_db(self.deref_mut())?;
-
         let first_number = blocks.first().unwrap().number;
 
         let last = blocks.last().unwrap();
@@ -510,6 +507,9 @@ where
         for block in blocks {
             self.insert_block(block)?;
         }
+
+        // Write state and changesets to the database
+        state.write_to_db(self.deref_mut())?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 
