@@ -3,7 +3,11 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
-use crate::eth::{cache::EthStateCache, signer::EthSigner};
+use crate::eth::{
+    cache::EthStateCache,
+    error::{EthApiError, EthResult},
+    signer::EthSigner,
+};
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
@@ -20,7 +24,7 @@ mod server;
 mod sign;
 mod state;
 mod transactions;
-use crate::eth::error::{EthApiError, EthResult};
+
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// Cache limit of block-level fee history for `eth_feeHistory` RPC method.
