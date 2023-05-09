@@ -243,18 +243,20 @@ impl PostState {
     }
 
     /// Extend this [PostState] with the changes in another [PostState].
-    ///
-    /// # Panics
-    ///
-    /// If both poststates contain storage changes for the same block number.
     pub fn extend(&mut self, mut other: PostState) {
         // Insert storage change sets
         for (block_number, storage_changes) in std::mem::take(&mut other.storage_changes).inner {
-            assert!(self.storage_changes.get(&block_number).is_none());
             for (address, their_storage_transition) in storage_changes {
                 let our_storage = self.storage.entry(address).or_default();
                 let (wipe, storage) = if their_storage_transition.wipe.is_wiped() {
-                    our_storage.times_wiped += 1;
+                    // Check existing storage change.
+                    match self.storage_changes.get(&block_number).and_then(|ch| ch.get(&address)) {
+                        Some(change) if change.wipe.is_wiped() => (), // already counted
+                        _ => {
+                            our_storage.times_wiped += 1;
+                        }
+                    };
+                    // Check if this is the first wipe.
                     let wipe = if our_storage.times_wiped == 1 {
                         StorageWipe::Primary
                     } else {
