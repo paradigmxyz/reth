@@ -255,14 +255,19 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Compute pool metrics
         let stats = self.size();
+        self.update_size_metrics(stats);
+
+        OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
+    }
+
+    /// Update sub-pools size metrics.
+    pub(crate) fn update_size_metrics(&mut self, stats: PoolSize) {
         self.metrics.pending_pool_transactions.set(stats.pending as f64);
         self.metrics.pending_pool_size_bytes.set(stats.pending_size as f64);
         self.metrics.basefee_pool_transactions.set(stats.basefee as f64);
         self.metrics.basefee_pool_size_bytes.set(stats.basefee_size as f64);
         self.metrics.queued_pool_transactions.set(stats.queued as f64);
         self.metrics.queued_pool_size_bytes.set(stats.queued_size as f64);
-
-        OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
     }
 
     /// Adds the transaction into the pool.
