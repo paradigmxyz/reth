@@ -9,6 +9,7 @@
 //!
 //! This crate contains Ethereum primitive types and helper functions.
 
+pub mod abi;
 mod account;
 pub mod basefee;
 mod bits;
