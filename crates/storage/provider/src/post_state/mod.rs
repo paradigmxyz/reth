@@ -250,8 +250,8 @@ impl PostState {
     pub fn extend(&mut self, mut other: PostState) {
         // Insert storage change sets
         for (block_number, storage_changes) in std::mem::take(&mut other.storage_changes).inner {
+            assert!(self.storage_changes.get(&block_number).is_none());
             for (address, their_storage_transition) in storage_changes {
-                assert!(self.storage_changes.get(&block_number).is_none());
                 let our_storage = self.storage.entry(address).or_default();
                 let (wipe, storage) = if their_storage_transition.wipe.is_wiped() {
                     our_storage.times_wiped += 1;
@@ -506,10 +506,16 @@ impl PostState {
                 if storage.wipe.is_primary() {
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
-                        storage.storage.insert(entry.key.into(), entry.value);
+                        let key = U256::from_be_bytes(entry.key.to_fixed_bytes());
+                        if !storage.storage.contains_key(&key) {
+                            storage.storage.insert(entry.key.into(), entry.value);
+                        }
 
                         while let Some(entry) = storages_cursor.next_dup_val()? {
-                            storage.storage.insert(entry.key.into(), entry.value);
+                            let key = U256::from_be_bytes(entry.key.to_fixed_bytes());
+                            if !storage.storage.contains_key(&key) {
+                                storage.storage.insert(entry.key.into(), entry.value);
+                            }
                         }
                     }
                 }
@@ -1202,6 +1208,197 @@ mod tests {
             None,
             "Account A should only be in the changeset 2 times on deletion"
         );
+    }
+
+    #[test]
+    fn write_to_db_multiple_selfdestructs() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect("Could not get database tx");
+
+        let address1 = Address::random();
+
+        let mut init_state = PostState::new();
+        init_state.create_account(0, address1, Account::default());
+        init_state.change_storage(
+            0,
+            address1,
+            // 0x00 => 0 => 1
+            // 0x01 => 0 => 2
+            BTreeMap::from([
+                (U256::from(0), (U256::ZERO, U256::from(1))),
+                (U256::from(1), (U256::ZERO, U256::from(2))),
+            ]),
+        );
+        init_state.write_to_db(&tx).expect("Could not write init state to DB");
+
+        let mut post_state = PostState::new();
+        post_state.change_storage(
+            1,
+            address1,
+            // 0x00 => 1 => 2
+            BTreeMap::from([(U256::from(0), (U256::from(1), U256::from(2)))]),
+        );
+        post_state.destroy_account(2, address1, Account::default());
+        post_state.create_account(3, address1, Account::default());
+        post_state.change_storage(
+            4,
+            address1,
+            // 0x00 => 0 => 2
+            // 0x02 => 0 => 4
+            // 0x06 => 0 => 6
+            BTreeMap::from([
+                (U256::from(0), (U256::ZERO, U256::from(2))),
+                (U256::from(2), (U256::ZERO, U256::from(4))),
+                (U256::from(6), (U256::ZERO, U256::from(6))),
+            ]),
+        );
+        post_state.destroy_account(5, address1, Account::default());
+
+        // Create, change, destroy and recreate in the same block.
+        post_state.create_account(6, address1, Account::default());
+        post_state.change_storage(
+            6,
+            address1,
+            // 0x00 => 0 => 2
+            BTreeMap::from([(U256::from(0), (U256::ZERO, U256::from(2)))]),
+        );
+        post_state.destroy_account(6, address1, Account::default());
+        post_state.create_account(6, address1, Account::default());
+
+        post_state.change_storage(
+            7,
+            address1,
+            // 0x00 => 0 => 9
+            BTreeMap::from([(U256::from(0), (U256::ZERO, U256::from(9)))]),
+        );
+
+        post_state.write_to_db(&tx).expect("Could not write post state to DB");
+
+        let mut storage_changeset_cursor = tx
+            .cursor_dup_read::<tables::StorageChangeSet>()
+            .expect("Could not open plain storage state cursor");
+        let mut storage_changes = storage_changeset_cursor.walk_range(..).unwrap();
+
+        // Iterate through all storage changes
+
+        // Block <number>
+        // <slot>: <expected value before>
+        // ...
+
+        // Block #0
+        // 0x00: 0
+        // 0x01: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((0, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((0, address1)),
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::ZERO }
+            )))
+        );
+
+        // Block #1
+        // 0x00: 1
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
+            )))
+        );
+
+        // Block #2 (destroyed)
+        // 0x00: 2
+        // 0x01: 2
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((2, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(2) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((2, address1)),
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
+            )))
+        );
+
+        // Block #3
+        // no storage changes
+
+        // Block #4
+        // 0x00: 0
+        // 0x02: 0
+        // 0x06: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(2), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(6), value: U256::ZERO }
+            )))
+        );
+
+        // Block #5 (destroyed)
+        // 0x00: 2
+        // 0x02: 4
+        // 0x06: 6
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(2) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(4) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(6), value: U256::from(6) }
+            )))
+        );
+
+        // Block #6
+        // no storage changes (only inter block changes)
+
+        // Block #7
+        // 0x00: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((7, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(storage_changes.next(), None);
     }
 
     #[test]
