@@ -122,6 +122,29 @@ impl FileClient {
         self.headers.get(&(self.headers.len() as u64)).map(|h| h.hash_slow())
     }
 
+    /// Returns the highest block number of this client has or `None` if empty
+    pub fn max_block(&self) -> Option<u64> {
+        self.headers.keys().max().copied()
+    }
+
+    /// Returns true if all blocks are canonical (no gaps)
+    pub fn has_canonical_blocks(&self) -> bool {
+        if self.headers.is_empty() {
+            return true
+        }
+        let mut nums = self.headers.keys().copied().collect::<Vec<_>>();
+        nums.sort_unstable();
+        let mut iter = nums.into_iter();
+        let mut lowest = iter.next().expect("not empty");
+        for next in iter {
+            if next != lowest + 1 {
+                return false
+            }
+            lowest = next;
+        }
+        true
+    }
+
     /// Use the provided bodies as the file client's block body buffer.
     pub(crate) fn with_bodies(mut self, bodies: HashMap<BlockHash, BlockBody>) -> Self {
         self.bodies = bodies;

@@ -41,12 +41,6 @@ impl TxState {
         *self >= TxState::PENDING_POOL_BITS
     }
 
-    /// Returns `true` if the `ENOUGH_FEE_CAP_BLOCK` bit is set.
-    #[inline]
-    pub(crate) fn has_enough_fee_cap(&self) -> bool {
-        self.intersects(TxState::ENOUGH_FEE_CAP_BLOCK)
-    }
-
     /// Returns `true` if the transaction has a nonce gap.
     #[inline]
     pub(crate) fn has_nonce_gap(&self) -> bool {

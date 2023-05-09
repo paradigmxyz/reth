@@ -1,7 +1,9 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use crate::dirs::{JwtSecretPath, PlatformPath};
-use clap::Args;
+use clap::{
+    builder::{PossibleValue, TypedValueParser},
+    Arg, Args, Command,
+};
 use futures::FutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
@@ -19,10 +21,11 @@ use reth_rpc_engine_api::{EngineApi, EngineApiServer};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
+    ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::Path,
+    path::PathBuf,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Default)]
@@ -40,8 +43,8 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port")]
     pub http_port: Option<u16>,
 
-    /// Rpc Modules to be configured for http server
-    #[arg(long = "http.api")]
+    /// Rpc Modules to be configured for the HTTP server
+    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
@@ -64,8 +67,8 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.origins", name = "ws.origins")]
     pub ws_allowed_origins: Option<String>,
 
-    /// Rpc Modules to be configured for Ws server
-    #[arg(long = "ws.api")]
+    /// Rpc Modules to be configured for the WS server
+    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC  server
@@ -86,7 +89,7 @@ pub struct RpcServerArgs {
 
     /// Path to a JWT secret to use for authenticated RPC endpoints
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
-    auth_jwtsecret: Option<PlatformPath<JwtSecretPath>>,
+    auth_jwtsecret: Option<PathBuf>,
 }
 
 impl RpcServerArgs {
@@ -100,18 +103,22 @@ impl RpcServerArgs {
     /// If such a parameter is not given, the client SHOULD generate such a token, valid for the
     /// duration of the execution, and SHOULD store the hex-encoded secret as a jwt.hex file on
     /// the filesystem. This file can then be used to provision the counterpart client.
-    pub(crate) fn jwt_secret(&self) -> Result<JwtSecret, JwtError> {
-        let arg = self.auth_jwtsecret.as_ref();
-        let path: Option<&Path> = arg.map(|p| p.as_ref());
-        match path {
-            Some(fpath) => JwtSecret::from_file(fpath),
+    ///
+    /// The `default_jwt_path` provided as an argument will be used as the default location for the
+    /// jwt secret in case the `auth_jwtsecret` argument is not provided.
+    pub(crate) fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
+        match self.auth_jwtsecret.as_ref() {
+            Some(fpath) => {
+                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                JwtSecret::from_file(fpath)
+            }
             None => {
-                let default_path = PlatformPath::<JwtSecretPath>::default();
-                let fpath = default_path.as_ref();
-                if fpath.exists() {
-                    JwtSecret::from_file(fpath)
+                if default_jwt_path.exists() {
+                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
+                    JwtSecret::from_file(&default_jwt_path)
                 } else {
-                    JwtSecret::try_create(fpath)
+                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
+                    JwtSecret::try_create(&default_jwt_path)
                 }
             }
         }
@@ -122,6 +129,7 @@ impl RpcServerArgs {
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
+    #[allow(clippy::too_many_arguments)]
     pub async fn start_servers<Client, Pool, Network, Tasks, Events, Engine>(
         &self,
         client: Client,
@@ -130,6 +138,7 @@ impl RpcServerArgs {
         executor: Tasks,
         events: Events,
         engine_api: Engine,
+        jwt_secret: JwtSecret,
     ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
     where
         Client: BlockProvider
@@ -145,7 +154,10 @@ impl RpcServerArgs {
         Events: CanonStateSubscriptions + Clone + 'static,
         Engine: EngineApiServer,
     {
-        let auth_config = self.auth_server_config()?;
+        let auth_config = self.auth_server_config(jwt_secret)?;
+
+        let module_config = self.transport_rpc_module_config();
+        debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
         let (rpc_modules, auth_module) = RpcModuleBuilder::default()
             .with_client(client)
@@ -153,7 +165,7 @@ impl RpcServerArgs {
             .with_network(network)
             .with_events(events)
             .with_executor(executor)
-            .build_with_auth_server(self.transport_rpc_module_config(), engine_api);
+            .build_with_auth_server(module_config, engine_api);
 
         let server_config = self.rpc_server_config();
         let has_server = server_config.has_server();
@@ -213,6 +225,7 @@ impl RpcServerArgs {
         network: Network,
         executor: Tasks,
         engine_api: EngineApi<Client>,
+        jwt_secret: JwtSecret,
     ) -> Result<AuthServerHandle, RpcError>
     where
         Client: BlockProvider
@@ -230,7 +243,7 @@ impl RpcServerArgs {
             self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
-        let secret = self.jwt_secret().map_err(|err| RpcError::Custom(err.to_string()))?;
+
         reth_rpc_builder::auth::launch(
             client,
             pool,
@@ -238,7 +251,7 @@ impl RpcServerArgs {
             executor,
             engine_api,
             socket_address,
-            secret,
+            jwt_secret,
         )
         .await
     }
@@ -294,14 +307,45 @@ impl RpcServerArgs {
     }
 
     /// Creates the [AuthServerConfig] from cli args.
-    fn auth_server_config(&self) -> Result<AuthServerConfig, RpcError> {
-        let secret = self.jwt_secret().map_err(|err| RpcError::Custom(err.to_string()))?;
+    fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
         let address = SocketAddr::new(
             self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
 
-        Ok(AuthServerConfig::builder(secret).socket_addr(address).build())
+        Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+    }
+}
+
+/// clap value parser for [RpcModuleSelection].
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+struct RpcModuleSelectionValueParser;
+
+impl TypedValueParser for RpcModuleSelectionValueParser {
+    type Value = RpcModuleSelection;
+
+    fn parse_ref(
+        &self,
+        _cmd: &Command,
+        arg: Option<&Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        let val =
+            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        val.parse::<RpcModuleSelection>().map_err(|err| {
+            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let possible_values = RethRpcModule::all_variants().to_vec().join(",");
+            let msg = format!(
+                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
+            );
+            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+        })
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values = RethRpcModule::all_variants().iter().map(PossibleValue::new);
+        Some(Box::new(values))
     }
 }
 

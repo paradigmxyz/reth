@@ -1,13 +1,14 @@
 use crate::{
-    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    TransactionsProvider,
+    traits::{BlockSource, ReceiptProvider},
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, PostState, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytecode, Bytes, ChainInfo, Header,
-    Receipt, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256,
-    KECCAK_EMPTY, U256,
+    Receipt, SealedBlock, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash,
+    TxNumber, H256, KECCAK_EMPTY, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
@@ -33,13 +34,25 @@ impl BlockIdProvider for NoopProvider {
         Ok(ChainInfo::default())
     }
 
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        Ok(0)
+    }
+
     fn block_number(&self, _hash: H256) -> Result<Option<BlockNumber>> {
         Ok(None)
     }
 }
 
 impl BlockProvider for NoopProvider {
+    fn find_block_by_hash(&self, hash: H256, _source: BlockSource) -> Result<Option<Block>> {
+        self.block(hash.into())
+    }
+
     fn block(&self, _id: BlockId) -> Result<Option<Block>> {
+        Ok(None)
+    }
+
+    fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(None)
     }
 
@@ -126,6 +139,12 @@ impl AccountProvider for NoopProvider {
     }
 }
 
+impl StateRootProvider for NoopProvider {
+    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+        todo!()
+    }
+}
+
 impl StateProvider for NoopProvider {
     fn storage(&self, _account: Address, _storage_key: StorageKey) -> Result<Option<StorageValue>> {
         Ok(None)
@@ -197,7 +216,15 @@ impl StateProviderFactory for NoopProvider {
         Ok(Box::new(*self))
     }
 
-    fn pending<'a>(
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {

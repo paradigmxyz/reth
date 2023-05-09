@@ -2,10 +2,12 @@ use crate::{
     prefix_set::PrefixSet,
     trie_cursor::{CursorSubNode, TrieCursor},
     updates::TrieUpdates,
-    Nibbles,
 };
 use reth_db::{table::Key, Error};
-use reth_primitives::{trie::BranchNodeCompact, H256};
+use reth_primitives::{
+    trie::{BranchNodeCompact, Nibbles},
+    H256,
+};
 use std::marker::PhantomData;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
@@ -36,7 +38,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             trie_updates: None,
-            __phantom: PhantomData::default(),
+            __phantom: PhantomData,
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -57,7 +59,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             stack,
             can_skip_current_node: false,
             trie_updates: None,
-            __phantom: PhantomData::default(),
+            __phantom: PhantomData,
         };
         this.update_skip_node();
         this

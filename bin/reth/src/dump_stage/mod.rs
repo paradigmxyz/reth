@@ -1,6 +1,6 @@
 //! Database debugging tool
 use crate::{
-    dirs::{DbPath, MaybePlatformPath, PlatformPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
 use clap::Parser;
@@ -9,7 +9,7 @@ use reth_db::{
 };
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 mod hashing_storage;
@@ -27,15 +27,15 @@ use merkle::dump_merkle_stage;
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the database folder.
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -75,14 +75,9 @@ pub enum Stages {
 #[derive(Debug, Clone, Parser)]
 pub struct StageCommand {
     /// The path to the new database folder.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(long, value_name = "OUTPUT_PATH", verbatim_doc_comment, default_value_t)]
-    output_db: PlatformPath<DbPath>,
+    #[arg(long, value_name = "OUTPUT_PATH", verbatim_doc_comment)]
+    output_db: PathBuf,
+
     /// From which block.
     #[arg(long, short)]
     from: u64,
@@ -98,9 +93,10 @@ pub struct StageCommand {
 impl Command {
     /// Execute `dump-stage` command
     pub async fn execute(self) -> eyre::Result<()> {
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
-
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let db_path = data_dir.db_path();
+        info!(target: "reth::cli", path = ?db_path, "Opening database");
         std::fs::create_dir_all(&db_path)?;
 
         // TODO: Auto-impl for Database trait
@@ -135,12 +131,12 @@ impl Command {
 pub(crate) fn setup<DB: Database>(
     from: u64,
     to: u64,
-    output_db: &PlatformPath<DbPath>,
+    output_db: &PathBuf,
     db_tool: &mut DbTool<'_, DB>,
 ) -> eyre::Result<(reth_db::mdbx::Env<reth_db::mdbx::WriteMap>, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 
-    info!(target: "reth::cli", "Creating separate db at {}", output_db);
+    info!(target: "reth::cli", ?output_db, "Creating separate db");
 
     let output_db = init_db(output_db)?;
 

@@ -1,8 +1,4 @@
-use crate::{
-    dirs::{DbPath, PlatformPath},
-    dump_stage::setup,
-    utils::DbTool,
-};
+use crate::{dump_stage::setup, utils::DbTool};
 use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
@@ -10,14 +6,14 @@ use reth_db::{
 use reth_primitives::MAINNET;
 use reth_provider::Transaction;
 use reth_stages::{stages::ExecutionStage, Stage, StageId, UnwindInput};
-use std::{ops::DerefMut, sync::Arc};
+use std::{ops::DerefMut, path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
     from: u64,
     to: u64,
-    output_db: &PlatformPath<DbPath>,
+    output_db: &PathBuf,
     should_run: bool,
 ) -> Result<()> {
     let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;

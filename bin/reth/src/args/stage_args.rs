@@ -11,4 +11,5 @@ pub enum StageEnum {
     Hashing,
     Merkle,
     TxLookup,
+    History,
 }

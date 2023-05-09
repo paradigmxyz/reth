@@ -10,6 +10,10 @@ build = "build.rs"
 [build-dependencies]
 built = { version = "0.6", features = ["git2", "chrono", "semver"] }
 
+# Add jemalloc for extra perf on Linux systems.
+[target.'cfg(all(not(windows), not(target_env = "musl")))'.dependencies]
+jemallocator = "0.5.0"
+
 [dependencies]
 # reth
 reth-primitives = { path = "../../crates/primitives", features = ["arbitrary"] }
@@ -41,7 +45,7 @@ reth-discv4 = { path = "../../crates/net/discv4" }
 built = { version = "0.6", features = ["chrono", "semver"] }
 
 # crypto
-secp256k1 = { version = "0.26.0", features = [
+secp256k1 = { version = "0.27.0", features = [
     "global-context",
     "rand-std",
     "recovery",

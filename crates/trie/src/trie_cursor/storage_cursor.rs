@@ -81,6 +81,6 @@ mod tests {
             .unwrap();
 
         let mut cursor = StorageTrieCursor::new(cursor, hashed_address);
-        assert_eq!(cursor.seek(key.clone().into()).unwrap().unwrap().1, value);
+        assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
     }
 }

@@ -156,7 +156,7 @@ impl Stream for TestDownload {
             }
 
             let empty = SealedHeader::default();
-            if let Err(error) = this.consensus.pre_validate_header(&empty, &empty) {
+            if let Err(error) = this.consensus.validate_header_against_parent(&empty, &empty) {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
@@ -306,7 +306,15 @@ impl StatusUpdater for TestStatusUpdater {
 
 #[async_trait::async_trait]
 impl Consensus for TestConsensus {
-    fn pre_validate_header(
+    fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
+        if self.fail_validation() {
+            Err(consensus::ConsensusError::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_header_against_parent(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
@@ -318,7 +326,7 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn validate_header(
+    fn validate_header_with_total_difficulty(
         &self,
         header: &Header,
         total_difficulty: U256,
@@ -330,7 +338,7 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn pre_validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::ConsensusError> {
+    fn validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::ConsensusError> {
         if self.fail_validation() {
             Err(consensus::ConsensusError::BaseFeeMissing)
         } else {

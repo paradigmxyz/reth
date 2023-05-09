@@ -280,6 +280,47 @@ mod tests {
         assert_eq!(walker.next(), None);
     }
 
+    #[test]
+    fn db_cursor_walk_range_on_dup_table() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        let address0 = Address::zero();
+        let address1 = Address::from_low_u64_be(1);
+        let address2 = Address::from_low_u64_be(2);
+
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address0, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address1, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address2, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address0, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address1, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address2, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(2, AccountBeforeTx { address: address0, info: None }) // <- should not be returned by the walker
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<AccountChangeSet>().unwrap();
+
+        let entries = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(entries.len(), 7);
+
+        let mut walker = cursor.walk_range(0..=1).unwrap();
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address0, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address1, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address2, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address0, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address1, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address2, info: None }))));
+        assert_eq!(walker.next(), None);
+    }
+
     #[allow(clippy::reversed_empty_ranges)]
     #[test]
     fn db_cursor_walk_range_invalid() {
@@ -466,6 +507,52 @@ mod tests {
         let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
+    }
+
+    #[test]
+    fn db_cursor_insert_dup() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+        let key = Address::random();
+        let subkey1 = H256::random();
+        let subkey2 = H256::random();
+
+        let entry1 = StorageEntry { key: subkey1, value: U256::ZERO };
+        assert!(dup_cursor.insert(key, entry1).is_ok());
+
+        // Can't insert
+        let entry2 = StorageEntry { key: subkey2, value: U256::ZERO };
+        assert!(dup_cursor.insert(key, entry2).is_err());
+    }
+
+    #[test]
+    fn db_cursor_delete_current_non_existent() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let key1 = Address::from_low_u64_be(1);
+        let key2 = Address::from_low_u64_be(2);
+        let key3 = Address::from_low_u64_be(3);
+        let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
+
+        assert!(cursor.insert(key1, Account::default()).is_ok());
+        assert!(cursor.insert(key2, Account::default()).is_ok());
+        assert!(cursor.insert(key3, Account::default()).is_ok());
+
+        // Seek & delete key2
+        cursor.seek_exact(key2).unwrap();
+        assert_eq!(cursor.delete_current(), Ok(()));
+        assert_eq!(cursor.seek_exact(key2), Ok(None));
+
+        // Seek & delete key2 again
+        assert_eq!(cursor.seek_exact(key2), Ok(None));
+        assert_eq!(cursor.delete_current(), Ok(()));
+        // Assert that key1 is still there
+        assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
+        // Assert that key3 was deleted
+        assert_eq!(cursor.seek_exact(key3), Ok(None));
     }
 
     #[test]

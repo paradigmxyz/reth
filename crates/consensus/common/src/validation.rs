@@ -182,8 +182,7 @@ pub fn validate_block_standalone(
 ) -> Result<(), ConsensusError> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
-    let ommers_hash =
-        reth_primitives::proofs::calculate_ommers_root(block.ommers.iter().map(|h| h.as_ref()));
+    let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
     if block.header.ommers_hash != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff {
             got: ommers_hash,
@@ -193,7 +192,7 @@ pub fn validate_block_standalone(
 
     // Check transaction root
     // TODO(onbjerg): This should probably be accessible directly on [Block]
-    let transaction_root = reth_primitives::proofs::calculate_transaction_root(block.body.iter());
+    let transaction_root = reth_primitives::proofs::calculate_transaction_root(&block.body);
     if block.header.transactions_root != transaction_root {
         return Err(ConsensusError::BodyTransactionRootDiff {
             got: transaction_root,
@@ -205,8 +204,7 @@ pub fn validate_block_standalone(
     if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
         let withdrawals =
             block.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
-        let withdrawals_root =
-            reth_primitives::proofs::calculate_withdrawals_root(withdrawals.iter());
+        let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
         let header_withdrawals_root =
             block.withdrawals_root.as_ref().ok_or(ConsensusError::WithdrawalsRootMissing)?;
         if withdrawals_root != *header_withdrawals_root {
@@ -235,32 +233,6 @@ pub fn validate_block_standalone(
     Ok(())
 }
 
-/// Calculate base fee for next block. EIP-1559 spec
-pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u64) -> u64 {
-    let gas_target = gas_limit / constants::EIP1559_ELASTICITY_MULTIPLIER;
-
-    if gas_used == gas_target {
-        return base_fee
-    }
-    if gas_used > gas_target {
-        let gas_used_delta = gas_used - gas_target;
-        let base_fee_delta = std::cmp::max(
-            1,
-            base_fee as u128 * gas_used_delta as u128 /
-                gas_target as u128 /
-                constants::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128,
-        );
-        base_fee + (base_fee_delta as u64)
-    } else {
-        let gas_used_delta = gas_target - gas_used;
-        let base_fee_per_gas_delta = base_fee as u128 * gas_used_delta as u128 /
-            gas_target as u128 /
-            constants::EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR as u128;
-
-        base_fee.saturating_sub(base_fee_per_gas_delta as u64)
-    }
-}
-
 /// Validate block in regards to parent
 pub fn validate_header_regarding_parent(
     parent: &SealedHeader,
@@ -276,18 +248,15 @@ pub fn validate_header_regarding_parent(
     }
 
     // timestamp in past check
-    if child.timestamp < parent.timestamp {
+    if child.timestamp <= parent.timestamp {
         return Err(ConsensusError::TimestampIsInPast {
             parent_timestamp: parent.timestamp,
             timestamp: child.timestamp,
         })
     }
 
-    // difficulty check is done by consensus.
-    // TODO(onbjerg): Unsure what the check here is supposed to be, but it should be moved to
-    // [BeaconConsensus]. if chain_spec.paris_status().block_number() > Some(child.number) {
-    //    // TODO how this needs to be checked? As ice age did increment it by some formula
-    //}
+    // TODO Check difficulty increment between parent and child
+    // Ace age did increment it by some formula that we need to follow.
 
     let mut parent_gas_limit = parent.gas_limit;
 
@@ -321,11 +290,7 @@ pub fn validate_header_regarding_parent(
                 constants::EIP1559_INITIAL_BASE_FEE
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have them.
-                calculate_next_block_base_fee(
-                    parent.gas_used,
-                    parent.gas_limit,
-                    parent.base_fee_per_gas.ok_or(ConsensusError::BaseFeeMissing)?,
-                )
+                parent.next_block_base_fee().ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
@@ -428,33 +393,6 @@ mod tests {
         Header, Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
     use std::ops::RangeBounds;
-
-    #[test]
-    fn calculate_base_fee_success() {
-        let base_fee = [
-            1000000000, 1000000000, 1000000000, 1072671875, 1059263476, 1049238967, 1049238967, 0,
-            1, 2,
-        ];
-        let gas_used = [
-            10000000, 10000000, 10000000, 9000000, 10001000, 0, 10000000, 10000000, 10000000,
-            10000000,
-        ];
-        let gas_limit = [
-            10000000, 12000000, 14000000, 10000000, 14000000, 2000000, 18000000, 18000000,
-            18000000, 18000000,
-        ];
-        let next_base_fee = [
-            1125000000, 1083333333, 1053571428, 1179939062, 1116028649, 918084097, 1063811730, 1,
-            2, 3,
-        ];
-
-        for i in 0..base_fee.len() {
-            assert_eq!(
-                next_base_fee[i],
-                calculate_next_block_base_fee(gas_used[i], gas_limit[i], base_fee[i])
-            );
-        }
-    }
 
     mock! {
         WithdrawalsProvider {}
@@ -594,6 +532,7 @@ mod tests {
         parent.gas_limit = 30000000;
         parent.base_fee_per_gas = Some(0x28041f7f5);
         parent.number -= 1;
+        parent.timestamp -= 1;
 
         let ommers = Vec::new();
         let body = Vec::new();
@@ -686,7 +625,7 @@ mod tests {
                 .collect::<Vec<_>>();
             SealedBlock {
                 header: Header {
-                    withdrawals_root: Some(proofs::calculate_withdrawals_root(withdrawals.iter())),
+                    withdrawals_root: Some(proofs::calculate_withdrawals_root(&withdrawals)),
                     ..Default::default()
                 }
                 .seal_slow(),

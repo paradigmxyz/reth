@@ -1,4 +1,8 @@
-use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
+use crate::{
+    error::PoolResult,
+    pool::{state::SubPool, TransactionEvents},
+    validate::ValidPoolTransaction,
+};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, H256, U256,
@@ -24,15 +28,20 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
 
-    /// Returns stats about the pool.
-    fn status(&self) -> PoolSize;
+    /// Returns stats about the pool and all sub-pools.
+    fn pool_size(&self) -> PoolSize;
 
-    /// Event listener for when a new block was mined.
+    /// Returns the block the pool is currently tracking.
+    ///
+    /// This tracks the block that the pool has last seen.
+    fn block_info(&self) -> BlockInfo;
+
+    /// Event listener for when the pool needs to be updated
     ///
     /// Implementers need to update the pool accordingly.
     /// For example the base fee of the pending block is determined after a block is mined which
     /// affects the dynamic fee requirement of pending transactions in the pool.
-    fn on_new_block(&self, event: OnNewBlockEvent);
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
 
     /// Imports an _external_ transaction.
     ///
@@ -43,6 +52,29 @@ pub trait TransactionPool: Send + Sync + Clone {
     async fn add_external_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
         self.add_transaction(TransactionOrigin::External, transaction).await
     }
+
+    /// Imports all _external_ transactions
+    ///
+    ///
+    /// Consumer: Utility
+    async fn add_external_transactions(
+        &self,
+        transactions: Vec<Self::Transaction>,
+    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+        self.add_transactions(TransactionOrigin::External, transactions).await
+    }
+
+    /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
+    ///
+    /// This is the same as [TransactionPool::add_transaction] but returns an event stream for the
+    /// given transaction.
+    ///
+    /// Consumer: Custom
+    async fn add_transaction_and_subscribe(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> PoolResult<TransactionEvents>;
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
@@ -106,9 +138,31 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
+    /// Returns all transactions that can be included in the next block.
+    ///
+    /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
+    ///
+    /// Consumer: RPC
+    fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that can be included in _future_ blocks.
+    ///
+    /// This and [Self::pending_transactions] are mutually exclusive.
+    ///
+    /// Consumer: RPC
+    fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that are currently in the pool grouped by whether they are ready
+    /// for inclusion in the next block or not.
+    ///
+    /// This is primarily used for the `txpool_` namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool>
+    ///
+    /// Consumer: RPC
+    fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction>;
+
     /// Removes all transactions corresponding to the given hashes.
     ///
-    /// Also removes all dependent transactions.
+    /// Also removes all _dependent_ transactions.
     ///
     /// Consumer: Block production
     fn remove_transactions(
@@ -151,6 +205,31 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+}
+
+/// A Helper type that bundles all transactions in the pool.
+#[derive(Debug, Clone, Default)]
+pub struct AllPoolTransactions<T: PoolTransaction> {
+    /// Transactions that are ready for inclusion in the next block.
+    pub pending: Vec<Arc<ValidPoolTransaction<T>>>,
+    /// Transactions that are ready for inclusion in _future_ blocks, but are currently parked,
+    /// because they depend on other transactions that are not yet included in the pool (nonce gap)
+    /// or otherwise blocked.
+    pub queued: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+// === impl AllPoolTransactions ===
+
+impl<T: PoolTransaction> AllPoolTransactions<T> {
+    /// Returns an iterator over all pending [TransactionSignedEcRecovered] transactions.
+    pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
+        self.pending.iter().map(|tx| tx.transaction.to_recovered_transaction())
+    }
+
+    /// Returns an iterator over all queued [TransactionSignedEcRecovered] transactions.
+    pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
+        self.queued.iter().map(|tx| tx.transaction.to_recovered_transaction())
+    }
 }
 
 /// Represents a transaction that was propagated over the network.
@@ -229,31 +308,54 @@ impl TransactionOrigin {
     }
 }
 
-/// Event fired when a new block was mined
+/// Represents changes after a new canonical block or range of canonical blocks was added to the
+/// chain.
+///
+/// It is expected that this is only used if the added blocks are canonical to the pool's last known
+/// block hash. In other words, the first added block of the range must be the child of the last
+/// known block hash.
+///
+/// This is used to update the pool state accordingly.
 #[derive(Debug, Clone)]
-pub struct OnNewBlockEvent {
-    /// Hash of the added block.
+pub struct CanonicalStateUpdate {
+    /// Hash of the tip block.
     pub hash: H256,
+    /// Number of the tip block.
+    pub number: u64,
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
     pub pending_block_base_fee: u128,
-    /// Provides a set of state changes that affected the accounts.
-    pub state_changes: StateDiff,
-    /// All mined transactions in the block
+    /// A set of changed accounts across a range of blocks.
+    pub changed_accounts: Vec<ChangedAccount>,
+    /// All mined transactions in the block range.
     pub mined_transactions: Vec<H256>,
 }
 
-/// Contains a list of changed state
-#[derive(Debug, Clone)]
-pub struct StateDiff {
-    // TODO(mattsse) this could be an `Arc<revm::State>>`
+/// Represents a changed account
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct ChangedAccount {
+    /// The address of the account.
+    pub address: Address,
+    /// Account nonce.
+    pub nonce: u64,
+    /// Account balance.
+    pub balance: U256,
+}
+
+// === impl ChangedAccount ===
+
+impl ChangedAccount {
+    /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
+    pub(crate) fn empty(address: Address) -> Self {
+        Self { address, nonce: 0, balance: U256::ZERO }
+    }
 }
 
 /// An `Iterator` that only returns transactions that are ready to be executed.
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
-/// transactions are valid (no nonce gaps.).
+/// transactions are valid (no nonce gaps.) for the tracked state of the pool.
 pub trait BestTransactions: Iterator + Send {
     /// Mark the transaction as invalid.
     ///
@@ -296,8 +398,10 @@ pub trait PoolTransaction:
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
-    /// This will return `None` for non-EIP1559 transactions
-    fn max_fee_per_gas(&self) -> Option<u128>;
+    /// For legacy transactions this is gas_price.
+    ///
+    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
+    fn max_fee_per_gas(&self) -> u128;
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
@@ -386,12 +490,14 @@ impl PoolTransaction for PooledTransaction {
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
-    /// This will return `None` for non-EIP1559 transactions
-    fn max_fee_per_gas(&self) -> Option<u128> {
+    /// For legacy transactions this is gas_price.
+    ///
+    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
+    fn max_fee_per_gas(&self) -> u128 {
         match &self.transaction.transaction {
-            Transaction::Legacy(_) => None,
-            Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(tx) => Some(tx.max_fee_per_gas),
+            Transaction::Legacy(tx) => tx.gas_price,
+            Transaction::Eip2930(tx) => tx.gas_price,
+            Transaction::Eip1559(tx) => tx.max_fee_per_gas,
         }
     }
 
@@ -479,4 +585,18 @@ pub struct PoolSize {
     pub queued: usize,
     /// Reported size of transactions in the _queued_ sub-pool.
     pub queued_size: usize,
+}
+
+/// Represents the current status of the pool.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct BlockInfo {
+    /// Hash for the currently tracked block.
+    pub last_seen_block_hash: H256,
+    /// Current the currently tracked block.
+    pub last_seen_block_number: u64,
+    /// Currently enforced base fee: the threshold for the basefee sub-pool.
+    ///
+    /// Note: this is the derived base fee of the _next_ block that builds on the clock the pool is
+    /// currently tracking.
+    pub pending_basefee: u128,
 }

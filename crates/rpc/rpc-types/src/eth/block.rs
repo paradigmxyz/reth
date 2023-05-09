@@ -144,6 +144,7 @@ impl Block {
                 signed_tx,
                 block_hash,
                 block_number,
+                block.base_fee_per_gas,
                 U256::from(idx),
             ))
         }

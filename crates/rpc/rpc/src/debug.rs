@@ -1,7 +1,7 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult},
-        revm_utils::inspect,
+        revm_utils::{inspect, replay_transactions_until},
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
@@ -9,7 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, H256, U256};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256, U256};
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{State, SubState},
@@ -20,14 +20,14 @@ use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
-        BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
-        GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame, NoopFrame,
-        TraceResult,
+        BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerConfig,
+        GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame,
+        NoopFrame, TraceResult,
     },
     BlockError, CallRequest, RichBlock,
 };
 use revm::primitives::Env;
-use reth_rpc_types::trace::geth::GethDebugTracerConfig;
+use revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv};
 
 /// `debug` API implementation.
 ///
@@ -38,7 +38,6 @@ pub struct DebugApi<Client, Eth> {
     client: Client,
     /// The implementation of `eth` API
     eth_api: Eth,
-
     // restrict the number of concurrent calls to `debug_traceTransaction`
     tracing_call_guard: TracingCallGuard,
 }
@@ -59,6 +58,39 @@ where
     Client: BlockProvider + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
+    /// Trace the entire block
+    fn trace_block_with(
+        &self,
+        at: BlockId,
+        transactions: Vec<TransactionSigned>,
+        cfg: CfgEnv,
+        block_env: BlockEnv,
+        opts: GethDebugTracingOptions,
+    ) -> EthResult<Vec<TraceResult>> {
+        // replay all transactions of the block
+        self.eth_api.with_state_at_block(at, move |state| {
+            let mut results = Vec::with_capacity(transactions.len());
+            let mut db = SubState::new(State::new(state));
+
+            let mut transactions = transactions.into_iter().peekable();
+            while let Some(tx) = transactions.next() {
+                let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                let tx = tx_env_with_recovered(&tx);
+                let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                let (result, state_changes) = trace_transaction(opts.clone(), env, &mut db)?;
+                results.push(TraceResult::Success { result });
+
+                if transactions.peek().is_some() {
+                    // need to apply the state changes of this transaction before executing the next
+                    // transaction
+                    db.commit(state_changes)
+                }
+            }
+
+            Ok(results)
+        })
+    }
+
     /// Replays the given block and returns the trace of each transaction.
     ///
     /// This expects a rlp encoded block
@@ -67,15 +99,16 @@ where
     pub async fn debug_trace_raw_block(
         &self,
         rlp_block: Bytes,
-        _opts: GethDebugTracingOptions,
+        opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
         let block =
             Block::decode(&mut rlp_block.as_ref()).map_err(BlockError::RlpDecodeRawBlock)?;
-        let _parent = block.parent_hash;
 
-        // TODO we need the state after the parent block
+        let (cfg, block_env) = self.eth_api.evm_env_for_raw_block(&block.header).await?;
 
-        todo!()
+        // we trace on top the block's parent block
+        let parent = block.parent_hash;
+        self.trace_block_with(parent.into(), block.body, cfg, block_env, opts)
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -89,28 +122,17 @@ where
             .block_hash_for_id(block_id)?
             .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
-        let ((cfg, block_env, at), transactions) = futures::try_join!(
+        let ((cfg, block_env, _), block) = futures::try_join!(
             self.eth_api.evm_env_at(block_hash.into()),
-            self.eth_api.transactions_by_block(block_hash),
+            self.eth_api.block_by_id(block_id),
         )?;
-        let transactions = transactions.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
-        // replay all transactions of the block
-        self.eth_api.with_state_at(at, move |state| {
-            let mut results = Vec::with_capacity(transactions.len());
-            let mut db = SubState::new(State::new(state));
+        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        // we need to get the state of the parent block because we're replaying this block on top of
+        // its parent block's state
+        let state_at = block.parent_hash;
 
-            for tx in transactions {
-                let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-                let tx = tx_env_with_recovered(&tx);
-                let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                // TODO(mattsse): get rid of clone by extracting necessary opts fields into a struct
-                let result = trace_transaction(opts.clone(), env, &mut db)?;
-                results.push(TraceResult::Success { result });
-            }
-
-            Ok(results)
-        })
+        self.trace_block_with(state_at.into(), block.body, cfg, block_env, opts)
     }
 
     /// Trace the transaction according to the provided options.
@@ -121,19 +143,27 @@ where
         tx_hash: H256,
         opts: GethDebugTracingOptions,
     ) -> EthResult<GethTraceFrame> {
-        let (transaction, at) = match self.eth_api.transaction_by_hash_at(tx_hash).await? {
+        let (transaction, block) = match self.eth_api.transaction_and_block(tx_hash).await? {
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
+        let (cfg, block_env, _) = self.eth_api.evm_env_at(block.hash.into()).await?;
 
-        let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let state_at = block.parent_hash;
+        let block_txs = block.body;
 
-        self.eth_api.with_state_at(at, |state| {
+        self.eth_api.with_state_at_block(state_at.into(), |state| {
+            // configure env for the target transaction
             let tx = transaction.into_recovered();
-            let tx = tx_env_with_recovered(&tx);
-            let env = Env { cfg, block, tx };
+
             let mut db = SubState::new(State::new(state));
-            trace_transaction(opts, env, &mut db)
+            // replay all transactions prior to the targeted transaction
+            replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
+
+            let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+            trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
         })
     }
 
@@ -163,22 +193,29 @@ where
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
-                        let (res, _) =
-                            self.eth_api.inspect_call_at(call, at, state_overrides, &mut inspector).await?;
+                        let (res, _) = self
+                            .eth_api
+                            .inspect_call_at(call, at, state_overrides, &mut inspector)
+                            .await?;
                         return Ok(FourByteFrame::from(inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
-                        let call_config = tracer_config.unwrap().into_call_config().unwrap_or_default();
+                        let call_config =
+                            tracer_config.unwrap().into_call_config().unwrap_or_default();
 
                         let inspector_config = TracingInspectorConfig::from_geth_config(&config);
 
                         let mut inspector = TracingInspector::new(inspector_config);
 
-                        let (res, _) =
-                            self.eth_api.inspect_call_at(call, at, state_overrides, &mut inspector).await?;
+                        let (res, _) = self
+                            .eth_api
+                            .inspect_call_at(call, at, state_overrides, &mut inspector)
+                            .await?;
                         let gas_used = res.result.gas_used();
 
-                        let frame = inspector.into_geth_builder().geth_call_traces(U256::from(gas_used), call_config);
+                        let frame = inspector
+                            .into_geth_builder()
+                            .geth_call_traces(U256::from(gas_used), call_config);
 
                         return Ok(frame.into())
                     }
@@ -346,14 +383,16 @@ impl<Client, Eth> std::fmt::Debug for DebugApi<Client, Eth> {
     }
 }
 
-/// Executes the configured transaction in the environment on the given database.
+/// Executes the configured transaction with the environment on the given database.
+///
+/// Returns the trace frame and the state that got updated after executing the transaction.
 ///
 /// Note: this does not apply any state overrides if they're configured in the `opts`.
 fn trace_transaction(
     opts: GethDebugTracingOptions,
     env: Env,
     db: &mut SubState<StateProviderBox<'_>>,
-) -> EthResult<GethTraceFrame> {
+) -> EthResult<(GethTraceFrame, revm_primitives::State)> {
     let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
     if let Some(tracer) = tracer {
         // valid matching config
@@ -367,8 +406,8 @@ fn trace_transaction(
             GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                 GethDebugBuiltInTracerType::FourByteTracer => {
                     let mut inspector = FourByteInspector::default();
-                    let _ = inspect(db, env, &mut inspector)?;
-                    return Ok(FourByteFrame::from(inspector).into())
+                    let (res, _) = inspect(db, env, &mut inspector)?;
+                    return Ok((FourByteFrame::from(inspector).into(), res.state))
                 }
                 GethDebugBuiltInTracerType::CallTracer => {
                     let call_config = tracer_config.unwrap().into_call_config().unwrap_or_default();
@@ -380,14 +419,18 @@ fn trace_transaction(
                     let (res, _) = inspect(db, env, &mut inspector)?;
                     let gas_used = res.result.gas_used();
 
-                    let frame = inspector.into_geth_builder().geth_call_traces(U256::from(gas_used), call_config);
+                    let frame = inspector
+                        .into_geth_builder()
+                        .geth_call_traces(U256::from(gas_used), call_config);
 
                     return Ok(frame.into())
                 }
                 GethDebugBuiltInTracerType::PreStateTracer => {
                     todo!()
                 }
-                GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
+                GethDebugBuiltInTracerType::NoopTracer => {
+                    Ok((NoopFrame::default().into(), Default::default()))
+                }
             },
             GethDebugTracerType::JsTracer(_) => {
                 Err(EthApiError::Unsupported("javascript tracers are unsupported."))
@@ -405,5 +448,5 @@ fn trace_transaction(
 
     let frame = inspector.into_geth_builder().geth_traces(U256::from(gas_used), config);
 
-    Ok(frame.into())
+    Ok((frame.into(), res.state))
 }

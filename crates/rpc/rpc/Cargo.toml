@@ -46,7 +46,7 @@ tokio-util = "0.7"
 pin-project = "1.0"
 
 bytes = "1.4"
-secp256k1 = { version = "0.26.0", features = [
+secp256k1 = { version = "0.27.0", features = [
     "global-context",
     "rand-std",
     "recovery"

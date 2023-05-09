@@ -33,6 +33,22 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     Error(T, Box<dyn std::error::Error + Send + Sync>),
 }
 
+impl<T: PoolTransaction> TransactionValidationOutcome<T> {
+    /// Returns the transaction that was validated.
+    pub fn transaction(&self) -> &T {
+        match self {
+            Self::Valid { transaction, .. } => transaction,
+            Self::Invalid(transaction, ..) => transaction,
+            Self::Error(transaction, ..) => transaction,
+        }
+    }
+
+    /// Returns the hash of the transactions
+    pub fn tx_hash(&self) -> TxHash {
+        *self.transaction().hash()
+    }
+}
+
 /// Provides support for validating transaction at any given state of the chain
 #[async_trait::async_trait]
 pub trait TransactionValidator: Send + Sync {
@@ -206,7 +222,7 @@ where
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
-        if transaction.max_priority_fee_per_gas() > transaction.max_fee_per_gas() {
+        if transaction.max_priority_fee_per_gas() > Some(transaction.max_fee_per_gas()) {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
@@ -335,8 +351,15 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
-    pub fn max_fee_per_gas(&self) -> Option<u128> {
+    ///
+    ///  For legacy transactions this is gas_price.
+    pub fn max_fee_per_gas(&self) -> u128 {
         self.transaction.max_fee_per_gas()
+    }
+
+    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
+    pub fn effective_gas_price(&self) -> u128 {
+        self.transaction.effective_gas_price()
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.

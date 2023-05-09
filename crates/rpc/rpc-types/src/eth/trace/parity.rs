@@ -5,7 +5,10 @@
 
 use reth_primitives::{Address, Bytes, H256, U256, U64};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    ops::{Deref, DerefMut},
+};
 
 /// Result type for parity style transaction trace
 pub type TraceResult = crate::trace::common::TraceResult<TraceOutput, String>;
@@ -90,9 +93,23 @@ pub struct AccountDiff {
 }
 
 /// New-type for list of account diffs
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct StateDiff(pub BTreeMap<Address, AccountDiff>);
+
+impl Deref for StateDiff {
+    type Target = BTreeMap<Address, AccountDiff>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for StateDiff {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type", content = "action")]
@@ -229,35 +246,50 @@ pub struct LocalizedTransactionTrace {
     pub block_hash: Option<H256>,
 }
 
+/// A record of a full VM trace for a CALL/CREATE.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VmTrace {
+    /// The code to be executed.
     pub code: Bytes,
+    /// All executed instructions.
     pub ops: Vec<VmInstruction>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VmInstruction {
+    /// The program counter.
     pub pc: usize,
+    /// The gas cost for this instruction.
     pub cost: u64,
+    /// Information concerning the execution of the operation.
     pub ex: Option<VmExecutedOperation>,
+    /// Subordinate trace of the CALL/CREATE if applicable.
     pub sub: Option<VmTrace>,
 }
 
+/// A record of an executed VM operation.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VmExecutedOperation {
+    /// The total gas used.
     pub used: u64,
+    /// The stack item placed, if any.
     pub push: Option<H256>,
+    /// If altered, the memory delta.
     pub mem: Option<MemoryDelta>,
+    /// The altered storage value, if any.
     pub store: Option<StorageDelta>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// A diff of some chunk of memory.
 pub struct MemoryDelta {
+    /// Offset into memory the change begins.
     pub off: usize,
+    /// The changed data.
     pub data: Bytes,
 }
 

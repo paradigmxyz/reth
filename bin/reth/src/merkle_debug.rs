@@ -1,5 +1,5 @@
 //! Command for debugging merkle trie calculation.
-use crate::dirs::{DbPath, MaybePlatformPath};
+use crate::dirs::{DataDirPath, MaybePlatformPath};
 use clap::Parser;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_primitives::ChainSpec;
@@ -7,8 +7,9 @@ use reth_provider::Transaction;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
 use reth_stages::{
     stages::{
-        AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage, ACCOUNT_HASHING,
-        EXECUTION, MERKLE_EXECUTION, SENDER_RECOVERY, STORAGE_HASHING,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
+        StorageHashingStage, ACCOUNT_HASHING, EXECUTION, MERKLE_EXECUTION, SENDER_RECOVERY,
+        STORAGE_HASHING,
     },
     ExecInput, Stage,
 };
@@ -17,15 +18,15 @@ use std::{ops::Deref, sync::Arc};
 /// `reth merkle-debug` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the database folder.
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(global = true, long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -56,9 +57,9 @@ pub struct Command {
 impl Command {
     /// Execute `merkle-debug` command
     pub async fn execute(self) -> eyre::Result<()> {
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
-
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let db_path = data_dir.db_path();
         std::fs::create_dir_all(&db_path)?;
 
         let db = Arc::new(init_db(db_path)?);
@@ -74,7 +75,14 @@ impl Command {
                 MERKLE_EXECUTION.get_progress(tx.deref())?.unwrap_or_default());
 
         let factory = reth_revm::Factory::new(self.chain.clone());
-        let mut execution_stage = ExecutionStage::new(factory, 1);
+        let mut execution_stage = ExecutionStage::new(
+            factory,
+            ExecutionStageThresholds {
+                max_blocks: Some(1),
+                max_changes: None,
+                max_changesets: None,
+            },
+        );
 
         let mut account_hashing_stage = AccountHashingStage::default();
         let mut storage_hashing_stage = StorageHashingStage::default();
@@ -148,16 +156,17 @@ impl Command {
                     .walk_range(..)?
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let clean_result = merkle_stage
-                    .execute(
-                        &mut tx,
-                        ExecInput {
-                            previous_stage: Some((STORAGE_HASHING, block)),
-                            stage_progress: None,
-                        },
-                    )
-                    .await;
-                assert!(clean_result.is_ok(), "Clean state root calculation failed");
+                let clean_input = ExecInput {
+                    previous_stage: Some((STORAGE_HASHING, block)),
+                    stage_progress: None,
+                };
+                loop {
+                    let clean_result = merkle_stage.execute(&mut tx, clean_input).await;
+                    assert!(clean_result.is_ok(), "Clean state root calculation failed");
+                    if clean_result.unwrap().done {
+                        break
+                    }
+                }
 
                 let clean_account_trie = tx
                     .cursor_read::<tables::AccountsTrie>()?

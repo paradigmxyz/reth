@@ -30,6 +30,9 @@ macro_rules! delegate_provider_impls {
     ($target:ty $(where [$($generics:tt)*])?) => {
         $crate::providers::state::macros::delegate_impls_to_as_ref!(
             for $target =>
+            StateRootProvider $(where [$($generics)*])? {
+                fn state_root(&self, state: crate::PostState) -> reth_interfaces::Result<reth_primitives::H256>;
+            }
             AccountProvider $(where [$($generics)*])? {
                 fn basic_account(&self, address: reth_primitives::Address) -> reth_interfaces::Result<Option<reth_primitives::Account>>;
             }

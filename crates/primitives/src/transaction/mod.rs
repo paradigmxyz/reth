@@ -302,6 +302,11 @@ impl Transaction {
         }
     }
 
+    /// Get the transaction's nonce.
+    pub fn to(&self) -> Option<Address> {
+        self.kind().to()
+    }
+
     /// Get transaction type
     pub fn tx_type(&self) -> TxType {
         match self {
@@ -312,8 +317,8 @@ impl Transaction {
     }
 
     /// Gets the transaction's value field.
-    pub fn value(&self) -> &u128 {
-        match self {
+    pub fn value(&self) -> u128 {
+        *match self {
             Transaction::Legacy(TxLegacy { value, .. }) => value,
             Transaction::Eip2930(TxEip2930 { value, .. }) => value,
             Transaction::Eip1559(TxEip1559 { value, .. }) => value,
@@ -363,26 +368,6 @@ impl Transaction {
         }
     }
 
-    // TODO: dedup with effective_tip_per_gas
-    /// Determine the effective gas limit for the given transaction and base fee.
-    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
-    /// transactions is returned.
-    ///
-    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> Option<u128> {
-        if let Some(base_fee) = base_fee {
-            let max_fee_per_gas = self.max_fee_per_gas();
-            if max_fee_per_gas < base_fee as u128 {
-                None
-            } else {
-                let effective_max_fee = max_fee_per_gas - base_fee as u128;
-                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
-            }
-        } else {
-            Some(self.priority_fee_or_price())
-        }
-    }
-
     /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
     /// otherwise return the gas price.
     ///
@@ -400,7 +385,41 @@ impl Transaction {
         }
     }
 
-    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
+    /// Returns the effective gas price for the given base fee.
+    ///
+    /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        let dynamic_tx = match self {
+            Transaction::Legacy(tx) => return tx.gas_price,
+            Transaction::Eip2930(tx) => return tx.gas_price,
+            Transaction::Eip1559(dynamic_tx) => dynamic_tx,
+        };
+
+        dynamic_tx.effective_gas_price(base_fee)
+    }
+
+    // TODO: dedup with effective_tip_per_gas
+    /// Determine the effective gas limit for the given transaction and base fee.
+    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
+    /// transactions is returned.
+    ///
+    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
+    pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
+        if let Some(base_fee) = base_fee {
+            let max_fee_per_gas = self.max_fee_per_gas();
+            if max_fee_per_gas < base_fee as u128 {
+                None
+            } else {
+                let effective_max_fee = max_fee_per_gas - base_fee as u128;
+                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
+            }
+        } else {
+            Some(self.priority_fee_or_price())
+        }
+    }
+
+    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee:
+    /// `min(maxFeePerGas - baseFee, maxPriorityFeePerGas)`
     ///
     /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
     pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
@@ -633,6 +652,26 @@ impl Encodable for Transaction {
     }
 }
 
+impl TxEip1559 {
+    /// Returns the effective gas price for the given `base_fee`.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas - base_fee as u128;
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
+            }
+        }
+    }
+}
+
 /// Whether or not the transaction is a contract creation.
 #[derive_arbitrary(compact, rlp)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -642,6 +681,16 @@ pub enum TransactionKind {
     Create,
     /// A transaction that calls a contract or transfer.
     Call(Address),
+}
+
+impl TransactionKind {
+    /// Returns the address of the contract that will be called or will receive the transfer.
+    pub fn to(self) -> Option<Address> {
+        match self {
+            TransactionKind::Create => None,
+            TransactionKind::Call(to) => Some(to),
+        }
+    }
 }
 
 impl Compact for TransactionKind {
@@ -1509,5 +1558,21 @@ mod tests {
 
         let decoded = TransactionSignedEcRecovered::decode(&mut &encoded[..]).unwrap();
         assert_eq!(recovered, decoded)
+    }
+
+    #[test]
+    fn test_decode_tx() {
+        // some random transactions pulled from hive tests
+        let s = "b86f02f86c0705843b9aca008506fc23ac00830124f89400000000000000000000000000000000000003160180c001a00293c713e2f1eab91c366621ff2f867e05ad7e99d4aa5d069aafeb9e1e8c9b6aa05ec6c0605ff20b57c90a6484ec3b0509e5923733d06f9b69bee9a2dabe4f1352";
+        let tx = TransactionSigned::decode(&mut &hex::decode(s).unwrap()[..]).unwrap();
+        let mut b = Vec::new();
+        tx.encode(&mut b);
+        assert_eq!(s, hex::encode(&b));
+
+        let s = "f865048506fc23ac00830124f8940000000000000000000000000000000000000316018032a06b8fdfdcb84790816b7af85b19305f493665fe8b4e7c51ffdd7cc144cd776a60a028a09ab55def7b8d6602ba1c97a0ebbafe64ffc9c8e89520cec97a8edfb2ebe9";
+        let tx = TransactionSigned::decode(&mut &hex::decode(s).unwrap()[..]).unwrap();
+        let mut b = Vec::new();
+        tx.encode(&mut b);
+        assert_eq!(s, hex::encode(&b));
     }
 }

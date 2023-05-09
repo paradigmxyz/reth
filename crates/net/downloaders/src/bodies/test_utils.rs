@@ -24,7 +24,7 @@ pub(crate) fn zip_blocks<'a>(
                 BlockResponse::Full(SealedBlock {
                     header: header.clone(),
                     body: body.transactions,
-                    ommers: body.ommers.into_iter().map(|o| o.seal_slow()).collect(),
+                    ommers: body.ommers,
                     withdrawals: body.withdrawals,
                 })
             }

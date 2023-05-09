@@ -1,3 +1,4 @@
+use crate::U8;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +32,12 @@ impl From<TxType> for u8 {
             TxType::EIP2930 => EIP2930_TX_TYPE_ID,
             TxType::EIP1559 => EIP1559_TX_TYPE_ID,
         }
+    }
+}
+
+impl From<TxType> for U8 {
+    fn from(value: TxType) -> Self {
+        U8::from(u8::from(value))
     }
 }
 

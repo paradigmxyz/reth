@@ -1,4 +1,8 @@
-use crate::stages::{BODIES, FINISH, HEADERS};
+use crate::stages::{
+    ACCOUNT_HASHING, BODIES, EXECUTION, FINISH, HEADERS, INDEX_ACCOUNT_HISTORY,
+    INDEX_STORAGE_HISTORY, MERKLE_EXECUTION, MERKLE_UNWIND, SENDER_RECOVERY, TOTAL_DIFFICULTY,
+    TRANSACTION_LOOKUP,
+};
 use reth_db::{
     tables::SyncStage,
     transaction::{DbTx, DbTxMut},
@@ -6,6 +10,69 @@ use reth_db::{
 };
 use reth_primitives::BlockNumber;
 use std::fmt::Display;
+
+/// All known stages
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(missing_docs)]
+pub enum StageKind {
+    Headers,
+    Bodies,
+    SenderRecovery,
+    TotalDifficulty,
+    AccountHashing,
+    StorageHashing,
+    IndexAccountHistory,
+    IndexStorageHistory,
+    MerkleExecution,
+    MerkleUnwind,
+    Execution,
+    TransactionLookup,
+    Finish,
+}
+
+impl StageKind {
+    /// All supported Stages
+    pub const ALL: [StageKind; 13] = [
+        StageKind::Headers,
+        StageKind::Bodies,
+        StageKind::SenderRecovery,
+        StageKind::TotalDifficulty,
+        StageKind::AccountHashing,
+        StageKind::StorageHashing,
+        StageKind::IndexAccountHistory,
+        StageKind::IndexStorageHistory,
+        StageKind::MerkleExecution,
+        StageKind::MerkleUnwind,
+        StageKind::Execution,
+        StageKind::TransactionLookup,
+        StageKind::Finish,
+    ];
+
+    /// Returns the ID of this stage.
+    pub fn id(&self) -> StageId {
+        match self {
+            StageKind::Headers => HEADERS,
+            StageKind::Bodies => BODIES,
+            StageKind::SenderRecovery => SENDER_RECOVERY,
+            StageKind::TotalDifficulty => TOTAL_DIFFICULTY,
+            StageKind::AccountHashing => ACCOUNT_HASHING,
+            StageKind::StorageHashing => ACCOUNT_HASHING,
+            StageKind::IndexAccountHistory => INDEX_ACCOUNT_HISTORY,
+            StageKind::IndexStorageHistory => INDEX_STORAGE_HISTORY,
+            StageKind::MerkleExecution => MERKLE_EXECUTION,
+            StageKind::MerkleUnwind => MERKLE_UNWIND,
+            StageKind::Execution => EXECUTION,
+            StageKind::TransactionLookup => TRANSACTION_LOOKUP,
+            StageKind::Finish => FINISH,
+        }
+    }
+}
+
+impl Display for StageKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id())
+    }
+}
 
 /// The ID of a stage.
 ///

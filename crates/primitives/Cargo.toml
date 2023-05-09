@@ -27,7 +27,7 @@ fixed-hash = { version = "0.8", default-features = false, features = [
 ] }
 
 # crypto
-secp256k1 = { version = "0.26.0", default-features = false, features = [
+secp256k1 = { version = "0.27.0", default-features = false, features = [
     "global-context",
     "alloc",
     "recovery",
@@ -35,6 +35,13 @@ secp256k1 = { version = "0.26.0", default-features = false, features = [
 
 # used for forkid
 crc = "3"
+
+# tracing
+tracing = "0.1"
+
+# tokio
+tokio = { version = "1", default-features = false, features = ["sync"] }
+tokio-stream = "0.1"
 
 # misc
 bytes = "1.4"
@@ -75,7 +82,7 @@ proptest-derive = "0.3"
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
-secp256k1 = "0.26.0"
+secp256k1 = "0.27.0"
 criterion = "0.4.0"
 pprof = { version = "0.11", features = [
     "flamegraph",
@@ -95,4 +102,8 @@ test-utils = []
 
 [[bench]]
 name = "recover_ecdsa_crit"
+harness = false
+
+[[bench]]
+name = "trie_root"
 harness = false

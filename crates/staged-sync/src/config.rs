@@ -4,7 +4,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_network::{NetworkConfigBuilder, PeersConfig};
+use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -18,6 +18,8 @@ pub struct Config {
     pub stages: StageConfig,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
+    /// Configuration for peer sessions.
+    pub sessions: SessionsConfig,
 }
 
 impl Config {
@@ -36,7 +38,10 @@ impl Config {
 
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(secret_key).peer_config(peer_config).discovery(discv4)
+        NetworkConfigBuilder::new(secret_key)
+            .sessions_config(self.sessions.clone())
+            .peer_config(peer_config)
+            .discovery(discv4)
     }
 }
 
@@ -149,13 +154,25 @@ impl Default for SenderRecoveryConfig {
 /// Execution stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ExecutionConfig {
-    /// The maximum number of blocks to execution before committing progress to the database.
-    pub commit_threshold: u64,
+    /// The maximum number of blocks to process before the execution stage commits.
+    pub max_blocks: Option<u64>,
+    /// The maximum amount of state changes to keep in memory before the execution stage commits.
+    pub max_changes: Option<u64>,
+    /// The maximum amount of changesets to keep in memory before they are written to the pending
+    /// database transaction.
+    ///
+    /// If this is lower than `max_gas`, then history is periodically flushed to the database
+    /// transaction, which frees up memory.
+    pub max_changesets: Option<u64>,
 }
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000 }
+        Self {
+            max_blocks: Some(500_000),
+            max_changes: Some(5_000_000),
+            max_changesets: Some(1_000_000),
+        }
     }
 }
 
