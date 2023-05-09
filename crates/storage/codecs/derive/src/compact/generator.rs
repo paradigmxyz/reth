@@ -112,7 +112,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
                     #decompressor.with(|decompressor| {
                         let mut decompressor = decompressor.borrow_mut();
 
-                        let mut tmp: Vec<u8> = Vec::with_capacity(1000);
+                        let mut tmp: Vec<u8> = Vec::with_capacity(300);
 
                         while let Err(err) = decompressor.decompress_to_buffer(&buf[..], &mut tmp) {
                             let err = err.to_string();
