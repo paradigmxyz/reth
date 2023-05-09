@@ -477,19 +477,6 @@ impl PostState {
         &mut self,
         tx: &TX,
     ) -> Result<(), DbError> {
-        // Write account changes
-        tracing::trace!(target: "provider::post_state", "Writing account changes");
-        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-        for (block_number, account_changes) in
-            std::mem::take(&mut self.account_changes).inner.into_iter()
-        {
-            for (address, info) in account_changes.into_iter() {
-                tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
-                account_changeset_cursor
-                    .append_dup(block_number, AccountBeforeTx { address, info })?;
-            }
-        }
-
         // Write storage changes
         tracing::trace!(target: "provider::post_state", "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
@@ -499,6 +486,19 @@ impl PostState {
         {
             for (address, mut storage) in storage_changes.into_iter() {
                 let storage_id = BlockNumberAddress((block_number, address));
+
+                // If the account was created and wiped at the same block, skip all storage changes
+                if storage.wipe.is_wiped() {
+                    if self
+                        .account_changes
+                        .get(&block_number)
+                        .and_then(|changes| changes.get(&address).map(|info| info.is_none()))
+                        // No account info available, fallback to `false`
+                        .unwrap_or_default()
+                    {
+                        continue
+                    }
+                }
 
                 // If we are writing the primary storage wipe transition, the pre-existing plain
                 // storage state has to be taken from the database and written to storage history.
@@ -527,6 +527,19 @@ impl PostState {
                         StorageEntry { key: H256(slot.to_be_bytes()), value: old_value },
                     )?;
                 }
+            }
+        }
+
+        // Write account changes
+        tracing::trace!(target: "provider::post_state", "Writing account changes");
+        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+        for (block_number, account_changes) in
+            std::mem::take(&mut self.account_changes).inner.into_iter()
+        {
+            for (address, info) in account_changes.into_iter() {
+                tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
+                account_changeset_cursor
+                    .append_dup(block_number, AccountBeforeTx { address, info })?;
             }
         }
 
