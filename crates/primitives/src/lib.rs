@@ -18,7 +18,6 @@ mod chain;
 mod checkpoints;
 pub mod constants;
 pub mod contract;
-mod error;
 pub mod filter;
 mod forkid;
 mod genesis;
