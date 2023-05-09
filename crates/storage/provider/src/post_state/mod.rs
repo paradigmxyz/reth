@@ -14,13 +14,13 @@ use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 mod account;
 pub use account::AccountChanges;
 
 mod storage;
-pub use storage::{ChangedStorage, Storage, StorageChanges, StorageChangeset};
+pub use storage::{Storage, StorageChanges, StorageChangeset, StorageTransition, StorageWipe};
 
 // todo: rewrite all the docs for this
 /// The state of accounts after execution of one or more transactions, including receipts and new
@@ -77,7 +77,7 @@ pub struct PostState {
     /// New code created during the execution
     bytecode: BTreeMap<H256, Bytecode>,
     /// The receipt(s) of the executed transaction(s).
-    receipts: Vec<Receipt>,
+    receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
 }
 
 impl PostState {
@@ -87,15 +87,15 @@ impl PostState {
     }
 
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
-    pub fn with_tx_capacity(txs: usize) -> Self {
-        Self { receipts: Vec::with_capacity(txs), ..Default::default() }
+    pub fn with_tx_capacity(block: BlockNumber, txs: usize) -> Self {
+        Self { receipts: BTreeMap::from([(block, Vec::with_capacity(txs))]), ..Default::default() }
     }
 
     /// Return the current size of the poststate.
     ///
     /// Size is the sum of individual changes to accounts, storage, bytecode and receipts.
     pub fn size(&self) -> usize {
-        self.accounts.len() + self.bytecode.len() + self.receipts.len() + self.changeset_size()
+        self.accounts.len() + self.bytecode.len() + self.receipts.len() /* TODO: fix size */ + self.changeset_size()
     }
 
     /// Return the current size of history changes in the poststate.
@@ -150,25 +150,25 @@ impl PostState {
     }
 
     /// Get the receipts for the transactions executed to form this [PostState].
-    pub fn receipts(&self) -> &[Receipt] {
-        &self.receipts
+    pub fn receipts(&self, block: BlockNumber) -> &[Receipt] {
+        self.receipts.get(&block).map(Vec::as_slice).unwrap_or(&[])
     }
 
     /// Returns an iterator over all logs in this [PostState].
-    pub fn logs(&self) -> impl Iterator<Item = &Log> + '_ {
-        self.receipts().iter().flat_map(|r| r.logs.iter())
+    pub fn logs(&self, block: BlockNumber) -> impl Iterator<Item = &Log> {
+        self.receipts(block).iter().flat_map(|r| r.logs.iter())
     }
 
     /// Returns the logs bloom for all recorded logs.
-    pub fn logs_bloom(&self) -> Bloom {
-        logs_bloom(self.logs())
+    pub fn logs_bloom(&self, block: BlockNumber) -> Bloom {
+        logs_bloom(self.logs(block))
     }
 
     /// Returns the receipt root for all recorded receipts.
     /// TODO: This function hides an expensive operation (bloom). We should probably make it more
     /// explicit.
-    pub fn receipts_root(&self) -> H256 {
-        calculate_receipt_root_ref(self.receipts())
+    pub fn receipts_root(&self, block: BlockNumber) -> H256 {
+        calculate_receipt_root_ref(self.receipts(block))
     }
 
     /// Hash all changed accounts and storage entries that are currently stored in the post state.
@@ -242,18 +242,39 @@ impl PostState {
             .root()
     }
 
-    // todo: note overwrite behavior, i.e. changes in `other` take precedent
     /// Extend this [PostState] with the changes in another [PostState].
+    ///
+    /// # Panics
+    ///
+    /// If both poststates contain storage changes for the same block number.
     pub fn extend(&mut self, mut other: PostState) {
-        // Update plain state
-        self.accounts.extend(other.accounts);
-        for (address, their_storage) in other.storage {
-            let our_storage = self.storage.entry(address).or_default();
-            if their_storage.wiped() {
-                our_storage.times_wiped += their_storage.times_wiped;
-                our_storage.storage.clear();
+        // Insert storage change sets
+        for (block_number, storage_changes) in std::mem::take(&mut other.storage_changes).inner {
+            for (address, their_storage_transition) in storage_changes {
+                assert!(self.storage_changes.get(&block_number).is_none());
+                let our_storage = self.storage.entry(address).or_default();
+                let (wipe, storage) = if their_storage_transition.wipe.is_wiped() {
+                    our_storage.times_wiped += 1;
+                    let wipe = if our_storage.times_wiped == 1 {
+                        StorageWipe::Primary
+                    } else {
+                        // Even if the wipe in other poststate was primary before, demote it to
+                        // secondary.
+                        StorageWipe::Secondary
+                    };
+                    let mut wiped_storage = std::mem::take(&mut our_storage.storage);
+                    wiped_storage.extend(their_storage_transition.storage);
+                    (wipe, wiped_storage)
+                } else {
+                    (StorageWipe::None, their_storage_transition.storage)
+                };
+                self.storage_changes.insert_for_block_and_address(
+                    block_number,
+                    address,
+                    wipe,
+                    storage.into_iter(),
+                );
             }
-            our_storage.storage.extend(their_storage.storage);
         }
 
         // Insert account change sets
@@ -261,19 +282,13 @@ impl PostState {
             self.account_changes.insert_for_block(block_number, account_changes);
         }
 
-        // Insert storage change sets
-        for (block_number, storage_changes) in std::mem::take(&mut other.storage_changes).inner {
-            for (address, their_storage) in storage_changes {
-                if their_storage.wiped {
-                    self.storage_changes.set_wiped(block_number, address);
-                }
-                self.storage_changes.insert_for_block_and_address(
-                    block_number,
-                    address,
-                    their_storage.storage.into_iter(),
-                );
-            }
+        // Update plain state
+        self.accounts.extend(other.accounts);
+        for (address, their_storage) in other.storage {
+            let our_storage = self.storage.entry(address).or_default();
+            our_storage.storage.extend(their_storage.storage);
         }
+
         self.receipts.extend(other.receipts);
         self.bytecode.extend(other.bytecode);
     }
@@ -282,22 +297,65 @@ impl PostState {
     ///
     /// The reverted changes are removed from this post-state, and their effects are reverted.
     pub fn revert_to(&mut self, target_block_number: BlockNumber) {
-        let account_changes_to_revert = self.account_changes.drain_above(target_block_number);
-        for (_, accounts) in account_changes_to_revert.into_iter().rev() {
-            self.accounts.extend(accounts);
+        // Revert account state & changes
+        let removed_account_changes = self.account_changes.drain_above(target_block_number);
+        let changed_accounts = self
+            .account_changes
+            .iter()
+            .flat_map(|(_, account_changes)| account_changes.iter().map(|(address, _)| *address))
+            .collect::<BTreeSet<_>>();
+        let mut account_state: BTreeMap<Address, Option<Account>> = BTreeMap::default();
+        for address in changed_accounts {
+            let info = removed_account_changes
+                .iter()
+                .find_map(|(_, changes)| {
+                    changes.iter().find_map(|ch| (ch.0 == &address).then(|| ch.1.clone()))
+                })
+                .unwrap_or(self.accounts.get(&address).expect("exists").clone());
+            account_state.insert(address.clone(), info);
         }
+        self.accounts = account_state;
 
-        let storage_changes_to_revert = self.storage_changes.drain_above(target_block_number);
-        for (_, storages) in storage_changes_to_revert.into_iter().rev() {
-            for (address, storage) in storages {
-                self.storage.entry(address).and_modify(|head_storage| {
-                    if storage.wiped {
-                        head_storage.times_wiped -= 1;
+        // Revert storage state & changes
+        let removed_storage_changes = self.storage_changes.drain_above(target_block_number);
+        let mut storage_state: BTreeMap<Address, Storage> = BTreeMap::default();
+        for (_, storage_changes) in self.storage_changes.iter() {
+            for (address, storage_change) in storage_changes {
+                let entry = storage_state.entry(*address).or_default();
+                if storage_change.wipe.is_wiped() {
+                    entry.times_wiped += 1;
+                }
+                for (slot, _) in storage_change.storage.iter() {
+                    let value = removed_storage_changes
+                        .iter()
+                        .find_map(|(_, changes)| {
+                            changes.iter().find_map(|ch| {
+                                if ch.0 == address {
+                                    match ch.1.storage.iter().find_map(|(changed_slot, value)| {
+                                        (slot == changed_slot).then(|| value.clone())
+                                    }) {
+                                        value @ Some(_) => Some(value),
+                                        None if ch.1.wipe.is_wiped() => Some(None),
+                                        None => None,
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .unwrap_or_else(|| {
+                            self.storage.get(&address).and_then(|s| s.storage.get(slot).copied())
+                        });
+                    if let Some(value) = value {
+                        entry.storage.insert(*slot, value);
                     }
-                    head_storage.storage.extend(storage.clone().storage);
-                });
+                }
             }
         }
+        self.storage = storage_state;
+
+        // Revert receipts
+        self.receipts.retain(|block_number, _| *block_number <= target_block_number);
     }
 
     /// Reverts each change up to and including any change that is part of `transition_id`.
@@ -322,6 +380,7 @@ impl PostState {
         // Remove all changes in the returned post-state that were not reverted
         non_reverted_state.storage_changes.retain_above(revert_to_block);
         non_reverted_state.account_changes.retain_above(revert_to_block);
+        non_reverted_state.receipts.retain(|block_number, _| *block_number > revert_to_block);
 
         non_reverted_state
     }
@@ -364,8 +423,16 @@ impl PostState {
 
         let storage = self.storage.entry(address).or_default();
         storage.times_wiped += 1;
-        storage.storage.clear();
-        self.storage_changes.set_wiped(block_number, address);
+        let wipe =
+            if storage.times_wiped == 1 { StorageWipe::Primary } else { StorageWipe::Secondary };
+
+        let wiped_storage = std::mem::take(&mut storage.storage);
+        self.storage_changes.insert_for_block_and_address(
+            block_number,
+            address,
+            wipe,
+            wiped_storage.into_iter(),
+        );
     }
 
     /// Add changed storage values to the post-state.
@@ -383,6 +450,7 @@ impl PostState {
         self.storage_changes.insert_for_block_and_address(
             block_number,
             address,
+            StorageWipe::None,
             changeset.into_iter().map(|(slot, (old, _))| (slot, old)),
         );
     }
@@ -400,8 +468,8 @@ impl PostState {
     /// Add a transaction receipt to the post-state.
     ///
     /// Transactions should always include their receipts in the post-state.
-    pub fn add_receipt(&mut self, receipt: Receipt) {
-        self.receipts.push(receipt);
+    pub fn add_receipt(&mut self, block: BlockNumber, receipt: Receipt) {
+        self.receipts.entry(block).or_default().push(receipt);
     }
 
     /// Write changeset history to the database.
@@ -432,7 +500,10 @@ impl PostState {
             for (address, mut storage) in storage_changes.into_iter() {
                 let storage_id = BlockNumberAddress((block_number, address));
 
-                if storage.wiped {
+                // If we are writing the primary storage wipe transition, the pre-existing plain
+                // storage state has to be taken from the database and written to storage history.
+                // See [StorageWipe::Primary] for more details.
+                if storage.wipe.is_primary() {
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
                         storage.storage.insert(entry.key.into(), entry.value);
@@ -463,7 +534,8 @@ impl PostState {
         // Write new storage state
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         for (address, storage) in self.storage.into_iter() {
-            // If the storage was wiped, remove all previous entries from the database.
+            // If the storage was wiped at least once, remove all previous entries from the
+            // database.
             if storage.wiped() {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
@@ -507,17 +579,15 @@ impl PostState {
         }
 
         // Write the receipts of the transactions
+        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-        let mut next_tx_num =
-            if let Some(last_tx) = receipts_cursor.last()?.map(|(tx_num, _)| tx_num) {
-                last_tx + 1
-            } else {
-                // The very first tx
-                0
-            };
-        for receipt in self.receipts.into_iter() {
-            receipts_cursor.append(next_tx_num, receipt)?;
-            next_tx_num += 1;
+        for (block, receipts) in self.receipts {
+            let (_, body_indices) = bodies_cursor.seek_exact(block)?.unwrap(); // TODO: fix this
+            let tx_range = body_indices.tx_num_range();
+            assert_eq!(receipts.len(), tx_range.clone().count());
+            for (tx_num, receipt) in tx_range.zip(receipts) {
+                receipts_cursor.append(tx_num, receipt)?;
+            }
         }
 
         Ok(())
@@ -817,24 +887,22 @@ mod tests {
     #[test]
     fn revert_to() {
         let mut state = PostState::new();
-        state.create_account(
-            1,
-            Address::repeat_byte(0),
-            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
-        );
-        let revert_to = 1;
+        let address1 = Address::repeat_byte(0);
+        let account1 = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+        state.create_account(1, address1, account1);
         state.create_account(
             2,
             Address::repeat_byte(0xff),
             Account { nonce: 2, balance: U256::from(2), bytecode_hash: None },
         );
-
         assert_eq!(
             state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
             2
         );
 
+        let revert_to = 1;
         state.revert_to(revert_to);
+        assert_eq!(state.accounts, BTreeMap::from([(address1, Some(account1))]));
         assert_eq!(
             state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
             1
@@ -845,12 +913,12 @@ mod tests {
     fn wiped_revert() {
         let address = Address::random();
 
-        let init_block_number = 1;
+        let init_block_number = 0;
         let init_account = Account { balance: U256::from(3), ..Default::default() };
         let init_slot = U256::from(1);
 
         // Create init state for demonstration purposes
-        // Block 1
+        // Block 0
         // Account: exists
         // Storage: 0x01: 1
         let mut init_state = PostState::new();
@@ -860,8 +928,18 @@ mod tests {
             address,
             BTreeMap::from([(init_slot, (U256::ZERO, U256::from(1)))]),
         );
+        assert_eq!(
+            init_state.storage.get(&address),
+            Some(&Storage {
+                storage: BTreeMap::from([(init_slot, U256::from(1))]),
+                times_wiped: 0
+            })
+        );
 
         let mut post_state = PostState::new();
+        // Block 1
+        // <nothing>
+
         // Block 2
         // Account: destroyed
         // Storage: wiped
@@ -883,6 +961,14 @@ mod tests {
         // Revert to block 2
         post_state.revert_to(2);
         assert!(post_state.storage.get(&address).unwrap().wiped());
+        assert_eq!(
+            post_state.storage.get(&address).unwrap(),
+            &Storage { times_wiped: 1, storage: BTreeMap::default() }
+        );
+
+        // Revert to block 1
+        post_state.revert_to(1);
+        assert_eq!(post_state.storage.get(&address), None);
     }
 
     /// Checks that if an account is touched multiple times in the same block,
@@ -998,12 +1084,12 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    ChangedStorage {
+                    StorageTransition {
                         storage: BTreeMap::from([
                             (U256::from(0), U256::from(0)),
                             (U256::from(1), U256::from(3))
                         ]),
-                        wiped: false,
+                        wipe: StorageWipe::None,
                     }
                 )])
             )]),
@@ -1070,9 +1156,9 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    ChangedStorage {
+                    StorageTransition {
                         storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
-                        wiped: false,
+                        wipe: StorageWipe::None,
                     }
                 )])
             )]),
@@ -1113,9 +1199,9 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    ChangedStorage {
+                    StorageTransition {
                         storage: BTreeMap::from([(U256::from(0), U256::from(1)),]),
-                        wiped: false,
+                        wipe: StorageWipe::None,
                     }
                 )])
             )]),
@@ -1147,9 +1233,9 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    ChangedStorage {
+                    StorageTransition {
                         storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
-                        wiped: false,
+                        wipe: StorageWipe::None,
                     }
                 )])
             )]),

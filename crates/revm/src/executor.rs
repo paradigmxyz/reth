@@ -223,7 +223,7 @@ where
         self.init_env(&block.header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
-        let mut post_state = PostState::with_tx_capacity(block.body.len());
+        let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
         for (transaction, sender) in block.body.iter().zip(senders.into_iter()) {
             // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -249,15 +249,18 @@ where
             cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(Receipt {
-                tx_type: transaction.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
-                success: result.is_success(),
-                cumulative_gas_used,
-                // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-            });
+            post_state.add_receipt(
+                block.number,
+                Receipt {
+                    tx_type: transaction.tx_type(),
+                    // Success flag was added in `EIP-658: Embedding transaction status code in
+                    // receipts`.
+                    success: result.is_success(),
+                    cumulative_gas_used,
+                    // convert to reth log
+                    logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                },
+            );
         }
 
         Ok((post_state, cumulative_gas_used))
@@ -311,7 +314,7 @@ where
             verify_receipt(
                 block.header.receipts_root,
                 block.header.logs_bloom,
-                post_state.receipts().iter(),
+                post_state.receipts(block.number).iter(),
             )?;
         }
 
@@ -491,6 +494,7 @@ pub fn verify_receipt<'a>(
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
 ) -> Result<(), Error> {
     // Check receipts root.
+    // TODO: ref
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
@@ -601,7 +605,7 @@ mod tests {
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
-        post_state::{ChangedStorage, Storage},
+        post_state::{Storage, StorageTransition, StorageWipe},
         AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
@@ -820,8 +824,8 @@ mod tests {
                 block.number,
                 BTreeMap::from([(
                     account1,
-                    ChangedStorage {
-                        wiped: false,
+                    StorageTransition {
+                        wipe: StorageWipe::None,
                         // Slot 1 changed from 0 to 2
                         storage: BTreeMap::from([(U256::from(1), U256::ZERO)])
                     }
