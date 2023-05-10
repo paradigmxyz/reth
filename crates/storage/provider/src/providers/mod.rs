@@ -1,8 +1,9 @@
 use crate::{
     BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
-    BlockchainTreePendingStateProvider, CanonStateNotifications, CanonStateSubscriptions,
-    EvmEnvProvider, HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProviderBox,
-    StateProviderFactory, TransactionsProvider, WithdrawalsProvider, CanonChainTracker, ProviderError,
+    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
+    ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -11,7 +12,7 @@ use reth_interfaces::{
     Error, Result,
 };
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockHash, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header,
+    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TxHash, TxNumber, Withdrawal, H256, U256,
 };
