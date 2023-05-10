@@ -4,7 +4,7 @@ use jsonrpsee_core::RpcResult as Result;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
-use reth_primitives::{BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, U64};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, U64};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
@@ -170,7 +170,7 @@ where
         for num in start..start + count {
             let block = self
                 .client
-                .block(BlockId::Number(num.into()))
+                .block(BlockHashOrNumber::Number(num))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
             result.push(block.map(Into::into));
         }
@@ -192,7 +192,7 @@ where
         for hash in hashes {
             let block = self
                 .client
-                .block(BlockId::Hash(hash.into()))
+                .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
             result.push(block.map(Into::into));
         }

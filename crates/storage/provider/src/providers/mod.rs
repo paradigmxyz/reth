@@ -1,8 +1,8 @@
 use crate::{
-    BlockHashProvider, BlockIdProvider, BlockProvider, BlockchainTreePendingStateProvider,
-    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
-    PostStateDataProvider, ReceiptProvider, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
+    BlockchainTreePendingStateProvider, CanonStateNotifications, CanonStateSubscriptions,
+    EvmEnvProvider, HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProviderBox,
+    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -10,7 +10,7 @@ use reth_interfaces::{
     Result,
 };
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, ChainInfo, Header,
+    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash,
     TxNumber, Withdrawal, H256, U256,
 };
@@ -92,7 +92,7 @@ where
     }
 }
 
-impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
+impl<DB, Tree> BlockNumProvider for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
@@ -105,37 +105,26 @@ where
         self.database.best_block_number()
     }
 
-    fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<BlockNumber>> {
-        let num = match num {
-            BlockNumberOrTag::Latest => self.chain_info()?.best_number,
-            BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Pending => {
-                return Ok(self.tree.pending_block_num_hash().map(|b| b.number))
-            }
-            BlockNumberOrTag::Finalized => return Ok(self.chain_info()?.last_finalized),
-            BlockNumberOrTag::Safe => return Ok(self.chain_info()?.safe_finalized),
-            BlockNumberOrTag::Earliest => 0,
-        };
-        Ok(Some(num))
-    }
-
-    fn block_hash_for_id(&self, block_id: BlockId) -> Result<Option<H256>> {
-        match block_id {
-            BlockId::Hash(hash) => Ok(Some(hash.into())),
-            BlockId::Number(num) => match num {
-                BlockNumberOrTag::Latest => Ok(Some(self.chain_info()?.best_hash)),
-                BlockNumberOrTag::Pending => Ok(self.tree.pending_block_num_hash().map(|b| b.hash)),
-                _ => self
-                    .convert_block_number(num)?
-                    .map(|num| self.block_hash(num))
-                    .transpose()
-                    .map(|maybe_hash| maybe_hash.flatten()),
-            },
-        }
-    }
-
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.database.block_number(hash)
+    }
+}
+
+impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: BlockchainTreeViewer + Send + Sync,
+{
+    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+        todo!()
+    }
+
+    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+        todo!()
+    }
+
+    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(self.tree.pending_block_num_hash())
     }
 }
 
@@ -163,18 +152,18 @@ where
         Ok(block)
     }
 
-    fn block(&self, id: BlockId) -> Result<Option<Block>> {
-        if id.is_pending() {
-            return Ok(self.tree.pending_block().map(SealedBlock::unseal))
+    fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
+        match id {
+            BlockHashOrNumber::Hash(hash) => self.find_block_by_hash(hash, BlockSource::Any),
+            BlockHashOrNumber::Number(num) => self.database.block_by_number(num),
         }
-        self.database.block(id)
     }
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(self.tree.pending_block())
     }
 
-    fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.database.ommers(id)
     }
 }
@@ -207,7 +196,10 @@ where
         self.database.transaction_block(id)
     }
 
-    fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+    fn transactions_by_block(
+        &self,
+        id: BlockHashOrNumber,
+    ) -> Result<Option<Vec<TransactionSigned>>> {
         self.database.transactions_by_block(id)
     }
 
@@ -232,7 +224,7 @@ where
         self.database.receipt_by_hash(hash)
     }
 
-    fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
+    fn receipts_by_block(&self, block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
         self.database.receipts_by_block(block)
     }
 }
@@ -242,7 +234,11 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
+    fn withdrawals_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> Result<Option<Vec<Withdrawal>>> {
         self.database.withdrawals_by_block(id, timestamp)
     }
 
@@ -256,7 +252,12 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
+    fn fill_env_at(
+        &self,
+        cfg: &mut CfgEnv,
+        block_env: &mut BlockEnv,
+        at: BlockHashOrNumber,
+    ) -> Result<()> {
         self.database.fill_env_at(cfg, block_env, at)
     }
 
@@ -269,7 +270,7 @@ where
         self.database.fill_env_with_header(cfg, block_env, header)
     }
 
-    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
+    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockHashOrNumber) -> Result<()> {
         self.database.fill_block_env_at(block_env, at)
     }
 
@@ -277,7 +278,7 @@ where
         self.database.fill_block_env_with_header(block_env, header)
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockId) -> Result<()> {
+    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> Result<()> {
         self.database.fill_cfg_env_at(cfg, at)
     }
 
@@ -404,6 +405,41 @@ where
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         self.tree.pending_block_num_hash()
+    }
+}
+
+impl<DB, Tree> BlockProviderIdExt for BlockchainProvider<DB, Tree>
+where
+    Self: BlockProvider + BlockIdProvider,
+    Tree: BlockchainTreeEngine,
+{
+    fn block_by_id(&self, id: BlockId) -> Result<Option<Block>> {
+        match id {
+            BlockId::Number(num) => self.block_by_number_or_tag(num),
+            BlockId::Hash(hash) => {
+                // TODO: should we only apply this for the RPCs that are listed in EIP-1898?
+                // so not at the provider level?
+                // if we decide to do this at a higher level, then we can make this an automatic
+                // trait impl
+                if Some(true) == hash.require_canonical {
+                    // check the database, canonical blocks are only stored in the database
+                    self.find_block_by_hash(hash.block_hash, BlockSource::Database)
+                } else {
+                    self.block_by_hash(hash.block_hash)
+                }
+            }
+        }
+    }
+
+    fn ommers_by_id(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
+        match id {
+            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
+            BlockId::Hash(hash) => {
+                // TODO: EIP-1898 question, see above
+                // here it is not handled
+                self.ommers(BlockHashOrNumber::Hash(hash.block_hash))
+            }
+        }
     }
 }
 

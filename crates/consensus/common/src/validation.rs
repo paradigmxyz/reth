@@ -389,8 +389,9 @@ mod tests {
     use mockall::mock;
     use reth_interfaces::{Error::Consensus, Result};
     use reth_primitives::{
-        hex_literal::hex, proofs, Account, Address, BlockHash, BlockId, Bytes, ChainSpecBuilder,
-        Header, Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
+        hex_literal::hex, proofs, Account, Address, BlockHash, BlockHashOrNumber, Bytes,
+        ChainSpecBuilder, Header, Signature, TransactionKind, TransactionSigned, Withdrawal,
+        MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -402,7 +403,7 @@ mod tests {
 
             fn withdrawals_by_block(
                 &self,
-                _id: BlockId,
+                _id: BlockHashOrNumber,
                 _timestamp: u64,
             ) -> RethResult<Option<Vec<Withdrawal>>> ;
         }
@@ -475,7 +476,7 @@ mod tests {
 
         fn withdrawals_by_block(
             &self,
-            _id: BlockId,
+            _id: BlockHashOrNumber,
             _timestamp: u64,
         ) -> RethResult<Option<Vec<Withdrawal>>> {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
