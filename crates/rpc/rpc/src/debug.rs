@@ -186,7 +186,7 @@ where
         let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides: _ } =
             opts;
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
-        // TODO(mattsse) support non default tracers
+
         if let Some(tracer) = tracer {
             // valid matching config
             if let Some(ref config) = tracer_config {
@@ -206,27 +206,25 @@ where
                         return Ok(FourByteFrame::from(inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
+                        // we validated the config above
                         let call_config =
-                            tracer_config.unwrap().into_call_config().unwrap_or_default();
+                            tracer_config.and_then(|c| c.into_call_config()).unwrap_or_default();
 
-                        let inspector_config = TracingInspectorConfig::from_geth_config(&config);
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_geth_config(&config),
+                        );
 
-                        let mut inspector = TracingInspector::new(inspector_config);
-
-                        let (res, _) = self
+                        let _ = self
                             .eth_api
                             .inspect_call_at(call, at, state_overrides, &mut inspector)
                             .await?;
-                        let gas_used = res.result.gas_used();
 
-                        let frame = inspector
-                            .into_geth_builder()
-                            .geth_call_traces(U256::from(gas_used), call_config);
+                        let frame = inspector.into_geth_builder().geth_call_traces(call_config);
 
                         return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
-                        todo!()
+                        Err(EthApiError::Unsupported("pre state tracer currently unsupported."))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
@@ -405,6 +403,7 @@ fn trace_transaction(
     db: &mut SubState<StateProviderBox<'_>>,
 ) -> EthResult<(GethTraceFrame, revm_primitives::State)> {
     let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
+
     if let Some(tracer) = tracer {
         // valid matching config
         if let Some(ref config) = tracer_config {
@@ -421,18 +420,16 @@ fn trace_transaction(
                     return Ok((FourByteFrame::from(inspector).into(), res.state))
                 }
                 GethDebugBuiltInTracerType::CallTracer => {
-                    let call_config = tracer_config.unwrap().into_call_config().unwrap_or_default();
+                    // we validated the config above
+                    let call_config =
+                        tracer_config.and_then(|c| c.into_call_config()).unwrap_or_default();
 
-                    let inspector_config = TracingInspectorConfig::from_geth_config(&config);
-
-                    let mut inspector = TracingInspector::new(inspector_config);
+                    let mut inspector =
+                        TracingInspector::new(TracingInspectorConfig::from_geth_config(&config));
 
                     let (res, _) = inspect(db, env, &mut inspector)?;
-                    let gas_used = res.result.gas_used();
 
-                    let frame = inspector
-                        .into_geth_builder()
-                        .geth_call_traces(U256::from(gas_used), call_config);
+                    let frame = inspector.into_geth_builder().geth_call_traces(call_config);
 
                     return Ok((frame.into(), res.state))
                 }
