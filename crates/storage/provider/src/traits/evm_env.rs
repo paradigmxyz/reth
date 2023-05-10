@@ -39,7 +39,7 @@ pub trait EvmEnvProvider: Send + Sync {
     /// Fills the [BlockEnv] fields with values specific to the given [Header].
     fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> Result<()>;
 
-    /// Fills the [CfgEnv] fields with values specific to the given [BlockId].
+    /// Fills the [CfgEnv] fields with values specific to the given [BlockHashOrNumber].
     fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> Result<()>;
 
     /// Fills the [CfgEnv] fields with values specific to the given [Header].
