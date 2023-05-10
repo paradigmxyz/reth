@@ -719,7 +719,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // If block is already canonical don't return error.
         if self.block_indices.is_block_hash_canonical(block_hash) {
-            info!(target: "blockchain_tree", "Block is already canonical");
+            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
             let td = self
                 .externals
                 .shareable_db()
@@ -732,7 +732,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
-            info!(target: "blockchain_tree", "Block hash not found in block indices");
+            info!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
             return Err(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
@@ -766,6 +766,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // event about new canonical chain.
         let chain_notification;
         info!(
+            target: "blockchain_tree",
             "Committing new canonical chain: {:?}",
             new_canon_chain.blocks().iter().map(|(_, b)| b.num_hash()).collect::<Vec<_>>()
         );
@@ -789,6 +790,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             let old_canon_chain = match old_canon_chain {
                 val @ Err(_) => {
                     error!(
+                        target: "blockchain_tree",
                         "Reverting canonical chain failed with error: {:?}\n\
                             Old BlockIndices are:{:?}\n\
                             New BlockIndices are: {:?}\n\
@@ -813,7 +815,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 self.insert_chain(AppendableChain::new(old_canon_chain));
             } else {
                 // error here to confirm that we are reverting nothing from db.
-                error!("Reverting nothing from db on block: #{:?}", block_hash);
+                error!(target: "blockchain_tree", "Reverting nothing from db on block: #{:?}", block_hash);
 
                 chain_notification =
                     CanonStateNotification::Commit { new: Arc::new(new_canon_chain) };
@@ -876,7 +878,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let tip = tx.tip_number()?;
         let revert_range = (revert_until + 1)..=tip;
-        info!("Revert canonical chain from block: {:?}", revert_range);
+        info!(target: "blockchain_tree", "Revert canonical chain from block: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
             .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)
