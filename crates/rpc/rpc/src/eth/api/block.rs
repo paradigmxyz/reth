@@ -5,12 +5,12 @@ use crate::{
     EthApi,
 };
 use reth_primitives::BlockId;
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Block, Index, RichBlock};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Returns the uncle headers of the given block
     ///
@@ -20,7 +20,7 @@ where
         block_id: impl Into<BlockId>,
     ) -> EthResult<Option<Vec<reth_primitives::Header>>> {
         let block_id = block_id.into();
-        Ok(self.client().ommers(block_id)?)
+        Ok(self.client().ommers_by_id(block_id)?)
     }
 
     pub(crate) async fn ommer_by_block_and_index(
@@ -34,7 +34,7 @@ where
             // Pending block can be fetched directly without need for caching
             self.client().pending_block()?.map(|block| block.ommers)
         } else {
-            self.client().ommers(block_id)?
+            self.client().ommers_by_id(block_id)?
         }
         .unwrap_or_default();
 

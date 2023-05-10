@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U256, U64};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_types::{FeeHistoryCache, SyncInfo, SyncStatus};
 use reth_transaction_pool::TransactionPool;
 use std::{num::NonZeroUsize, sync::Arc};
@@ -106,7 +106,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
 {
     fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
         self.client().convert_block_number(num)
@@ -177,7 +177,7 @@ impl<Client, Pool, Events> std::fmt::Debug for EthApi<Client, Pool, Events> {
 impl<Client, Pool, Network> EthApiSpec for EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
 {
     /// Returns the current ethereum protocol version.
