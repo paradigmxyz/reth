@@ -876,7 +876,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let tip = tx.tip_number()?;
         let revert_range = (revert_until + 1)..=tip;
-        info!("Revert canonical chain from block: {:?}", revert_range);
+        info!("Revert canonical chain range: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
             .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)
