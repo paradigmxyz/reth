@@ -2,7 +2,10 @@ use super::BlockHashProvider;
 use reth_interfaces::Result;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, H256};
 
-/// Client trait for transforming [BlockId].
+/// Client trait for getting important block numbers (such as the latest block number), converting
+/// block hashes to numbers, and fetching a block hash from its block number.
+///
+/// This trait also supports fetching block hashes and block numbers from a [BlockHashOrNumber].
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
     /// Returns the current info for the chain.
@@ -33,7 +36,15 @@ pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
     }
 }
 
-/// Client trait for transforming [BlockId].
+/// Client trait for transforming [BlockId] into block numbers or hashes.
+///
+/// Types that implement this trait must be able to resolve all variants of [BlockNumberOrTag] to
+/// block numbers or hashes. Automatic implementations for resolving [BlockNumberOrTag] variants
+/// are provided if the type implements the `pending_block_num_hash`, `finalized_block_num`, and
+/// `safe_block_num` methods.
+///
+/// The resulting block numbers can be converted to hashes using the underlying [BlockNumProvider]
+/// methods, and vice versa.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockIdProvider: BlockNumProvider + Send + Sync {
     /// Converts the `BlockNumberOrTag` variants to a block number.

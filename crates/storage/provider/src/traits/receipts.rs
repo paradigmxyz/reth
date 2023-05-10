@@ -17,6 +17,15 @@ pub trait ReceiptProvider: Send + Sync {
 }
 
 /// Trait extension for `ReceiptProvider`, for types that implement `BlockId` conversion.
+///
+/// The `Receipt` trait should be implemented on types that can retrieve receipts from either
+/// a block number or hash. However, it might be desirable to fetch receipts from a `BlockId` type,
+/// which can be a number, hash, or tag such as `BlockNumberOrTag::Safe`.
+///
+/// Resolving tags requires keeping track of block hashes or block numbers associated with the tag,
+/// so this trait can only be implemented for types that implement `BlockIdProvider`. The
+/// `BlockIdProvider` methods should be used to resolve `BlockId`s to block numbers or hashes, and
+/// retrieving the receipts should be done using the type's `ReceiptProvider` methods.
 pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdProvider {
     /// Get receipt by block id
     fn receipts_by_block_id(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
