@@ -187,6 +187,7 @@ where
 #[derive(Debug)]
 struct EthFilterInner<Client, Pool> {
     /// The transaction pool.
+    #[allow(unused)] // we need this for non standard full transactions eventually
     pool: Pool,
     /// The client that can interact with the chain.
     client: Client,
