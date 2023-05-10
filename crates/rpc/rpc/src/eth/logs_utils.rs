@@ -97,6 +97,7 @@ pub(crate) fn get_filter_block_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_primitives::{filter::Filter, BlockNumberOrTag};
 
     #[test]
     fn test_log_range_from_and_to() {
@@ -139,5 +140,30 @@ mod tests {
 
         // no range given -> head
         assert_eq!(range, (info.best_number, info.best_number));
+    }
+
+    #[test]
+    fn parse_log_from_only() {
+        let s = r#"{"fromBlock":"0xf47a42","address":["0x7de93682b9b5d80d45cd371f7a14f74d49b0914c","0x0f00392fcb466c0e4e4310d81b941e07b4d5a079","0xebf67ab8cff336d3f609127e8bbf8bd6dd93cd81"],"topics":["0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"]}"#;
+        let filter: Filter = serde_json::from_str(s).unwrap();
+
+        assert_eq!(filter.get_from_block(), Some(16022082));
+        assert!(filter.get_to_block().is_none());
+
+        let best_number = 17229427;
+        let info = ChainInfo { best_number, ..Default::default() };
+
+        let (from_block, to_block) = filter.block_option.as_range();
+
+        let start_block = info.best_number;
+
+        let (from_block_number, to_block_number) = get_filter_block_range(
+            from_block.and_then(BlockNumberOrTag::as_number),
+            to_block.and_then(BlockNumberOrTag::as_number),
+            start_block,
+            info,
+        );
+        assert_eq!(from_block_number, 16022082);
+        assert_eq!(to_block_number, best_number);
     }
 }
