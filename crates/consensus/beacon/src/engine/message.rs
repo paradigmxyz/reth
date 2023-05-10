@@ -61,6 +61,14 @@ impl OnForkChoiceUpdated {
         }
     }
 
+    /// Returns a `ForkChoiceUpdateResult` if there is no pending payload.
+    pub(crate) fn update_result(&self) -> Option<ForkChoiceUpdateResult> {
+        match &self.fut {
+            Either::Left(fut) => fut.clone().now_or_never(),
+            Either::Right(_) => None,
+        }
+    }
+
     /// If the forkchoice update was successful and no payload attributes were provided, this method
     pub(crate) fn updated_with_pending_payload_id(
         payload_status: PayloadStatus,

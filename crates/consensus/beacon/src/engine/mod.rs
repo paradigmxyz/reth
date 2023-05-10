@@ -356,7 +356,17 @@ where
                         let header = self
                             .load_header(head_block_number)?
                             .expect("was canonicalized, so it exists");
-                        return Ok(self.process_payload_attributes(attrs, header, state))
+
+                        let payload_response =
+                            self.process_payload_attributes(attrs, header, state);
+                        if let Some(Ok(status)) = payload_response.update_result() {
+                            if status.is_valid() {
+                                // we will return VALID, so let's make sure the info tracker is
+                                // properly updated
+                                self.blockchain_provider.on_forkchoice_update_received(&state)?;
+                            }
+                        }
+                        return Ok(payload_response)
                     }
 
                     // we will return VALID, so let's make sure the info tracker is properly
