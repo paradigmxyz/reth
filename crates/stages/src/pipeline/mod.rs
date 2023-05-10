@@ -16,8 +16,8 @@ mod progress;
 mod set;
 mod sync_metrics;
 
+pub use crate::pipeline::ctrl::ControlFlow;
 pub use builder::*;
-use ctrl::*;
 pub use event::*;
 use progress::*;
 pub use set::*;
