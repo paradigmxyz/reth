@@ -178,7 +178,7 @@ where
 
         if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
-                self.header = None;
+                self.body = None;
                 return Poll::Ready(ResponseResult::Body(res))
             }
         }
