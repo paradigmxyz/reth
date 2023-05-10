@@ -116,11 +116,13 @@ where
     Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
-        todo!()
+        // TODO: implement with canon chain tracker
+        Ok(None)
     }
 
     fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
-        todo!()
+        // TODO: implement with canon chain tracker
+        Ok(None)
     }
 
     fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
