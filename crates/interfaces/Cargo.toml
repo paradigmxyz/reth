@@ -11,19 +11,23 @@ reth-codecs = { path = "../storage/codecs" }
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../rpc/rpc-types" }
 reth-network-api = { path = "../net/network-api" }
-revm-primitives = "1.1"
-async-trait = "0.1.57"
-thiserror = "1.0.37"
-auto_impl = "1.0"
-tokio = { version = "1.21.2", features = ["sync"] }
-
 # TODO(onbjerg): We only need this for [BlockBody]
 reth-eth-wire = { path = "../net/eth-wire" }
 
-# codecs
+# eth
+revm-primitives = "1.1"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+
+# async
+async-trait = "0.1.57"
 futures = "0.3"
+tokio = { version = "1.21.2", features = ["sync"] }
 tokio-stream = "0.1.11"
+
+# misc
+auto_impl = "1.0"
+thiserror = "1.0.37"
+tracing = "0.1"
 rand = "0.8.5"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 secp256k1 = { version = "0.27.0", default-features = false, features = [

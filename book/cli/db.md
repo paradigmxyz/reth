@@ -31,10 +31,6 @@ Options:
           
           [default: default]
 
-      --db <PATH>
-          The path to the database folder. If not specified, it will be set in the data dir for the
-          chain being used.
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           

@@ -26,7 +26,7 @@ pub struct Command {
     /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t, global = true)]
     datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
@@ -42,7 +42,8 @@ pub struct Command {
         value_name = "CHAIN_OR_PATH",
         verbatim_doc_comment,
         default_value = "mainnet",
-        value_parser = genesis_value_parser
+        value_parser = genesis_value_parser,
+        global = true,
     )]
     chain: Arc<ChainSpec>,
 
@@ -225,5 +226,17 @@ impl Command {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn parse_stats_globals() {
+        let cmd = Command::try_parse_from(["reth", "stats", "--datadir", "../mainnet"]).unwrap();
+        assert_eq!(cmd.datadir.as_ref(), Some(Path::new("../mainnet")));
     }
 }

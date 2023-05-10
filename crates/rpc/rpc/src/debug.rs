@@ -27,7 +27,8 @@ use reth_rpc_types::{
     BlockError, CallRequest, RichBlock,
 };
 use revm::primitives::Env;
-use revm_primitives::{BlockEnv, CfgEnv};
+use revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv};
+use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
 ///
@@ -38,7 +39,7 @@ pub struct DebugApi<Client, Eth> {
     client: Client,
     /// The implementation of `eth` API
     eth_api: Eth,
-    // restrict the number of concurrent calls to `debug_traceTransaction`
+    // restrict the number of concurrent calls to tracing calls
     tracing_call_guard: TracingCallGuard,
 }
 
@@ -58,6 +59,11 @@ where
     Client: BlockProvider + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
+    /// Acquires a permit to execute a tracing call.
+    async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
+        self.tracing_call_guard.clone().acquire_owned().await
+    }
+
     /// Trace the entire block
     fn trace_block_with(
         &self,
@@ -72,13 +78,19 @@ where
             let mut results = Vec::with_capacity(transactions.len());
             let mut db = SubState::new(State::new(state));
 
-            for tx in transactions {
+            let mut transactions = transactions.into_iter().peekable();
+            while let Some(tx) = transactions.next() {
                 let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                 let tx = tx_env_with_recovered(&tx);
                 let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                // TODO(mattsse): get rid of clone by extracting necessary opts fields into a struct
-                let result = trace_transaction(opts.clone(), env, &mut db)?;
+                let (result, state_changes) = trace_transaction(opts.clone(), env, &mut db)?;
                 results.push(TraceResult::Success { result });
+
+                if transactions.peek().is_some() {
+                    // need to apply the state changes of this transaction before executing the next
+                    // transaction
+                    db.commit(state_changes)
+                }
             }
 
             Ok(results)
@@ -157,7 +169,7 @@ where
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
 
             let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-            trace_transaction(opts, env, &mut db)
+            trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
         })
     }
 
@@ -282,6 +294,7 @@ where
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_raw_block(self, rlp_block, opts).await?)
     }
 
@@ -291,6 +304,7 @@ where
         block: H256,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_block(self, block.into(), opts).await?)
     }
 
@@ -300,6 +314,7 @@ where
         block: BlockNumberOrTag,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_block(self, block.into(), opts).await?)
     }
 
@@ -309,6 +324,7 @@ where
         tx_hash: H256,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<GethTraceFrame> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts).await?)
     }
 
@@ -319,6 +335,7 @@ where
         block_number: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
     ) -> RpcResult<GethTraceFrame> {
+        let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_call(self, request, block_number, opts).await?)
     }
 }
@@ -329,14 +346,16 @@ impl<Client, Eth> std::fmt::Debug for DebugApi<Client, Eth> {
     }
 }
 
-/// Executes the configured transaction in the environment on the given database.
+/// Executes the configured transaction with the environment on the given database.
+///
+/// Returns the trace frame and the state that got updated after executing the transaction.
 ///
 /// Note: this does not apply any state overrides if they're configured in the `opts`.
 fn trace_transaction(
     opts: GethDebugTracingOptions,
     env: Env,
     db: &mut SubState<StateProviderBox<'_>>,
-) -> EthResult<GethTraceFrame> {
+) -> EthResult<(GethTraceFrame, revm_primitives::State)> {
     let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
     if let Some(tracer) = tracer {
         // valid matching config
@@ -350,8 +369,8 @@ fn trace_transaction(
             GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                 GethDebugBuiltInTracerType::FourByteTracer => {
                     let mut inspector = FourByteInspector::default();
-                    let _ = inspect(db, env, &mut inspector)?;
-                    return Ok(FourByteFrame::from(inspector).into())
+                    let (res, _) = inspect(db, env, &mut inspector)?;
+                    return Ok((FourByteFrame::from(inspector).into(), res.state))
                 }
                 GethDebugBuiltInTracerType::CallTracer => {
                     todo!()
@@ -359,7 +378,9 @@ fn trace_transaction(
                 GethDebugBuiltInTracerType::PreStateTracer => {
                     todo!()
                 }
-                GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
+                GethDebugBuiltInTracerType::NoopTracer => {
+                    Ok((NoopFrame::default().into(), Default::default()))
+                }
             },
             GethDebugTracerType::JsTracer(_) => {
                 Err(EthApiError::Unsupported("javascript tracers are unsupported."))
@@ -377,5 +398,5 @@ fn trace_transaction(
 
     let frame = inspector.into_geth_builder().geth_traces(U256::from(gas_used), config);
 
-    Ok(frame.into())
+    Ok((frame.into(), res.state))
 }

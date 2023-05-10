@@ -23,9 +23,9 @@ use reth_transaction_pool::TransactionPool;
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Default)]
@@ -107,14 +107,17 @@ impl RpcServerArgs {
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
     /// jwt secret in case the `auth_jwtsecret` argument is not provided.
     pub(crate) fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        let arg = self.auth_jwtsecret.as_ref();
-        let path: Option<&Path> = arg.map(|p| p.as_ref());
-        match path {
-            Some(fpath) => JwtSecret::from_file(fpath),
+        match self.auth_jwtsecret.as_ref() {
+            Some(fpath) => {
+                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                JwtSecret::from_file(fpath)
+            }
             None => {
                 if default_jwt_path.exists() {
+                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
                     JwtSecret::from_file(&default_jwt_path)
                 } else {
+                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
                     JwtSecret::try_create(&default_jwt_path)
                 }
             }
@@ -153,13 +156,16 @@ impl RpcServerArgs {
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 
+        let module_config = self.transport_rpc_module_config();
+        debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
+
         let (rpc_modules, auth_module) = RpcModuleBuilder::default()
             .with_client(client)
             .with_pool(pool)
             .with_network(network)
             .with_events(events)
             .with_executor(executor)
-            .build_with_auth_server(self.transport_rpc_module_config(), engine_api);
+            .build_with_auth_server(module_config, engine_api);
 
         let server_config = self.rpc_server_config();
         let has_server = server_config.has_server();

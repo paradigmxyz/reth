@@ -68,14 +68,6 @@ where
         Ok(self.cache().get_block_transactions(block_hash).await?.map(|txs| txs.len()))
     }
 
-    /// Returns the block header for the given block id.
-    pub(crate) async fn header(
-        &self,
-        block_id: impl Into<BlockId>,
-    ) -> EthResult<Option<reth_primitives::SealedHeader>> {
-        Ok(self.block(block_id).await?.map(|block| block.header))
-    }
-
     /// Returns the block object for the given block id.
     pub(crate) async fn block(
         &self,
