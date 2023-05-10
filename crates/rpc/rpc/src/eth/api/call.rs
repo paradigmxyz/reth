@@ -14,7 +14,7 @@ use crate::{
 use ethers_core::utils::get_contract_address;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, U256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::{
     access_list::AccessListInspector,
     database::{State, SubState},
@@ -34,7 +34,7 @@ const MIN_CREATE_GAS: u64 = 53_000u64;
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].

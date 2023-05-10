@@ -7,7 +7,8 @@ use clap::{
 use futures::FutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockProvider, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, StateProviderFactory,
+    BlockProviderIdExt, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
+    StateProviderFactory,
 };
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
@@ -141,7 +142,7 @@ impl RpcServerArgs {
         jwt_secret: JwtSecret,
     ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
     where
-        Client: BlockProvider
+        Client: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -193,7 +194,7 @@ impl RpcServerArgs {
         events: Events,
     ) -> Result<RpcServerHandle, RpcError>
     where
-        Client: BlockProvider
+        Client: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -228,7 +229,7 @@ impl RpcServerArgs {
         jwt_secret: JwtSecret,
     ) -> Result<AuthServerHandle, RpcError>
     where
-        Client: BlockProvider
+        Client: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider

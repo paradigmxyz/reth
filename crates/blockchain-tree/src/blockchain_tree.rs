@@ -17,8 +17,8 @@ use reth_primitives::{
 use reth_provider::{
     chain::{ChainSplit, SplitAt},
     post_state::PostState,
-    BlockIdProvider, CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    Chain, ExecutorFactory, HeaderProvider, Transaction,
+    BlockNumProvider, CanonStateNotification, CanonStateNotificationSender,
+    CanonStateNotifications, Chain, ExecutorFactory, HeaderProvider, Transaction,
 };
 use std::{
     collections::{BTreeMap, HashMap},

@@ -15,7 +15,10 @@ use reth_primitives::{
     serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
     H256, H64, U256, U64,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    BlockIdProvider, BlockProvider, BlockProviderIdExt, EvmEnvProvider, HeaderProvider,
+    StateProviderFactory,
+};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock,
@@ -30,7 +33,13 @@ impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProvider
+        + BlockIdProvider
+        + BlockProviderIdExt
+        + HeaderProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`

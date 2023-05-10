@@ -106,7 +106,10 @@ use jsonrpsee::{
 };
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{
+    BlockProvider, BlockProviderIdExt, CanonStateSubscriptions, EvmEnvProvider,
+    StateProviderFactory,
+};
 use reth_rpc::{
     eth::cache::EthStateCache, AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
     EthSubscriptionIdProvider, NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
@@ -159,7 +162,7 @@ pub async fn launch<Client, Pool, Network, Tasks, Events>(
     events: Events,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -252,7 +255,7 @@ impl<Client, Pool, Network, Tasks, Events> RpcModuleBuilder<Client, Pool, Networ
 
 impl<Client, Pool, Network, Tasks, Events> RpcModuleBuilder<Client, Pool, Network, Tasks, Events>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -450,7 +453,8 @@ impl RpcModuleSelection {
         config: RpcModuleConfig,
     ) -> RpcModule<()>
     where
-        Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+        Client:
+            BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
@@ -651,7 +655,7 @@ where
 
 impl<Client, Pool, Network, Tasks, Events> RethModuleRegistry<Client, Pool, Network, Tasks, Events>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
