@@ -97,7 +97,7 @@ pub(crate) fn get_filter_block_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::filter::Filter;
+    use reth_primitives::{filter::Filter, BlockNumberOrTag};
 
     #[test]
     fn test_log_range_from_and_to() {
@@ -157,8 +157,12 @@ mod tests {
 
         let start_block = info.best_number;
 
-        let (from_block_number, to_block_number) =
-            get_filter_block_range(from_block.copied(), to_block.copied(), start_block, info);
+        let (from_block_number, to_block_number) = get_filter_block_range(
+            from_block.and_then(BlockNumberOrTag::as_number),
+            to_block.and_then(BlockNumberOrTag::as_number),
+            start_block,
+            info,
+        );
         assert_eq!(from_block_number, 16022082);
         assert_eq!(to_block_number, best_number);
     }
