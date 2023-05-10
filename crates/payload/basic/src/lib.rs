@@ -23,7 +23,7 @@ use reth_primitives::{
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{BlockProvider, BlockSource, PostState, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -98,7 +98,7 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {}
 
 impl<Client, Pool, Tasks> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Pool, Tasks>
 where
-    Client: StateProviderFactory + BlockProvider + Clone + Unpin + 'static,
+    Client: StateProviderFactory + BlockProviderIdExt + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
 {
@@ -111,7 +111,7 @@ where
         let parent_block = if attributes.parent.is_zero() {
             // use latest block if parent is zero: genesis block
             self.client
-                .block(BlockNumberOrTag::Latest.into())?
+                .block_by_number_or_tag(BlockNumberOrTag::Latest)?
                 .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?
                 .seal_slow()
         } else {

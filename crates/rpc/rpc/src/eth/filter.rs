@@ -13,7 +13,7 @@ use reth_primitives::{
     filter::{Filter, FilterBlockOption, FilteredParams},
     SealedBlock,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider};
+use reth_provider::{BlockIdProvider, BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{FilterChanges, FilterId, Log};
 use reth_transaction_pool::TransactionPool;
@@ -61,7 +61,7 @@ impl<Client, Pool> EthFilter<Client, Pool> {
 #[async_trait]
 impl<Client, Pool> EthFilterApiServer for EthFilter<Client, Pool>
 where
-    Client: BlockProvider + EvmEnvProvider + 'static,
+    Client: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
@@ -122,7 +122,17 @@ where
             FilterKind::Log(filter) => {
                 let (from_block_number, to_block_number) = match filter.block_option {
                     FilterBlockOption::Range { from_block, to_block } => {
-                        logs_utils::get_filter_block_range(from_block, to_block, start_block, info)
+                        let from = from_block
+                            .map(|num| self.inner.client.convert_block_number(num))
+                            .transpose()
+                            .to_rpc_result()?
+                            .flatten();
+                        let to = to_block
+                            .map(|num| self.inner.client.convert_block_number(num))
+                            .transpose()
+                            .to_rpc_result()?
+                            .flatten();
+                        logs_utils::get_filter_block_range(from, to, start_block, info)
                     }
                     FilterBlockOption::AtBlockHash(_) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
@@ -203,7 +213,7 @@ struct EthFilterInner<Client, Pool> {
 
 impl<Client, Pool> EthFilterInner<Client, Pool>
 where
-    Client: BlockProvider + EvmEnvProvider + 'static,
+    Client: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
@@ -235,8 +245,18 @@ where
 
                 // we start at the most recent block if unset in filter
                 let start_block = info.best_number;
+                let from = from_block
+                    .map(|num| self.client.convert_block_number(num))
+                    .transpose()
+                    .to_rpc_result()?
+                    .flatten();
+                let to = to_block
+                    .map(|num| self.client.convert_block_number(num))
+                    .transpose()
+                    .to_rpc_result()?
+                    .flatten();
                 let (from_block_number, to_block_number) =
-                    logs_utils::get_filter_block_range(from_block, to_block, start_block, info);
+                    logs_utils::get_filter_block_range(from, to, start_block, info);
                 Ok(self
                     .get_logs_in_block_range(&filter, from_block_number, to_block_number)
                     .await?)
