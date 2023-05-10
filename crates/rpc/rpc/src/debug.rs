@@ -10,7 +10,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256, U256};
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderBox};
+use reth_provider::{BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProviderBox};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -56,7 +56,7 @@ impl<Client, Eth> DebugApi<Client, Eth> {
 
 impl<Client, Eth> DebugApi<Client, Eth>
 where
-    Client: BlockProvider + HeaderProvider + 'static,
+    Client: BlockProviderIdExt + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Acquires a permit to execute a tracing call.
@@ -206,7 +206,7 @@ where
 #[async_trait]
 impl<Client, Eth> DebugApiServer for DebugApi<Client, Eth>
 where
-    Client: BlockProvider + HeaderProvider + 'static,
+    Client: BlockProviderIdExt + HeaderProvider + 'static,
     Eth: EthApiSpec + 'static,
 {
     /// Handler for `debug_getRawHeader`
@@ -232,7 +232,7 @@ where
 
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
-        let block = self.client.block(block_id).to_rpc_result()?;
+        let block = self.client.block_by_id(block_id).to_rpc_result()?;
 
         let mut res = Vec::new();
         if let Some(mut block) = block {
@@ -261,7 +261,8 @@ where
 
     /// Handler for `debug_getRawReceipts`
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let receipts = self.client.receipts_by_block(block_id).to_rpc_result()?.unwrap_or_default();
+        let receipts =
+            self.client.receipts_by_block_id(block_id).to_rpc_result()?.unwrap_or_default();
         let mut all_receipts = Vec::with_capacity(receipts.len());
 
         for receipt in receipts {

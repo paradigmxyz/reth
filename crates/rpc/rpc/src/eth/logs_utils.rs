@@ -1,6 +1,4 @@
-use reth_primitives::{
-    filter::FilteredParams, BlockNumHash, BlockNumberOrTag, ChainInfo, Receipt, TxHash, U256,
-};
+use reth_primitives::{filter::FilteredParams, BlockNumHash, ChainInfo, Receipt, TxHash, U256};
 use reth_rpc_types::Log;
 
 /// Returns all matching logs of a block's receipts grouped with the hash of their transaction.
@@ -72,8 +70,8 @@ pub(crate) fn log_matches_filter(
 
 /// Computes the block range based on the filter range and current block numbers
 pub(crate) fn get_filter_block_range(
-    from_block: Option<BlockNumberOrTag>,
-    to_block: Option<BlockNumberOrTag>,
+    from_block: Option<u64>,
+    to_block: Option<u64>,
     start_block: u64,
     info: ChainInfo,
 ) -> (u64, u64) {
@@ -83,13 +81,13 @@ pub(crate) fn get_filter_block_range(
     // if a `from_block` argument is provided then the `from_block_number` is the converted value or
     // the start block if the converted value is larger than the start block, since `from_block`
     // can't be a future block: `min(head, from_block)`
-    if let Some(filter_from_block) = from_block.and_then(|num| info.convert_block_number(num)) {
+    if let Some(filter_from_block) = from_block {
         from_block_number = start_block.min(filter_from_block)
     }
 
     // upper end of the range is the converted `to_block` argument, restricted by the best block:
     // `min(best_number,to_block_number)`
-    if let Some(filter_to_block) = to_block.and_then(|num| info.convert_block_number(num)) {
+    if let Some(filter_to_block) = to_block {
         to_block_number = info.best_number.min(filter_to_block);
     }
 
@@ -102,17 +100,17 @@ mod tests {
 
     #[test]
     fn test_log_range_from_and_to() {
-        let from: BlockNumberOrTag = 14000000u64.into();
-        let to: BlockNumberOrTag = 14000100u64.into();
+        let from = 14000000u64;
+        let to = 14000100u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
         let range = get_filter_block_range(Some(from), Some(to), info.best_number, info);
-        assert_eq!(range, (from.as_number().unwrap(), to.as_number().unwrap()));
+        assert_eq!(range, (from, to));
     }
 
     #[test]
     fn test_log_range_higher() {
-        let from: BlockNumberOrTag = 15000001u64.into();
-        let to: BlockNumberOrTag = 15000002u64.into();
+        let from = 15000001u64;
+        let to = 15000002u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
         let range = get_filter_block_range(Some(from), Some(to), info.best_number, info.clone());
         assert_eq!(range, (info.best_number, info.best_number));
@@ -120,18 +118,18 @@ mod tests {
 
     #[test]
     fn test_log_range_from() {
-        let from: BlockNumberOrTag = 14000000u64.into();
+        let from = 14000000u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
         let range = get_filter_block_range(Some(from), None, info.best_number, info.clone());
-        assert_eq!(range, (from.as_number().unwrap(), info.best_number));
+        assert_eq!(range, (from, info.best_number));
     }
 
     #[test]
     fn test_log_range_to() {
-        let to: BlockNumberOrTag = 14000000u64.into();
+        let to = 14000000u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
         let range = get_filter_block_range(None, Some(to), info.best_number, info.clone());
-        assert_eq!(range, (info.best_number, to.as_number().unwrap()));
+        assert_eq!(range, (info.best_number, to));
     }
 
     #[test]
