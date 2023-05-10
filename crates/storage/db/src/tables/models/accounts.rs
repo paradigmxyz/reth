@@ -39,7 +39,7 @@ impl Compact for AccountBeforeTx {
         if let Some(account) = self.info {
             acc_len = account.to_compact(buf);
         }
-        acc_len + 32
+        acc_len + 20
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8])
@@ -49,7 +49,7 @@ impl Compact for AccountBeforeTx {
         let address = Address::from_slice(&buf[..20]);
         buf.advance(20);
 
-        let info = if buf.has_remaining() {
+        let info = if len - 20 > 0 {
             let (acc, advanced_buf) = Account::from_compact(buf, len - 20);
             buf = advanced_buf;
             Some(acc)
