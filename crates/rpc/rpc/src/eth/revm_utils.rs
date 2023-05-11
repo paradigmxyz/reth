@@ -211,6 +211,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         nonce,
         access_list,
         chain_id,
+        ..
     } = request;
 
     let CallFees { max_priority_fee_per_gas, gas_price } = CallFees::ensure_fees(

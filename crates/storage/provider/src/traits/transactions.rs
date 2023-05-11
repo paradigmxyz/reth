@@ -1,11 +1,13 @@
-use crate::BlockIdProvider;
+use crate::BlockNumProvider;
 use reth_interfaces::Result;
-use reth_primitives::{BlockId, BlockNumber, TransactionMeta, TransactionSigned, TxHash, TxNumber};
+use reth_primitives::{
+    BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned, TxHash, TxNumber,
+};
 use std::ops::RangeBounds;
 
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionsProvider: BlockIdProvider + Send + Sync {
+pub trait TransactionsProvider: BlockNumProvider + Send + Sync {
     /// Get internal transaction identifier by transaction hash.
     ///
     /// This is the inverse of [TransactionsProvider::transaction_by_id].
@@ -29,7 +31,10 @@ pub trait TransactionsProvider: BlockIdProvider + Send + Sync {
     fn transaction_block(&self, id: TxNumber) -> Result<Option<BlockNumber>>;
 
     /// Get transactions by block id.
-    fn transactions_by_block(&self, block: BlockId) -> Result<Option<Vec<TransactionSigned>>>;
+    fn transactions_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> Result<Option<Vec<TransactionSigned>>>;
 
     /// Get transactions by block range.
     fn transactions_by_block_range(

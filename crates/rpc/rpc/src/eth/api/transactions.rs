@@ -16,7 +16,7 @@ use reth_primitives::{
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
@@ -181,7 +181,7 @@ pub trait EthTransactions: Send + Sync {
 impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
@@ -368,6 +368,7 @@ where
                     chain_id: Some(chain_id),
                     access_list: request.access_list.clone(),
                     max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                    transaction_type: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
             )
@@ -533,7 +534,7 @@ where
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
     pub(crate) fn sign_request(
@@ -764,7 +765,7 @@ mod tests {
     #[tokio::test]
     async fn send_raw_transaction() {
         let noop_provider = NoopProvider::default();
-        let noop_network_provider = NoopNetwork::default();
+        let noop_network_provider = NoopNetwork;
 
         let pool = testing_pool();
 

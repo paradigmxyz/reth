@@ -181,6 +181,18 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.best()
     }
 
+    /// Returns all transactions from the pending sub-pool
+    pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pending_pool.all().collect()
+    }
+
+    /// Returns all transactions from parked pools
+    pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut queued = self.basefee_pool.all().collect::<Vec<_>>();
+        queued.extend(self.queued_pool.all());
+        queued
+    }
+
     /// Returns `true` if the transaction with the given hash is already included in this pool.
     pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
         self.all_transactions.contains(tx_hash)
@@ -241,7 +253,21 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Process the sub-pool updates
         let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
+        // update the metrics after the update
+        self.update_size_metrics();
+
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
+    }
+
+    /// Update sub-pools size metrics.
+    pub(crate) fn update_size_metrics(&mut self) {
+        let stats = self.size();
+        self.metrics.pending_pool_transactions.set(stats.pending as f64);
+        self.metrics.pending_pool_size_bytes.set(stats.pending_size as f64);
+        self.metrics.basefee_pool_transactions.set(stats.basefee as f64);
+        self.metrics.basefee_pool_size_bytes.set(stats.basefee_size as f64);
+        self.metrics.queued_pool_transactions.set(stats.queued as f64);
+        self.metrics.queued_pool_size_bytes.set(stats.queued_size as f64);
     }
 
     /// Adds the transaction into the pool.

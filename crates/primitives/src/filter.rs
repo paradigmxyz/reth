@@ -24,6 +24,7 @@ pub enum FilterBlockOption {
 }
 
 impl FilterBlockOption {
+    /// Returns the `fromBlock` value, if any
     pub fn get_to_block(&self) -> Option<&BlockNumberOrTag> {
         match self {
             FilterBlockOption::Range { to_block, .. } => to_block.as_ref(),
@@ -31,10 +32,21 @@ impl FilterBlockOption {
         }
     }
 
+    /// Returns the `toBlock` value, if any
     pub fn get_from_block(&self) -> Option<&BlockNumberOrTag> {
         match self {
             FilterBlockOption::Range { from_block, .. } => from_block.as_ref(),
             FilterBlockOption::AtBlockHash(_) => None,
+        }
+    }
+
+    /// Returns the range (`fromBlock`, `toBlock`) if this is a range filter.
+    pub fn as_range(&self) -> (Option<&BlockNumberOrTag>, Option<&BlockNumberOrTag>) {
+        match self {
+            FilterBlockOption::Range { from_block, to_block } => {
+                (from_block.as_ref(), to_block.as_ref())
+            }
+            FilterBlockOption::AtBlockHash(_) => (None, None),
         }
     }
 }

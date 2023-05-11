@@ -4,8 +4,6 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-// TODO remove later
-#![allow(dead_code)]
 
 //! Reth RPC implementation
 //!
@@ -19,6 +17,7 @@ pub mod eth;
 mod layers;
 mod net;
 mod trace;
+mod txpool;
 mod web3;
 
 pub use admin::AdminApi;
@@ -29,6 +28,7 @@ pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvide
 pub use layers::{AuthLayer, AuthValidator, Claims, JwtAuthValidator, JwtError, JwtSecret};
 pub use net::NetApi;
 pub use trace::TraceApi;
+pub use txpool::TxPoolApi;
 pub use web3::Web3Api;
 
 pub(crate) mod result;
