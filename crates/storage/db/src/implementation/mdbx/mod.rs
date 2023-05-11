@@ -48,6 +48,9 @@ impl<E: EnvironmentKind> Database for Env<E> {
     }
 }
 
+const GIGABYTE: usize = 1024 * 1024 * 1024;
+const TERABYTE: usize = GIGABYTE * 1024;
+
 impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
@@ -62,14 +65,19 @@ impl<E: EnvironmentKind> Env<E> {
             inner: Environment::new()
                 .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
-                    size: Some(0..(1024 * 1024 * 1024 * 1024 * 4)), // TODO: reevaluate (4 tb)
-                    growth_step: Some(1024 * 1024 * 256),           // TODO: reevaluate (256 mb)
+                    // Maximum database size of 4 terabytes
+                    size: Some(0..(4 * TERABYTE)),
+                    // We grow the database in increments of 4 gigabytes
+                    growth_step: Some(4 * GIGABYTE as isize),
+                    // The database never shrinks
                     shrink_threshold: None,
                     page_size: Some(PageSize::Set(default_page_size())),
                 })
                 .set_flags(EnvironmentFlags {
                     mode,
-                    no_rdahead: true, // TODO: reevaluate
+                    // We disable readahead because it improves performance for linear scans, but
+                    // worsens it for random access (which is our access pattern outside of sync)
+                    no_rdahead: true,
                     coalesce: true,
                     ..Default::default()
                 })

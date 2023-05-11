@@ -33,6 +33,22 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     Error(T, Box<dyn std::error::Error + Send + Sync>),
 }
 
+impl<T: PoolTransaction> TransactionValidationOutcome<T> {
+    /// Returns the transaction that was validated.
+    pub fn transaction(&self) -> &T {
+        match self {
+            Self::Valid { transaction, .. } => transaction,
+            Self::Invalid(transaction, ..) => transaction,
+            Self::Error(transaction, ..) => transaction,
+        }
+    }
+
+    /// Returns the hash of the transactions
+    pub fn tx_hash(&self) -> TxHash {
+        *self.transaction().hash()
+    }
+}
+
 /// Provides support for validating transaction at any given state of the chain
 #[async_trait::async_trait]
 pub trait TransactionValidator: Send + Sync {
