@@ -1,4 +1,4 @@
-use crate::result::{internal_rpc_err, ToRpcResult};
+use crate::result::ToRpcResult;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
@@ -51,12 +51,11 @@ where
     }
 
     /// Handler for `admin_peerEvents`
-    fn subscribe_peer_events(
+    async fn subscribe_peer_events(
         &self,
-        sink: jsonrpsee::SubscriptionSink,
-    ) -> jsonrpsee::types::SubscriptionResult {
-        sink.close(internal_rpc_err("admin_peerEvents is not implemented yet"));
-        Ok(())
+        _pending: jsonrpsee::PendingSubscriptionSink,
+    ) -> jsonrpsee::core::SubscriptionResult {
+        Err("admin_peerEvents is not implemented yet".into())
     }
 
     /// Handler for `admin_nodeInfo`

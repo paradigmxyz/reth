@@ -284,7 +284,7 @@ mod tests {
 
         // Create a mock rpc module
         let mut module = RpcModule::new(());
-        module.register_method("greet_melkor", |_, _| Ok("You are the dark lord")).unwrap();
+        module.register_method("greet_melkor", |_, _| "You are the dark lord").unwrap();
 
         server.start(module).unwrap()
     }
