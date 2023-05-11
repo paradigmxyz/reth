@@ -15,6 +15,7 @@ pub mod db;
 pub mod dirs;
 pub mod drop_stage;
 pub mod dump_stage;
+pub mod execution_debug;
 pub mod merkle_debug;
 pub mod node;
 pub mod p2p;
