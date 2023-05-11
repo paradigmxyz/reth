@@ -1,9 +1,9 @@
 //! Types for representing call trace items.
 
 use crate::tracing::utils::convert_memory;
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
+use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
-    geth::StructLog,
+    geth::{CallFrame, CallLogFrame, StructLog},
     parity::{
         Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
         CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TraceResult,
@@ -34,6 +34,31 @@ impl CallKind {
     /// Returns true if the call is a create
     pub fn is_any_create(&self) -> bool {
         matches!(self, CallKind::Create | CallKind::Create2)
+    }
+}
+
+impl std::fmt::Display for CallKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallKind::Call => {
+                write!(f, "CALL")
+            }
+            CallKind::StaticCall => {
+                write!(f, "STATICCALL")
+            }
+            CallKind::CallCode => {
+                write!(f, "CALLCODE")
+            }
+            CallKind::DelegateCall => {
+                write!(f, "DELEGATECALL")
+            }
+            CallKind::Create => {
+                write!(f, "CREATE")
+            }
+            CallKind::Create2 => {
+                write!(f, "CREATE2")
+            }
+        }
     }
 }
 
@@ -118,6 +143,18 @@ pub(crate) struct CallTrace {
     pub(crate) call_context: Option<CallContext>,
     /// Opcode-level execution steps
     pub(crate) steps: Vec<CallTraceStep>,
+}
+
+impl CallTrace {
+    // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
+    pub(crate) fn is_error(&self) -> bool {
+        self.status as u8 >= InstructionResult::Revert as u8
+    }
+
+    /// Returns the error message if it is an erroneous result.
+    pub(crate) fn as_error(&self) -> Option<String> {
+        self.is_error().then(|| format!("{:?}", self.status))
+    }
 }
 
 impl Default for CallTrace {
@@ -275,6 +312,47 @@ impl CallTraceNode {
                 init: self.trace.data.clone().into(),
             }),
         }
+    }
+
+    /// Converts this call trace into an _empty_ geth [CallFrame]
+    ///
+    /// Caution: this does not include any of the child calls
+    pub(crate) fn geth_empty_call_frame(&self, include_logs: bool) -> CallFrame {
+        let mut call_frame = CallFrame {
+            typ: self.trace.kind.to_string(),
+            from: self.trace.caller,
+            to: Some(self.trace.address),
+            value: Some(self.trace.value),
+            gas: U256::from(self.trace.gas_used),
+            gas_used: U256::from(self.trace.gas_used),
+            input: self.trace.data.clone().into(),
+            output: Some(self.trace.output.clone().into()),
+            error: None,
+            revert_reason: None,
+            calls: None,
+            logs: None,
+        };
+
+        // we need to populate error and revert reason
+        if !self.trace.success {
+            call_frame.revert_reason = decode_revert_reason(self.trace.output.clone());
+            call_frame.error = self.trace.as_error();
+        }
+
+        if include_logs {
+            call_frame.logs = Some(
+                self.logs
+                    .iter()
+                    .map(|log| CallLogFrame {
+                        address: Some(self.trace.address),
+                        topics: Some(log.topics.clone()),
+                        data: Some(log.data.clone().into()),
+                    })
+                    .collect(),
+            );
+        }
+
+        call_frame
     }
 }
 
