@@ -5,8 +5,8 @@
 
 use crate::eth::{
     cache::EthStateCache,
-    gas_oracle::GasPriceOracle,
     error::{EthApiError, EthResult},
+    gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
 use async_trait::async_trait;

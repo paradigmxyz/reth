@@ -5,7 +5,7 @@ use reth_interfaces::{Error as GeneralError, Result};
 use reth_primitives::{
     constants::GWEI_TO_WEI, BlockHashOrNumber, BlockId, BlockNumberOrTag, H256, U256,
 };
-use reth_provider::{BlockProvider, ProviderError};
+use reth_provider::{BlockProviderIdExt, ProviderError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -82,7 +82,7 @@ pub struct GasPriceOracle<Client> {
 
 impl<Client> GasPriceOracle<Client>
 where
-    Client: BlockProvider + 'static,
+    Client: BlockProviderIdExt + 'static,
 {
     /// Creates and returns the [GasPriceOracle].
     pub fn new(client: Client, oracle_config: GasPriceOracleConfig, cache: EthStateCache) -> Self {
