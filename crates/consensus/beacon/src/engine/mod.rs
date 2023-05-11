@@ -368,6 +368,9 @@ where
                         return Ok(payload_response)
                     }
 
+                    // we will return VALID, so let's make sure the info tracker is
+                    // properly updated
+                    self.update_canon_chain(&state)?;
                     PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
@@ -388,9 +391,6 @@ where
 
         self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
         trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
-        // we will return VALID, so let's make sure the info tracker is
-        // properly updated
-        self.update_canon_chain(&state)?;
         Ok(OnForkChoiceUpdated::valid(status))
     }
 
