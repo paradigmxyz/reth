@@ -25,7 +25,7 @@ pub const DEFAULT_IGNORE_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GasPriceOracleConfig {
-    /// The number of blocks to sample for gas price estimates
+    /// The number of populated blocks to produce the gas price estimate
     pub blocks: u32,
 
     /// The percentile of gas prices to use for the estimate
@@ -137,6 +137,7 @@ where
                 .ok_or(GeneralError::Provider(ProviderError::BlockBodyIndices {
                     number: current_block,
                 }))?;
+
             if block_values.is_empty() {
                 results.push(U256::from(last_price.price));
             } else {
@@ -144,7 +145,8 @@ where
                 populated_blocks += 1;
             }
 
-            if populated_blocks >= self.oracle_config.max_block_history {
+            // break when we have enough populated blocks
+            if populated_blocks >= self.oracle_config.blocks {
                 break
             }
 
@@ -208,7 +210,8 @@ where
                 // recover sender, check if coinbase
                 let sender = tx.recover_signer();
                 match sender {
-                    Some(addr) => addr == block.beneficiary,
+                    // transactions will be filtered if this is false
+                    Some(addr) => addr != block.beneficiary,
                     // TODO: figure out an error for this case or ignore
                     None => false,
                 }
