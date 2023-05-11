@@ -490,16 +490,14 @@ impl PostState {
                 let storage_id = BlockNumberAddress((block_number, address));
 
                 // If the account was created and wiped at the same block, skip all storage changes
-                if storage.wipe.is_wiped() {
-                    if self
-                        .account_changes
+                if storage.wipe.is_wiped() &&
+                    self.account_changes
                         .get(&block_number)
                         .and_then(|changes| changes.get(&address).map(|info| info.is_none()))
                         // No account info available, fallback to `false`
                         .unwrap_or_default()
-                    {
-                        continue
-                    }
+                {
+                    continue
                 }
 
                 // If we are writing the primary storage wipe transition, the pre-existing plain
