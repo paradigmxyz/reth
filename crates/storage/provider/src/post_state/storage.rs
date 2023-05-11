@@ -1,6 +1,6 @@
 use derive_more::Deref;
 use reth_primitives::{Address, BlockNumber, U256};
-use std::collections::{btree_map::Entry, BTreeMap, HashSet};
+use std::collections::{btree_map::Entry, BTreeMap};
 
 /// Storage for an account with the old and new values for each slot: (slot -> (old, new)).
 pub type StorageChangeset = BTreeMap<U256, (U256, U256)>;
@@ -121,28 +121,27 @@ impl StorageChanges {
     }
 
     /// Retain entries only above specified block number.
-    pub fn retain_above(&mut self, target_block: BlockNumber) {
-        let mut observed_storage_wipes: HashSet<Address> = HashSet::default();
+    ///
+    /// # Returns
+    ///
+    /// The update mapping of address to the number of times it was wiped.
+    pub fn retain_above(&mut self, target_block: BlockNumber) -> BTreeMap<Address, u64> {
+        let mut updated_times_wiped: BTreeMap<Address, u64> = BTreeMap::default();
         self.inner.retain(|block_number, storages| {
             if *block_number > target_block {
                 for (address, storage) in storages.iter_mut() {
-                    storage.wipe = match storage.wipe {
-                        StorageWipe::Primary => {
-                            observed_storage_wipes.insert(*address);
+                    if storage.wipe.is_wiped() {
+                        let times_wiped_entry = updated_times_wiped.entry(*address).or_default();
+                        storage.wipe = if *times_wiped_entry == 0 {
+                            // No wipe was observed, promote the wipe to primary even if it was
+                            // secondary before.
                             StorageWipe::Primary
-                        }
-                        StorageWipe::Secondary => {
-                            if observed_storage_wipes.contains(address) {
-                                // We already observed the storage wipe for this address
-                                StorageWipe::Secondary
-                            } else {
-                                // No wipe was observed, promote the secondary wipe to primary
-                                observed_storage_wipes.insert(*address);
-                                StorageWipe::Primary
-                            }
-                        }
-                        StorageWipe::None => StorageWipe::None, // nothing to do
-                    };
+                        } else {
+                            // We already observed the storage wipe for this address
+                            StorageWipe::Secondary
+                        };
+                        *times_wiped_entry += 1;
+                    }
                 }
                 true
             } else {
@@ -152,5 +151,6 @@ impl StorageChanges {
                 false
             }
         });
+        updated_times_wiped
     }
 }
