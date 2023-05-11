@@ -159,6 +159,11 @@ where
         Ok(price)
     }
 
+    /// Get the `limit` lowest effective tip values for the block at number `block_num`. If the
+    /// oracle has a configured `ignore_price` threshold, then tip values under that threshold will
+    /// be ignored before returning a result.
+    ///
+    /// If the block cannot be found, then this will return `None`.
     async fn get_block_values(&self, block_num: u64, limit: usize) -> Result<Option<Vec<U256>>> {
         // TODO: we could cache num -> hash as well as long as we invalidate the cache between
         // forkchoice updates
