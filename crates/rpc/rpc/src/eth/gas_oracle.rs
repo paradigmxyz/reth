@@ -8,7 +8,6 @@ use reth_primitives::{
 };
 use reth_provider::{BlockProviderIdExt, ProviderError};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::warn;
 
