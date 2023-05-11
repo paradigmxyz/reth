@@ -43,6 +43,8 @@ pub use error::{BeaconEngineError, BeaconEngineResult, BeaconForkChoiceUpdateErr
 mod metrics;
 
 mod event;
+pub(crate) mod sync;
+
 pub use event::BeaconConsensusEngineEvent;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
