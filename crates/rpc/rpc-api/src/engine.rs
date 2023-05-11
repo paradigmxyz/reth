@@ -1,4 +1,4 @@
-use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     filter::Filter, Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, H256, U256, U64,
 };
@@ -17,11 +17,11 @@ pub trait EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     #[method(name = "engine_newPayloadV1")]
-    async fn new_payload_v1(&self, payload: ExecutionPayload) -> Result<PayloadStatus>;
+    async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_newpayloadv2>
     #[method(name = "engine_newPayloadV2")]
-    async fn new_payload_v2(&self, payload: ExecutionPayload) -> Result<PayloadStatus>;
+    async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -31,7 +31,7 @@ pub trait EngineApi {
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated>;
+    ) -> RpcResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     #[method(name = "engine_forkchoiceUpdatedV2")]
@@ -39,7 +39,7 @@ pub trait EngineApi {
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated>;
+    ) -> RpcResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
     ///
@@ -51,7 +51,7 @@ pub trait EngineApi {
     /// Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
     #[method(name = "engine_getPayloadV1")]
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> Result<ExecutionPayload>;
+    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayload>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_getpayloadv2>
     ///
@@ -59,14 +59,14 @@ pub trait EngineApi {
     /// payload build process at the time of receiving this call. Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
     #[method(name = "engine_getPayloadV2")]
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> Result<ExecutionPayloadEnvelope>;
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "engine_getPayloadBodiesByHashV1")]
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
-    ) -> Result<ExecutionPayloadBodies>;
+    ) -> RpcResult<ExecutionPayloadBodies>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     #[method(name = "engine_getPayloadBodiesByRangeV1")]
@@ -74,18 +74,18 @@ pub trait EngineApi {
         &self,
         start: U64,
         count: U64,
-    ) -> Result<ExecutionPayloadBodies>;
+    ) -> RpcResult<ExecutionPayloadBodies>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
     #[method(name = "engine_exchangeTransitionConfigurationV1")]
     async fn exchange_transition_configuration(
         &self,
         transition_configuration: TransitionConfiguration,
-    ) -> Result<TransitionConfiguration>;
+    ) -> RpcResult<TransitionConfiguration>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     #[method(name = "engine_exchangeCapabilities")]
-    async fn exchange_capabilities(&self, capabilities: Vec<String>) -> Result<Vec<String>>;
+    async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -97,15 +97,15 @@ pub trait EngineApi {
 pub trait EngineEthApi {
     /// Returns an object with data about the sync status or false.
     #[method(name = "eth_syncing")]
-    fn syncing(&self) -> Result<SyncStatus>;
+    fn syncing(&self) -> RpcResult<SyncStatus>;
 
     /// Returns the chain ID of the current network.
     #[method(name = "eth_chainId")]
-    async fn chain_id(&self) -> Result<Option<U64>>;
+    async fn chain_id(&self) -> RpcResult<Option<U64>>;
 
     /// Returns the number of most recent block.
     #[method(name = "eth_blockNumber")]
-    fn block_number(&self) -> Result<U256>;
+    fn block_number(&self) -> RpcResult<U256>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "eth_call")]
@@ -114,15 +114,15 @@ pub trait EngineEthApi {
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
-    ) -> Result<Bytes>;
+    ) -> RpcResult<Bytes>;
 
     /// Returns code at a given address at given block number.
     #[method(name = "eth_getCode")]
-    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes>;
+    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<Bytes>;
 
     /// Returns information about a block by hash.
     #[method(name = "eth_getBlockByHash")]
-    async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>>;
+    async fn block_by_hash(&self, hash: H256, full: bool) -> RpcResult<Option<RichBlock>>;
 
     /// Returns information about a block by number.
     #[method(name = "eth_getBlockByNumber")]
@@ -130,13 +130,13 @@ pub trait EngineEthApi {
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> Result<Option<RichBlock>>;
+    ) -> RpcResult<Option<RichBlock>>;
 
     /// Sends signed transaction, returning its hash.
     #[method(name = "eth_sendRawTransaction")]
-    async fn send_raw_transaction(&self, bytes: Bytes) -> Result<H256>;
+    async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<H256>;
 
     /// Returns logs matching given filter object.
     #[method(name = "eth_getLogs")]
-    async fn logs(&self, filter: Filter) -> Result<Vec<Log>>;
+    async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
 }

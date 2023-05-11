@@ -6,7 +6,7 @@ use jsonrpsee::{
         client::{ClientT, SubscriptionClientT},
         error::Error,
     },
-    types::error::{CallError, ErrorCode},
+    types::error::ErrorCode,
 };
 use reth_primitives::{
     hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, H256, H64,
@@ -22,7 +22,7 @@ use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
     match err {
-        Error::Call(CallError::Custom(error_obj)) => {
+        Error::Call(error_obj) => {
             error_obj.code() == ErrorCode::InternalError.code() &&
                 error_obj.message() == "unimplemented"
         }

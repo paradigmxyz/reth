@@ -22,8 +22,8 @@ tokio = { version = "1", features = ["sync"] }
 # misc
 async-trait = "0.1"
 thiserror = "1.0.37"
-jsonrpsee-types = "0.16"
-jsonrpsee-core = "0.16"
+jsonrpsee-types = "0.18"
+jsonrpsee-core = "0.18"
 tracing = "0.1"
 
 [dev-dependencies]

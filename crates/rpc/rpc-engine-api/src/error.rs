@@ -93,7 +93,7 @@ impl From<oneshot::error::RecvError> for EngineApiError {
     }
 }
 
-impl From<EngineApiError> for jsonrpsee_types::error::CallError {
+impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         let code = match error {
             EngineApiError::InvalidBodiesRange { .. } |
@@ -105,17 +105,17 @@ impl From<EngineApiError> for jsonrpsee_types::error::CallError {
             // Any other server error
             _ => INTERNAL_ERROR_CODE,
         };
-        jsonrpsee_types::error::CallError::Custom(jsonrpsee_types::error::ErrorObject::owned(
+        jsonrpsee_types::error::ErrorObject::owned(
             code,
             // TODO properly convert to rpc error
             error.to_string(),
             None::<()>,
-        ))
+        )
     }
 }
 
 impl From<EngineApiError> for jsonrpsee_core::error::Error {
     fn from(error: EngineApiError) -> Self {
-        jsonrpsee_types::error::CallError::from(error).into()
+        jsonrpsee_core::error::Error::Call(error.into())
     }
 }

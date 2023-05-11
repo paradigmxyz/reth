@@ -261,8 +261,8 @@ where
             BlockId::Hash(hash) => self.client.header(&hash.into()).to_rpc_result()?,
             BlockId::Number(number_or_tag) => {
                 let number =
-                    self.client.convert_block_number(number_or_tag).to_rpc_result()?.ok_or(
-                        jsonrpsee::core::Error::Custom("Pending block not supported".to_string()),
+                    self.client.convert_block_number(number_or_tag).to_rpc_result()?.ok_or_else(
+                        || internal_rpc_err("Pending block not supported".to_string()),
                     )?;
                 self.client.header_by_number(number).to_rpc_result()?
             }

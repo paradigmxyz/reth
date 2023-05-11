@@ -100,9 +100,8 @@
 use constants::*;
 use error::{RpcError, ServerKind};
 use jsonrpsee::{
-    core::server::rpc_module::Methods,
     server::{IdProvider, Server, ServerHandle},
-    RpcModule,
+    Methods, RpcModule,
 };
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};

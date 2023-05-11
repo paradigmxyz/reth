@@ -31,7 +31,7 @@ revm-primitives = { version = "1.1", features = ["serde"] }
 
 
 # rpc
-jsonrpsee = { version = "0.16" }
+jsonrpsee = { version = "0.18" }
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
@@ -62,4 +62,4 @@ schnellru = "0.2"
 futures = "0.3.26"
 
 [dev-dependencies]
-jsonrpsee = { version = "0.16", features = ["client"] }
+jsonrpsee = { version = "0.18", features = ["client"] }

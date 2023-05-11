@@ -2,19 +2,17 @@
 use futures::{stream::FuturesOrdered, StreamExt};
 use jsonrpsee::{
     core::{
-        server::{
-            helpers::{prepare_error, BatchResponse, BatchResponseBuilder, MethodResponse},
-            resource_limiting::Resources,
-            rpc_module::{MethodKind, Methods},
-        },
+        server::helpers::{prepare_error, BatchResponseBuilder, MethodResponse},
         tracing::{rx_log_from_json, tx_log_from_str},
         JsonRawValue,
     },
+    helpers::batch_response_error,
     server::{
         logger,
         logger::{Logger, TransportProtocol},
     },
     types::{error::ErrorCode, ErrorObject, Id, InvalidRequest, Notification, Params, Request},
+    MethodCallback, Methods,
 };
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
@@ -36,7 +34,6 @@ pub(crate) struct CallData<'a, L: Logger> {
     methods: &'a Methods,
     max_response_body_size: u32,
     max_log_length: u32,
-    resources: &'a Resources,
     request_start: L::Instant,
 }
 
@@ -44,7 +41,7 @@ pub(crate) struct CallData<'a, L: Logger> {
 // request in the batch and read the results off of a new channel, `rx_batch`, and then send the
 // complete batch response back to the client over `tx`.
 #[instrument(name = "batch", skip(b), level = "TRACE")]
-pub(crate) async fn process_batch_request<L>(b: Batch<'_, L>) -> BatchResponse
+pub(crate) async fn process_batch_request<L>(b: Batch<'_, L>) -> String
 where
     L: Logger,
 {
@@ -60,9 +57,7 @@ where
             .filter_map(|v| {
                 if let Ok(req) = serde_json::from_str::<Request<'_>>(v.get()) {
                     Some(Either::Right(execute_call(req, call.clone())))
-                } else if let Ok(_notif) =
-                    serde_json::from_str::<Notification<'_, &JsonRawValue>>(v.get())
-                {
+                } else if let Ok(_notif) = serde_json::from_str::<Notif<'_>>(v.get()) {
                     // notifications should not be answered.
                     got_notif = true;
                     None
@@ -87,12 +82,12 @@ where
         }
 
         if got_notif && batch_response.is_empty() {
-            BatchResponse { result: String::new(), success: true }
+            String::new()
         } else {
             batch_response.finish()
         }
     } else {
-        BatchResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError))
+        batch_response_error(Id::Null, ErrorObject::from(ErrorCode::ParseError))
     }
 }
 
@@ -123,7 +118,6 @@ pub(crate) async fn execute_call<L: Logger>(
     call: CallData<'_, L>,
 ) -> MethodResponse {
     let CallData {
-        resources,
         methods,
         logger,
         max_response_body_size,
@@ -148,61 +142,28 @@ pub(crate) async fn execute_call<L: Logger>(
             );
             MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound))
         }
-        Some((name, method)) => match &method.inner() {
-            MethodKind::Sync(callback) => {
+        Some((name, method)) => match method {
+            MethodCallback::Sync(callback) => {
                 logger.on_call(
                     name,
                     params.clone(),
                     logger::MethodKind::MethodCall,
                     TransportProtocol::Http,
                 );
-
-                match method.claim(name, resources) {
-                    Ok(guard) => {
-                        let r = (callback)(id, params, max_response_body_size as usize);
-                        drop(guard);
-                        r
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            "[Methods::execute_with_resources] failed to lock resources: {}",
-                            err
-                        );
-                        MethodResponse::error(id, ErrorObject::from(ErrorCode::ServerIsBusy))
-                    }
-                }
+                (callback)(id, params, max_response_body_size as usize)
             }
-            MethodKind::Async(callback) => {
+            MethodCallback::Async(callback) => {
                 logger.on_call(
                     name,
                     params.clone(),
                     logger::MethodKind::MethodCall,
                     TransportProtocol::Http,
                 );
-                match method.claim(name, resources) {
-                    Ok(guard) => {
-                        let id = id.into_owned();
-                        let params = params.into_owned();
-
-                        (callback)(
-                            id,
-                            params,
-                            conn_id,
-                            max_response_body_size as usize,
-                            Some(guard),
-                        )
-                        .await
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            "[Methods::execute_with_resources] failed to lock resources: {}",
-                            err
-                        );
-                        MethodResponse::error(id, ErrorObject::from(ErrorCode::ServerIsBusy))
-                    }
-                }
+                let id = id.into_owned();
+                let params = params.into_owned();
+                (callback)(id, params, conn_id, max_response_body_size as usize).await
             }
-            MethodKind::Subscription(_) | MethodKind::Unsubscription(_) => {
+            MethodCallback::Subscription(_) | MethodCallback::Unsubscription(_) => {
                 logger.on_call(
                     name,
                     params.clone(),
@@ -231,7 +192,6 @@ fn execute_notification(notif: Notif<'_>, max_log_length: u32) -> MethodResponse
 #[allow(unused)]
 pub(crate) struct HandleRequest<L: Logger> {
     pub(crate) methods: Methods,
-    pub(crate) resources: Resources,
     pub(crate) max_request_body_size: u32,
     pub(crate) max_response_body_size: u32,
     pub(crate) max_log_length: u32,
@@ -241,15 +201,7 @@ pub(crate) struct HandleRequest<L: Logger> {
 }
 
 pub(crate) async fn handle_request<L: Logger>(request: String, input: HandleRequest<L>) -> String {
-    let HandleRequest {
-        methods,
-        resources,
-        max_response_body_size,
-        max_log_length,
-        logger,
-        conn,
-        ..
-    } = input;
+    let HandleRequest { methods, max_response_body_size, max_log_length, logger, conn, .. } = input;
 
     enum Kind {
         Single,
@@ -273,7 +225,6 @@ pub(crate) async fn handle_request<L: Logger>(request: String, input: HandleRequ
         methods: &methods,
         max_response_body_size,
         max_log_length,
-        resources: &resources,
         request_start,
     };
     // Single request or notification
@@ -281,8 +232,7 @@ pub(crate) async fn handle_request<L: Logger>(request: String, input: HandleRequ
         let response = process_single_request(request.into_bytes(), call).await;
         response.result
     } else {
-        let response = process_batch_request(Batch { data: request.into_bytes(), call }).await;
-        response.result
+        process_batch_request(Batch { data: request.into_bytes(), call }).await
     };
 
     drop(conn);
