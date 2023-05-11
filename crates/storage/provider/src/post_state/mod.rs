@@ -382,7 +382,7 @@ impl PostState {
         let updated_times_wiped = non_reverted_state.storage_changes.retain_above(revert_to_block);
         // Update or reset the number of times the account was wiped.
         for (address, storage) in non_reverted_state.storage.iter_mut() {
-            storage.times_wiped = updated_times_wiped.get(&address).cloned().unwrap_or_default();
+            storage.times_wiped = updated_times_wiped.get(address).cloned().unwrap_or_default();
         }
 
         non_reverted_state
