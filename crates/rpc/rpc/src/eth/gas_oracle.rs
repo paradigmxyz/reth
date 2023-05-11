@@ -1,9 +1,10 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
 use super::{cache::EthStateCache, error::EthResult};
-use reth_interfaces::{Error as GeneralError, Result};
+use reth_interfaces::{consensus::ConsensusError, Error as GeneralError, Result};
 use reth_primitives::{
-    constants::GWEI_TO_WEI, BlockHashOrNumber, BlockId, BlockNumberOrTag, H256, U256,
+    constants::GWEI_TO_WEI, BlockHashOrNumber, BlockId, BlockNumberOrTag, InvalidTransactionError,
+    H256, U256,
 };
 use reth_provider::{BlockProviderIdExt, ProviderError};
 use serde::{Deserialize, Serialize};
@@ -91,11 +92,10 @@ where
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
     pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
-        // TODO: we really shouldn't have this be None, but let's get rid of these expects?
         let header_hash = self
             .client
             .block_hash_for_id(BlockId::Number(BlockNumberOrTag::Latest))?
-            .expect("a latest header always exists");
+            .expect("a latest header should always exist");
         let header = self
             .client
             .header_by_hash_or_number(BlockHashOrNumber::Hash(header_hash))?
@@ -123,9 +123,11 @@ where
             let block_values = self
                 .get_block_values(current_block, SAMPLE_NUMBER as usize)
                 .await?
-                .expect("this means we couldn't find the block");
+                .ok_or(GeneralError::Provider(ProviderError::BlockBodyIndices {
+                    number: current_block,
+                }))?;
             if block_values.is_empty() {
-                results.push(Some(U256::from(last_price.price)));
+                results.push(U256::from(last_price.price));
             } else {
                 results.extend(block_values);
                 populated_blocks += 1;
@@ -142,11 +144,9 @@ where
         let mut price = last_price.price;
         if !results.is_empty() {
             results.sort_unstable();
-            // TODO - error handling
-            price = results
+            price = *results
                 .get((results.len() - 1) * self.oracle_config.percentile as usize / 100)
-                .expect("this should exist")
-                .expect("this shouldn't be None");
+                .expect("gas price index is a percent of nonzero array length, so a value always exists; qed");
         }
 
         // constrain to the max price
@@ -159,11 +159,7 @@ where
         Ok(price)
     }
 
-    async fn get_block_values(
-        &self,
-        block_num: u64,
-        limit: usize,
-    ) -> Result<Option<Vec<Option<U256>>>> {
+    async fn get_block_values(&self, block_num: u64, limit: usize) -> Result<Option<Vec<U256>>> {
         // TODO: we could cache num -> hash as well as long as we invalidate the cache between
         // forkchoice updates
         let block_hash = match self.client.block_hash(block_num)? {
@@ -201,21 +197,25 @@ where
                     None => false,
                 }
             })
+            // map all values to effective_gas_tip because we will be returning those values
+            // anyways
+            .map(|tx| tx.effective_gas_tip(block.base_fee_per_gas))
             .collect::<Vec<_>>();
 
         // now do the sort
-        txs.sort_unstable_by(|first, second| {
-            first
-                .effective_gas_tip(block.base_fee_per_gas)
-                .cmp(&second.effective_gas_tip(block.base_fee_per_gas))
-        });
+        txs.sort_unstable();
 
-        Ok(Some(
-            txs.iter_mut()
-                .take(limit)
-                .map(|tx| tx.effective_gas_tip(block.base_fee_per_gas).map(U256::from))
-                .collect(),
-        ))
+        // fill result with the top `limit` transactions
+        let mut final_result = Vec::with_capacity(limit);
+        for tx in txs.iter().take(limit) {
+            // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
+            // less than the base fee
+            let effective_tip = tx
+                .ok_or(ConsensusError::InvalidTransaction(InvalidTransactionError::FeeCapTooLow))?;
+            final_result.push(U256::from(effective_tip));
+        }
+
+        Ok(Some(final_result))
     }
 }
 
