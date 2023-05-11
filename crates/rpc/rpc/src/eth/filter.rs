@@ -399,7 +399,7 @@ pub enum FilterError {
 }
 
 // convert the error
-impl From<FilterError> for jsonrpsee::core::Error {
+impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
     fn from(err: FilterError) -> Self {
         match err {
             FilterError::FilterNotFound(_) => rpc_error_with_code(
