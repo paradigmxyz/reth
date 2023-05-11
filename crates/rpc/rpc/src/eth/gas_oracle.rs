@@ -1,12 +1,11 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
-use super::{cache::EthStateCache, error::EthResult};
-use reth_interfaces::{consensus::ConsensusError, Error as GeneralError, Result};
-use reth_primitives::{
-    constants::GWEI_TO_WEI, BlockHashOrNumber, BlockId, BlockNumberOrTag, InvalidTransactionError,
-    H256, U256,
+use crate::eth::{
+    cache::EthStateCache,
+    error::{EthApiError, EthResult, InvalidTransactionError},
 };
-use reth_provider::{BlockProviderIdExt, ProviderError};
+use reth_primitives::{constants::GWEI_TO_WEI, BlockId, BlockNumberOrTag, H256, U256};
+use reth_provider::BlockProviderIdExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
@@ -97,11 +96,7 @@ where
         let header_hash = self
             .client
             .block_hash_for_id(BlockId::Number(BlockNumberOrTag::Latest))?
-            .expect("a latest header should always exist");
-        let header = self
-            .client
-            .header_by_hash_or_number(BlockHashOrNumber::Hash(header_hash))?
-            .ok_or(GeneralError::Provider(ProviderError::BlockHash { block_hash: header_hash }))?;
+            .ok_or(EthApiError::UnknownBlockNumber)?;
 
         let mut last_price = self.last_price.lock().await;
 
@@ -115,18 +110,16 @@ where
         //
         // we only return more than check_block blocks' worth of prices if one or more return empty
         // transactions
-        let mut current_block = header.number;
+        let mut current_hash = header_hash;
         let mut results = Vec::new();
         let mut populated_blocks = 0;
 
         // we only check a maximum of 2 * max_block_history
         for _ in 0..self.oracle_config.max_block_history * 2 {
-            let block_values = self
-                .get_block_values(current_block, SAMPLE_NUMBER as usize)
+            let (parent_hash, block_values) = self
+                .get_block_values(current_hash, SAMPLE_NUMBER as usize)
                 .await?
-                .ok_or(GeneralError::Provider(ProviderError::BlockBodyIndices {
-                    number: current_block,
-                }))?;
+                .ok_or(EthApiError::UnknownBlockNumber)?;
 
             if block_values.is_empty() {
                 results.push(U256::from(last_price.price));
@@ -140,7 +133,7 @@ where
                 break
             }
 
-            current_block -= 1;
+            current_hash = parent_hash;
         }
 
         // sort results then take the configured percentile result
@@ -164,23 +157,22 @@ where
         Ok(price)
     }
 
-    /// Get the `limit` lowest effective tip values for the block at number `block_num`. If the
-    /// oracle has a configured `ignore_price` threshold, then tip values under that threshold will
-    /// be ignored before returning a result.
+    /// Get the `limit` lowest effective tip values for the given block. If the oracle has a
+    /// configured `ignore_price` threshold, then tip values under that threshold will be ignored
+    /// before returning a result.
     ///
     /// If the block cannot be found, then this will return `None`.
-    async fn get_block_values(&self, block_num: u64, limit: usize) -> Result<Option<Vec<U256>>> {
-        // TODO: we could cache num -> hash as well as long as we invalidate the cache between
-        // forkchoice updates
-        let block_hash = match self.client.block_hash(block_num)? {
-            Some(num) => num,
-            None => return Ok(None),
-        };
-
+    ///
+    /// This method also returns the parent hash for the given block.
+    async fn get_block_values(
+        &self,
+        block_hash: H256,
+        limit: usize,
+    ) -> EthResult<Option<(H256, Vec<U256>)>> {
         // check the cache
         let block = match self.cache.get_block(block_hash).await? {
             Some(block) => block,
-            None => match self.client.block_by_number(block_num)? {
+            None => match self.client.block_by_hash(block_hash)? {
                 Some(block) => block,
                 None => return Ok(None),
             },
@@ -221,12 +213,11 @@ where
         for tx in txs.iter().take(limit) {
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
             // less than the base fee
-            let effective_tip = tx
-                .ok_or(ConsensusError::InvalidTransaction(InvalidTransactionError::FeeCapTooLow))?;
+            let effective_tip = tx.ok_or(InvalidTransactionError::FeeCapTooLow)?;
             final_result.push(U256::from(effective_tip));
         }
 
-        Ok(Some(final_result))
+        Ok(Some((block.parent_hash, final_result)))
     }
 }
 
