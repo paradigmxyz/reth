@@ -113,8 +113,8 @@ where
     }
 
     /// Return the minimum pipeline progress
-    pub fn minimum_progress(&self) -> &Option<u64> {
-        &self.progress.minimum_progress
+    pub fn minimum_progress(&self) -> Option<u64> {
+        self.progress.minimum_progress
     }
 
     /// Set tip for reverse sync.

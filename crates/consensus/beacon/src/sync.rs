@@ -7,27 +7,27 @@ use reth_interfaces::p2p::{
     full_block::{FetchFullBlockFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
-use reth_primitives::{SealedBlock, H256};
+use reth_primitives::{BlockNumber, SealedBlock, H256};
 use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
     collections::VecDeque,
-    future::Future,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
+use tracing::trace;
 
 /// Manages syncing under the control of the engine.
 ///
-/// This type controls the [Pipeline] and supports full block downloads.
+/// This type controls the [Pipeline] and supports (single) full block downloads.
 ///
 /// Caution: If the pipeline is running, this type will not emit blocks downloaded from the network
 /// [EngineSyncEvent::FetchedFullBlock] until the pipeline is idle to prevent commits to the
 /// database while the pipeline is still active.
-pub(crate) struct EngineSyncManager<Client, DB>
+pub(crate) struct EngineSyncController<DB, Client>
 where
-    Client: HeadersClient + BodiesClient,
     DB: Database,
+    Client: HeadersClient + BodiesClient,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -36,24 +36,31 @@ where
     /// The current state of the pipeline.
     /// The pipeline is used for large ranges.
     pipeline_state: PipelineState<DB>,
-    /// Pending target for the pipeline.
-    pending_pipeline_target: Option<PipelineSyncTarget>,
+    /// Pending target block for the pipeline to sync
+    pending_pipeline_target: Option<H256>,
     /// In requests in progress.
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// Buffered events until the manager is polled and the pipeline is idle.
     queued_events: VecDeque<EngineSyncEvent>,
+    /// If enabled, the pipeline will be triggered continuously, as soon as it becomes idle
+    run_pipeline_continuously: bool,
+    /// Max block after which the consensus engine would terminate the sync. Used for debugging
+    /// purposes.
+    max_block: Option<BlockNumber>,
 }
 
-impl<Client, DB> EngineSyncManager<Client, DB>
+impl<DB, Client> EngineSyncController<DB, Client>
 where
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     DB: Database + 'static,
+    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
-        client: Client,
         pipeline: Pipeline<DB>,
+        client: Client,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
+        run_pipeline_continuously: bool,
+        max_block: Option<BlockNumber>,
     ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(client),
@@ -62,7 +69,15 @@ where
             pending_pipeline_target: None,
             inflight_full_block_requests: Vec::new(),
             queued_events: VecDeque::new(),
+            run_pipeline_continuously,
+            max_block,
         }
+    }
+
+    /// Sets the max block value for testing
+    #[cfg(test)]
+    pub(crate) fn set_max_block(&mut self, block: BlockNumber) {
+        self.max_block = Some(block);
     }
 
     /// Cancels all full block requests that are in progress.
@@ -75,11 +90,6 @@ where
         self.pipeline_state.is_idle()
     }
 
-    /// Returns `true` if the pipeline is active.
-    pub(crate) fn is_pipeline_syncing(&self) -> bool {
-        !self.pipeline_state.is_idle()
-    }
-
     /// Starts requesting a full block from the network.
     pub(crate) fn download_full_block(&mut self, hash: H256) {
         let request = self.full_block_client.get_full_block(hash);
@@ -87,8 +97,25 @@ where
     }
 
     /// Sets a new target to sync the pipeline to.
-    pub(crate) fn set_pipeline_target(&mut self, target: PipelineSyncTarget) {
+    pub(crate) fn set_pipeline_sync_target(&mut self, target: H256) {
         self.pending_pipeline_target = Some(target);
+    }
+
+    /// Check if the engine reached max block as specified by `max_block` parameter.
+    ///
+    /// Note: this is mainly for debugging purposes.
+    pub(crate) fn has_reached_max_block(&self, progress: BlockNumber) -> bool {
+        let has_reached_max_block =
+            self.max_block.map(|target| progress >= target).unwrap_or_default();
+        if has_reached_max_block {
+            trace!(
+                target: "consensus::engine",
+                ?progress,
+                max_block = ?self.max_block,
+                "Consensus engine reached max block."
+            );
+        }
+        has_reached_max_block
     }
 
     /// Advances the pipeline state.
@@ -102,9 +129,12 @@ where
             }
         };
         let ev = match res {
-            Ok((pipeline, res)) => {
+            Ok((pipeline, result)) => {
+                let minimum_progress = pipeline.minimum_progress();
+                let reached_max_block =
+                    self.has_reached_max_block(minimum_progress.unwrap_or_default());
                 self.pipeline_state = PipelineState::Idle(Some(pipeline));
-                EngineSyncEvent::PipelineFinished(res)
+                EngineSyncEvent::PipelineFinished { result, reached_max_block }
             }
             Err(_) => {
                 // failed to receive the pipeline
@@ -114,21 +144,34 @@ where
         Poll::Ready(ev)
     }
 
+    /// This will spawn the pipeline if it is idle and a target is set or if the pipeline is set to
+    /// run continuously.
     fn try_spawn_pipeline(&mut self) -> Option<EngineSyncEvent> {
         match &mut self.pipeline_state {
             PipelineState::Idle(pipeline) => {
-                let target = self.pending_pipeline_target.take()?.0;
+                let target = self.pending_pipeline_target.take();
+
+                if target.is_none() && !self.run_pipeline_continuously {
+                    // nothing to sync
+                    return None
+                }
+
                 let (tx, rx) = oneshot::channel();
 
-                let mut pipeline = pipeline.take().expect("exists");
+                let pipeline = pipeline.take().expect("exists");
                 self.pipeline_task_spawner.spawn_critical_blocking(
                     "pipeline task",
                     Box::pin(async move {
-                        let result = pipeline.run_as_fut(Some(target)).await;
+                        let result = pipeline.run_as_fut(target).await;
                         let _ = tx.send(result);
                     }),
                 );
                 self.pipeline_state = PipelineState::Running(rx);
+
+                // we also clear any pending full block requests because we expect them to be
+                // outdated (included in the range the pipeline is syncing anyway)
+                self.clear_full_block_requests();
+
                 Some(EngineSyncEvent::PipelineStarted(target))
             }
             PipelineState::Running(_) => None,
@@ -174,24 +217,30 @@ where
     }
 }
 
-/// The event type emitted by the [EngineSyncManager].
+/// The event type emitted by the [EngineSyncController].
 #[derive(Debug)]
 pub(crate) enum EngineSyncEvent {
     /// A full block has been downloaded from the network.
     FetchedFullBlock(SealedBlock),
     /// Pipeline started syncing
-    PipelineStarted(H256),
+    ///
+    /// This is none if the pipeline is triggered without a specific target.
+    PipelineStarted(Option<H256>),
     /// Pipeline finished
     ///
     /// If this is returned, the pipeline is idle.
-    PipelineFinished(Result<ControlFlow, PipelineError>),
-    /// Pipeline was dropped after it was started
+    PipelineFinished {
+        /// Final result of the pipeline run.
+        result: Result<ControlFlow, PipelineError>,
+        /// Whether the pipeline reached the configured `max_block`.
+        ///
+        /// Note: this is only relevant in debugging scenarios.
+        reached_max_block: bool,
+    },
+    /// Pipeline task was dropped after it was started, unable to receive it because channel
+    /// closed. This would indicate a panicked pipeline task
     PipelineTaskDropped,
 }
-
-/// The target hash to pass to the pipeline.
-#[derive(Debug)]
-pub(crate) struct PipelineSyncTarget(pub H256);
 
 /// The possible pipeline states within the sync controller.
 ///
