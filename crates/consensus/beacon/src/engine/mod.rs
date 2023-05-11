@@ -613,9 +613,8 @@ where
                 //  [head..FCU.number]
 
                 let hash = block.hash;
-                if self.on_new_payload(block.into()).is_syncing() {
-                    // we're still syncing here, which means the block was not the next canonical
-                    // block so we're starting the pipleine to block instead
+                if !self.on_new_payload(block.into()).is_valid() {
+                    // if the payload is invalid we run the pipeline
                     self.sync.set_pipeline_sync_target(hash);
                 }
             }
