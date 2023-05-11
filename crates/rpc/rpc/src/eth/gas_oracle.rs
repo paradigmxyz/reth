@@ -61,14 +61,6 @@ impl Default for GasPriceOracleConfig {
     }
 }
 
-/// An error that can occur when calculating the gas price estimates
-#[derive(Debug, Clone, Error)]
-pub enum GasPriceOracleError {
-    /// A transaction failed sender recovery
-    #[error("transaction failed sender recovery")]
-    InvalidSignature,
-}
-
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
 pub struct GasPriceOracle<Client> {
@@ -130,7 +122,6 @@ where
 
         // we only check a maximum of 2 * max_block_history
         for _ in 0..self.oracle_config.max_block_history * 2 {
-            // TODO - error handling
             let block_values = self
                 .get_block_values(current_block, SAMPLE_NUMBER as usize)
                 .await?
