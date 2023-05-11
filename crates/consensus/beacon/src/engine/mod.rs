@@ -138,7 +138,7 @@ pub struct BeaconConsensusEngine<DB, TS, BT>
 where
     DB: Database,
     TS: TaskSpawner,
-    BT: BlockchainTreeEngine,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker,
 {
     /// The database handle.
     db: DB,
