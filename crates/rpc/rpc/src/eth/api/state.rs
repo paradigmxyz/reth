@@ -9,14 +9,14 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    AccountProvider, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
+    AccountProvider, BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {

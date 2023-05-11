@@ -10,7 +10,9 @@ use jsonrpsee::{
     server::{RpcModule, ServerHandle},
 };
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
+};
 use reth_rpc::{
     eth::cache::EthStateCache, AuthLayer, Claims, EngineEthApi, EthApi, EthFilter,
     JwtAuthValidator, JwtSecret,
@@ -35,7 +37,8 @@ pub async fn launch<Client, Pool, Network, Tasks, EngineApi>(
     secret: JwtSecret,
 ) -> Result<AuthServerHandle, RpcError>
 where
-    Client: BlockProvider
+    Client: BlockProviderIdExt
+        + ReceiptProviderIdExt
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
@@ -63,7 +66,7 @@ pub async fn launch_with_eth_api<Client, Pool, Network, EngineApi>(
     secret: JwtSecret,
 ) -> Result<AuthServerHandle, RpcError>
 where
-    Client: BlockProvider
+    Client: BlockProviderIdExt
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider

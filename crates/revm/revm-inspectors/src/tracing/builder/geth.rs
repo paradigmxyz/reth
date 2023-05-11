@@ -106,4 +106,49 @@ impl GethTraceBuilder {
             struct_logs,
         }
     }
+
+    /// Generate a geth-style traces for the call tracer.
+    ///
+    /// This decodes all call frames from the recorded traces.
+    pub fn geth_call_traces(&self, opts: CallConfig) -> CallFrame {
+        if self.nodes.is_empty() {
+            return Default::default()
+        }
+
+        let include_logs = opts.with_log.unwrap_or_default();
+        // first fill up the root
+        let main_trace_node = &self.nodes[0];
+        let root_call_frame = main_trace_node.geth_empty_call_frame(include_logs);
+
+        if opts.only_top_call.unwrap_or_default() {
+            return root_call_frame
+        }
+
+        // fill all the call frames in the root call frame with the recorded traces.
+        // traces are identified by their index in the arena
+        // so we can populate the call frame tree by walking up the call tree
+        let mut call_frames = Vec::with_capacity(self.nodes.len());
+        call_frames.push((0, root_call_frame));
+        for (idx, trace) in self.nodes.iter().enumerate().skip(1) {
+            call_frames.push((idx, trace.geth_empty_call_frame(include_logs)));
+        }
+
+        // pop the _children_ calls frame and move it to the parent
+        // this will roll up the child frames to their parent; this works because `child idx >
+        // parent idx`
+        loop {
+            let (idx, call) = call_frames.pop().expect("call frames not empty");
+            let node = &self.nodes[idx];
+            if let Some(parent) = node.parent {
+                let parent_frame = &mut call_frames[parent];
+                // we need to ensure that calls are in order they are called: the last child node is
+                // the last call, but since we walk up the tree, we need to always
+                // insert at position 0
+                parent_frame.1.calls.get_or_insert_with(Vec::new).insert(0, call);
+            } else {
+                debug_assert!(call_frames.is_empty(), "only one root node has no parent");
+                return call
+            }
+        }
+    }
 }

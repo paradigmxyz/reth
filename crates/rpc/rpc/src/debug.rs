@@ -10,7 +10,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256, U256};
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderBox};
+use reth_provider::{BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProviderBox};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -56,7 +56,7 @@ impl<Client, Eth> DebugApi<Client, Eth> {
 
 impl<Client, Eth> DebugApi<Client, Eth>
 where
-    Client: BlockProvider + HeaderProvider + 'static,
+    Client: BlockProviderIdExt + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Acquires a permit to execute a tracing call.
@@ -185,8 +185,54 @@ where
         // TODO(mattsse) apply block overrides
         let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides: _ } =
             opts;
-        let GethDebugTracingOptions { config, .. } = tracing_options;
-        // TODO(mattsse) support non default tracers
+        let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
+
+        if let Some(tracer) = tracer {
+            // valid matching config
+            if let Some(ref config) = tracer_config {
+                if !config.matches_tracer(&tracer) {
+                    return Err(EthApiError::InvalidTracerConfig)
+                }
+            }
+
+            return match tracer {
+                GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
+                    GethDebugBuiltInTracerType::FourByteTracer => {
+                        let mut inspector = FourByteInspector::default();
+                        let (_res, _) = self
+                            .eth_api
+                            .inspect_call_at(call, at, state_overrides, &mut inspector)
+                            .await?;
+                        return Ok(FourByteFrame::from(inspector).into())
+                    }
+                    GethDebugBuiltInTracerType::CallTracer => {
+                        // we validated the config above
+                        let call_config =
+                            tracer_config.and_then(|c| c.into_call_config()).unwrap_or_default();
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_geth_config(&config),
+                        );
+
+                        let _ = self
+                            .eth_api
+                            .inspect_call_at(call, at, state_overrides, &mut inspector)
+                            .await?;
+
+                        let frame = inspector.into_geth_builder().geth_call_traces(call_config);
+
+                        return Ok(frame.into())
+                    }
+                    GethDebugBuiltInTracerType::PreStateTracer => {
+                        Err(EthApiError::Unsupported("pre state tracer currently unsupported."))
+                    }
+                    GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
+                },
+                GethDebugTracerType::JsTracer(_) => {
+                    Err(EthApiError::Unsupported("javascript tracers are unsupported."))
+                }
+            }
+        }
 
         // default structlog tracer
         let inspector_config = TracingInspectorConfig::from_geth_config(&config);
@@ -206,7 +252,7 @@ where
 #[async_trait]
 impl<Client, Eth> DebugApiServer for DebugApi<Client, Eth>
 where
-    Client: BlockProvider + HeaderProvider + 'static,
+    Client: BlockProviderIdExt + HeaderProvider + 'static,
     Eth: EthApiSpec + 'static,
 {
     /// Handler for `debug_getRawHeader`
@@ -232,7 +278,7 @@ where
 
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
-        let block = self.client.block(block_id).to_rpc_result()?;
+        let block = self.client.block_by_id(block_id).to_rpc_result()?;
 
         let mut res = Vec::new();
         if let Some(mut block) = block {
@@ -261,7 +307,8 @@ where
 
     /// Handler for `debug_getRawReceipts`
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let receipts = self.client.receipts_by_block(block_id).to_rpc_result()?.unwrap_or_default();
+        let receipts =
+            self.client.receipts_by_block_id(block_id).to_rpc_result()?.unwrap_or_default();
         let mut all_receipts = Vec::with_capacity(receipts.len());
 
         for receipt in receipts {
@@ -357,6 +404,7 @@ fn trace_transaction(
     db: &mut SubState<StateProviderBox<'_>>,
 ) -> EthResult<(GethTraceFrame, revm_primitives::State)> {
     let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
+
     if let Some(tracer) = tracer {
         // valid matching config
         if let Some(ref config) = tracer_config {
@@ -373,7 +421,18 @@ fn trace_transaction(
                     return Ok((FourByteFrame::from(inspector).into(), res.state))
                 }
                 GethDebugBuiltInTracerType::CallTracer => {
-                    todo!()
+                    // we validated the config above
+                    let call_config =
+                        tracer_config.and_then(|c| c.into_call_config()).unwrap_or_default();
+
+                    let mut inspector =
+                        TracingInspector::new(TracingInspectorConfig::from_geth_config(&config));
+
+                    let (res, _) = inspect(db, env, &mut inspector)?;
+
+                    let frame = inspector.into_geth_builder().geth_call_traces(call_config);
+
+                    return Ok((frame.into(), res.state))
                 }
                 GethDebugBuiltInTracerType::PreStateTracer => {
                     todo!()
