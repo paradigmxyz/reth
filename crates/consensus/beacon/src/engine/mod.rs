@@ -11,7 +11,9 @@ use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, BlockNumber, Header, SealedBlock, SealedHeader, H256, U256,
 };
-use reth_provider::{providers::BlockchainProvider, CanonChainTracker};
+use reth_provider::{
+    providers::BlockchainProvider, BlockProvider, BlockSource, CanonChainTracker, ProviderError,
+};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
@@ -363,15 +365,12 @@ where
                             if status.is_valid() {
                                 // we will return VALID, so let's make sure the info tracker is
                                 // properly updated
-                                self.blockchain_provider.on_forkchoice_update_received(&state)?;
+                                self.update_canon_chain(&state)?;
                             }
                         }
                         return Ok(payload_response)
                     }
 
-                    // we will return VALID, so let's make sure the info tracker is properly
-                    // updated
-                    self.blockchain_provider.on_forkchoice_update_received(&state)?;
                     PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
@@ -392,7 +391,47 @@ where
 
         self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
         trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
+        // we will return VALID, so let's make sure the info tracker is
+        // properly updated
+        self.update_canon_chain(&state)?;
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Sets the state of the canon chain tracker based on the given forkchoice update. This should
+    /// be called before issuing a VALID forkchoice update.
+    fn update_canon_chain(&self, update: &ForkchoiceState) -> Result<(), BeaconEngineError> {
+        if !update.finalized_block_hash.is_zero() {
+            let finalized = self
+                .blockchain_provider
+                .find_block_by_hash(update.finalized_block_hash, BlockSource::Any)?
+                .ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(update.finalized_block_hash))
+                })?;
+            self.blockchain_provider
+                .set_finalized(finalized.header.seal(update.finalized_block_hash));
+        }
+
+        if !update.safe_block_hash.is_zero() {
+            let safe = self
+                .blockchain_provider
+                .find_block_by_hash(update.safe_block_hash, BlockSource::Any)?
+                .ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(update.safe_block_hash))
+                })?;
+            self.blockchain_provider.set_safe(safe.header.seal(update.safe_block_hash));
+        }
+
+        // the consensus engine should ensure the head is not zero so we always update the head
+        let head = self
+            .blockchain_provider
+            .find_block_by_hash(update.head_block_hash, BlockSource::Any)?
+            .ok_or_else(|| {
+                Error::Provider(ProviderError::UnknownBlockHash(update.head_block_hash))
+            })?;
+
+        self.blockchain_provider.set_canonical_head(head.header.seal(update.head_block_hash));
+        self.blockchain_provider.on_forkchoice_update_received(update);
+        Ok(())
     }
 
     /// Handler for a failed a forkchoice update due to a canonicalization error.

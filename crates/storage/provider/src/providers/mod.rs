@@ -435,34 +435,9 @@ where
     Tree: Send + Sync,
     Self: BlockProvider,
 {
-    fn on_forkchoice_update_received(&self, update: &ForkchoiceState) -> Result<()> {
+    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
         // update timestamp
         self.chain_info.on_forkchoice_update_received();
-
-        // get the latest finalized block
-        if !update.finalized_block_hash.is_zero() {
-            let finalized = self
-                .find_block_by_hash(update.finalized_block_hash, BlockSource::Any)?
-                .ok_or_else(|| {
-                    Error::Provider(ProviderError::UnknownBlockHash(update.finalized_block_hash))
-                })?;
-            self.chain_info.set_finalized(finalized.header.seal(update.finalized_block_hash));
-        }
-        if !update.safe_block_hash.is_zero() {
-            let safe =
-                self.find_block_by_hash(update.safe_block_hash, BlockSource::Any)?.ok_or_else(
-                    || Error::Provider(ProviderError::UnknownBlockHash(update.safe_block_hash)),
-                )?;
-            self.chain_info.set_safe(safe.header.seal(update.safe_block_hash));
-        }
-
-        // the consensus engine should ensure the head is not zero so we always update the head
-        let head = self.find_block_by_hash(update.head_block_hash, BlockSource::Any)?.ok_or_else(
-            || Error::Provider(ProviderError::UnknownBlockHash(update.head_block_hash)),
-        )?;
-
-        self.chain_info.set_canonical_head(head.header.seal(update.head_block_hash));
-        Ok(())
     }
 
     fn set_finalized(&self, header: SealedHeader) {
