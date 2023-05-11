@@ -10,6 +10,7 @@ use reth_provider::{BlockProviderIdExt, ProviderError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tracing::warn;
 
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: u32 = 3;
@@ -86,7 +87,17 @@ where
     Client: BlockProviderIdExt + 'static,
 {
     /// Creates and returns the [GasPriceOracle].
-    pub fn new(client: Client, oracle_config: GasPriceOracleConfig, cache: EthStateCache) -> Self {
+    pub fn new(
+        client: Client,
+        mut oracle_config: GasPriceOracleConfig,
+        cache: EthStateCache,
+    ) -> Self {
+        // sanitize the perentile to be less than 100
+        if oracle_config.percentile > 100 {
+            warn!(prev_percentile=?oracle_config.percentile, "Invalid configured gas price percentile, using 100 instead");
+            oracle_config.percentile = 100;
+        }
+
         Self { client, oracle_config, last_price: Default::default(), cache }
     }
 
