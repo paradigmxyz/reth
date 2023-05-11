@@ -51,8 +51,9 @@ pub struct BlockchainProvider<DB, Tree> {
 }
 
 impl<DB, Tree> BlockchainProvider<DB, Tree> {
-    /// Create new  provider instance that wraps the database and the blockchain tree.
-    pub fn new(database: ShareableDatabase<DB>, tree: Tree, latest: SealedHeader) -> Self {
+    /// Create new  provider instance that wraps the database and the blockchain tree, using the
+    /// provided latest header to initialize the chain info tracker.
+    pub fn with_latest(database: ShareableDatabase<DB>, tree: Tree, latest: SealedHeader) -> Self {
         Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
     }
 }
@@ -63,10 +64,10 @@ where
 {
     /// Create a new provider using only the database and the tree, fetching the latest header from
     /// the database to initialize the provider.
-    pub fn new_from_db(database: ShareableDatabase<DB>, tree: Tree) -> Result<Self> {
+    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Result<Self> {
         let best = database.chain_info()?;
         match database.header_by_number(best.best_number)? {
-            Some(header) => Ok(Self::new(database, tree, header.seal(best.best_hash))),
+            Some(header) => Ok(Self::with_latest(database, tree, header.seal(best.best_hash))),
             None => Err(Error::Provider(ProviderError::Header { number: best.best_number })),
         }
     }

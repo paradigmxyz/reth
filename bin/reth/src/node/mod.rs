@@ -190,7 +190,7 @@ impl Command {
 
         // setup the blockchain provider
         let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
-        let blockchain_db = BlockchainProvider::new_from_db(shareable_db, blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider::new(shareable_db, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             EthTransactionValidator::new(blockchain_db.clone(), Arc::clone(&self.chain)),

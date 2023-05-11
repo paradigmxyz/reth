@@ -931,7 +931,7 @@ mod tests {
         );
         let shareable_db = ShareableDatabase::new(db.clone(), chain_spec.clone());
         let latest = chain_spec.genesis_header().seal_slow();
-        let blockchain_provider = BlockchainProvider::new(shareable_db, tree, latest);
+        let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
         let (engine, handle) = BeaconConsensusEngine::new(
             db.clone(),
             TokioTaskExecutor::default(),
