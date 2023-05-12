@@ -181,7 +181,7 @@ where
         // check the cache (this will hit the disk if the block is not cached)
         let block = match self.cache.get_block(block_hash).await? {
             Some(block) => block,
-            None => return Err(EthApiError::UnknownBlockNumber),
+            None => return Ok(None),
         };
 
         // sort the transactions by effective tip
