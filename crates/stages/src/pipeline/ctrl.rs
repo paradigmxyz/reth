@@ -15,6 +15,7 @@ pub enum ControlFlow {
         /// The progress of the last stage
         progress: BlockNumber,
     },
+    /// Pipeline made no progress
     NoProgress {
         /// The current stage progress.
         stage_progress: Option<BlockNumber>,
@@ -22,10 +23,12 @@ pub enum ControlFlow {
 }
 
 impl ControlFlow {
+    /// Whether the pipeline should continue executing stages.
     pub fn should_continue(&self) -> bool {
         matches!(self, ControlFlow::Continue { .. } | ControlFlow::NoProgress { .. })
     }
 
+    /// Returns true if the control flow is unwind.
     pub fn is_unwind(&self) -> bool {
         matches!(self, ControlFlow::Unwind { .. })
     }
