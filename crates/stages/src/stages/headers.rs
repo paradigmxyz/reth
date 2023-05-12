@@ -241,12 +241,13 @@ where
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block
-        info!(target: "sync::stages::headers", to_block = input.unwind_to, "Unwinding");
         tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,
         )?;
         tx.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
         tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+
+        info!(target: "sync::stages::headers", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }

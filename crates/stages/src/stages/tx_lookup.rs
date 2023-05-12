@@ -143,7 +143,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
-        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput { done: is_final_range, stage_progress: end_block })
     }
 
@@ -153,14 +153,16 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, "Unwinding");
+        let (range, unwind_to, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
+
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
         let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
-        let mut rev_walker = body_cursor.walk_back(None)?;
+        let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
-            if number <= input.unwind_to {
+            if number <= unwind_to {
                 break
             }
 
@@ -175,7 +177,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_to })
     }
 }
 

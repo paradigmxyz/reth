@@ -46,7 +46,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         // Insert changeset to history index
         tx.insert_account_history_index(indices)?;
 
-        info!(target: "sync::stages::index_account_history", "Stage finished");
+        info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
     }
 
@@ -56,13 +56,14 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
-        let range = input.unwind_block_range();
+        let (range, unwind_progress, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
 
         tx.unwind_account_history_indices(range)?;
 
+        info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         // from HistoryIndex higher than that number.
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        Ok(UnwindOutput { stage_progress: unwind_progress })
     }
 }
 
