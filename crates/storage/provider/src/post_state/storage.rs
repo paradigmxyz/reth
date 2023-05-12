@@ -1,22 +1,45 @@
 use derive_more::Deref;
 use reth_primitives::{Address, BlockNumber, U256};
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::{btree_map::Entry, BTreeMap, HashSet};
 
 /// Storage for an account with the old and new values for each slot: (slot -> (old, new)).
 pub type StorageChangeset = BTreeMap<U256, (U256, U256)>;
 
-/// Changed storage state for the account.
-///
-/// # Wiped Storage
-///
-/// The field `wiped` denotes whether the pre-existing storage in the database should be cleared or
-/// not.
+/// The storage state of the account before the state transition.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub struct ChangedStorage {
-    /// Whether the storage was wiped or not.
-    pub wiped: bool,
+pub struct StorageTransition {
+    /// The indicator of the storage wipe.
+    pub wipe: StorageWipe,
     /// The storage slots.
     pub storage: BTreeMap<U256, U256>,
+}
+
+/// The indicator of the storage wipe.
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub enum StorageWipe {
+    /// The storage was not wiped at this change.
+    #[default]
+    None,
+    /// The storage was wiped for the first time in the current in-memory state.
+    ///
+    /// When writing history to the database, on the primary storage wipe the pre-existing storage
+    /// will be inserted as the storage state before this transition.
+    Primary,
+    /// The storage had been already wiped before.
+    Secondary,
+}
+
+impl StorageWipe {
+    /// Returns `true` if the wipe occurred at this transition.
+    pub fn is_wiped(&self) -> bool {
+        matches!(self, Self::Primary | Self::Secondary)
+    }
+
+    /// Returns `true` if the primary wiped occurred at this transition.
+    /// See [StorageWipe::Primary] for more details.
+    pub fn is_primary(&self) -> bool {
+        matches!(self, Self::Primary)
+    }
 }
 
 /// Latest storage state for the account.
@@ -48,28 +71,27 @@ impl Storage {
 pub struct StorageChanges {
     /// The inner mapping of block changes.
     #[deref]
-    pub inner: BTreeMap<BlockNumber, BTreeMap<Address, ChangedStorage>>,
+    pub inner: BTreeMap<BlockNumber, BTreeMap<Address, StorageTransition>>,
     /// Hand tracked change size.
     pub size: usize,
 }
 
 impl StorageChanges {
-    /// Set storage `wiped` flag for specified block number and address.
-    pub fn set_wiped(&mut self, block: BlockNumber, address: Address) {
-        self.inner.entry(block).or_default().entry(address).or_default().wiped = true;
-    }
-
     /// Insert storage entries for specified block number and address.
     pub fn insert_for_block_and_address<I>(
         &mut self,
         block: BlockNumber,
         address: Address,
+        wipe: StorageWipe,
         storage: I,
     ) where
         I: Iterator<Item = (U256, U256)>,
     {
         let block_entry = self.inner.entry(block).or_default();
         let storage_entry = block_entry.entry(address).or_default();
+        if wipe.is_wiped() {
+            storage_entry.wipe = wipe;
+        }
         for (slot, value) in storage {
             if let Entry::Vacant(entry) = storage_entry.storage.entry(slot) {
                 entry.insert(value);
@@ -82,7 +104,7 @@ impl StorageChanges {
     pub fn drain_above(
         &mut self,
         target_block: BlockNumber,
-    ) -> BTreeMap<BlockNumber, BTreeMap<Address, ChangedStorage>> {
+    ) -> BTreeMap<BlockNumber, BTreeMap<Address, StorageTransition>> {
         let mut evicted = BTreeMap::new();
         self.inner.retain(|block_number, storages| {
             if *block_number > target_block {
@@ -100,8 +122,28 @@ impl StorageChanges {
 
     /// Retain entries only above specified block number.
     pub fn retain_above(&mut self, target_block: BlockNumber) {
+        let mut observed_storage_wipes: HashSet<Address> = HashSet::default();
         self.inner.retain(|block_number, storages| {
             if *block_number > target_block {
+                for (address, storage) in storages.iter_mut() {
+                    storage.wipe = match storage.wipe {
+                        StorageWipe::Primary => {
+                            observed_storage_wipes.insert(*address);
+                            StorageWipe::Primary
+                        }
+                        StorageWipe::Secondary => {
+                            if observed_storage_wipes.contains(address) {
+                                // We already observed the storage wipe for this address
+                                StorageWipe::Secondary
+                            } else {
+                                // No wipe was observed, promote the secondary wipe to primary
+                                observed_storage_wipes.insert(*address);
+                                StorageWipe::Primary
+                            }
+                        }
+                        StorageWipe::None => StorageWipe::None, // nothing to do
+                    };
+                }
                 true
             } else {
                 // This is fine, because it's called only on post state splits
