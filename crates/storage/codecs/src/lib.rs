@@ -313,6 +313,32 @@ impl Compact for bool {
     }
 }
 
+fn encode_varuint<B>(mut n: usize, buf: &mut B)
+where
+    B: bytes::BufMut + AsMut<[u8]>,
+{
+    while n >= 0x80 {
+        buf.put_u8((n as u8) | 0x80);
+        n >>= 7;
+    }
+    buf.put_u8(n as u8);
+}
+
+fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
+    let mut value: usize = 0;
+
+    for i in 0..33 {
+        let byte = buf.get_u8();
+        if byte < 128 {
+            value |= usize::from(byte) << (i * 7);
+            return (value, buf)
+        } else {
+            value |= usize::from(byte & 0x7F) << (i * 7);
+        }
+    }
+    panic!("Could not correctly decode value.");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +473,17 @@ mod tests {
         assert_eq!(0xffffffffffffffffu64.to_compact(&mut buf), 8);
         assert_eq!(&buf, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
         assert_eq!(u64::from_compact(&buf, 8), (0xffffffffffffffffu64, vec![].as_slice()));
+    }
+
+    #[test]
+    fn variable_uint() {
+        proptest::proptest!(|(val: usize)| {
+            let mut buf = vec![];
+            encode_varuint(val, &mut buf);
+            let (decoded, read_buf) = decode_varuint(&buf);
+            assert_eq!(val, decoded);
+            assert!(!read_buf.has_remaining());
+        });
     }
 
     #[main_codec]
