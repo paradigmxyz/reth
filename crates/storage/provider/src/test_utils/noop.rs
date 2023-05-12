@@ -76,11 +76,11 @@ impl BlockIdProvider for NoopProvider {
         Ok(None)
     }
 
-    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 
-    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 }

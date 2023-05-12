@@ -263,7 +263,7 @@ impl BlockNumProvider for MockEthProvider {
 }
 
 impl BlockIdProvider for MockEthProvider {
-    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 
@@ -271,7 +271,7 @@ impl BlockIdProvider for MockEthProvider {
         Ok(None)
     }
 
-    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 }
