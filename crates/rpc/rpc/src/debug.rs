@@ -26,6 +26,7 @@ use reth_rpc_types::{
     },
     BlockError, CallRequest, RichBlock,
 };
+use reth_tasks::TaskSpawner;
 use revm::primitives::Env;
 use revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -41,14 +42,22 @@ pub struct DebugApi<Client, Eth> {
     eth_api: Eth,
     // restrict the number of concurrent calls to tracing calls
     tracing_call_guard: TracingCallGuard,
+    /// The type that can spawn tasks which would otherwise block.
+    #[allow(unused)]
+    task_spawner: Box<dyn TaskSpawner>,
 }
 
 // === impl DebugApi ===
 
 impl<Client, Eth> DebugApi<Client, Eth> {
     /// Create a new instance of the [DebugApi]
-    pub fn new(client: Client, eth: Eth, tracing_call_guard: TracingCallGuard) -> Self {
-        Self { client, eth_api: eth, tracing_call_guard }
+    pub fn new(
+        client: Client,
+        eth: Eth,
+        task_spawner: Box<dyn TaskSpawner>,
+        tracing_call_guard: TracingCallGuard,
+    ) -> Self {
+        Self { client, eth_api: eth, task_spawner, tracing_call_guard }
     }
 }
 

@@ -672,9 +672,31 @@ where
         let eth_api = self.eth_api();
         self.modules.insert(
             RethRpcModule::Debug,
-            DebugApi::new(self.client.clone(), eth_api, self.tracing_call_guard.clone())
-                .into_rpc()
-                .into(),
+            DebugApi::new(
+                self.client.clone(),
+                eth_api,
+                Box::new(self.executor.clone()),
+                self.tracing_call_guard.clone(),
+            )
+            .into_rpc()
+            .into(),
+        );
+        self
+    }
+
+    /// Register Trace Namespace
+    pub fn register_trace(&mut self) -> &mut Self {
+        let eth_api = self.eth_api();
+        self.modules.insert(
+            RethRpcModule::Trace,
+            DebugApi::new(
+                self.client.clone(),
+                eth_api,
+                Box::new(self.executor.clone()),
+                self.tracing_call_guard.clone(),
+            )
+            .into_rpc()
+            .into(),
         );
         self
     }
@@ -749,6 +771,7 @@ where
                         RethRpcModule::Debug => DebugApi::new(
                             self.client.clone(),
                             eth_api.clone(),
+                            Box::new(self.executor.clone()),
                             self.tracing_call_guard.clone(),
                         )
                         .into_rpc()
@@ -768,6 +791,7 @@ where
                             self.client.clone(),
                             eth_api.clone(),
                             eth_cache.clone(),
+                            Box::new(self.executor.clone()),
                             self.tracing_call_guard.clone(),
                         )
                         .into_rpc()
