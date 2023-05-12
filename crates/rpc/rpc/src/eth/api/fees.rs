@@ -30,8 +30,7 @@ where
 
     /// Returns a suggestion for the priority fee (the tip)
     pub(crate) async fn suggested_priority_fee(&self) -> EthResult<U256> {
-        // TODO: properly implement sampling https://github.com/ethereum/pm/issues/328#issuecomment-853234014
-        Ok(U256::from(1e9 as u64))
+        self.gas_oracle().suggest_tip_cap().await
     }
 
     /// Reports the fee history, for the given amount of blocks, up until the newest block
