@@ -137,12 +137,12 @@ where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
 {
-    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
-        Ok(self.chain_info.get_safe_num_hash().map(|num_hash| num_hash.number))
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(self.chain_info.get_safe_num_hash())
     }
 
-    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
-        Ok(self.chain_info.get_finalized_num_hash().map(|num_hash| num_hash.number))
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(self.chain_info.get_finalized_num_hash())
     }
 
     fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
