@@ -1,7 +1,7 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
-use jsonrpsee::core::Error as RpcError;
+use jsonrpsee::{core::Error as RpcError, types::ErrorObject};
 use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
@@ -65,7 +65,7 @@ pub enum EthApiError {
     InvalidRewardPercentile(f64),
 }
 
-impl From<EthApiError> for RpcError {
+impl From<EthApiError> for ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
             EthApiError::FailedToDecodeSignedTransaction |
@@ -88,6 +88,12 @@ impl From<EthApiError> for RpcError {
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InvalidRewardPercentile(msg) => internal_rpc_err(msg.to_string()),
         }
+    }
+}
+
+impl From<EthApiError> for RpcError {
+    fn from(error: EthApiError) -> Self {
+        RpcError::Call(error.into())
     }
 }
 
@@ -227,7 +233,7 @@ impl InvalidTransactionError {
     }
 }
 
-impl From<InvalidTransactionError> for RpcError {
+impl From<InvalidTransactionError> for ErrorObject<'static> {
     fn from(err: InvalidTransactionError) -> Self {
         match err {
             InvalidTransactionError::Revert(revert) => {

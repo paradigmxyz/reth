@@ -22,8 +22,11 @@ pub type ForkChoiceUpdateResult = Result<ForkchoiceUpdated, ForkchoiceUpdateErro
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkchoiceState {
+    /// Hash of the head block.
     pub head_block_hash: H256,
+    /// Hash of the safe block.
     pub safe_block_hash: H256,
+    /// Hash of finalized block.
     pub finalized_block_hash: H256,
 }
 

@@ -13,6 +13,7 @@ reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-stages = { path = "../../stages" }
 reth-db = { path = "../../storage/db" }
+reth-provider = { path = "../../storage/provider" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-tasks = { path = "../../tasks" }
 reth-payload-builder = { path = "../../payload/builder" }

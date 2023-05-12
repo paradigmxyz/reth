@@ -23,6 +23,7 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     BlockError, CallRequest, Index, TransactionInfo,
 };
+use reth_tasks::TaskSpawner;
 use revm::primitives::Env;
 use revm_primitives::{db::DatabaseCommit, ExecutionResult};
 use std::collections::HashSet;
@@ -40,6 +41,9 @@ pub struct TraceApi<Client, Eth> {
     /// The async cache frontend for eth-related data
     #[allow(unused)] // we need this for trace_filter eventually
     eth_cache: EthStateCache,
+    /// The type that can spawn tasks which would otherwise be blocking.
+    #[allow(unused)]
+    task_spawner: Box<dyn TaskSpawner>,
     // restrict the number of concurrent calls to `trace_*`
     tracing_call_guard: TracingCallGuard,
 }
@@ -57,9 +61,10 @@ impl<Client, Eth> TraceApi<Client, Eth> {
         client: Client,
         eth_api: Eth,
         eth_cache: EthStateCache,
+        task_spawner: Box<dyn TaskSpawner>,
         tracing_call_guard: TracingCallGuard,
     ) -> Self {
-        Self { client, eth_api, eth_cache, tracing_call_guard }
+        Self { client, eth_api, eth_cache, task_spawner, tracing_call_guard }
     }
 
     /// Acquires a permit to execute a tracing call.

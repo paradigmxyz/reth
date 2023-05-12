@@ -1,18 +1,20 @@
 use crate::{
     BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
-    BlockchainTreePendingStateProvider, CanonStateNotifications, CanonStateSubscriptions,
-    EvmEnvProvider, HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProviderBox,
-    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
+    ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
-    Result,
+    consensus::ForkchoiceState,
+    Error, Result,
 };
 use reth_primitives::{
     Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash,
-    TxNumber, Withdrawal, H256, U256,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
@@ -22,13 +24,15 @@ pub use state::{
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
+    time::Instant,
 };
 use tracing::trace;
 
+mod chain_info;
 mod database;
 mod post_state_provider;
 mod state;
-use crate::traits::BlockSource;
+use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
 
@@ -43,12 +47,30 @@ pub struct BlockchainProvider<DB, Tree> {
     database: ShareableDatabase<DB>,
     /// The blockchain tree instance.
     tree: Tree,
+    /// Tracks the chain info wrt forkchoice updates
+    chain_info: ChainInfoTracker,
 }
 
 impl<DB, Tree> BlockchainProvider<DB, Tree> {
-    /// Create new  provider instance that wraps the database and the blockchain tree.
-    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Self {
-        Self { database, tree }
+    /// Create new  provider instance that wraps the database and the blockchain tree, using the
+    /// provided latest header to initialize the chain info tracker.
+    pub fn with_latest(database: ShareableDatabase<DB>, tree: Tree, latest: SealedHeader) -> Self {
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
+    }
+}
+
+impl<DB, Tree> BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+{
+    /// Create a new provider using only the database and the tree, fetching the latest header from
+    /// the database to initialize the provider.
+    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Result<Self> {
+        let best = database.chain_info()?;
+        match database.header_by_number(best.best_number)? {
+            Some(header) => Ok(Self::with_latest(database, tree, header.seal(best.best_hash))),
+            None => Err(Error::Provider(ProviderError::Header { number: best.best_number })),
+        }
     }
 }
 
@@ -116,13 +138,11 @@ where
     Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
-        // TODO: implement with canon chain tracker
-        Ok(None)
+        Ok(self.chain_info.get_safe_num_hash().map(|num_hash| num_hash.number))
     }
 
     fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
-        // TODO: implement with canon chain tracker
-        Ok(None)
+        Ok(self.chain_info.get_finalized_num_hash().map(|num_hash| num_hash.number))
     }
 
     fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
@@ -407,6 +427,34 @@ where
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         self.tree.pending_block_num_hash()
+    }
+}
+
+impl<DB, Tree> CanonChainTracker for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: Send + Sync,
+    Self: BlockProvider,
+{
+    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
+        // update timestamp
+        self.chain_info.on_forkchoice_update_received();
+    }
+
+    fn set_finalized(&self, header: SealedHeader) {
+        self.chain_info.set_finalized(header);
+    }
+
+    fn set_safe(&self, header: SealedHeader) {
+        self.chain_info.set_safe(header);
+    }
+
+    fn set_canonical_head(&self, header: SealedHeader) {
+        self.chain_info.set_canonical_head(header);
+    }
+
+    fn last_received_update_timestamp(&self) -> Option<Instant> {
+        self.chain_info.last_forkchoice_update_received_at()
     }
 }
 

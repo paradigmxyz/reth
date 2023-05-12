@@ -365,10 +365,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{eth::cache::EthStateCache, EthApi};
-    use jsonrpsee::{
-        core::{error::Error as RpcError, RpcResult},
-        types::error::{CallError, INVALID_PARAMS_CODE},
-    };
+    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use rand::random;
     use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256};
@@ -393,8 +390,8 @@ mod tests {
             None,
         )
         .await;
-        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
-        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         let block_count = 10;
@@ -477,8 +474,8 @@ mod tests {
             Some(vec![10.0]),
         )
         .await;
-        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
-        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         // newest_block is finalized

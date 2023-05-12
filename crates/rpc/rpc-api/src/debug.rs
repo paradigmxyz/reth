@@ -1,4 +1,4 @@
-use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_rpc_types::{
     trace::geth::{
@@ -14,23 +14,23 @@ use reth_rpc_types::{
 pub trait DebugApi {
     /// Returns an RLP-encoded header.
     #[method(name = "debug_getRawHeader")]
-    async fn raw_header(&self, block_id: BlockId) -> Result<Bytes>;
+    async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
     /// Returns an RLP-encoded block.
     #[method(name = "debug_getRawBlock")]
-    async fn raw_block(&self, block_id: BlockId) -> Result<Bytes>;
+    async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
     /// Returns a EIP-2718 binary-encoded transaction.
     #[method(name = "debug_getRawTransaction")]
-    async fn raw_transaction(&self, hash: H256) -> Result<Bytes>;
+    async fn raw_transaction(&self, hash: H256) -> RpcResult<Bytes>;
 
     /// Returns an array of EIP-2718 binary-encoded receipts.
     #[method(name = "debug_getRawReceipts")]
-    async fn raw_receipts(&self, block_id: BlockId) -> Result<Vec<Bytes>>;
+    async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>>;
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
     #[method(name = "debug_getBadBlocks")]
-    async fn bad_blocks(&self) -> Result<Vec<RichBlock>>;
+    async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>>;
 
     /// Returns the structured logs created during the execution of EVM between two blocks
     /// (excluding start) as a JSON object.
@@ -39,7 +39,7 @@ pub trait DebugApi {
         &self,
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
-    ) -> Result<Vec<BlockTraceResult>>;
+    ) -> RpcResult<Vec<BlockTraceResult>>;
 
     /// The `debug_traceBlock` method will return a full stack trace of all invoked opcodes of all
     /// transaction that were included in this block.
@@ -53,7 +53,7 @@ pub trait DebugApi {
         &self,
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>>;
+    ) -> RpcResult<Vec<TraceResult>>;
 
     /// Similar to `debug_traceBlock`, `debug_traceBlockByHash` accepts a block hash and will replay
     /// the block that is already present in the database. For the second parameter see
@@ -63,7 +63,7 @@ pub trait DebugApi {
         &self,
         block: H256,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>>;
+    ) -> RpcResult<Vec<TraceResult>>;
 
     /// Similar to `debug_traceBlockByNumber`, `debug_traceBlockByHash` accepts a block number
     /// [BlockNumberOrTag] and will replay the block that is already present in the database.
@@ -73,7 +73,7 @@ pub trait DebugApi {
         &self,
         block: BlockNumberOrTag,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>>;
+    ) -> RpcResult<Vec<TraceResult>>;
 
     /// The `debug_traceTransaction` debugging method will attempt to run the transaction in the
     /// exact same manner as it was executed on the network. It will replay any transaction that
@@ -84,7 +84,7 @@ pub trait DebugApi {
         &self,
         tx_hash: H256,
         opts: GethDebugTracingOptions,
-    ) -> Result<GethTraceFrame>;
+    ) -> RpcResult<GethTraceFrame>;
 
     /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
     /// execution using the final state of parent block as the base.
@@ -101,5 +101,5 @@ pub trait DebugApi {
         request: CallRequest,
         block_number: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
-    ) -> Result<GethTraceFrame>;
+    ) -> RpcResult<GethTraceFrame>;
 }
