@@ -19,7 +19,7 @@ reth-consensus-common = { path = "../consensus/common" }
 revm = { version = "3" }
 
 # common
-tracing = "0.1.37"
+tracing = { workspace = true }
 
 [dev-dependencies]
 reth-rlp = { path = "../rlp" }
