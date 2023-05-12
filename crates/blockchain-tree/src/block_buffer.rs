@@ -24,15 +24,15 @@ pub struct BlockBuffer {
     ///
     /// Note: BTreeMap is used so that we can remove the finalized old blocks
     /// from the buffer
-    blocks: BufferedBlocks,
+    pub(crate) blocks: BufferedBlocks,
     /// Needed for removal of the blocks. and to connect the potential unconnected block
     /// to the connected one.
-    parent_to_child: HashMap<BlockHash, HashSet<BlockNumHash>>,
+    pub(crate) parent_to_child: HashMap<BlockHash, HashSet<BlockNumHash>>,
     /// LRU used for tracing oldest inserted blocks that are going to be
     /// first in line for evicting if `max_blocks` limit is hit.
     ///
     /// Used as counter of amount of blocks inside buffer.
-    lru: LruCache<BlockNumHash, ()>,
+    pub(crate) lru: LruCache<BlockNumHash, ()>,
 }
 
 impl BlockBuffer {
