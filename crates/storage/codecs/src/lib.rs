@@ -433,7 +433,7 @@ mod tests {
         buf.extend([1u8, 2]);
 
         let mut remaining_buf = buf.as_slice();
-        remaining_buf.advance(2 + 2 + 32 + 2 + 32);
+        remaining_buf.advance(1 + 1 + 32 + 1 + 32);
 
         assert_eq!(Vec::<H256>::from_compact(&buf, 0), (list, remaining_buf));
         assert_eq!(remaining_buf, &[1u8, 2]);
