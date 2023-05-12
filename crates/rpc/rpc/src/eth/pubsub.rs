@@ -3,9 +3,10 @@ use crate::eth::logs_utils;
 use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{filter::FilteredParams, TxHash};
+use reth_primitives::TxHash;
 use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
+use reth_rpc_types::FilteredParams;
 
 use reth_rpc_types::{
     pubsub::{

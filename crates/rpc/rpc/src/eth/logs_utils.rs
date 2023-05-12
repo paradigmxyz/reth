@@ -1,5 +1,5 @@
-use reth_primitives::{filter::FilteredParams, BlockNumHash, ChainInfo, Receipt, TxHash, U256};
-use reth_rpc_types::Log;
+use reth_primitives::{BlockNumHash, ChainInfo, Receipt, TxHash, U256};
+use reth_rpc_types::{FilteredParams, Log};
 
 /// Returns all matching logs of a block's receipts grouped with the hash of their transaction.
 pub(crate) fn matching_block_logs<I>(
@@ -97,7 +97,8 @@ pub(crate) fn get_filter_block_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{filter::Filter, BlockNumberOrTag};
+    use reth_primitives::BlockNumberOrTag;
+    use reth_rpc_types::Filter;
 
     #[test]
     fn test_log_range_from_and_to() {

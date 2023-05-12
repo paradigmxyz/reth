@@ -9,13 +9,10 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{
-    filter::{Filter, FilterBlockOption, FilteredParams},
-    Receipt, SealedBlock,
-};
+use reth_primitives::{Receipt, SealedBlock};
 use reth_provider::{BlockIdProvider, BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
-use reth_rpc_types::{FilterChanges, FilterId, Log};
+use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
 use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, iter::StepBy, ops::RangeInclusive, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
