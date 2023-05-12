@@ -686,12 +686,13 @@ where
 
     /// Register Trace Namespace
     pub fn register_trace(&mut self) -> &mut Self {
-        let eth_api = self.eth_api();
+        let eth = self.eth_handlers();
         self.modules.insert(
             RethRpcModule::Trace,
-            DebugApi::new(
+            TraceApi::new(
                 self.client.clone(),
-                eth_api,
+                eth.api.clone(),
+                eth.cache,
                 Box::new(self.executor.clone()),
                 self.tracing_call_guard.clone(),
             )
