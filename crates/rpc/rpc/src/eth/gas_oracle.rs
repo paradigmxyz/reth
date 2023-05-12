@@ -93,15 +93,18 @@ where
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
     pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
-        let header_hash = self
+        let block = self
             .client
-            .block_hash_for_id(BlockId::Number(BlockNumberOrTag::Latest))?
+            .block_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
             .ok_or(EthApiError::UnknownBlockNumber)?;
+
+        // seal for the block hash
+        let header = block.header.seal_slow();
 
         let mut last_price = self.last_price.lock().await;
 
         // if we have stored a last price, then we check whether or not it was for the same head
-        if last_price.block_hash == header_hash {
+        if last_price.block_hash == header.hash {
             return Ok(last_price.price)
         }
 
@@ -110,12 +113,18 @@ where
         //
         // we only return more than check_block blocks' worth of prices if one or more return empty
         // transactions
-        let mut current_hash = header_hash;
+        let mut current_hash = header.hash;
         let mut results = Vec::new();
         let mut populated_blocks = 0;
 
-        // we only check a maximum of 2 * max_block_history
-        for _ in 0..self.oracle_config.max_block_history * 2 {
+        // we only check a maximum of 2 * max_block_history, or the number of blocks in the chain
+        let max_blocks = if self.oracle_config.max_block_history * 2 > header.number {
+            header.number
+        } else {
+            self.oracle_config.max_block_history * 2
+        };
+
+        for _ in 0..max_blocks {
             let (parent_hash, block_values) = self
                 .get_block_values(current_hash, SAMPLE_NUMBER as usize)
                 .await?
@@ -152,7 +161,7 @@ where
             }
         }
 
-        *last_price = GasPriceOracleResult { block_hash: header_hash, price };
+        *last_price = GasPriceOracleResult { block_hash: header.hash, price };
 
         Ok(price)
     }
@@ -169,13 +178,10 @@ where
         block_hash: H256,
         limit: usize,
     ) -> EthResult<Option<(H256, Vec<U256>)>> {
-        // check the cache
+        // check the cache (this will hit the disk if the block is not cached)
         let block = match self.cache.get_block(block_hash).await? {
             Some(block) => block,
-            None => match self.client.block_by_hash(block_hash)? {
-                Some(block) => block,
-                None => return Ok(None),
-            },
+            None => return Err(EthApiError::UnknownBlockNumber),
         };
 
         // sort the transactions by effective tip
