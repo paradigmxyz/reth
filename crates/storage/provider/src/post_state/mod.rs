@@ -95,7 +95,7 @@ impl PostState {
     ///
     /// Size is the sum of individual changes to accounts, storage, bytecode and receipts.
     pub fn size(&self) -> usize {
-        self.accounts.len() + self.bytecode.len() + self.receipts.len() /* TODO: fix size */ + self.changeset_size()
+        self.accounts.len() + self.bytecode.len() + self.receipts.len() + self.changeset_size()
     }
 
     /// Return the current size of history changes in the poststate.
@@ -516,7 +516,7 @@ impl PostState {
         for (block, receipts) in self.receipts {
             let (_, body_indices) = bodies_cursor.seek_exact(block)?.expect("body indices exist");
             let tx_range = body_indices.tx_num_range();
-            assert_eq!(receipts.len(), tx_range.clone().count());
+            assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
             for (tx_num, receipt) in tx_range.zip(receipts) {
                 receipts_cursor.append(tx_num, receipt)?;
             }
