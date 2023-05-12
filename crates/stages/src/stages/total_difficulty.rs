@@ -81,7 +81,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
                 .map_err(|error| StageError::Validation { block: header.number, error })?;
             cursor_td.append(block_number, td.into())?;
         }
-        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
     }
 
@@ -91,9 +91,13 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, "Unwinding");
-        tx.unwind_table_by_num::<tables::HeaderTD>(input.unwind_to)?;
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        let (_, unwind_to, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
+
+        tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
+
+        info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_to })
     }
 }
 

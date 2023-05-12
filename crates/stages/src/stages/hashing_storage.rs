@@ -181,6 +181,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             if current_key.is_some() {
                 // `from_block` is correct here as were are iteration over state for this
                 // particular block.
+                info!(target: "sync::stages::hashing_storage", stage_progress = input.stage_progress(), is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
             }
         } else {
@@ -194,7 +195,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             tx.insert_storage_for_hashing(storages.into_iter())?;
         }
 
-        info!(target: "sync::stages::hashing_storage", "Stage finished");
+        info!(target: "sync::stages::hashing_storage", stage_progress = input.previous_stage_progress(), is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
     }
 
@@ -204,11 +205,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let range = input.unwind_block_range();
+        let (range, unwind_progress, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
 
         tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_progress })
     }
 }
 
