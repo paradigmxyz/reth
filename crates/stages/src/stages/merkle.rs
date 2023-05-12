@@ -226,7 +226,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         self.validate_state_root(trie_root, block_root, to_block)?;
 
-        info!(target: "sync::stages::merkle::exec", "Stage finished");
+        info!(target: "sync::stages::merkle::exec", stage_progress = to_block, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: to_block, done: true })
     }
 
@@ -238,13 +238,14 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     ) -> Result<UnwindOutput, StageError> {
         let range = input.unwind_block_range();
         if matches!(self, MerkleStage::Execution { .. }) {
-            info!(target: "sync::stages::merkle::exec", "Stage is always skipped");
+            info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         if input.unwind_to == 0 {
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
+            info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
@@ -264,7 +265,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }
 
-        info!(target: "sync::stages::merkle::unwind", "Stage finished");
+        info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }

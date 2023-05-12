@@ -255,6 +255,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             if next_address.is_some() {
                 // from block is correct here as were are iteration over state for this
                 // particular block
+                info!(target: "sync::stages::hashing_account", stage_progress = input.stage_progress(), is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
             }
         } else {
@@ -269,7 +270,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             tx.insert_account_for_hashing(accounts.into_iter())?;
         }
 
-        info!(target: "sync::stages::hashing_account", "Stage finished");
+        info!(target: "sync::stages::hashing_account", stage_progress = input.previous_stage_progress(), is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
     }
 
@@ -279,15 +280,14 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        // There is no threshold on account unwind, we will always take changesets and
-        // apply past values to HashedAccount table.
-
-        let range = input.unwind_block_range();
+        let (range, unwind_progress, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Aggregate all transition changesets and and make list of account that have been changed.
         tx.unwind_account_hashing(range)?;
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_progress })
     }
 }
 

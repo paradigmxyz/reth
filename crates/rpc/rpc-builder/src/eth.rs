@@ -1,5 +1,8 @@
 use reth_rpc::{
-    eth::cache::{EthStateCache, EthStateCacheConfig},
+    eth::{
+        cache::{EthStateCache, EthStateCacheConfig},
+        gas_oracle::GasPriceOracleConfig,
+    },
     EthApi, EthFilter, EthPubSub,
 };
 use serde::{Deserialize, Serialize};
@@ -25,6 +28,8 @@ pub struct EthHandlers<Client, Pool, Network, Events> {
 pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
+    /// Settings for the gas price oracle
+    pub gas_oracle: GasPriceOracleConfig,
     /// The maximum number of tracing calls that can be executed in concurrently.
     pub max_tracing_requests: usize,
     /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
@@ -35,6 +40,7 @@ impl Default for EthConfig {
     fn default() -> Self {
         Self {
             cache: EthStateCacheConfig::default(),
+            gas_oracle: GasPriceOracleConfig::default(),
             max_tracing_requests: 10,
             max_logs_per_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
         }
