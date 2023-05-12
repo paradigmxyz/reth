@@ -393,9 +393,13 @@ pub fn commit_state_changes<DB>(
                     panic!("Left panic to critically jumpout if happens, as every account should be hot loaded.");
                 }
             };
-            // Insert into `change` a old account and None for new account
-            // and mark storage to be mapped
-            post_state.destroy_account(block_number, address, to_reth_acc(&db_account.info));
+
+            let old = to_reth_acc(&db_account.info);
+            if !old.is_empty() {
+                // Insert into `change` a old account and None for new account
+                // and mark storage to be wiped
+                post_state.destroy_account(block_number, address, to_reth_acc(&db_account.info));
+            }
 
             // clear cached DB and mark account as not existing
             db_account.storage.clear();
