@@ -505,7 +505,7 @@ where
             if blocks.len() == 1 {
                 let block_receipts = BlockReceipts {
                     block_hash: blocks[0].hash,
-                    receipts: state.receipts().to_vec(),
+                    receipts: state.receipts(blocks[0].number).to_vec(),
                 };
                 receipts.push(block_receipts);
             }

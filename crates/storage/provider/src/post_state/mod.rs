@@ -77,7 +77,7 @@ pub struct PostState {
     /// New code created during the execution
     bytecode: BTreeMap<H256, Bytecode>,
     /// The receipt(s) of the executed transaction(s).
-    receipts: Vec<Receipt>,
+    receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
 }
 
 impl PostState {
@@ -87,8 +87,8 @@ impl PostState {
     }
 
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
-    pub fn with_tx_capacity(txs: usize) -> Self {
-        Self { receipts: Vec::with_capacity(txs), ..Default::default() }
+    pub fn with_tx_capacity(block: BlockNumber, txs: usize) -> Self {
+        Self { receipts: BTreeMap::from([(block, Vec::with_capacity(txs))]), ..Default::default() }
     }
 
     /// Return the current size of the poststate.
@@ -150,25 +150,25 @@ impl PostState {
     }
 
     /// Get the receipts for the transactions executed to form this [PostState].
-    pub fn receipts(&self) -> &[Receipt] {
-        &self.receipts
+    pub fn receipts(&self, block: BlockNumber) -> &[Receipt] {
+        self.receipts.get(&block).map(Vec::as_slice).unwrap_or(&[])
     }
 
     /// Returns an iterator over all logs in this [PostState].
-    pub fn logs(&self) -> impl Iterator<Item = &Log> + '_ {
-        self.receipts().iter().flat_map(|r| r.logs.iter())
+    pub fn logs(&self, block: BlockNumber) -> impl Iterator<Item = &Log> {
+        self.receipts(block).iter().flat_map(|r| r.logs.iter())
     }
 
     /// Returns the logs bloom for all recorded logs.
-    pub fn logs_bloom(&self) -> Bloom {
-        logs_bloom(self.logs())
+    pub fn logs_bloom(&self, block: BlockNumber) -> Bloom {
+        logs_bloom(self.logs(block))
     }
 
     /// Returns the receipt root for all recorded receipts.
     /// TODO: This function hides an expensive operation (bloom). We should probably make it more
     /// explicit.
-    pub fn receipts_root(&self) -> H256 {
-        calculate_receipt_root_ref(self.receipts())
+    pub fn receipts_root(&self, block: BlockNumber) -> H256 {
+        calculate_receipt_root_ref(self.receipts(block))
     }
 
     /// Hash all changed accounts and storage entries that are currently stored in the post state.
@@ -298,6 +298,9 @@ impl PostState {
                 });
             }
         }
+
+        // Revert receipts
+        self.receipts.retain(|block_number, _| *block_number <= target_block_number);
     }
 
     /// Reverts each change up to and including any change that is part of `transition_id`.
@@ -322,6 +325,7 @@ impl PostState {
         // Remove all changes in the returned post-state that were not reverted
         non_reverted_state.storage_changes.retain_above(revert_to_block);
         non_reverted_state.account_changes.retain_above(revert_to_block);
+        non_reverted_state.receipts.retain(|block_number, _| *block_number > revert_to_block);
 
         non_reverted_state
     }
@@ -400,8 +404,8 @@ impl PostState {
     /// Add a transaction receipt to the post-state.
     ///
     /// Transactions should always include their receipts in the post-state.
-    pub fn add_receipt(&mut self, receipt: Receipt) {
-        self.receipts.push(receipt);
+    pub fn add_receipt(&mut self, block: BlockNumber, receipt: Receipt) {
+        self.receipts.entry(block).or_default().push(receipt);
     }
 
     /// Write changeset history to the database.
@@ -507,17 +511,15 @@ impl PostState {
         }
 
         // Write the receipts of the transactions
+        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-        let mut next_tx_num =
-            if let Some(last_tx) = receipts_cursor.last()?.map(|(tx_num, _)| tx_num) {
-                last_tx + 1
-            } else {
-                // The very first tx
-                0
-            };
-        for receipt in self.receipts.into_iter() {
-            receipts_cursor.append(next_tx_num, receipt)?;
-            next_tx_num += 1;
+        for (block, receipts) in self.receipts {
+            let (_, body_indices) = bodies_cursor.seek_exact(block)?.expect("body indices exist");
+            let tx_range = body_indices.tx_num_range();
+            assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
+            for (tx_num, receipt) in tx_range.zip(receipts) {
+                receipts_cursor.append(tx_num, receipt)?;
+            }
         }
 
         Ok(())
@@ -838,6 +840,23 @@ mod tests {
         assert_eq!(
             state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
             1
+        );
+    }
+
+    #[test]
+    fn receipts_split_at() {
+        let mut state = PostState::new();
+        (1..=4).for_each(|block| {
+            state.add_receipt(block, Receipt::default());
+        });
+        let state2 = state.split_at(2);
+        assert_eq!(
+            state.receipts,
+            BTreeMap::from([(1, vec![Receipt::default()]), (2, vec![Receipt::default()])])
+        );
+        assert_eq!(
+            state2.receipts,
+            BTreeMap::from([(3, vec![Receipt::default()]), (4, vec![Receipt::default()])])
         );
     }
 
