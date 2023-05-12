@@ -94,13 +94,29 @@ impl PostState {
     /// Return the current size of the poststate.
     ///
     /// Size is the sum of individual changes to accounts, storage, bytecode and receipts.
-    pub fn size(&self) -> usize {
-        self.accounts.len() + self.bytecode.len() + self.receipts.len() + self.changeset_size()
+    pub fn size_hint(&self) -> usize {
+        // The amount of plain state account entries to update.
+        self.accounts.len()
+            // The approximate amount of plain state storage entries to update.
+            // NOTE: This can be improved by manually keeping track of the storage size for each account.
+            + self.storage.len()
+            // The amount of bytecodes to insert.
+            + self.bytecode.len()
+            // The approximate amount of receipts.
+            // NOTE: This can be improved by manually keeping track of the receipt size for each block number.
+            + self.receipts.len()
+            // The approximate amount of changsets to update.
+            + self.changeset_size_hint()
     }
 
     /// Return the current size of history changes in the poststate.
-    pub fn changeset_size(&self) -> usize {
-        self.account_changes.size + self.storage_changes.size
+    pub fn changeset_size_hint(&self) -> usize {
+        // The amount of account changesets to insert.
+        self.account_changes.size
+            // The approximate amount of storage changes to insert.
+            // NOTE: This does not include the entries for primary storage wipes,
+            // which need to be read from plain state.
+            + self.storage_changes.size
     }
 
     /// Get the latest state of all changed accounts.
