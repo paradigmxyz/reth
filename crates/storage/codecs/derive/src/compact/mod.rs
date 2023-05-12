@@ -41,13 +41,13 @@ pub enum FieldTypes {
 }
 
 /// Derives the `Compact` trait and its from/to implementations.
-pub fn derive(input: TokenStream) -> TokenStream {
+pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let mut output = quote! {};
 
     let DeriveInput { ident, data, .. } = parse_macro_input!(input);
     let fields = get_fields(&data);
-    output.extend(generate_flag_struct(&ident, &fields));
-    output.extend(generate_from_to(&ident, &fields));
+    output.extend(generate_flag_struct(&ident, &fields, is_zstd));
+    output.extend(generate_from_to(&ident, &fields, is_zstd));
     output.into()
 }
 
@@ -201,8 +201,8 @@ mod tests {
         let mut output = quote! {};
         let DeriveInput { ident, data, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
-        output.extend(generate_flag_struct(&ident, &fields));
-        output.extend(generate_from_to(&ident, &fields));
+        output.extend(generate_flag_struct(&ident, &fields, false));
+        output.extend(generate_from_to(&ident, &fields, false));
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
@@ -211,7 +211,7 @@ mod tests {
                 use bytes::Buf;
                 use modular_bitfield::prelude::*;
 
-                #[doc=r" Fieldset that facilitates compacting the parent type."]
+                #[doc="Fieldset that facilitates compacting the parent type. Used bytes: 2 | Unused bits: 1"]
                 #[bitfield]
                 #[derive(Clone, Copy, Debug, Default)]
                 pub struct TestStructFlags {

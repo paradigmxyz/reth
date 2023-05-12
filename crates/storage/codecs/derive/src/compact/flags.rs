@@ -2,7 +2,11 @@ use super::*;
 
 /// Generates the flag fieldset struct that is going to be used to store the length of fields and
 /// their potential presence.
-pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenStream2 {
+pub(crate) fn generate_flag_struct(
+    ident: &Ident,
+    fields: &FieldList,
+    is_zstd: bool,
+) -> TokenStream2 {
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
     let flags_ident = format_ident!("{ident}Flags");
@@ -27,6 +31,7 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
                 })
                 .collect::<Vec<_>>(),
             &mut field_flags,
+            is_zstd,
         )
     };
 
@@ -34,7 +39,7 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
         return placeholder_flag_struct(&flags_ident)
     }
 
-    let total_bytes = pad_flag_struct(total_bits, &mut field_flags);
+    let (total_bytes, unused_bits) = pad_flag_struct(total_bits, &mut field_flags);
 
     // Provides the number of bytes used to represent the flag struct.
     let readable_bytes = vec![
@@ -44,6 +49,9 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
         total_bytes.into()
     ];
 
+    let docs =
+        format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
+
     // Generate the flag struct.
     quote! {
 
@@ -52,7 +60,7 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
             use bytes::Buf;
             use modular_bitfield::prelude::*;
 
-            /// Fieldset that facilitates compacting the parent type.
+            #[doc = #docs]
             #[bitfield]
             #[derive(Clone, Copy, Debug, Default)]
             pub struct #flags_ident {
@@ -77,6 +85,7 @@ pub(crate) fn generate_flag_struct(ident: &Ident, fields: &FieldList) -> TokenSt
 fn build_struct_field_flags(
     fields: Vec<&StructFieldDescriptor>,
     field_flags: &mut Vec<TokenStream2>,
+    is_zstd: bool,
 ) -> u8 {
     let mut total_bits = 0;
 
@@ -106,14 +115,23 @@ fn build_struct_field_flags(
             }
         }
     }
+
+    if is_zstd {
+        field_flags.push(quote! {
+            pub __zstd: B1,
+        });
+
+        total_bits += 1;
+    }
+
     total_bits
 }
 
 /// Total number of bits should be divisible by 8, so we might need to pad the struct with an unused
 /// skipped field.
 ///
-/// Returns the total number of bytes used by the flags struct.
-fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> u8 {
+/// Returns the total number of bytes used by the flags struct and how many unused bits.
+fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> (u8, u8) {
     let remaining = 8 - total_bits % 8;
     if remaining != 8 {
         let bsize = format_ident!("B{remaining}");
@@ -121,9 +139,9 @@ fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> u8 {
             #[skip]
             unused: #bsize ,
         });
-        (total_bits + remaining) / 8
+        ((total_bits + remaining) / 8, remaining)
     } else {
-        total_bits / 8
+        (total_bits / 8, 0)
     }
 }
 
