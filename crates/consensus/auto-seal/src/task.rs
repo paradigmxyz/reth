@@ -178,11 +178,11 @@ where
                             // clear all transactions from pool
                             pool.remove_transactions(body.iter().map(|tx| tx.hash()));
 
-                            header.receipts_root = if post_state.receipts().is_empty() {
+                            let receipts = post_state.receipts(header.number);
+                            header.receipts_root = if receipts.is_empty() {
                                 EMPTY_RECEIPTS
                             } else {
-                                let receipts_with_bloom = post_state
-                                    .receipts()
+                                let receipts_with_bloom = receipts
                                     .iter()
                                     .map(|r| r.clone().into())
                                     .collect::<Vec<ReceiptWithBloom>>();
