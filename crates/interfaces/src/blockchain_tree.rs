@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, HashSet};
 /// * [BlockchainTreeEngine::finalize_block]: Remove chains that join to now finalized block, as
 ///   chain becomes invalid.
 /// * [BlockchainTreeEngine::make_canonical]: Check if we have the hash of block that we want to
-///   finalize and commit it to db. If we dont have the block, pipeline syncing should start to
-///   fetch the blocks from p2p. Do reorg in tables if canonical chain if needed.
+///   finalize and commit it to db. If we don't have the block, syncing should start to fetch the
+///   blocks from p2p. Do reorg in tables if canonical chain if needed.
 pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Recover senders and call [`BlockchainTreeEngine::insert_block`].
     fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
@@ -98,11 +98,14 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
 
-    /// Given a hash, this tries to find the last ancestor that is part of the canonical chain.
+    /// Given the parent hash of a block, this tries to find the last ancestor that is part of the
+    /// canonical chain.
     ///
     /// In other words, this will walk up the (side) chain starting with the given hash and return
     /// the first block that's canonical.
-    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash>;
+    ///
+    /// Note: this could be the given `parent_hash` if it's already canonical.
+    fn find_canonical_ancestor(&self, parent_hash: BlockHash) -> Option<BlockHash>;
 
     /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
     fn canonical_tip(&self) -> BlockNumHash;

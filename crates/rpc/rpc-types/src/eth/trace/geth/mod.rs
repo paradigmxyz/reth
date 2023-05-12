@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 // re-exports
 pub use self::{
-    call::{CallConfig, CallFrame},
+    call::{CallConfig, CallFrame, CallLogFrame},
     four_byte::FourByteFrame,
     noop::NoopFrame,
     pre_state::{PreStateConfig, PreStateFrame},

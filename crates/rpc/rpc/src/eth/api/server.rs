@@ -15,7 +15,10 @@ use reth_primitives::{
     serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
     H256, H64, U256, U64,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    BlockIdProvider, BlockProvider, BlockProviderIdExt, EvmEnvProvider, HeaderProvider,
+    StateProviderFactory,
+};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock,
@@ -30,7 +33,13 @@ impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProvider
+        + BlockIdProvider
+        + BlockProviderIdExt
+        + HeaderProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`
@@ -356,10 +365,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{eth::cache::EthStateCache, EthApi};
-    use jsonrpsee::{
-        core::{error::Error as RpcError, RpcResult},
-        types::error::{CallError, INVALID_PARAMS_CODE},
-    };
+    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use rand::random;
     use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256};
@@ -373,7 +379,7 @@ mod tests {
         let eth_api = EthApi::new(
             NoopProvider::default(),
             testing_pool(),
-            NoopNetwork::default(),
+            NoopNetwork,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 
@@ -384,8 +390,8 @@ mod tests {
             None,
         )
         .await;
-        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
-        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         let block_count = 10;
@@ -457,7 +463,7 @@ mod tests {
         let eth_api = EthApi::new(
             mock_provider,
             testing_pool(),
-            NoopNetwork::default(),
+            NoopNetwork,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 
@@ -468,8 +474,8 @@ mod tests {
             Some(vec![10.0]),
         )
         .await;
-        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
-        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         // newest_block is finalized

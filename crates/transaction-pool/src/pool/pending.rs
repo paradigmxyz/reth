@@ -84,6 +84,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
+    /// Returns an iterator over all transactions in the pool
+    pub(crate) fn all(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+        self.by_id.values().map(|tx| tx.transaction.transaction.clone())
+    }
+
     /// Removes all transactions and their dependent transaction from the subpool that no longer
     /// satisfy the given basefee (`tx.fee < basefee`)
     ///

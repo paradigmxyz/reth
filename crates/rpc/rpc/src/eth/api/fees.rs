@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, BlockNumberOrTag, U256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 use std::collections::BTreeMap;
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.

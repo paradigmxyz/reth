@@ -6,11 +6,9 @@ use crate::server::{
 };
 use futures::{FutureExt, SinkExt, Stream, StreamExt};
 use jsonrpsee::{
-    core::{
-        server::{resource_limiting::Resources, rpc_module::Methods},
-        Error, TEN_MB_SIZE_BYTES,
-    },
+    core::{Error, TEN_MB_SIZE_BYTES},
     server::{logger::Logger, IdProvider, RandomIntegerIdProvider, ServerHandle},
+    Methods,
 };
 use std::{
     future::Future,
@@ -39,7 +37,6 @@ mod ipc;
 pub struct IpcServer<B = Identity, L = ()> {
     /// The endpoint we listen for incoming transactions
     endpoint: Endpoint,
-    resources: Resources,
     logger: L,
     id_provider: Arc<dyn IdProvider>,
     cfg: Settings,
@@ -63,7 +60,7 @@ impl IpcServer {
     /// async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     ///     let server = Builder::default().build("/tmp/my-uds")?;
     ///     let mut module = RpcModule::new(());
-    ///     module.register_method("say_hello", |_, _| Ok("lo"))?;
+    ///     module.register_method("say_hello", |_, _| "lo")?;
     ///     let handle = server.start(module).await?;
     ///
     ///     // In this example we don't care about doing shutdown so let's it run forever.
@@ -74,7 +71,7 @@ impl IpcServer {
     /// }
     /// ```
     pub async fn start(mut self, methods: impl Into<Methods>) -> Result<ServerHandle, Error> {
-        let methods = methods.into().initialize_resources(&self.resources)?;
+        let methods = methods.into();
         let (stop_tx, stop_rx) = watch::channel(());
 
         let stop_handle = StopHandle::new(stop_rx);
@@ -110,7 +107,6 @@ impl IpcServer {
         let max_request_body_size = self.cfg.max_request_body_size;
         let max_response_body_size = self.cfg.max_response_body_size;
         let max_log_length = self.cfg.max_log_length;
-        let resources = self.resources;
         let id_provider = self.id_provider;
         let max_subscriptions_per_connection = self.cfg.max_subscriptions_per_connection;
         let logger = self.logger;
@@ -148,7 +144,6 @@ impl IpcServer {
                     let tower_service = TowerService {
                         inner: ServiceData {
                             methods: methods.clone(),
-                            resources: resources.clone(),
                             max_request_body_size,
                             max_response_body_size,
                             max_log_length,
@@ -184,7 +179,6 @@ impl std::fmt::Debug for IpcServer {
             .field("endpoint", &self.endpoint.path())
             .field("cfg", &self.cfg)
             .field("id_provider", &self.id_provider)
-            .field("resources", &self.resources)
             .finish()
     }
 }
@@ -195,8 +189,6 @@ impl std::fmt::Debug for IpcServer {
 pub(crate) struct ServiceData<L: Logger> {
     /// Registered server methods.
     pub(crate) methods: Methods,
-    /// Tracker for currently used resources on the server.
-    pub(crate) resources: Resources,
     /// Max request body size.
     pub(crate) max_request_body_size: u32,
     /// Max request body size.
@@ -246,7 +238,6 @@ impl<L: Logger> Service<String> for TowerService<L> {
         // handle the request
         let data = ipc::HandleRequest {
             methods: self.inner.methods.clone(),
-            resources: self.inner.resources.clone(),
             max_request_body_size: self.inner.max_request_body_size,
             max_response_body_size: self.inner.max_response_body_size,
             max_log_length: self.inner.max_log_length,
@@ -382,7 +373,6 @@ impl Default for Settings {
 #[derive(Debug)]
 pub struct Builder<B = Identity, L = ()> {
     settings: Settings,
-    resources: Resources,
     logger: L,
     /// Subscription ID provider.
     id_provider: Arc<dyn IdProvider>,
@@ -393,7 +383,6 @@ impl Default for Builder {
     fn default() -> Self {
         Builder {
             settings: Settings::default(),
-            resources: Resources::default(),
             logger: (),
             id_provider: Arc::new(RandomIntegerIdProvider),
             service_builder: tower::ServiceBuilder::new(),
@@ -432,26 +421,10 @@ impl<B, L> Builder<B, L> {
         self
     }
 
-    /// Register a new resource kind. Errors if `label` is already registered, or if the number of
-    /// registered resources on this server instance would exceed 8.
-    ///
-    /// See the module documentation for
-    /// [`resource_limiting`][jsonrpsee::core::server::resource_limiting] for details.
-    pub fn register_resource(
-        mut self,
-        label: &'static str,
-        capacity: u16,
-        default: u16,
-    ) -> Result<Self, Error> {
-        self.resources.register(label, capacity, default)?;
-        Ok(self)
-    }
-
     /// Add a logger to the builder [`Logger`].
     pub fn set_logger<T: Logger>(self, logger: T) -> Builder<B, T> {
         Builder {
             settings: self.settings,
-            resources: self.resources,
             logger,
             id_provider: self.id_provider,
             service_builder: self.service_builder,
@@ -513,7 +486,6 @@ impl<B, L> Builder<B, L> {
     pub fn set_middleware<T>(self, service_builder: tower::ServiceBuilder<T>) -> Builder<T, L> {
         Builder {
             settings: self.settings,
-            resources: self.resources,
             logger: self.logger,
             id_provider: self.id_provider,
             service_builder,
@@ -531,7 +503,6 @@ impl<B, L> Builder<B, L> {
         Ok(IpcServer {
             endpoint,
             cfg: self.settings,
-            resources: self.resources,
             logger: self.logger,
             id_provider: self.id_provider,
             service_builder: self.service_builder,
@@ -554,7 +525,7 @@ mod tests {
         let server = Builder::default().build(&endpoint).unwrap();
         let mut module = RpcModule::new(());
         let msg = r#"{"jsonrpc":"2.0","id":83,"result":"0x7a69"}"#;
-        module.register_method("eth_chainId", move |_, _| Ok(msg)).unwrap();
+        module.register_method("eth_chainId", move |_, _| msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 

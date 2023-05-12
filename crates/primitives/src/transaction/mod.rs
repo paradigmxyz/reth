@@ -305,6 +305,11 @@ impl Transaction {
         }
     }
 
+    /// Get the transaction's nonce.
+    pub fn to(&self) -> Option<Address> {
+        self.kind().to()
+    }
+
     /// Get transaction type
     pub fn tx_type(&self) -> TxType {
         match self {
@@ -315,8 +320,8 @@ impl Transaction {
     }
 
     /// Gets the transaction's value field.
-    pub fn value(&self) -> &u128 {
-        match self {
+    pub fn value(&self) -> u128 {
+        *match self {
             Transaction::Legacy(TxLegacy { value, .. }) => value,
             Transaction::Eip2930(TxEip2930 { value, .. }) => value,
             Transaction::Eip1559(TxEip1559 { value, .. }) => value,
@@ -679,6 +684,16 @@ pub enum TransactionKind {
     Create,
     /// A transaction that calls a contract or transfer.
     Call(Address),
+}
+
+impl TransactionKind {
+    /// Returns the address of the contract that will be called or will receive the transfer.
+    pub fn to(self) -> Option<Address> {
+        match self {
+            TransactionKind::Create => None,
+            TransactionKind::Call(to) => Some(to),
+        }
+    }
 }
 
 impl Compact for TransactionKind {

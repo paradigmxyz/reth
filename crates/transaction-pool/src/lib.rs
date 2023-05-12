@@ -83,10 +83,11 @@
 pub use crate::{
     config::PoolConfig,
     ordering::{CostOrdering, TransactionOrdering},
+    pool::TransactionEvents,
     traits::{
-        BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount, PoolTransaction,
-        PooledTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin,
-        TransactionPool,
+        AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
+        PoolTransaction, PooledTransaction, PropagateKind, PropagatedTransactions,
+        TransactionOrigin, TransactionPool,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
@@ -94,7 +95,7 @@ pub use crate::{
     },
 };
 use crate::{
-    error::{PoolError, PoolResult},
+    error::PoolResult,
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
@@ -249,24 +250,22 @@ where
         self.pool.on_canonical_state_change(update);
     }
 
+    async fn add_transaction_and_subscribe(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> PoolResult<TransactionEvents> {
+        let (_, tx) = self.validate(origin, transaction).await;
+        self.pool.add_transaction_and_subscribe(origin, tx)
+    }
+
     async fn add_transaction(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-
-        match tx {
-            TransactionValidationOutcome::Valid { .. } => {
-                self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
-            }
-            TransactionValidationOutcome::Invalid(transaction, error) => {
-                Err(PoolError::InvalidTransaction(*transaction.hash(), error))
-            }
-            TransactionValidationOutcome::Error(transaction, error) => {
-                Err(PoolError::Other(*transaction.hash(), error))
-            }
-        }
+        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
     }
 
     async fn add_transactions(
@@ -311,6 +310,18 @@ where
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(self.pool.best_transactions())
+    }
+
+    fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.pending_transactions()
+    }
+
+    fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.queued_transactions()
+    }
+
+    fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction> {
+        self.pool.all_transactions()
     }
 
     fn remove_transactions(

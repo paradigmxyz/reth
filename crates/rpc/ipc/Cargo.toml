@@ -21,7 +21,7 @@ pin-project = "1.0"
 tower = "0.4"
 
 # misc
-jsonrpsee = { version = "0.16", features = ["server", "client"] }
+jsonrpsee = { version = "0.18", features = ["server", "client"] }
 serde_json = "1.0"
 tracing = "0.1.37"
 bytes = "1.4"

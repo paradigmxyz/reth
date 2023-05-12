@@ -16,8 +16,8 @@ mod progress;
 mod set;
 mod sync_metrics;
 
+pub use crate::pipeline::ctrl::ControlFlow;
 pub use builder::*;
-use ctrl::*;
 pub use event::*;
 use progress::*;
 pub use set::*;
@@ -113,8 +113,8 @@ where
     }
 
     /// Return the minimum pipeline progress
-    pub fn minimum_progress(&self) -> &Option<u64> {
-        &self.progress.minimum_progress
+    pub fn minimum_progress(&self) -> Option<u64> {
+        self.progress.minimum_progress
     }
 
     /// Set tip for reverse sync.

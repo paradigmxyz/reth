@@ -1,12 +1,12 @@
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
     mdbx::{Env, WriteMap},
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Account, Bytecode, ChainSpec, StorageEntry, H256};
-use reth_provider::{Transaction, TransactionError};
+use reth_primitives::{Account, Bytecode, ChainSpec, H256, U256};
+use reth_provider::{PostState, Transaction, TransactionError};
 use reth_stages::StageKind;
 use std::{path::Path, sync::Arc};
 use tracing::debug;
@@ -65,7 +65,6 @@ pub fn init_genesis<DB: Database>(
     drop(tx);
     debug!("Writing genesis block.");
     let tx = db.tx_mut()?;
-    insert_genesis_state::<DB>(&tx, genesis)?;
 
     // use transaction to insert genesis header
     let transaction = Transaction::new_raw(&db, tx);
@@ -78,6 +77,8 @@ pub fn init_genesis<DB: Database>(
     tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
     tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
     tx.put::<tables::Headers>(0, header)?;
+
+    insert_genesis_state::<DB>(&tx, genesis)?;
 
     // insert sync stage
     for stage in StageKind::ALL.iter() {
@@ -93,38 +94,32 @@ pub fn insert_genesis_state<DB: Database>(
     tx: &<DB as DatabaseGAT<'_>>::TXMut,
     genesis: &reth_primitives::Genesis,
 ) -> Result<(), InitDatabaseError> {
-    let mut account_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
-    let mut storage_cursor = tx.cursor_write::<tables::PlainStorageState>()?;
-    let mut bytecode_cursor = tx.cursor_write::<tables::Bytecodes>()?;
+    let mut state = PostState::default();
 
-    // Insert account state
     for (address, account) in &genesis.alloc {
         let mut bytecode_hash = None;
-        // insert bytecode hash
         if let Some(code) = &account.code {
-            let hash = keccak256(code.as_ref());
-            bytecode_cursor.upsert(hash, Bytecode::new_raw_with_hash(code.0.clone(), hash))?;
-            bytecode_hash = Some(hash);
+            let bytecode = Bytecode::new_raw(code.0.clone());
+            // FIXME: Can bytecode_hash be Some(Bytes::new()) here?
+            bytecode_hash = Some(bytecode.hash);
+            state.add_bytecode(bytecode.hash, bytecode);
         }
-        // insert plain account.
-        account_cursor.upsert(
+        state.create_account(
+            0,
             *address,
-            Account {
-                nonce: account.nonce.unwrap_or_default(),
-                balance: account.balance,
-                bytecode_hash,
-            },
-        )?;
-        // insert plain storages
+            Account { nonce: account.nonce.unwrap_or(0), balance: account.balance, bytecode_hash },
+        );
         if let Some(storage) = &account.storage {
+            let mut storage_changes = reth_provider::post_state::StorageChangeset::new();
             for (&key, &value) in storage {
-                if value.is_zero() {
-                    continue
-                }
-                storage_cursor.upsert(*address, StorageEntry { key, value: value.into() })?
+                storage_changes
+                    .insert(U256::from_be_bytes(key.0), (U256::ZERO, U256::from_be_bytes(value.0)));
             }
+            state.change_storage(0, *address, storage_changes);
         }
     }
+    state.write_to_db(tx)?;
+
     Ok(())
 }
 

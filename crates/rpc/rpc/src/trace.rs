@@ -23,8 +23,9 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     BlockError, CallRequest, Index, TransactionInfo,
 };
+use reth_tasks::TaskSpawner;
 use revm::primitives::Env;
-use revm_primitives::ResultAndState;
+use revm_primitives::{db::DatabaseCommit, ExecutionResult};
 use std::collections::HashSet;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -37,8 +38,12 @@ pub struct TraceApi<Client, Eth> {
     client: Client,
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
-    /// The async cache frontend for eth related data
+    /// The async cache frontend for eth-related data
+    #[allow(unused)] // we need this for trace_filter eventually
     eth_cache: EthStateCache,
+    /// The type that can spawn tasks which would otherwise be blocking.
+    #[allow(unused)]
+    task_spawner: Box<dyn TaskSpawner>,
     // restrict the number of concurrent calls to `trace_*`
     tracing_call_guard: TracingCallGuard,
 }
@@ -46,14 +51,20 @@ pub struct TraceApi<Client, Eth> {
 // === impl TraceApi ===
 
 impl<Client, Eth> TraceApi<Client, Eth> {
+    /// The client that can interact with the chain.
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// Create a new instance of the [TraceApi]
     pub fn new(
         client: Client,
         eth_api: Eth,
         eth_cache: EthStateCache,
+        task_spawner: Box<dyn TaskSpawner>,
         tracing_call_guard: TracingCallGuard,
     ) -> Self {
-        Self { client, eth_api, eth_cache, tracing_call_guard }
+        Self { client, eth_api, eth_cache, task_spawner, tracing_call_guard }
     }
 
     /// Acquires a permit to execute a tracing call.
@@ -211,7 +222,7 @@ where
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
-        F: Fn(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
+        F: Fn(TransactionInfo, TracingInspector, ExecutionResult) -> EthResult<R> + Send,
     {
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.eth_api.evm_env_at(block_id),
@@ -236,7 +247,9 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = SubState::new(State::new(state));
 
-                for (idx, tx) in transactions.into_iter().enumerate() {
+                let mut transactions = transactions.into_iter().enumerate().peekable();
+
+                while let Some((idx, tx)) = transactions.next() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx_info = TransactionInfo {
                         hash: Some(tx.hash()),
@@ -251,7 +264,15 @@ where
 
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    results.push(f(tx_info, inspector, res)?);
+                    results.push(f(tx_info, inspector, res.result)?);
+
+                    // need to apply the state changes of this transaction before executing the next
+                    // transaction
+                    if transactions.peek().is_some() {
+                        // need to apply the state changes of this transaction before executing the
+                        // next transaction
+                        db.commit(res.state)
+                    }
                 }
 
                 Ok(results)
@@ -286,8 +307,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> EthResult<Option<Vec<TraceResultsWithTransactionHash>>> {
         self.trace_block_with(block_id, tracing_config(&trace_types), |tx_info, inspector, res| {
-            let full_trace =
-                inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
+            let full_trace = inspector.into_parity_builder().into_trace_results(res, &trace_types);
             let trace = TraceResultsWithTransactionHash {
                 transaction_hash: tx_info.hash.expect("tx hash is set"),
                 full_trace,
