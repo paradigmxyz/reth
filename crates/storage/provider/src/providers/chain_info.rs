@@ -13,7 +13,7 @@ impl ChainInfoTracker {
     pub(crate) fn new(head: SealedHeader) -> Self {
         Self {
             inner: Arc::new(ChainInfoInner {
-                last_forkchoice_update: RwLock::new(Instant::now()),
+                last_forkchoice_update: RwLock::new(None),
                 canonical_head: RwLock::new(head),
                 safe_block: RwLock::new(None),
                 finalized_block: RwLock::new(None),
@@ -23,12 +23,12 @@ impl ChainInfoTracker {
 
     /// Update the timestamp when we received a forkchoice update.
     pub(crate) fn on_forkchoice_update_received(&self) {
-        *self.inner.last_forkchoice_update.write() = Instant::now();
+        self.inner.last_forkchoice_update.write().replace(Instant::now());
     }
 
     /// Returns the instant when we received the latest forkchoice update.
     #[allow(unused)]
-    pub(crate) fn last_forkchoice_update_received_at(&self) -> Instant {
+    pub(crate) fn last_forkchoice_update_received_at(&self) -> Option<Instant> {
         *self.inner.last_forkchoice_update.read()
     }
 
@@ -92,7 +92,7 @@ struct ChainInfoInner {
     /// Timestamp when we received the last fork choice update.
     ///
     /// This is mainly used to track if we're connected to a beacon node.
-    last_forkchoice_update: RwLock<Instant>,
+    last_forkchoice_update: RwLock<Option<Instant>>,
     /// The canonical head of the chain.
     canonical_head: RwLock<SealedHeader>,
     /// The block that the beacon node considers safe.
