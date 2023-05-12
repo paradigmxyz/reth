@@ -11,6 +11,14 @@ use tokio::{
 };
 use tokio_util::codec::FramedWrite;
 
+mod bodies_client;
+mod file_client;
+mod file_codec;
+
+pub use bodies_client::TestBodiesClient;
+pub use file_client::{FileClient, FileClientError};
+pub(crate) use file_codec::BlockFileCodec;
+
 /// Metrics scope used for testing.
 pub(crate) const TEST_SCOPE: &str = "downloaders.test";
 
@@ -59,11 +67,3 @@ pub(crate) async fn generate_bodies_file(
     file.seek(SeekFrom::Start(0)).await.unwrap();
     (file, headers, bodies)
 }
-
-mod file_client;
-mod file_codec;
-mod test_client;
-
-pub use file_client::{FileClient, FileClientError};
-pub(crate) use file_codec::BlockFileCodec;
-pub use test_client::TestBodiesClient;

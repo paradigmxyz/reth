@@ -240,6 +240,7 @@ impl Command {
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
+        let network_client = network.fetch_client().await?;
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
@@ -310,11 +311,10 @@ impl Command {
 
             pipeline
         } else {
-            let client = network.fetch_client().await?;
             self.build_networked_pipeline(
                 &mut config,
                 network.clone(),
-                client,
+                network_client.clone(),
                 Arc::clone(&consensus),
                 db.clone(),
                 &ctx.task_executor,
@@ -339,9 +339,10 @@ impl Command {
         let pipeline_events = pipeline.events();
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
-            ctx.task_executor.clone(),
+            network_client,
             pipeline,
             blockchain_db.clone(),
+            Box::new(ctx.task_executor.clone()),
             self.debug.max_block,
             self.debug.continuous,
             payload_builder.clone(),
