@@ -89,37 +89,36 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        // TODO: can it be smaller?
-        buf.put_u16(self.len() as u16);
+        encode_varuint(self.len(), buf);
+
+        let mut tmp: Vec<u8> = Vec::with_capacity(64);
 
         for element in self {
-            let length_index = buf.as_mut().len();
+            tmp.clear();
 
-            // Placeholder for the length, since it can only be known after compacting the element
-            // and BufMut doesn't support going back
-            buf.put_slice(&[0, 0]);
+            // We don't know the length until we compact it
+            let length = element.to_compact(&mut tmp);
+            encode_varuint(length, buf);
 
-            let len = element.to_compact(buf);
-
-            // Replace placeholder with the real length
-            buf.as_mut()[length_index..=length_index + 1]
-                .copy_from_slice(&(len as u16).to_be_bytes());
+            buf.put_slice(&tmp);
         }
+
         0
     }
 
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let length = buf.get_u16();
-        let mut list = Vec::with_capacity(length as usize);
-
+    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
+        let (length, mut buf) = decode_varuint(buf);
+        let mut list = Vec::with_capacity(length);
+        #[allow(unused_assignments)]
+        let mut len = 0;
         for _ in 0..length {
             #[allow(unused_assignments)]
             let mut element = T::default();
 
-            let len = buf.get_u16();
+            (len, buf) = decode_varuint(buf);
 
-            (element, _) = T::from_compact(&buf[..(len as usize)], len as usize);
-            buf.advance(len as usize);
+            (element, _) = T::from_compact(&buf[..len], len);
+            buf.advance(len);
 
             list.push(element);
         }
@@ -132,7 +131,7 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        buf.put_u16(self.len() as u16);
+        encode_varuint(self.len(), buf);
 
         for element in self {
             element.to_compact(buf);
@@ -141,9 +140,9 @@ where
     }
 
     /// To be used by fixed sized types like `Vec<H256>`.
-    fn specialized_from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let length = buf.get_u16();
-        let mut list = Vec::with_capacity(length as usize);
+    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (length, mut buf) = decode_varuint(buf);
+        let mut list = Vec::with_capacity(length);
 
         for _ in 0..length {
             #[allow(unused_assignments)]
@@ -167,33 +166,30 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
+        let mut tmp = Vec::with_capacity(64);
+
         if let Some(element) = self {
-            let length_index = buf.as_mut().len();
+            // We don't know the length until we compact it
+            let length = element.to_compact(&mut tmp);
 
-            // Placeholder for the length, since it can only be known after compacting the element
-            // and BufMut doesn't support going back
-            buf.put_slice(&[0, 0]);
+            encode_varuint(length, buf);
 
-            let len = element.to_compact(buf);
-
-            // Replace placeholder with the real length
-            buf.as_mut()[length_index..=length_index + 1]
-                .copy_from_slice(&(len as u16).to_be_bytes());
+            buf.put_slice(&tmp);
 
             return 1
         }
         0
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
             return (None, buf)
         }
 
-        let len = buf.get_u16();
+        let (len, mut buf) = decode_varuint(buf);
 
-        let (element, _) = T::from_compact(&buf[..(len as usize)], len as usize);
-        buf.advance(len as usize);
+        let (element, _) = T::from_compact(&buf[..len], len);
+        buf.advance(len);
 
         (Some(element), buf)
     }
