@@ -97,8 +97,8 @@ where
     EthApiClient::send_transaction(client, transaction_request).await.unwrap_err();
     EthApiClient::hashrate(client).await.unwrap();
     EthApiClient::submit_hashrate(client, U256::default(), H256::default()).await.unwrap();
-    EthApiClient::gas_price(client).await.unwrap();
-    EthApiClient::max_priority_fee_per_gas(client).await.unwrap();
+    EthApiClient::gas_price(client).await.unwrap_err();
+    EthApiClient::max_priority_fee_per_gas(client).await.unwrap_err();
 
     // Unimplemented
     assert!(is_unimplemented(

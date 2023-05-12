@@ -86,6 +86,9 @@ pub enum ProviderError {
     /// Thrown when the cache service task dropped
     #[error("cache service task stopped")]
     CacheServiceUnavailable,
+    /// Thrown when the gas oracle task dropped
+    #[error("gas oracle task stopped")]
+    GasPriceOracleServiceUnavailable,
     /// Thrown when we failed to lookup a block for the pending state
     #[error("Unknown block hash: {0:}")]
     UnknownBlockHash(H256),
