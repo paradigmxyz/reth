@@ -15,6 +15,7 @@ use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, BlockNumber, Header, SealedBlock, SealedHeader, H256, U256,
 };
+use reth_provider::{BlockProvider, BlockSource, CanonChainTracker, ProviderError};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
@@ -138,15 +139,15 @@ impl BeaconConsensusEngineHandle {
 pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
-    BT: BlockchainTreeEngine,
     Client: HeadersClient + BodiesClient,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker,
 {
     /// The database handle.
     db: DB,
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
-    /// The blockchain tree used for live sync and reorg tracking.
-    blockchain_tree: BT,
+    /// The type we can use to query both the database and the blockchain tree.
+    blockchain: BT,
     /// The Engine API message receiver.
     engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
     /// A clone of the handle
@@ -168,7 +169,7 @@ where
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine + 'static,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -177,7 +178,7 @@ where
         db: DB,
         client: Client,
         pipeline: Pipeline<DB>,
-        blockchain_tree: BT,
+        blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
@@ -188,7 +189,7 @@ where
             db,
             client,
             pipeline,
-            blockchain_tree,
+            blockchain,
             task_spawner,
             max_block,
             run_pipeline_continuously,
@@ -205,7 +206,7 @@ where
         db: DB,
         client: Client,
         pipeline: Pipeline<DB>,
-        blockchain_tree: BT,
+        blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
@@ -224,7 +225,7 @@ where
         let this = Self {
             db,
             sync,
-            blockchain_tree,
+            blockchain,
             engine_message_rx: UnboundedReceiverStream::new(rx),
             handle: handle.clone(),
             forkchoice_state: None,
@@ -269,7 +270,7 @@ where
         //  which would make this inaccurate, e.g. if an invalid payload is received in this
         //  scenario: FUC (unknown head) -> valid payload  -> invalid payload
 
-        self.blockchain_tree.find_canonical_ancestor(parent_hash)
+        self.blockchain.find_canonical_ancestor(parent_hash)
     }
 
     /// Loads the header for the given `block_number` from the database.
@@ -327,7 +328,7 @@ where
         let status = if self.sync.is_pipeline_idle() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
-            match self.blockchain_tree.make_canonical(&state.head_block_hash) {
+            match self.blockchain.make_canonical(&state.head_block_hash) {
                 Ok(_) => {
                     let head_block_number = self
                         .get_block_number(state.head_block_hash)?
@@ -349,9 +350,20 @@ where
                         let header = self
                             .load_header(head_block_number)?
                             .expect("was canonicalized, so it exists");
-                        return Ok(self.process_payload_attributes(attrs, header, state))
+
+                        let payload_response =
+                            self.process_payload_attributes(attrs, header, state);
+                        if payload_response.is_valid_update() {
+                            // we will return VALID, so let's make sure the info tracker is
+                            // properly updated
+                            self.update_canon_chain(&state)?;
+                        }
+                        return Ok(payload_response)
                     }
 
+                    // we will return VALID, so let's make sure the info tracker is
+                    // properly updated
+                    self.update_canon_chain(&state)?;
                     PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
@@ -373,6 +385,42 @@ where
         self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
         trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Sets the state of the canon chain tracker based on the given forkchoice update. This should
+    /// be called before issuing a VALID forkchoice update.
+    fn update_canon_chain(&self, update: &ForkchoiceState) -> Result<(), BeaconEngineError> {
+        if !update.finalized_block_hash.is_zero() {
+            let finalized = self
+                .blockchain
+                .find_block_by_hash(update.finalized_block_hash, BlockSource::Any)?
+                .ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(update.finalized_block_hash))
+                })?;
+            self.blockchain.set_finalized(finalized.header.seal(update.finalized_block_hash));
+        }
+
+        if !update.safe_block_hash.is_zero() {
+            let safe = self
+                .blockchain
+                .find_block_by_hash(update.safe_block_hash, BlockSource::Any)?
+                .ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(update.safe_block_hash))
+                })?;
+            self.blockchain.set_safe(safe.header.seal(update.safe_block_hash));
+        }
+
+        // the consensus engine should ensure the head is not zero so we always update the head
+        let head = self
+            .blockchain
+            .find_block_by_hash(update.head_block_hash, BlockSource::Any)?
+            .ok_or_else(|| {
+                Error::Provider(ProviderError::UnknownBlockHash(update.head_block_hash))
+            })?;
+
+        self.blockchain.set_canonical_head(head.header.seal(update.head_block_hash));
+        self.blockchain.on_forkchoice_update_received(update);
+        Ok(())
     }
 
     /// Handler for a failed a forkchoice update due to a canonicalization error.
@@ -437,6 +485,9 @@ where
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
+    ///
+    /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
+    /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
         attrs: PayloadAttributes,
@@ -519,7 +570,7 @@ where
         let status = if self.sync.is_pipeline_idle() {
             // we can only insert new payloads if the pipeline is _not_ running, because it holds
             // exclusive access to the database
-            match self.blockchain_tree.insert_block_without_senders(block) {
+            match self.blockchain.insert_block_without_senders(block) {
                 Ok(status) => {
                     let mut latest_valid_hash = None;
                     let status = match status {
@@ -552,7 +603,7 @@ where
                     PayloadStatus::new(status, latest_valid_hash)
                 }
             }
-        } else if let Err(error) = self.blockchain_tree.buffer_block_without_sender(block) {
+        } else if let Err(error) = self.blockchain.buffer_block_without_sender(block) {
             // received a new payload while we're still syncing to the target
             let latest_valid_hash =
                 self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
@@ -575,7 +626,7 @@ where
         let needs_pipeline_run = match self.get_block_number(state.finalized_block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
-                self.blockchain_tree.restore_canonical_hashes(number)?;
+                self.blockchain.restore_canonical_hashes(number)?;
 
                 // After restoring the tree, check if the head block is missing.
                 self.db
@@ -663,8 +714,8 @@ where
 impl<DB, BT, Client> Future for BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + Unpin + 'static,
 {
     type Output = Result<(), BeaconEngineError>;
 
@@ -689,7 +740,7 @@ where
                     // Terminate the sync early if it's reached the maximum user
                     // configured block.
                     if is_valid_response {
-                        let tip_number = this.blockchain_tree.canonical_tip().number;
+                        let tip_number = this.blockchain.canonical_tip().number;
                         if this.sync.has_reached_max_block(tip_number) {
                             return Poll::Ready(Ok(()))
                         }
@@ -759,7 +810,10 @@ mod tests {
     use reth_interfaces::test_utils::{NoopFullBlockClient, TestConsensus};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
-    use reth_provider::{test_utils::TestExecutorFactory, Transaction};
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::TestExecutorFactory, ShareableDatabase,
+        Transaction,
+    };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, sync::Arc, time::Duration};
@@ -770,7 +824,10 @@ mod tests {
 
     type TestBeaconConsensusEngine = BeaconConsensusEngine<
         Arc<Env<WriteMap>>,
-        ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
+        BlockchainProvider<
+            Arc<Env<WriteMap>>,
+            ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
+        >,
         NoopFullBlockClient,
     >;
 
@@ -855,18 +912,22 @@ mod tests {
             .build(db.clone());
 
         // Setup blockchain tree
-        let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
+        let externals =
+            TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec.clone());
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, canon_state_notification_sender, config)
                 .expect("failed to create tree"),
         );
+        let shareable_db = ShareableDatabase::new(db.clone(), chain_spec.clone());
+        let latest = chain_spec.genesis_header().seal_slow();
+        let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
         let (engine, handle) = BeaconConsensusEngine::new(
             db.clone(),
             NoopFullBlockClient::default(),
             pipeline,
-            tree,
+            blockchain_provider,
             Box::<TokioTaskExecutor>::default(),
             None,
             false,

@@ -34,7 +34,7 @@ pub trait AdminApi {
         unsubscribe = "admin_peerEvents_unsubscribe",
         item = String
     )]
-    fn subscribe_peer_events(&self);
+    async fn subscribe_peer_events(&self) -> jsonrpsee::core::SubscriptionResult;
 
     /// Returns the ENR of the node.
     #[method(name = "admin_nodeInfo")]

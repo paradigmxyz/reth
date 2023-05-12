@@ -10,5 +10,9 @@ pub trait EthPubSubApi {
         unsubscribe = "eth_unsubscribe",
         item = reth_rpc_types::pubsub::SubscriptionResult
     )]
-    fn subscribe(&self, kind: SubscriptionKind, params: Option<Params>);
+    async fn subscribe(
+        &self,
+        kind: SubscriptionKind,
+        params: Option<Params>,
+    ) -> jsonrpsee::core::SubscriptionResult;
 }

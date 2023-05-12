@@ -28,6 +28,15 @@ use std::{
 };
 use tracing::{debug, info};
 
+/// Default max number of subscriptions per connection.
+pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
+/// Default max request size in MB.
+pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
+/// Default max response size in MB.
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 25;
+/// Default number of incoming connections.
+pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
+
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Default)]
 #[command(next_help_heading = "Rpc")]
@@ -90,10 +99,36 @@ pub struct RpcServerArgs {
 
     /// Path to a JWT secret to use for authenticated RPC endpoints
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
-    auth_jwtsecret: Option<PathBuf>,
+    pub auth_jwtsecret: Option<PathBuf>,
+
+    /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+    #[arg(long, default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB)]
+    pub rpc_max_request_size: u32,
+
+    /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
+    #[arg(long, default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB)]
+    pub rpc_max_response_size: u32,
+
+    /// Set the the maximum concurrent subscriptions per connection.
+    #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN)]
+    pub rpc_max_subscriptions_per_connection: u32,
+
+    /// Maximum number of RPC server connections.
+    #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS)]
+    pub rpc_max_connections: u32,
 }
 
 impl RpcServerArgs {
+    /// Returns the max request size in bytes.
+    pub fn rpc_max_request_size_bytes(&self) -> u32 {
+        self.rpc_max_request_size * 1024 * 1024
+    }
+
+    /// Returns the max response size in bytes.
+    pub fn rpc_max_response_size_bytes(&self) -> u32 {
+        self.rpc_max_response_size * 1024 * 1024
+    }
+
     /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
     /// jwt-secret, which designates a file containing the hex-encoded 256 bit secret key to be used
     /// for verifying/generating JWT tokens.
@@ -273,6 +308,24 @@ impl RpcServerArgs {
         config
     }
 
+    /// Returns the default server builder for http/ws
+    fn http_ws_server_builder(&self) -> ServerBuilder {
+        ServerBuilder::new()
+            .max_connections(self.rpc_max_connections)
+            .max_request_body_size(self.rpc_max_request_size_bytes())
+            .max_response_body_size(self.rpc_max_response_size_bytes())
+            .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection)
+    }
+
+    /// Returns the default ipc server builder
+    fn ipc_server_builder(&self) -> IpcServerBuilder {
+        IpcServerBuilder::default()
+            .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection)
+            .max_request_body_size(self.rpc_max_request_size_bytes())
+            .max_response_body_size(self.rpc_max_response_size_bytes())
+            .max_connections(self.rpc_max_connections)
+    }
+
     /// Creates the [RpcServerConfig] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig {
         let mut config = RpcServerConfig::default();
@@ -284,7 +337,7 @@ impl RpcServerArgs {
             );
             config = config
                 .with_http_address(socket_address)
-                .with_http(ServerBuilder::new())
+                .with_http(self.http_ws_server_builder())
                 .with_http_cors(self.http_corsdomain.clone())
                 .with_ws_cors(self.ws_allowed_origins.clone());
         }
@@ -294,12 +347,11 @@ impl RpcServerArgs {
                 self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
                 self.ws_port.unwrap_or(constants::DEFAULT_WS_RPC_PORT),
             );
-            config = config.with_ws_address(socket_address).with_ws(ServerBuilder::new());
+            config = config.with_ws_address(socket_address).with_ws(self.http_ws_server_builder());
         }
 
         if !self.ipcdisable {
-            let ipc_builder = IpcServerBuilder::default();
-            config = config.with_ipc(ipc_builder).with_ipc_endpoint(
+            config = config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(
                 self.ipcpath.as_ref().unwrap_or(&constants::DEFAULT_IPC_ENDPOINT.to_string()),
             );
         }

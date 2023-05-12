@@ -21,6 +21,14 @@ use tokio::sync::{
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+/// Default cache size for the block cache: 500MB
+///
+/// With an average block size of ~100kb this should be able to cache ~5000 blocks.
+const DEFAULT_BLOCK_CACHE_SIZE_BYTES: usize = 500 * 1024 * 1024;
+
+/// Default cache size for the receipts cache: 500MB
+const DEFAULT_RECEIPT_CACHE_SIZE_BYTES: usize = 500 * 1024 * 1024;
+
 /// The type that can send the response to a requested [Block]
 type BlockResponseSender = oneshot::Sender<Result<Option<Block>>>;
 
@@ -50,24 +58,24 @@ type EnvLruCache<L> = MultiConsumerLruCache<H256, (CfgEnv, BlockEnv), L, EnvResp
 pub struct EthStateCacheConfig {
     /// Max number of bytes for cached block data.
     ///
-    /// Default is 50MB
+    /// Default is 500MB
     pub max_block_bytes: usize,
     /// Max number of bytes for cached receipt data.
     ///
-    /// Default is 50MB
+    /// Default is 500MB
     pub max_receipt_bytes: usize,
     /// Max number of bytes for cached env data.
     ///
-    /// Default is 500kb (env configs are very small)
+    /// Default is 1MB (env configs are very small)
     pub max_env_bytes: usize,
 }
 
 impl Default for EthStateCacheConfig {
     fn default() -> Self {
         Self {
-            max_block_bytes: 50 * 1024 * 1024,
-            max_receipt_bytes: 50 * 1024 * 1024,
-            max_env_bytes: 500 * 1024,
+            max_block_bytes: DEFAULT_BLOCK_CACHE_SIZE_BYTES,
+            max_receipt_bytes: DEFAULT_RECEIPT_CACHE_SIZE_BYTES,
+            max_env_bytes: 1024 * 1024,
         }
     }
 }
