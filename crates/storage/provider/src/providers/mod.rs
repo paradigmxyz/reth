@@ -24,6 +24,7 @@ pub use state::{
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
+    time::Instant,
 };
 use tracing::trace;
 
@@ -452,6 +453,10 @@ where
 
     fn set_canonical_head(&self, header: SealedHeader) {
         self.chain_info.set_canonical_head(header);
+    }
+
+    fn last_received_update_timestamp(&self) -> Option<Instant> {
+        self.chain_info.last_forkchoice_update_received_at()
     }
 }
 
