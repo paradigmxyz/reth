@@ -408,7 +408,7 @@ mod tests {
 
         assert_eq!(None::<H256>.to_compact(&mut buf), 0);
         assert_eq!(opt.to_compact(&mut buf), 1);
-        assert_eq!(buf.len(), 34);
+        assert_eq!(buf.len(), 1 + 32);
 
         assert_eq!(Option::<H256>::from_compact(&buf, 1), (opt, vec![].as_slice()));
 
@@ -505,9 +505,9 @@ mod tests {
                 f_bool_t: true,                               // 1 bit  | 0 bytes
                 f_option_none: None,                          // 1 bit  | 0 bytes
                 f_option_some: Some(H256::zero()),            // 1 bit  | 32 bytes
-                f_option_some_u64: Some(0xffffu64),           // 1 bit  | 2 + 2 bytes
-                f_vec_empty: vec![],                          // 0 bits | 2 bytes
-                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 2 + 20*2 bytes
+                f_option_some_u64: Some(0xffffu64),           // 1 bit  | 1 + 2 bytes
+                f_vec_empty: vec![],                          // 0 bits | 1 bytes
+                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 1 + 20*2 bytes
             }
         }
     }
@@ -523,9 +523,9 @@ mod tests {
             1 +
             // 0 + 0 + 0 +
             32 +
-            2 + 2 +
-            2 +
-            2 + 20 * 2
+            1 + 2 +
+            1 +
+            1 + 20 * 2
         );
 
         assert_eq!(
