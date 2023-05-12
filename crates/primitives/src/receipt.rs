@@ -346,4 +346,38 @@ mod tests {
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
     }
+
+    #[test]
+    fn gigantic_receipt() {
+        let receipt = Receipt {
+            cumulative_gas_used: 16747627,
+            success: true,
+            tx_type: TxType::Legacy,
+            logs: vec![
+                Log {
+                    address: Address::from_str("0x4bf56695415f725e43c3e04354b604bcfb6dfb6e")
+                        .unwrap(),
+                    topics: vec![H256::from_str(
+                        "0xc69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9",
+                    )
+                    .unwrap()],
+                    data: crate::Bytes::from(vec![1; 0xffffff]),
+                },
+                Log {
+                    address: Address::from_str("0xfaca325c86bf9c2d5b413cd7b90b209be92229c2")
+                        .unwrap(),
+                    topics: vec![H256::from_str(
+                        "0x8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2",
+                    )
+                    .unwrap()],
+                    data: crate::Bytes::from(vec![1; 0xffffff]),
+                },
+            ],
+        };
+
+        let mut data = vec![];
+        receipt.clone().to_compact(&mut data);
+        let (decoded, _) = Receipt::from_compact(&data[..], data.len());
+        assert_eq!(decoded, receipt);
+    }
 }
