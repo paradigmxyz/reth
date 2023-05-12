@@ -358,12 +358,10 @@ where
 
                         let payload_response =
                             self.process_payload_attributes(attrs, header, state);
-                        if let Some(Ok(status)) = payload_response.update_result() {
-                            if status.is_valid() {
-                                // we will return VALID, so let's make sure the info tracker is
-                                // properly updated
-                                self.update_canon_chain(&state)?;
-                            }
+                        if payload_response.is_valid_update() {
+                            // we will return VALID, so let's make sure the info tracker is
+                            // properly updated
+                            self.update_canon_chain(&state)?;
                         }
                         return Ok(payload_response)
                     }
@@ -475,6 +473,9 @@ where
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
+    ///
+    /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
+    /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
         attrs: PayloadAttributes,
