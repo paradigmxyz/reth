@@ -11,5 +11,5 @@ crates/transaction-pool/    @mattsse
 crates/rpc/                 @mattsse @Rjected
 crates/payload/             @mattsse @Rjected
 crates/consensus/auto-seal  @mattsse
-crates/consensus/beacon     @rkrasiuk
+crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
 crates/trie                 @rkrasiuk
