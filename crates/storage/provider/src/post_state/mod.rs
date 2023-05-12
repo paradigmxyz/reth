@@ -20,7 +20,7 @@ mod account;
 pub use account::AccountChanges;
 
 mod storage;
-pub use storage::{ChangedStorage, Storage, StorageChanges, StorageChangeset};
+pub use storage::{Storage, StorageChanges, StorageChangeset, StorageTransition, StorageWipe};
 
 // todo: rewrite all the docs for this
 /// The state of accounts after execution of one or more transactions, including receipts and new
@@ -245,15 +245,39 @@ impl PostState {
     // todo: note overwrite behavior, i.e. changes in `other` take precedent
     /// Extend this [PostState] with the changes in another [PostState].
     pub fn extend(&mut self, mut other: PostState) {
-        // Update plain state
-        self.accounts.extend(other.accounts);
-        for (address, their_storage) in other.storage {
-            let our_storage = self.storage.entry(address).or_default();
-            if their_storage.wiped() {
-                our_storage.times_wiped += their_storage.times_wiped;
-                our_storage.storage.clear();
+        // Insert storage change sets
+        for (block_number, storage_changes) in std::mem::take(&mut other.storage_changes).inner {
+            for (address, their_storage_transition) in storage_changes {
+                let our_storage = self.storage.entry(address).or_default();
+                let (wipe, storage) = if their_storage_transition.wipe.is_wiped() {
+                    // Check existing storage change.
+                    match self.storage_changes.get(&block_number).and_then(|ch| ch.get(&address)) {
+                        Some(change) if change.wipe.is_wiped() => (), // already counted
+                        _ => {
+                            our_storage.times_wiped += 1;
+                        }
+                    };
+                    // Check if this is the first wipe.
+                    let wipe = if our_storage.times_wiped == 1 {
+                        StorageWipe::Primary
+                    } else {
+                        // Even if the wipe in other poststate was primary before, demote it to
+                        // secondary.
+                        StorageWipe::Secondary
+                    };
+                    let mut wiped_storage = std::mem::take(&mut our_storage.storage);
+                    wiped_storage.extend(their_storage_transition.storage);
+                    (wipe, wiped_storage)
+                } else {
+                    (StorageWipe::None, their_storage_transition.storage)
+                };
+                self.storage_changes.insert_for_block_and_address(
+                    block_number,
+                    address,
+                    wipe,
+                    storage.into_iter(),
+                );
             }
-            our_storage.storage.extend(their_storage.storage);
         }
 
         // Insert account change sets
@@ -261,19 +285,13 @@ impl PostState {
             self.account_changes.insert_for_block(block_number, account_changes);
         }
 
-        // Insert storage change sets
-        for (block_number, storage_changes) in std::mem::take(&mut other.storage_changes).inner {
-            for (address, their_storage) in storage_changes {
-                if their_storage.wiped {
-                    self.storage_changes.set_wiped(block_number, address);
-                }
-                self.storage_changes.insert_for_block_and_address(
-                    block_number,
-                    address,
-                    their_storage.storage.into_iter(),
-                );
-            }
+        // Update plain state
+        self.accounts.extend(other.accounts);
+        for (address, their_storage) in other.storage {
+            let our_storage = self.storage.entry(address).or_default();
+            our_storage.storage.extend(their_storage.storage);
         }
+
         self.receipts.extend(other.receipts);
         self.bytecode.extend(other.bytecode);
     }
@@ -291,7 +309,7 @@ impl PostState {
         for (_, storages) in storage_changes_to_revert.into_iter().rev() {
             for (address, storage) in storages {
                 self.storage.entry(address).and_modify(|head_storage| {
-                    if storage.wiped {
+                    if storage.wipe.is_wiped() {
                         head_storage.times_wiped -= 1;
                     }
                     head_storage.storage.extend(storage.clone().storage);
@@ -368,8 +386,16 @@ impl PostState {
 
         let storage = self.storage.entry(address).or_default();
         storage.times_wiped += 1;
-        storage.storage.clear();
-        self.storage_changes.set_wiped(block_number, address);
+        let wipe =
+            if storage.times_wiped == 1 { StorageWipe::Primary } else { StorageWipe::Secondary };
+
+        let wiped_storage = std::mem::take(&mut storage.storage);
+        self.storage_changes.insert_for_block_and_address(
+            block_number,
+            address,
+            wipe,
+            wiped_storage.into_iter(),
+        );
     }
 
     /// Add changed storage values to the post-state.
@@ -387,6 +413,7 @@ impl PostState {
         self.storage_changes.insert_for_block_and_address(
             block_number,
             address,
+            StorageWipe::None,
             changeset.into_iter().map(|(slot, (old, _))| (slot, old)),
         );
     }
@@ -413,19 +440,6 @@ impl PostState {
         &mut self,
         tx: &TX,
     ) -> Result<(), DbError> {
-        // Write account changes
-        tracing::trace!(target: "provider::post_state", "Writing account changes");
-        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-        for (block_number, account_changes) in
-            std::mem::take(&mut self.account_changes).inner.into_iter()
-        {
-            for (address, info) in account_changes.into_iter() {
-                tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
-                account_changeset_cursor
-                    .append_dup(block_number, AccountBeforeTx { address, info })?;
-            }
-        }
-
         // Write storage changes
         tracing::trace!(target: "provider::post_state", "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
@@ -436,13 +450,33 @@ impl PostState {
             for (address, mut storage) in storage_changes.into_iter() {
                 let storage_id = BlockNumberAddress((block_number, address));
 
-                if storage.wiped {
+                // If the account was created and wiped at the same block, skip all storage changes
+                if storage.wipe.is_wiped() &&
+                    self.account_changes
+                        .get(&block_number)
+                        .and_then(|changes| changes.get(&address).map(|info| info.is_none()))
+                        // No account info available, fallback to `false`
+                        .unwrap_or_default()
+                {
+                    continue
+                }
+
+                // If we are writing the primary storage wipe transition, the pre-existing plain
+                // storage state has to be taken from the database and written to storage history.
+                // See [StorageWipe::Primary] for more details.
+                if storage.wipe.is_primary() {
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
-                        storage.storage.insert(entry.key.into(), entry.value);
+                        let key = U256::from_be_bytes(entry.key.to_fixed_bytes());
+                        if !storage.storage.contains_key(&key) {
+                            storage.storage.insert(entry.key.into(), entry.value);
+                        }
 
                         while let Some(entry) = storages_cursor.next_dup_val()? {
-                            storage.storage.insert(entry.key.into(), entry.value);
+                            let key = U256::from_be_bytes(entry.key.to_fixed_bytes());
+                            if !storage.storage.contains_key(&key) {
+                                storage.storage.insert(entry.key.into(), entry.value);
+                            }
                         }
                     }
                 }
@@ -457,6 +491,19 @@ impl PostState {
             }
         }
 
+        // Write account changes
+        tracing::trace!(target: "provider::post_state", "Writing account changes");
+        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+        for (block_number, account_changes) in
+            std::mem::take(&mut self.account_changes).inner.into_iter()
+        {
+            for (address, info) in account_changes.into_iter() {
+                tracing::trace!(target: "provider::post_state", block_number, ?address, old = ?info, "Account changed");
+                account_changeset_cursor
+                    .append_dup(block_number, AccountBeforeTx { address, info })?;
+            }
+        }
+
         Ok(())
     }
 
@@ -467,7 +514,8 @@ impl PostState {
         // Write new storage state
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         for (address, storage) in self.storage.into_iter() {
-            // If the storage was wiped, remove all previous entries from the database.
+            // If the storage was wiped at least once, remove all previous entries from the
+            // database.
             if storage.wiped() {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
@@ -776,6 +824,197 @@ mod tests {
     }
 
     #[test]
+    fn write_to_db_multiple_selfdestructs() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect("Could not get database tx");
+
+        let address1 = Address::random();
+
+        let mut init_state = PostState::new();
+        init_state.create_account(0, address1, Account::default());
+        init_state.change_storage(
+            0,
+            address1,
+            // 0x00 => 0 => 1
+            // 0x01 => 0 => 2
+            BTreeMap::from([
+                (U256::from(0), (U256::ZERO, U256::from(1))),
+                (U256::from(1), (U256::ZERO, U256::from(2))),
+            ]),
+        );
+        init_state.write_to_db(&tx).expect("Could not write init state to DB");
+
+        let mut post_state = PostState::new();
+        post_state.change_storage(
+            1,
+            address1,
+            // 0x00 => 1 => 2
+            BTreeMap::from([(U256::from(0), (U256::from(1), U256::from(2)))]),
+        );
+        post_state.destroy_account(2, address1, Account::default());
+        post_state.create_account(3, address1, Account::default());
+        post_state.change_storage(
+            4,
+            address1,
+            // 0x00 => 0 => 2
+            // 0x02 => 0 => 4
+            // 0x06 => 0 => 6
+            BTreeMap::from([
+                (U256::from(0), (U256::ZERO, U256::from(2))),
+                (U256::from(2), (U256::ZERO, U256::from(4))),
+                (U256::from(6), (U256::ZERO, U256::from(6))),
+            ]),
+        );
+        post_state.destroy_account(5, address1, Account::default());
+
+        // Create, change, destroy and recreate in the same block.
+        post_state.create_account(6, address1, Account::default());
+        post_state.change_storage(
+            6,
+            address1,
+            // 0x00 => 0 => 2
+            BTreeMap::from([(U256::from(0), (U256::ZERO, U256::from(2)))]),
+        );
+        post_state.destroy_account(6, address1, Account::default());
+        post_state.create_account(6, address1, Account::default());
+
+        post_state.change_storage(
+            7,
+            address1,
+            // 0x00 => 0 => 9
+            BTreeMap::from([(U256::from(0), (U256::ZERO, U256::from(9)))]),
+        );
+
+        post_state.write_to_db(&tx).expect("Could not write post state to DB");
+
+        let mut storage_changeset_cursor = tx
+            .cursor_dup_read::<tables::StorageChangeSet>()
+            .expect("Could not open plain storage state cursor");
+        let mut storage_changes = storage_changeset_cursor.walk_range(..).unwrap();
+
+        // Iterate through all storage changes
+
+        // Block <number>
+        // <slot>: <expected value before>
+        // ...
+
+        // Block #0
+        // 0x00: 0
+        // 0x01: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((0, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((0, address1)),
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::ZERO }
+            )))
+        );
+
+        // Block #1
+        // 0x00: 1
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) }
+            )))
+        );
+
+        // Block #2 (destroyed)
+        // 0x00: 2
+        // 0x01: 2
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((2, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(2) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((2, address1)),
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) }
+            )))
+        );
+
+        // Block #3
+        // no storage changes
+
+        // Block #4
+        // 0x00: 0
+        // 0x02: 0
+        // 0x06: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(2), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((4, address1)),
+                StorageEntry { key: H256::from_low_u64_be(6), value: U256::ZERO }
+            )))
+        );
+
+        // Block #5 (destroyed)
+        // 0x00: 2
+        // 0x02: 4
+        // 0x06: 6
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(2) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(4) }
+            )))
+        );
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((5, address1)),
+                StorageEntry { key: H256::from_low_u64_be(6), value: U256::from(6) }
+            )))
+        );
+
+        // Block #6
+        // no storage changes (only inter block changes)
+
+        // Block #7
+        // 0x00: 0
+        assert_eq!(
+            storage_changes.next(),
+            Some(Ok((
+                BlockNumberAddress((7, address1)),
+                StorageEntry { key: H256::from_low_u64_be(0), value: U256::ZERO }
+            )))
+        );
+        assert_eq!(storage_changes.next(), None);
+    }
+
+    #[test]
     fn reuse_selfdestructed_account() {
         let address_a = Address::zero();
 
@@ -1017,12 +1256,12 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    ChangedStorage {
+                    StorageTransition {
                         storage: BTreeMap::from([
                             (U256::from(0), U256::from(0)),
                             (U256::from(1), U256::from(3))
                         ]),
-                        wiped: false,
+                        wipe: StorageWipe::None,
                     }
                 )])
             )]),
@@ -1089,9 +1328,9 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    ChangedStorage {
+                    StorageTransition {
                         storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
-                        wiped: false,
+                        wipe: StorageWipe::None,
                     }
                 )])
             )]),
@@ -1132,9 +1371,9 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    ChangedStorage {
+                    StorageTransition {
                         storage: BTreeMap::from([(U256::from(0), U256::from(1)),]),
-                        wiped: false,
+                        wipe: StorageWipe::None,
                     }
                 )])
             )]),
@@ -1166,9 +1405,9 @@ mod tests {
                 block,
                 BTreeMap::from([(
                     address,
-                    ChangedStorage {
+                    StorageTransition {
                         storage: BTreeMap::from([(U256::from(0), U256::from(0)),]),
-                        wiped: false,
+                        wipe: StorageWipe::None,
                     }
                 )])
             )]),

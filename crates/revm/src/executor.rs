@@ -604,7 +604,7 @@ mod tests {
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
-        post_state::{ChangedStorage, Storage},
+        post_state::{Storage, StorageTransition, StorageWipe},
         AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
@@ -823,8 +823,8 @@ mod tests {
                 block.number,
                 BTreeMap::from([(
                     account1,
-                    ChangedStorage {
-                        wiped: false,
+                    StorageTransition {
+                        wipe: StorageWipe::None,
                         // Slot 1 changed from 0 to 2
                         storage: BTreeMap::from([(U256::from(1), U256::ZERO)])
                     }
