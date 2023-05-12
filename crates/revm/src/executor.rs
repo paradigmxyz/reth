@@ -431,7 +431,7 @@ pub fn commit_state_changes<DB>(
                 Entry::Occupied(entry) => {
                     let entry = entry.into_mut();
 
-                    if matches!(entry.account_state, AccountState::NotExisting) {
+                    if entry.info.is_empty() {
                         let account = to_reth_acc(&account.info);
                         if !(has_state_clear_eip && account.is_empty()) {
                             post_state.create_account(block_number, address, account);
