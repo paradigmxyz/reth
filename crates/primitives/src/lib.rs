@@ -17,6 +17,7 @@ mod block;
 pub mod bloom;
 mod chain;
 mod checkpoints;
+mod compression;
 pub mod constants;
 pub mod contract;
 mod forkid;
@@ -50,6 +51,7 @@ pub use chain::{
     MAINNET, SEPOLIA,
 };
 pub use checkpoints::{AccountHashingCheckpoint, MerkleCheckpoint, StorageHashingCheckpoint};
+pub use compression::*;
 pub use constants::{
     EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
 };

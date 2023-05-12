@@ -7,7 +7,14 @@ mod compact;
 
 #[proc_macro_derive(Compact, attributes(maybe_zero))]
 pub fn derive(input: TokenStream) -> TokenStream {
-    compact::derive(input)
+    let is_zstd = false;
+    compact::derive(input, is_zstd)
+}
+
+#[proc_macro_derive(CompactZstd, attributes(maybe_zero))]
+pub fn derive_zstd(input: TokenStream) -> TokenStream {
+    let is_zstd = true;
+    compact::derive(input, is_zstd)
 }
 
 /// Implements the main codec. If the codec supports it, it will call `derive_arbitrary(..)`.
@@ -78,11 +85,22 @@ pub fn use_postcard(_args: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
-    let compact = quote! {
-        #[derive(Compact, serde::Serialize, serde::Deserialize)]
-        #ast
-    }
-    .into();
+
+    let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");
+
+    let compact = if with_zstd {
+        quote! {
+            #[derive(CompactZstd, serde::Serialize, serde::Deserialize)]
+            #ast
+        }
+        .into()
+    } else {
+        quote! {
+            #[derive(Compact, serde::Serialize, serde::Deserialize)]
+            #ast
+        }
+        .into()
+    };
 
     if let Some(first_arg) = args.clone().into_iter().next() {
         if first_arg.to_string() == "no_arbitrary" {
