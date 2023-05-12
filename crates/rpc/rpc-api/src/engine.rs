@@ -1,14 +1,12 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{
-    filter::Filter, Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, H256, U256, U64,
-};
+use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, H256, U256, U64};
 use reth_rpc_types::{
     engine::{
         ExecutionPayload, ExecutionPayloadBodies, ExecutionPayloadEnvelope, ForkchoiceState,
         ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    CallRequest, Log, RichBlock, SyncStatus,
+    CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
 
 #[cfg_attr(not(feature = "client"), rpc(server))]

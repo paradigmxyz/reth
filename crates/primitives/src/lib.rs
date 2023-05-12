@@ -19,7 +19,6 @@ mod chain;
 mod checkpoints;
 pub mod constants;
 pub mod contract;
-pub mod filter;
 mod forkid;
 mod genesis;
 mod hardfork;
