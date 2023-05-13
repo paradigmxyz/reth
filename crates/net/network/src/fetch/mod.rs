@@ -158,7 +158,14 @@ impl StateFetcher {
                 match self.download_requests_rx.poll_next_unpin(cx) {
                     Poll::Ready(Some(request)) => match request.get_priority() {
                         Priority::High => {
-                            self.queued_requests.push_front(request);
+                            // find the first normal request and queue before, add this request to
+                            // the back of the high-priority queue
+                            let pos = self
+                                .queued_requests
+                                .iter()
+                                .position(|req| req.is_normal_priority())
+                                .unwrap_or(0);
+                            self.queued_requests.insert(pos, request);
                         }
                         Priority::Normal => {
                             self.queued_requests.push_back(request);
@@ -377,11 +384,17 @@ impl DownloadRequest {
         }
     }
 
+    /// Returns the requested priority of this request
     fn get_priority(&self) -> &Priority {
         match self {
             DownloadRequest::GetBlockHeaders { priority, .. } => priority,
             DownloadRequest::GetBlockBodies { priority, .. } => priority,
         }
+    }
+
+    /// Returns `true` if this request is normal priority.
+    fn is_normal_priority(&self) -> bool {
+        self.get_priority().is_normal()
     }
 }
 
