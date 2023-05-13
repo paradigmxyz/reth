@@ -12,9 +12,9 @@ use reth_interfaces::{
     Error, Result,
 };
 use reth_primitives::{
-    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TxHash, TxNumber, Withdrawal, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
+    ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
@@ -405,6 +405,10 @@ where
         self.tree.blocks()
     }
 
+    fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
+        self.tree.header_by_hash(hash)
+    }
+
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         self.tree.block_by_hash(block_hash)
     }
@@ -441,20 +445,20 @@ where
         self.chain_info.on_forkchoice_update_received();
     }
 
-    fn set_finalized(&self, header: SealedHeader) {
-        self.chain_info.set_finalized(header);
-    }
-
-    fn set_safe(&self, header: SealedHeader) {
-        self.chain_info.set_safe(header);
+    fn last_received_update_timestamp(&self) -> Option<Instant> {
+        self.chain_info.last_forkchoice_update_received_at()
     }
 
     fn set_canonical_head(&self, header: SealedHeader) {
         self.chain_info.set_canonical_head(header);
     }
 
-    fn last_received_update_timestamp(&self) -> Option<Instant> {
-        self.chain_info.last_forkchoice_update_received_at()
+    fn set_safe(&self, header: SealedHeader) {
+        self.chain_info.set_safe(header);
+    }
+
+    fn set_finalized(&self, header: SealedHeader) {
+        self.chain_info.set_finalized(header);
     }
 }
 
@@ -478,6 +482,50 @@ where
                     self.block_by_hash(hash.block_hash)
                 }
             }
+        }
+    }
+
+    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Header>> {
+        match id {
+            BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head().unseal())),
+            BlockNumberOrTag::Finalized => {
+                Ok(self.chain_info.get_finalized_header().map(|h| h.unseal()))
+            }
+            BlockNumberOrTag::Safe => Ok(self.chain_info.get_safe_header().map(|h| h.unseal())),
+            BlockNumberOrTag::Earliest => self.header_by_number(0),
+            BlockNumberOrTag::Pending => Ok(self.tree.pending_header().map(|h| h.unseal())),
+            BlockNumberOrTag::Number(num) => self.header_by_number(num),
+        }
+    }
+
+    fn sealed_header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<SealedHeader>> {
+        match id {
+            BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head())),
+            BlockNumberOrTag::Finalized => Ok(self.chain_info.get_finalized_header()),
+            BlockNumberOrTag::Safe => Ok(self.chain_info.get_safe_header()),
+            BlockNumberOrTag::Earliest => {
+                self.header_by_number(0)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+            }
+            BlockNumberOrTag::Pending => Ok(self.tree.pending_header()),
+            BlockNumberOrTag::Number(num) => {
+                self.header_by_number(num)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+            }
+        }
+    }
+
+    fn sealed_header_by_id(&self, id: BlockId) -> Result<Option<SealedHeader>> {
+        match id {
+            BlockId::Number(num) => self.sealed_header_by_number_or_tag(num),
+            BlockId::Hash(hash) => {
+                self.header(&hash.block_hash)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+            }
+        }
+    }
+
+    fn header_by_id(&self, id: BlockId) -> Result<Option<Header>> {
+        match id {
+            BlockId::Number(num) => self.header_by_number_or_tag(num),
+            BlockId::Hash(hash) => self.header(&hash.block_hash),
         }
     }
 
