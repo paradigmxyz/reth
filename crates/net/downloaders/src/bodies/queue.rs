@@ -55,7 +55,7 @@ where
     }
 
     /// Add new request to the queue.
-    /// Expects sorted collection of headers.
+    /// Expects a sorted list of headers.
     pub(crate) fn push_new_request(
         &mut self,
         client: Arc<B>,

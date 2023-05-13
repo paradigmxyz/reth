@@ -160,8 +160,8 @@ impl Command {
                         downloader: BodiesDownloaderBuilder::default()
                             .with_stream_batch_size(batch_size as usize)
                             .with_request_limit(config.stages.bodies.downloader_request_limit)
-                            .with_max_buffered_responses(
-                                config.stages.bodies.downloader_max_buffered_responses,
+                            .with_max_buffered_blocks(
+                                config.stages.bodies.downloader_max_buffered_blocks,
                             )
                             .with_concurrent_requests_range(
                                 config.stages.bodies.downloader_min_concurrent_requests..=
