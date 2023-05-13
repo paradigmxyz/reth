@@ -12,7 +12,6 @@ use reth_interfaces::{
             response::BlockResponse,
         },
         error::{DownloadError, DownloadResult},
-        priority::Priority,
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
@@ -400,7 +399,6 @@ where
                             Arc::clone(&this.client),
                             Arc::clone(&this.consensus),
                             request,
-                            Priority::Normal,
                         );
                         new_request_submitted = true;
                     }
