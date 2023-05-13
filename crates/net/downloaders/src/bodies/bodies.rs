@@ -57,8 +57,10 @@ pub struct BodiesDownloader<B: BodiesClient, DB> {
     stream_batch_size: usize,
     /// The allowed range for number of concurrent requests.
     concurrent_requests_range: RangeInclusive<usize>,
-    /// Maximum amount of received bodies to buffer internally.
-    max_buffered_responses: usize,
+    /// Maximum amount of received blocks to buffer internally.
+    max_buffered_blocks: usize,
+    /// Current number of buffered blocks
+    num_buffered_blocks: usize,
     /// The range of block numbers for body download.
     download_range: RangeInclusive<BlockNumber>,
     /// The latest block number returned.
@@ -67,7 +69,7 @@ pub struct BodiesDownloader<B: BodiesClient, DB> {
     in_progress_queue: BodiesRequestQueue<B>,
     /// Buffered responses
     buffered_responses: BinaryHeap<OrderedBodiesResponse>,
-    /// Queued body responses
+    /// Queued body responses that can be returned for insertion into the database.
     queued_bodies: Vec<BlockResponse>,
     /// The bodies downloader metrics.
     metrics: DownloaderMetrics,
@@ -90,10 +92,10 @@ where
         self.query_headers(start_at..=*self.download_range.end(), limit)
     }
 
-    /// Retrieve a batch of headers from the database starting from provided block number.
+    /// Retrieve a batch of headers from the database starting from the provided block number.
     ///
     /// This method is going to return the batch as soon as one of the conditions below
-    /// is fullfilled:
+    /// is fulfilled:
     ///     1. The number of non-empty headers in the batch equals requested.
     ///     2. The total number of headers in the batch (both empty and non-empty)
     ///        is greater than or equal to the stream batch size.
@@ -109,23 +111,23 @@ where
             return Ok(None)
         }
 
+        // Collection of results
+        let mut headers = Vec::new();
+
+        // Non empty headers count
+        let mut non_empty_headers = 0;
+        let mut current_block_num = *range.start();
+
         // Acquire cursors over canonical and header tables
         let tx = self.db.tx()?;
         let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
-        // Non empty headers count
-        let mut non_empty_headers = 0;
-
-        // Collection of results
-        let mut headers = Vec::<SealedHeader>::default();
-
-        let mut current_block_num = *range.start();
-
         // Collect headers while
         //      1. Current block number is in range
         //      2. The number of non empty headers is less than maximum
-        //      3. The total number of headers is less than the stream batch size
+        //      3. The total number of headers is less than the stream batch size (this is only
+        // relevant if the range consists entirely of empty headers)
         while range.contains(&current_block_num) &&
             non_empty_headers < max_non_empty &&
             headers.len() < self.stream_batch_size
@@ -182,6 +184,11 @@ where
         max_dynamic.min(*self.concurrent_requests_range.end())
     }
 
+    /// Returns true if the number of buffered blocks is lower than the configured maximum
+    fn has_buffer_capacity(&self) -> bool {
+        self.num_buffered_blocks < self.max_buffered_blocks
+    }
+
     // Check if the stream is terminated
     fn is_terminated(&self) -> bool {
         // There is nothing to request if the range is empty
@@ -205,28 +212,50 @@ where
         self.download_range = RangeInclusive::new(1, 0);
         self.latest_queued_block_number.take();
         self.in_progress_queue.clear();
-        self.buffered_responses.clear();
         self.queued_bodies.clear();
+        self.buffered_responses.clear();
+        self.num_buffered_blocks = 0;
 
+        // reset metrics
         self.metrics.in_flight_requests.set(0.);
         self.metrics.buffered_responses.set(0.);
+        self.metrics.buffered_blocks.set(0.);
+        self.metrics.queued_blocks.set(0.);
     }
 
     /// Queues bodies and sets the latest queued block number
     fn queue_bodies(&mut self, bodies: Vec<BlockResponse>) {
         self.latest_queued_block_number = Some(bodies.last().expect("is not empty").block_number());
         self.queued_bodies.extend(bodies.into_iter());
+        self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
+    }
+
+    /// Removes the next response from the buffer.
+    fn pop_buffered_response(&mut self) -> Option<OrderedBodiesResponse> {
+        let resp = self.buffered_responses.pop()?;
+        self.metrics.buffered_responses.decrement(1.);
+        self.num_buffered_blocks -= resp.0.len();
+        self.metrics.buffered_blocks.set(self.num_buffered_blocks as f64);
+        Some(resp)
+    }
+
+    /// Adds a new response to the internal buffer
+    fn buffer_bodies_response(&mut self, response: Vec<BlockResponse>) {
+        self.num_buffered_blocks += response.len();
+        self.metrics.buffered_blocks.set(self.num_buffered_blocks as f64);
+        let response = OrderedBodiesResponse(response);
+        self.buffered_responses.push(response);
+        self.metrics.buffered_responses.set(self.buffered_responses.len() as f64);
     }
 
     /// Returns a response if it's first block number matches the next expected.
     fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse>> {
         if let Some(next) = self.buffered_responses.peek() {
             let expected = self.next_expected_block_number();
-            let next_block_rng = next.block_range();
+            let next_block_range = next.block_range();
 
-            if next_block_rng.contains(&expected) {
-                return self.buffered_responses.pop().map(|buffered| {
-                    self.metrics.buffered_responses.decrement(1.);
+            if next_block_range.contains(&expected) {
+                return self.pop_buffered_response().map(|buffered| {
                     buffered
                         .0
                         .into_iter()
@@ -237,10 +266,21 @@ where
             }
 
             // Drop buffered response since we passed that range
-            if *next_block_rng.end() < expected {
-                self.metrics.buffered_responses.decrement(1.);
-                self.buffered_responses.pop();
+            if *next_block_range.end() < expected {
+                self.pop_buffered_response();
             }
+        }
+        None
+    }
+
+    /// Returns the next batch of block bodies that can be returned if we have enough buffered
+    /// bodies
+    fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse>> {
+        if self.queued_bodies.len() >= self.stream_batch_size {
+            let next_batch = self.queued_bodies.drain(..self.stream_batch_size).collect::<Vec<_>>();
+            self.metrics.total_flushed.increment(next_batch.len() as u64);
+            self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
+            return Some(next_batch)
         }
         None
     }
@@ -326,14 +366,17 @@ where
         }
         // Submit new requests and poll any in progress
         loop {
+            // Yield next batch if ready
+            if let Some(next_batch) = this.try_split_next_batch() {
+                return Poll::Ready(Some(Ok(next_batch)))
+            }
+
             // Poll requests
             while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
                 this.metrics.in_flight_requests.decrement(1.);
                 match response {
                     Ok(response) => {
-                        let response = OrderedBodiesResponse(response);
-                        this.buffered_responses.push(response);
-                        this.metrics.buffered_responses.increment(1.);
+                        this.buffer_bodies_response(response);
                     }
                     Err(error) => {
                         tracing::debug!(target: "downloaders::bodies", ?error, "Request failed");
@@ -348,7 +391,7 @@ where
             // Submit new requests
             let concurrent_requests_limit = this.concurrent_request_limit();
             'inner: while this.in_progress_queue.len() < concurrent_requests_limit &&
-                this.buffered_responses.len() < this.max_buffered_responses
+                this.has_buffer_capacity()
             {
                 match this.next_headers_request() {
                     Ok(Some(request)) => {
@@ -374,26 +417,21 @@ where
                 this.queue_bodies(buf_response);
             }
 
-            // Yield next batch
-            if this.queued_bodies.len() >= this.stream_batch_size {
-                let next_batch = this.queued_bodies.drain(..this.stream_batch_size);
-                this.metrics.total_flushed.increment(next_batch.len() as u64);
-                return Poll::Ready(Some(Ok(next_batch.collect())))
-            }
-
             if !new_request_submitted {
                 break
             }
         }
+
         // All requests are handled, stream is finished
         if this.in_progress_queue.is_empty() {
             if this.queued_bodies.is_empty() {
                 return Poll::Ready(None)
             }
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
-            let next_batch = this.queued_bodies.drain(..batch_size);
+            let next_batch = this.queued_bodies.drain(..batch_size).collect::<Vec<_>>();
             this.metrics.total_flushed.increment(next_batch.len() as u64);
-            return Poll::Ready(Some(Ok(next_batch.collect())))
+            this.metrics.queued_blocks.set(this.queued_bodies.len() as f64);
+            return Poll::Ready(Some(Ok(next_batch)))
         }
 
         Poll::Pending
@@ -442,23 +480,25 @@ impl Ord for OrderedBodiesResponse {
 }
 
 /// Builder for [BodiesDownloader].
+#[derive(Debug, Clone)]
 pub struct BodiesDownloaderBuilder {
     /// The batch size of non-empty blocks per one request
-    request_limit: u64,
+    pub request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
-    stream_batch_size: usize,
+    pub stream_batch_size: usize,
     /// Maximum amount of received bodies to buffer internally.
-    max_buffered_responses: usize,
+    pub max_buffered_blocks: usize,
     /// The maximum number of requests to send concurrently.
-    concurrent_requests_range: RangeInclusive<usize>,
+    pub concurrent_requests_range: RangeInclusive<usize>,
 }
 
 impl Default for BodiesDownloaderBuilder {
     fn default() -> Self {
         Self {
             request_limit: 200,
-            stream_batch_size: 1000,
-            max_buffered_responses: 30000,
+            stream_batch_size: 10_000,
+            // With high block sizes at around 100kb this will be ~4GB of buffered blocks: ~43k
+            max_buffered_blocks: 4 * 1024 * 1024 * 1024 / 100,
             concurrent_requests_range: 5..=100,
         }
     }
@@ -487,12 +527,12 @@ impl BodiesDownloaderBuilder {
     }
 
     /// Set on the downloader.
-    pub fn with_max_buffered_responses(mut self, max_buffered_responses: usize) -> Self {
-        self.max_buffered_responses = max_buffered_responses;
+    pub fn with_max_buffered_blocks(mut self, max_buffered_responses: usize) -> Self {
+        self.max_buffered_blocks = max_buffered_responses;
         self
     }
 
-    /// Consume self and return the concurrent donwloader.
+    /// Consume self and return the concurrent downloader.
     pub fn build<B, DB>(
         self,
         client: B,
@@ -507,7 +547,7 @@ impl BodiesDownloaderBuilder {
             request_limit,
             stream_batch_size,
             concurrent_requests_range,
-            max_buffered_responses,
+            max_buffered_blocks: max_buffered_responses,
         } = self;
         let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
         let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
@@ -517,7 +557,7 @@ impl BodiesDownloaderBuilder {
             db,
             request_limit,
             stream_batch_size,
-            max_buffered_responses,
+            max_buffered_blocks: max_buffered_responses,
             concurrent_requests_range,
             in_progress_queue,
             metrics,
@@ -525,6 +565,7 @@ impl BodiesDownloaderBuilder {
             latest_queued_block_number: None,
             buffered_responses: Default::default(),
             queued_bodies: Default::default(),
+            num_buffered_blocks: 0,
         }
     }
 }
