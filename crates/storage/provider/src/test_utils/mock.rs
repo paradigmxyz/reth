@@ -8,8 +8,8 @@ use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, StorageKey, StorageValue,
-    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey,
+    StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -303,6 +303,17 @@ impl BlockProviderIdExt for MockEthProvider {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
             BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+        }
+    }
+
+    fn sealed_header_by_id(&self, id: BlockId) -> Result<Option<SealedHeader>> {
+        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+    }
+
+    fn header_by_id(&self, id: BlockId) -> Result<Option<Header>> {
+        match self.block_by_id(id)? {
+            None => Ok(None),
+            Some(block) => Ok(Some(block.header)),
         }
     }
 

@@ -3,7 +3,7 @@ use crate::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, Header, SealedBlock, H256,
+    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, Header, SealedBlock, SealedHeader, H256,
 };
 
 /// A helper enum that represents the origin of the requested block.
@@ -106,6 +106,33 @@ pub trait BlockProviderIdExt: BlockProvider + BlockIdProvider {
     ///
     /// Returns `None` if block is not found.
     fn block_by_id(&self, id: BlockId) -> Result<Option<Block>>;
+
+    /// Returns the header with matching tag from the database
+    ///
+    /// Returns `None` if header is not found.
+    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Header>> {
+        self.convert_block_number(id)?
+            .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))
+    }
+
+    /// Returns the header with matching tag from the database
+    ///
+    /// Returns `None` if header is not found.
+    fn sealed_header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<SealedHeader>> {
+        self.convert_block_number(id)?
+            .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
+            .map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+    }
+
+    /// Returns the sealed header with the matching `BlockId` from the database.
+    ///
+    /// Returns `None` if header is not found.
+    fn sealed_header_by_id(&self, id: BlockId) -> Result<Option<SealedHeader>>;
+
+    /// Returns the header with the matching `BlockId` from the database.
+    ///
+    /// Returns `None` if header is not found.
+    fn header_by_id(&self, id: BlockId) -> Result<Option<Header>>;
 
     /// Returns the ommers with the matching tag from the database.
     fn ommers_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Vec<Header>>> {
