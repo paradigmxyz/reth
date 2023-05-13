@@ -101,15 +101,26 @@ impl Default for TotalDifficultyConfig {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
+    ///
+    /// Default: 200
     pub downloader_request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
+    ///
+    /// Default: 10_000
     pub downloader_stream_batch_size: usize,
     /// Maximum amount of received bodies to buffer internally.
     /// The response contains multiple bodies.
-    pub downloader_max_buffered_responses: usize,
+    ///
+    /// Default: ~43_000 or 4GB with block size of 100kb
+    pub downloader_max_buffered_blocks: usize,
     /// The minimum number of requests to send concurrently.
+    ///
+    /// Default: 5
     pub downloader_min_concurrent_requests: usize,
     /// The maximum number of requests to send concurrently.
+    /// This is equal to the max number of peers.
+    ///
+    /// Default: 100
     pub downloader_max_concurrent_requests: usize,
 }
 
@@ -117,8 +128,9 @@ impl Default for BodiesConfig {
     fn default() -> Self {
         Self {
             downloader_request_limit: 200,
-            downloader_stream_batch_size: 10000,
-            downloader_max_buffered_responses: 1000,
+            downloader_stream_batch_size: 10_000,
+            // With high block sizes at around 100kb this will be ~4GB of buffered blocks: ~43k
+            downloader_max_buffered_blocks: 4 * 1024 * 1024 * 1024 / 100,
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
@@ -130,7 +142,7 @@ impl From<BodiesConfig> for BodiesDownloaderBuilder {
         BodiesDownloaderBuilder::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
             .with_request_limit(config.downloader_request_limit)
-            .with_max_buffered_responses(config.downloader_max_buffered_responses)
+            .with_max_buffered_blocks(config.downloader_max_buffered_blocks)
             .with_concurrent_requests_range(
                 config.downloader_min_concurrent_requests..=
                     config.downloader_max_concurrent_requests,

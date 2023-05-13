@@ -186,7 +186,7 @@ impl std::ops::DerefMut for SealedBlock {
 pub struct SealedBlockWithSenders {
     /// Sealed block
     pub block: SealedBlock,
-    /// List of senders that match trasanctions from block.
+    /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
 }
 
