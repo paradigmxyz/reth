@@ -67,8 +67,8 @@ impl<C> EthRequestHandler<C> {
         client: C,
         peers: PeersHandle,
         incoming: UnboundedReceiver<IncomingEthRequest>,
-        metrics: EthRequestHandlerMetrics,
     ) -> Self {
+        let metrics = Default::default();
         Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming), metrics }
     }
 }

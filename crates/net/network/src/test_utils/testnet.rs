@@ -242,8 +242,7 @@ where
         let (tx, rx) = unbounded_channel();
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
-        let metrics = Default::default();
-        let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx, metrics);
+        let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);
         self.request_handler = Some(request_handler);
     }
 }
