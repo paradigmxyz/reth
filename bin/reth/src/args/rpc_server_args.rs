@@ -175,7 +175,7 @@ impl RpcServerArgs {
         events: Events,
         engine_api: Engine,
         jwt_secret: JwtSecret,
-        gas_price_oracle_config: GasPriceOracleConfig,
+        gpo_config: GasPriceOracleConfig,
     ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
     where
         Client: BlockProviderIdExt
@@ -194,9 +194,8 @@ impl RpcServerArgs {
         let auth_config = self.auth_server_config(jwt_secret)?;
 
         let mut module_config = self.transport_rpc_module_config();
-        module_config = module_config.with_config(RpcModuleConfig::new(
-            EthConfig::with_gas_price_oracle_config(gas_price_oracle_config),
-        ));
+        module_config =
+            module_config.with_config(RpcModuleConfig::new(EthConfig::with_gpo_config(gpo_config)));
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
         let (rpc_modules, auth_module) = RpcModuleBuilder::default()

@@ -60,7 +60,7 @@ impl Default for GasPriceOracleConfig {
 }
 
 impl GasPriceOracleConfig {
-    /// Creating a new, sharable config
+    /// Creating a new gpo config with blocks, ignoreprice, maxprice and percentile
     pub fn new(
         blocks: Option<u32>,
         ignore_price: Option<u64>,
