@@ -1,6 +1,6 @@
 //! Blocks/Headers management for the p2p network.
 
-use crate::peers::PeersHandle;
+use crate::{metrics::EthRequestHandlerMetrics, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
@@ -55,6 +55,8 @@ pub struct EthRequestHandler<C> {
     peers: PeersHandle,
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
+    /// Metrics for the eth request handler.
+    metrics: EthRequestHandlerMetrics,
 }
 
 // === impl EthRequestHandler ===
@@ -64,8 +66,9 @@ impl<C> EthRequestHandler<C> {
         client: C,
         peers: PeersHandle,
         incoming: UnboundedReceiver<IncomingEthRequest>,
+        metrics: EthRequestHandlerMetrics,
     ) -> Self {
-        Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming) }
+        Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming), metrics }
     }
 }
 

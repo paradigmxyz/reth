@@ -119,3 +119,23 @@ impl DisconnectMetrics {
         }
     }
 }
+
+/// Metrics for the EthRequestHandler
+#[derive(Metrics)]
+#[metrics(scope = "network")]
+pub struct EthRequestHandlerMetrics {
+    /// Total number of requests received
+    pub(crate) requests_received: Counter,
+
+    /// Total number of requests served
+    pub(crate) requests_processed: Counter,
+
+    /// Total number of requests that failed to be served
+    pub(crate) requests_failed: Counter,
+
+    /// Total number of requests that timed out
+    pub(crate) requests_timed_out: Counter,
+
+    /// Total number of requests that were cancelled
+    pub(crate) requests_cancelled: Counter,
+}

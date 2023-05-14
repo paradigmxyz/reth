@@ -52,7 +52,8 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_eth_request_handler(tx);
         let peers = network.handle().peers_handle().clone();
-        let request_handler = EthRequestHandler::new(client, peers, rx);
+        let metrics = Default::default();
+        let request_handler = EthRequestHandler::new(client, peers, rx, metrics);
         NetworkBuilder { network, request_handler, transactions }
     }
 }
