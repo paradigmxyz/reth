@@ -4,7 +4,7 @@ use crate::eth::{
     cache::EthStateCache,
     error::{EthApiError, EthResult, InvalidTransactionError},
 };
-use reth_primitives::{constants::GWEI_TO_WEI, BlockId, BlockNumberOrTag, H256, U256};
+use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, H256, U256};
 use reth_provider::BlockProviderIdExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -82,7 +82,7 @@ where
         mut oracle_config: GasPriceOracleConfig,
         cache: EthStateCache,
     ) -> Self {
-        // sanitize the perentile to be less than 100
+        // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {
             warn!(prev_percentile=?oracle_config.percentile, "Invalid configured gas price percentile, using 100 instead");
             oracle_config.percentile = 100;
@@ -93,13 +93,10 @@ where
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
     pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
-        let block = self
+        let header = self
             .client
-            .block_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
-
-        // seal for the block hash
-        let header = block.header.seal_slow();
 
         let mut last_price = self.last_price.lock().await;
 

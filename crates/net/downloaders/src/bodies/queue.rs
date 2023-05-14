@@ -53,7 +53,7 @@ where
         self.last_requested_block_number.take();
     }
 
-    /// Add a new request to the queue.
+    /// Add new request to the queue.
     /// Expects a sorted list of headers.
     pub(crate) fn push_new_request(
         &mut self,

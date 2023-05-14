@@ -1,5 +1,7 @@
 use crate::{executor::Error as ExecutionError, Error};
-use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{
+    BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
+};
 use std::collections::{BTreeMap, HashSet};
 
 /// * [BlockchainTreeEngine::insert_block]: Connect block to chain, execute it and if valid insert
@@ -90,6 +92,11 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Caution: This will not return blocks from the canonical chain.
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
 
+    /// Returns the header with matching hash from the tree, if it exists.
+    ///
+    /// Caution: This will not return headers from the canonical chain.
+    fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader>;
+
     /// Returns the block with matching hash from the tree, if it exists.
     ///
     /// Caution: This will not return blocks from the canonical chain.
@@ -123,5 +130,10 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Returns the pending block if there is one.
     fn pending_block(&self) -> Option<SealedBlock> {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
+    }
+
+    /// Returns the pending block if there is one.
+    fn pending_header(&self) -> Option<SealedHeader> {
+        self.header_by_hash(self.pending_block_num_hash()?.hash)
     }
 }

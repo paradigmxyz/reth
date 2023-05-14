@@ -130,7 +130,7 @@ impl Default for BodiesConfig {
             downloader_request_limit: 200,
             downloader_stream_batch_size: 10_000,
             // With high block sizes at around 100kb this will be ~4GB of buffered blocks: ~43k
-            downloader_max_buffered_blocks: 4 * 1024 * 1024 * 1024 / 100,
+            downloader_max_buffered_blocks: 4 * 1024 * 1024 * 1024 / 100_000,
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
