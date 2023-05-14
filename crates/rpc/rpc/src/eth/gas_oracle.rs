@@ -67,21 +67,14 @@ impl GasPriceOracleConfig {
         max_price: Option<u64>,
         percentile: Option<u32>,
     ) -> Self {
-        let max_price =
-            if max_price.is_some() { U256::from(max_price.unwrap()) } else { DEFAULT_MAX_PRICE };
-        let ignore_price = if ignore_price.is_some() {
-            U256::from(ignore_price.unwrap())
-        } else {
-            DEFAULT_IGNORE_PRICE
-        };
         Self {
             blocks: blocks.unwrap_or(20),
             percentile: percentile.unwrap_or(60),
             max_header_history: 1024,
             max_block_history: 1024,
             default: None,
-            max_price: Some(max_price),
-            ignore_price: Some(ignore_price),
+            max_price: max_price.map(|p| U256::from(p)).or(Some(DEFAULT_MAX_PRICE)),
+            ignore_price: ignore_price.map(|p| U256::from(p)).or(Some(DEFAULT_IGNORE_PRICE)),
         }
     }
 }
