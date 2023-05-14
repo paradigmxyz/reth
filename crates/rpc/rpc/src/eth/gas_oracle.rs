@@ -59,6 +59,33 @@ impl Default for GasPriceOracleConfig {
     }
 }
 
+impl GasPriceOracleConfig {
+    /// Creating a new, sharable config
+    pub fn new(
+        blocks: Option<u32>,
+        ignore_price: Option<u64>,
+        max_price: Option<u64>,
+        percentile: Option<u32>,
+    ) -> Self {
+        let max_price =
+            if max_price.is_some() { U256::from(max_price.unwrap()) } else { DEFAULT_MAX_PRICE };
+        let ignore_price = if ignore_price.is_some() {
+            U256::from(ignore_price.unwrap())
+        } else {
+            DEFAULT_IGNORE_PRICE
+        };
+        Self {
+            blocks: blocks.unwrap_or(20),
+            percentile: percentile.unwrap_or(60),
+            max_header_history: 1024,
+            max_block_history: 1024,
+            default: None,
+            max_price: Some(max_price),
+            ignore_price: Some(ignore_price),
+        }
+    }
+}
+
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
 pub struct GasPriceOracle<Client> {

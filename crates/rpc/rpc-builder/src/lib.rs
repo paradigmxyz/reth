@@ -349,6 +349,10 @@ impl RpcModuleConfig {
     pub fn builder() -> RpcModuleConfigBuilder {
         RpcModuleConfigBuilder::default()
     }
+    /// Returns a new RPC module config given the eth namespace config
+    pub fn new(eth: EthConfig) -> Self {
+        Self { eth }
+    }
 }
 
 /// Configures [RpcModuleConfig]

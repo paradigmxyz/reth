@@ -2,7 +2,7 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
+    args::{get_secret_key, DebugArgs, GasPriceOracleArgs, NetworkArgs, RpcServerArgs},
     dirs::DataDirPath,
     prometheus_exporter,
     runner::CliContext,
@@ -43,6 +43,7 @@ use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, 
 use reth_provider::{BlockProvider, CanonStateSubscriptions, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
+use reth_rpc::eth::gas_oracle::GasPriceOracleConfig;
 use reth_rpc_engine_api::EngineApi;
 use reth_staged_sync::{
     utils::{
@@ -117,6 +118,9 @@ pub struct Command {
     /// The metrics will be served at the given interface and port.
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     metrics: Option<SocketAddr>,
+
+    #[clap(flatten)]
+    gas_price_oracle: GasPriceOracleArgs,
 
     #[clap(flatten)]
     network: NetworkArgs,
@@ -373,6 +377,14 @@ impl Command {
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
+        // configure the gas price oracle
+        let gas_price_oracle_config = GasPriceOracleConfig::new(
+            self.gas_price_oracle.blocks,
+            self.gas_price_oracle.ignore_price,
+            self.gas_price_oracle.max_price,
+            self.gas_price_oracle.percentile,
+        );
+
         // Start RPC servers
         let (_rpc_server, _auth_server) = self
             .rpc
@@ -384,6 +396,7 @@ impl Command {
                 blockchain_tree,
                 engine_api,
                 jwt_secret,
+                gas_price_oracle_config,
             )
             .await?;
 
