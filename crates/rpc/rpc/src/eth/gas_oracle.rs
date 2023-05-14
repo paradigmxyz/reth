@@ -73,8 +73,8 @@ impl GasPriceOracleConfig {
             max_header_history: 1024,
             max_block_history: 1024,
             default: None,
-            max_price: max_price.map(|p| U256::from(p)).or(Some(DEFAULT_MAX_PRICE)),
-            ignore_price: ignore_price.map(|p| U256::from(p)).or(Some(DEFAULT_IGNORE_PRICE)),
+            max_price: max_price.map(U256::from).or(Some(DEFAULT_MAX_PRICE)),
+            ignore_price: ignore_price.map(U256::from).or(Some(DEFAULT_IGNORE_PRICE)),
         }
     }
 }
