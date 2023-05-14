@@ -56,6 +56,7 @@ pub struct EthRequestHandler<C> {
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
     /// Metrics for the eth request handler.
+    #[allow(unused)]
     metrics: EthRequestHandlerMetrics,
 }
 

@@ -125,17 +125,22 @@ impl DisconnectMetrics {
 #[metrics(scope = "network")]
 pub struct EthRequestHandlerMetrics {
     /// Total number of requests received
+    #[allow(unused)]
     pub(crate) requests_received: Counter,
 
     /// Total number of requests served
+    #[allow(unused)]
     pub(crate) requests_processed: Counter,
 
     /// Total number of requests that failed to be served
+    #[allow(unused)]
     pub(crate) requests_failed: Counter,
 
     /// Total number of requests that timed out
+    #[allow(unused)]
     pub(crate) requests_timed_out: Counter,
 
     /// Total number of requests that were cancelled
+    #[allow(unused)]
     pub(crate) requests_cancelled: Counter,
 }
