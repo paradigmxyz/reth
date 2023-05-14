@@ -4969,6 +4969,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-util 0.7.7",
  "tower",
  "tracing",
