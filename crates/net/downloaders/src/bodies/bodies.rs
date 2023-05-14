@@ -26,15 +26,6 @@ use std::{
     task::{Context, Poll},
 };
 
-/// The multiplier for the number of connected peers.
-/// This might be used as an upper bound for determining the
-/// number of concurrent requests.
-///
-/// The multiplier is needed to optimistically increase the number
-/// of concurrent requests, since we are expecting to connect to more peers
-/// in the near future.
-const CONCURRENCY_PEER_MULTIPLIER: usize = 4;
-
 /// The scope for headers downloader metrics.
 pub const BODIES_DOWNLOADER_SCOPE: &str = "downloaders.bodies";
 
@@ -171,17 +162,14 @@ where
     fn concurrent_request_limit(&self) -> usize {
         let num_peers = self.client.num_connected_peers();
 
-        // we try to keep more requests than available peers active so that there's always a
-        // followup request available for a peer
-        let dynamic_target = num_peers * CONCURRENCY_PEER_MULTIPLIER;
-        let max_dynamic = dynamic_target.max(*self.concurrent_requests_range.start());
+        let max_requests = num_peers.max(*self.concurrent_requests_range.start());
 
-        // If only a few peers are connected we keep it low
+        // if we're only connected to a few peers, we keep it low
         if num_peers < *self.concurrent_requests_range.start() {
-            return max_dynamic
+            return max_requests
         }
 
-        max_dynamic.min(*self.concurrent_requests_range.end())
+        max_requests.min(*self.concurrent_requests_range.end())
     }
 
     /// Returns true if the number of buffered blocks is lower than the configured maximum
