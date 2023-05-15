@@ -306,11 +306,11 @@ where
                         let (res, _) = inspect(&mut db, env, &mut inspector)?;
                         results.push(f(tx_info, inspector, res.result)?);
 
-                        // need to apply the state changes of this transaction before executing the next
-                        // transaction
+                        // need to apply the state changes of this transaction before executing the
+                        // next transaction
                         if transactions.peek().is_some() {
-                            // need to apply the state changes of this transaction before executing the
-                            // next transaction
+                            // need to apply the state changes of this transaction before executing
+                            // the next transaction
                             db.commit(res.state)
                         }
                     }
@@ -319,7 +319,7 @@ where
                 })
                 .map(Some)
         })
-            .await
+        .await
     }
 
     /// Returns traces created at given block.
@@ -348,14 +348,19 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> EthResult<Option<Vec<TraceResultsWithTransactionHash>>> {
-        self.trace_block_with(block_id, tracing_config(&trace_types), move |tx_info, inspector, res| {
-            let full_trace = inspector.into_parity_builder().into_trace_results(res, &trace_types);
-            let trace = TraceResultsWithTransactionHash {
-                transaction_hash: tx_info.hash.expect("tx hash is set"),
-                full_trace,
-            };
-            Ok(trace)
-        })
+        self.trace_block_with(
+            block_id,
+            tracing_config(&trace_types),
+            move |tx_info, inspector, res| {
+                let full_trace =
+                    inspector.into_parity_builder().into_trace_results(res, &trace_types);
+                let trace = TraceResultsWithTransactionHash {
+                    transaction_hash: tx_info.hash.expect("tx hash is set"),
+                    full_trace,
+                };
+                Ok(trace)
+            },
+        )
         .await
     }
 }

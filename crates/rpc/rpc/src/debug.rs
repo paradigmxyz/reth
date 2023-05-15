@@ -29,7 +29,7 @@ use reth_rpc_types::{
 use reth_tasks::TaskSpawner;
 use revm::primitives::Env;
 use revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv};
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -62,6 +62,23 @@ where
     Client: BlockProviderIdExt + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
+    /// Executes the future on a new blocking task.
+    async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
+    where
+        C: FnOnce(Self) -> F,
+        F: Future<Output = EthResult<R>> + Send + 'static,
+        R: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        let f = c(this);
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+            let res = f.await;
+            let _ = tx.send(res);
+        }));
+        rx.await.map_err(|_| EthApiError::InternalTracingError)?
+    }
+
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
         self.inner.tracing_call_guard.clone().acquire_owned().await
@@ -109,13 +126,10 @@ where
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = this.trace_block_with_sync(at, transactions, cfg, block_env, opts);
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| EthApiError::InternalTracingError)?
+        self.on_blocking_task(|this| async move {
+            this.trace_block_with_sync(at, transactions, cfg, block_env, opts)
+        })
+        .await
     }
 
     /// Replays the given block and returns the trace of each transaction.
@@ -144,13 +158,10 @@ where
         block_id: BlockId,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = this.try_debug_trace_block(block_id, opts).await;
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| EthApiError::InternalTracingError)?
+        self.on_blocking_task(
+            |this| async move { this.try_debug_trace_block(block_id, opts).await },
+        )
+        .await
     }
 
     async fn try_debug_trace_block(
@@ -195,11 +206,9 @@ where
         // block the transaction is included in
         let state_at = block.parent_hash;
         let block_txs = block.body;
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
 
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = this.inner.eth_api.with_state_at_block(state_at.into(), |state| {
+        self.on_blocking_task(|this| async move {
+            this.inner.eth_api.with_state_at_block(state_at.into(), |state| {
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
@@ -215,10 +224,9 @@ where
 
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
                 trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
-            });
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| EthApiError::InternalTracingError)?
+            })
+        })
+        .await
     }
 
     /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
@@ -229,13 +237,10 @@ where
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
     ) -> EthResult<GethTraceFrame> {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = this.try_debug_trace_call(call, block_id, opts).await;
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| EthApiError::InternalTracingError)?
+        self.on_blocking_task(|this| async move {
+            this.try_debug_trace_call(call, block_id, opts).await
+        })
+        .await
     }
 
     /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
