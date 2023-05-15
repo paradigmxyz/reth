@@ -1,9 +1,8 @@
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
-use reth_beacon_consensus::{BeaconEngineError, BeaconForkChoiceUpdateError};
+use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{H256, U256};
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot};
 
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
@@ -15,7 +14,7 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
-/// Note: This is a high fidelity error type which can be converted to an RPC error that adheres to the spec: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
+/// Note: This is a high-fidelity error type which can be converted to an RPC error that adheres to the spec: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
 #[derive(Error, Debug)]
 pub enum EngineApiError {
     /// Unknown payload requested.
@@ -64,33 +63,18 @@ pub enum EngineApiError {
         /// Consensus terminal block hash.
         consensus: H256,
     },
-    /// Beacon consensus engine error.
-    #[error(transparent)]
-    ConsensusEngine(#[from] BeaconEngineError),
-    /// An error occurred while processing the fork choice update.
+    /// An error occurred while processing the fork choice update in the beacon consensus engine.
     #[error(transparent)]
     ForkChoiceUpdate(#[from] BeaconForkChoiceUpdateError),
+    /// An error occurred while processing a new payload in the beacon consensus engine.
+    #[error(transparent)]
+    NewPayload(#[from] BeaconOnNewPayloadError),
     /// Encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
-    /// Failed to send message due ot closed channel
-    #[error("Closed channel")]
-    ChannelClosed,
     /// Fetching the payload failed
     #[error(transparent)]
     GetPayloadError(#[from] PayloadBuilderError),
-}
-
-impl<T> From<mpsc::error::SendError<T>> for EngineApiError {
-    fn from(_: mpsc::error::SendError<T>) -> Self {
-        EngineApiError::ChannelClosed
-    }
-}
-
-impl From<oneshot::error::RecvError> for EngineApiError {
-    fn from(_: oneshot::error::RecvError) -> Self {
-        EngineApiError::ChannelClosed
-    }
 }
 
 impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -102,15 +86,22 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::HasWithdrawalsPreShanghai => INVALID_PARAMS_CODE,
             EngineApiError::UnknownPayload => UNKNOWN_PAYLOAD_CODE,
             EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
+
+            // Error responses from the consensus engine
+            EngineApiError::ForkChoiceUpdate(err) => match err {
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => return err.into(),
+                BeaconForkChoiceUpdateError::EngineUnavailable => INTERNAL_ERROR_CODE,
+            },
+            EngineApiError::NewPayload(ref err) => match err {
+                BeaconOnNewPayloadError::EngineUnavailable => INTERNAL_ERROR_CODE,
+            },
             // Any other server error
-            _ => INTERNAL_ERROR_CODE,
+            EngineApiError::TerminalTD { .. } |
+            EngineApiError::TerminalBlockHash { .. } |
+            EngineApiError::Internal(_) |
+            EngineApiError::GetPayloadError(_) => INTERNAL_ERROR_CODE,
         };
-        jsonrpsee_types::error::ErrorObject::owned(
-            code,
-            // TODO properly convert to rpc error
-            error.to_string(),
-            None::<()>,
-        )
+        jsonrpsee_types::error::ErrorObject::owned(code, error.to_string(), None::<()>)
     }
 }
 

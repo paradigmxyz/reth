@@ -1,4 +1,4 @@
-use crate::{BeaconConsensusEngineEvent, BeaconEngineResult};
+use crate::{engine::error::BeaconOnNewPayloadError, BeaconConsensusEngineEvent};
 use futures::{future::Either, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::error::PayloadBuilderError;
@@ -120,7 +120,7 @@ pub enum BeaconEngineMessage {
         /// The execution payload received by Engine API.
         payload: ExecutionPayload,
         /// The sender for returning payload status result.
-        tx: oneshot::Sender<BeaconEngineResult<PayloadStatus>>,
+        tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
