@@ -46,3 +46,11 @@ impl Default for EthConfig {
         }
     }
 }
+
+impl EthConfig {
+    /// Configures the gas price oracle settings
+    pub fn with_gpo_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
+        self.gas_oracle = gas_oracle_config;
+        self
+    }
+}
