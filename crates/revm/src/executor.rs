@@ -602,6 +602,7 @@ pub fn insert_post_block_withdrawals_balance_increments(
 mod tests {
     use super::*;
     use crate::database::State;
+    use once_cell::sync::Lazy;
     use reth_consensus_common::calc;
     use reth_primitives::{
         constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
@@ -613,6 +614,15 @@ mod tests {
     };
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
+
+    const DEFAULT_REVM_ACCOUNT: Lazy<RevmAccount> = Lazy::new(|| RevmAccount {
+        info: AccountInfo::default(),
+        storage: hash_map::HashMap::default(),
+        is_destroyed: false,
+        is_touched: false,
+        storage_cleared: false,
+        is_not_existing: false,
+    });
 
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
@@ -1064,19 +1074,11 @@ mod tests {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().istanbul_activated().build());
         let db = SubState::new(State::new(db));
 
-        let default_acc = RevmAccount {
-            info: AccountInfo::default(),
-            storage: hash_map::HashMap::default(),
-            is_destroyed: false,
-            is_touched: false,
-            storage_cleared: false,
-            is_not_existing: false,
-        };
         let mut executor = Executor::new(chain_spec, db);
         // touch account
         executor.commit_changes(
             1,
-            hash_map::HashMap::from([(account, default_acc.clone())]),
+            hash_map::HashMap::from([(account, DEFAULT_REVM_ACCOUNT.clone())]),
             true,
             &mut PostState::default(),
         );
@@ -1085,7 +1087,11 @@ mod tests {
             1,
             hash_map::HashMap::from([(
                 account,
-                RevmAccount { is_destroyed: true, is_touched: true, ..default_acc.clone() },
+                RevmAccount {
+                    is_destroyed: true,
+                    is_touched: true,
+                    ..DEFAULT_REVM_ACCOUNT.clone()
+                },
             )]),
             true,
             &mut PostState::default(),
@@ -1095,7 +1101,11 @@ mod tests {
             1,
             hash_map::HashMap::from([(
                 account,
-                RevmAccount { is_touched: true, storage_cleared: true, ..default_acc.clone() },
+                RevmAccount {
+                    is_touched: true,
+                    storage_cleared: true,
+                    ..DEFAULT_REVM_ACCOUNT.clone()
+                },
             )]),
             true,
             &mut PostState::default(),
@@ -1103,7 +1113,7 @@ mod tests {
         // touch account
         executor.commit_changes(
             1,
-            hash_map::HashMap::from([(account, default_acc)]),
+            hash_map::HashMap::from([(account, DEFAULT_REVM_ACCOUNT.clone())]),
             true,
             &mut PostState::default(),
         );
@@ -1112,5 +1122,35 @@ mod tests {
 
         let account = db.load_account(account).unwrap();
         assert_eq!(account.account_state, AccountState::StorageCleared);
+    }
+
+    /// If the account is created and destroyed within the same transaction, we shouldn't generate
+    /// the changeset.
+    #[test]
+    fn test_account_created_destroyed() {
+        let address = Address::random();
+
+        let mut db = SubState::new(State::new(StateProviderTest::default()));
+        db.load_account(address).unwrap(); // hot load the non-existing account
+
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
+        let mut executor = Executor::new(chain_spec, db);
+        let mut post_state = PostState::default();
+
+        executor.commit_changes(
+            1,
+            hash_map::HashMap::from([(
+                address,
+                RevmAccount {
+                    is_destroyed: true,
+                    storage_cleared: true,
+                    ..DEFAULT_REVM_ACCOUNT.clone()
+                },
+            )]),
+            true,
+            &mut post_state,
+        );
+
+        assert!(post_state.account_changes().is_empty());
     }
 }
