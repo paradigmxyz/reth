@@ -8,7 +8,7 @@ use reth_rpc::{
 use serde::{Deserialize, Serialize};
 
 /// The default maximum of logs in a single response.
-pub(crate) const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 2_000;
+pub(crate) const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 10_000;
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
