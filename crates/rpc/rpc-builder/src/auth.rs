@@ -53,7 +53,14 @@ where
     // spawn a new cache task
     let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor.clone());
     let gas_oracle = GasPriceOracle::new(client.clone(), Default::default(), eth_cache.clone());
-    let eth_api = EthApi::new(client.clone(), pool.clone(), network, eth_cache.clone(), gas_oracle);
+    let eth_api = EthApi::with_spawner(
+        client.clone(),
+        pool.clone(),
+        network,
+        eth_cache.clone(),
+        gas_oracle,
+        Box::new(executor.clone()),
+    );
     let eth_filter = EthFilter::new(client, pool, eth_cache.clone(), DEFAULT_MAX_LOGS_IN_RESPONSE);
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }

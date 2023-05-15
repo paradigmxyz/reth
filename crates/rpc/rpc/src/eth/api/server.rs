@@ -188,7 +188,7 @@ where
         block_number: Option<BlockId>,
     ) -> Result<H256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        Ok(EthApi::storage_at(self, address, index, block_number)?)
+        Ok(EthApi::storage_at(self, address, index, block_number).await?)
     }
 
     /// Handler for: `eth_getTransactionCount`
