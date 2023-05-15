@@ -969,7 +969,7 @@ mod tests {
                     block1_storage_changes.clone(),
                     block2_storage_changes.clone(),
                     block3_storage_changes.clone(),
-                    block4_storage_changes.clone(),
+                    block4_storage_changes,
                 ]),
                 size: 7,
             }
@@ -987,20 +987,14 @@ mod tests {
         assert_eq!(
             state_1_2.account_changes,
             AccountChanges {
-                inner: BTreeMap::from([
-                    block1_account_changes.clone(),
-                    block2_account_changes.clone()
-                ]),
+                inner: BTreeMap::from([block1_account_changes, block2_account_changes]),
                 size: 2
             }
         );
         assert_eq!(
             state_1_2.storage_changes,
             StorageChanges {
-                inner: BTreeMap::from([
-                    block1_storage_changes.clone(),
-                    block2_storage_changes.clone()
-                ]),
+                inner: BTreeMap::from([block1_storage_changes, block2_storage_changes]),
                 size: 6,
             }
         );
@@ -1023,10 +1017,7 @@ mod tests {
         assert_eq!(
             state_3_4.account_changes,
             AccountChanges {
-                inner: BTreeMap::from([
-                    block3_account_changes.clone(),
-                    block4_account_changes.clone(),
-                ]),
+                inner: BTreeMap::from([block3_account_changes, block4_account_changes,]),
                 size: 3
             }
         );
@@ -1035,7 +1026,7 @@ mod tests {
             state_3_4.storage_changes,
             StorageChanges {
                 inner: BTreeMap::from([
-                    block3_storage_changes.clone(),
+                    block3_storage_changes,
                     // Block #4. Wipe flag must be promoted to primary
                     (
                         4,
