@@ -56,7 +56,6 @@ pub struct EthRequestHandler<C> {
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
     /// Metrics for the eth request handler.
-    #[allow(unused)]
     metrics: EthRequestHandlerMetrics,
 }
 
@@ -146,6 +145,7 @@ where
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     ) {
+        self.metrics.received_headers_requests.increment(1);
         let headers = self.get_headers_response(request);
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
@@ -156,6 +156,7 @@ where
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     ) {
+        self.metrics.received_bodies_requests.increment(1);
         let mut bodies = Vec::new();
 
         let mut total_bytes = APPROX_BODY_SIZE;

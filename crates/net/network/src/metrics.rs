@@ -125,10 +125,8 @@ impl DisconnectMetrics {
 #[metrics(scope = "network")]
 pub struct EthRequestHandlerMetrics {
     /// Number of received headers requests
-    #[allow(unused)]
     pub(crate) received_headers_requests: Counter,
 
     /// Number of received bodies requests
-    #[allow(unused)]
     pub(crate) received_bodies_requests: Counter,
 }
