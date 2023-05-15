@@ -15,8 +15,10 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U256, U64};
 use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_types::{FeeHistoryCache, SyncInfo, SyncStatus};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{future::Future, num::NonZeroUsize, sync::Arc};
+use tokio::sync::oneshot;
 
 mod block;
 mod call;
@@ -63,24 +65,41 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
-#[derive(Clone)]
 pub struct EthApi<Client, Pool, Network> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Client, Pool, Network>>,
-    fee_history_cache: FeeHistoryCache,
 }
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProviderIdExt,
 {
-    /// Creates a new, shareable instance.
+    /// Creates a new, shareable instance using the default tokio task spawner.
     pub fn new(
         client: Client,
         pool: Pool,
         network: Network,
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Client>,
+    ) -> Self {
+        Self::with_spawner(
+            client,
+            pool,
+            network,
+            eth_cache,
+            gas_oracle,
+            Box::<TokioTaskExecutor>::default(),
+        )
+    }
+
+    /// Creates a new, shareable instance.
+    pub fn with_spawner(
+        client: Client,
+        pool: Pool,
+        network: Network,
+        eth_cache: EthStateCache,
+        gas_oracle: GasPriceOracle<Client>,
+        task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = client
@@ -98,13 +117,29 @@ where
             eth_cache,
             gas_oracle,
             starting_block: U256::from(latest_block),
-        };
-        Self {
-            inner: Arc::new(inner),
+            task_spawner,
             fee_history_cache: FeeHistoryCache::new(
                 NonZeroUsize::new(FEE_HISTORY_CACHE_LIMIT).unwrap(),
             ),
-        }
+        };
+        Self { inner: Arc::new(inner) }
+    }
+
+    /// Executes the future on a new blocking task.
+    pub(crate) async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
+    where
+        C: FnOnce(Self) -> F,
+        F: Future<Output = EthResult<R>> + Send + 'static,
+        R: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        let f = c(this);
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+            let res = f.await;
+            let _ = tx.send(res);
+        }));
+        rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 
     /// Returns the state cache frontend
@@ -204,6 +239,12 @@ impl<Client, Pool, Events> std::fmt::Debug for EthApi<Client, Pool, Events> {
     }
 }
 
+impl<Client, Pool, Events> Clone for EthApi<Client, Pool, Events> {
+    fn clone(&self) -> Self {
+        Self { inner: Arc::clone(&self.inner) }
+    }
+}
+
 #[async_trait]
 impl<Client, Pool, Network> EthApiSpec for EthApi<Client, Pool, Network>
 where
@@ -273,4 +314,8 @@ struct EthApiInner<Client, Pool, Network> {
     gas_oracle: GasPriceOracle<Client>,
     /// The block number at which the node started
     starting_block: U256,
+    /// The type that can spawn tasks which would otherwise block.
+    task_spawner: Box<dyn TaskSpawner>,
+    /// The cache for fee history entries,
+    fee_history_cache: FeeHistoryCache,
 }
