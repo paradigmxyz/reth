@@ -1,6 +1,6 @@
 //! Blocks/Headers management for the p2p network.
 
-use crate::peers::PeersHandle;
+use crate::{metrics::EthRequestHandlerMetrics, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
@@ -55,6 +55,8 @@ pub struct EthRequestHandler<C> {
     peers: PeersHandle,
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
+    /// Metrics for the eth request handler.
+    metrics: EthRequestHandlerMetrics,
 }
 
 // === impl EthRequestHandler ===
@@ -65,7 +67,8 @@ impl<C> EthRequestHandler<C> {
         peers: PeersHandle,
         incoming: UnboundedReceiver<IncomingEthRequest>,
     ) -> Self {
-        Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming) }
+        let metrics = Default::default();
+        Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming), metrics }
     }
 }
 
@@ -142,6 +145,7 @@ where
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     ) {
+        self.metrics.received_headers_requests.increment(1);
         let headers = self.get_headers_response(request);
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
@@ -152,6 +156,7 @@ where
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     ) {
+        self.metrics.received_bodies_requests.increment(1);
         let mut bodies = Vec::new();
 
         let mut total_bytes = APPROX_BODY_SIZE;
