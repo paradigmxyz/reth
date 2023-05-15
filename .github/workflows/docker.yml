@@ -1,0 +1,115 @@
+# This workflow is based on Lighthouse's: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/.github/workflows/docker.yml
+name: docker
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+
+env:
+  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  IMAGE_NAME: ${{ github.repository_owner}}/reth
+
+jobs:
+  extract-version:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Extract version (if unstable)
+        if: github.event.ref == 'refs/heads/main'
+        run: |
+          echo "VERSION=latest-unstable" >> $GITHUB_ENV
+      - name: Extract version (if tagged release)
+        if: startsWith(github.event.ref, 'refs/tags')
+        run: |
+          echo "VERSION=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_ENV
+    outputs:
+      VERSION: ${{ env.VERSION }}
+
+  build-docker-single-arch:
+    name: build-docker-${{ matrix.binary }}${{ matrix.features.version_suffix }}
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        arch: [aarch64, x86_64]
+        features: [
+          {version_suffix: "", env: "jemalloc", profile: "maxperf"},
+          {version_suffix: "-dev", env: "jemalloc", profile: "debug-fast"}
+        ]
+
+    needs: [extract-version]
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+      FEATURE_SUFFIX: ${{ matrix.features.version_suffix }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Update Rust
+        run: rustup update stable
+
+      - name: Cross build reth binary
+        run: |
+          cargo install cross
+          env CROSS_PROFILE=${{ matrix.profile }} CROSS_FEATURES=${{ matrix.features.env }} make build-${{ matrix.arch }}
+
+      - name: Map aarch64 to arm64 short arch
+        if: startsWith(matrix.arch, 'aarch64')
+        run: echo "SHORT_ARCH=arm64" >> $GITHUB_ENV
+      - name: Map x86_64 to amd64 short arch
+        if: startsWith(matrix.arch, 'x86_64')
+        run: echo "SHORT_ARCH=amd64" >> $GITHUB_ENV;
+
+      - name: Rename cross-built binary
+        if: startsWith(matrix.arch, 'aarch64')
+        run: |
+          mkdir ./bin;
+          mv ./target/${{ matrix.arch }}-unknown-linux-gnu/${{ matrix.profile }}/reth ./reth-${VERSION}-${SHORT_ARCH}${FEATURE_SUFFIX};
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: reth-${VERSION}-${SHORT_ARCH}${FEATURE_SUFFIX}
+          path: reth-${VERSION}-${SHORT_ARCH}${FEATURE_SUFFIX}
+
+  build-docker-multiarch:
+    name: build-docker-multiarch
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        short_arch: [arm64, amd64]
+        feature_suffix: ["", "-dev"]
+
+    needs: [build-docker-single-arch, extract-version]
+    env:
+      # We need to enable experimental docker features in order to use `docker manifest`
+      DOCKER_CLI_EXPERIMENTAL: enabled
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+      FEATURE_SUFFIX: ${{ matrix.feature_suffix }}
+      SHORT_ARCH: ${{ matrix.short_arch }}
+    steps:
+      - name: Dockerhub login
+        run: |
+          echo "${DOCKER_PASSWORD}" | docker login --username ${DOCKER_USERNAME} --password-stdin
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+
+      # Install dependencies for emulation. Have to create a new builder to pick up emulation support.
+      - name: Build Dockerfile and push
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install ${SHORT_ARCH}
+          docker buildx create --use --name cross-builder
+          docker buildx build \
+              --build-arg VERSION=${VERSION} \
+              --build-arg FEATURE_SUFFIX=${FEATURE_SUFFIX} \
+              --platform=linux/amd64,linux/arm64 \
+              --file ./Dockerfile.cross . \
+              --tag ${IMAGE_NAME}:${VERSION}${FEATURE_SUFFIX} \
+              --provenance=false \
+              --push
+
+      - name: Add latest tags (if release)
+        if: startsWith(github.event.ref, 'refs/tags')
+        run: |
+          docker buildx imagetools create --builder cross-builder -t ${IMAGE_NAME}:latest${FEATURE_SUFFIX} ${IMAGE_NAME}:${VERSION}${FEATURE_SUFFIX}

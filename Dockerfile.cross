@@ -1,0 +1,14 @@
+# This image is meant to enable cross-architecture builds.
+# It assumes the lighthouse binary has already been
+# compiled for `$TARGETPLATFORM` and moved to `./bin`.
+FROM --platform=$TARGETPLATFORM ubuntu:22.04
+
+# Used to find the binary
+ARG VERSION
+ARG FEATURE_SUFFIX
+ARG TARGETARCH
+
+COPY ./reth-${VERSION}-${TARGETARCH}-${FEATURE_SUFFIX} /usr/local/bin/reth
+
+EXPOSE 30303 30303/udp 9000 8545 8546
+ENTRYPOINT ["/usr/local/bin/reth", "node"]

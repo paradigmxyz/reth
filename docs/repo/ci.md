@@ -19,6 +19,7 @@ The CI runs a couple of workflows:
 - **[deny]**: Runs `cargo deny` to check for license conflicts and security advisories in our dependencies
 - **[sanity]**: Runs a couple of sanity checks on the code every night, such as checking for unused dependencies
 - **[release]**: Runs the release workflow
+- **[docker]**: Builds and publishes Docker images
 
 [ci]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/ci.yml
 [unit]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/unit.yml
@@ -29,4 +30,5 @@ The CI runs a couple of workflows:
 [deny]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/deny.yml
 [sanity]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/sanity.yml
 [release]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/release.yml
+[docker]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/docker.yml
 [gh-projects]: https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions
