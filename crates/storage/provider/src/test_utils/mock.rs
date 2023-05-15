@@ -5,7 +5,7 @@ use crate::{
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use parking_lot::Mutex;
-use reth_interfaces::Result;
+use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
     Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey,
@@ -243,7 +243,7 @@ impl BlockNumProvider for MockEthProvider {
             .iter()
             .find(|(_, header)| header.number == best_block_number)
             .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
-            .expect("provider is empty"))
+            .unwrap_or_default())
     }
 
     fn best_block_number(&self) -> Result<BlockNumber> {
@@ -252,7 +252,7 @@ impl BlockNumProvider for MockEthProvider {
             .iter()
             .max_by_key(|h| h.1.number)
             .map(|(_, header)| header.number)
-            .expect("provider is empty"))
+            .ok_or(ProviderError::HeaderNotFound)?)
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {

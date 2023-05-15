@@ -70,7 +70,10 @@ pub struct EthApi<Client, Pool, Network> {
     fee_history_cache: FeeHistoryCache,
 }
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
+impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+where
+    Client: BlockProviderIdExt,
+{
     /// Creates a new, shareable instance.
     pub fn new(
         client: Client,
@@ -79,6 +82,14 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Client>,
     ) -> Self {
+        // get the block number of the latest block
+        let latest_block = client
+            .header_by_number_or_tag(BlockNumberOrTag::Latest)
+            .ok()
+            .flatten()
+            .map(|header| header.number)
+            .unwrap_or_default();
+
         let inner = EthApiInner {
             client,
             pool,
@@ -86,6 +97,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
             signers: Default::default(),
             eth_cache,
             gas_oracle,
+            starting_block: U256::from(latest_block),
         };
         Self {
             inner: Arc::new(inner),
@@ -232,7 +244,7 @@ where
                 self.client().chain_info().map(|info| info.best_number).unwrap_or_default(),
             );
             SyncStatus::Info(SyncInfo {
-                starting_block: U256::from(0),
+                starting_block: self.inner.starting_block,
                 current_block,
                 highest_block: current_block,
                 warp_chunks_amount: None,
@@ -259,4 +271,6 @@ struct EthApiInner<Client, Pool, Network> {
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<Client>,
+    /// The block number at which the node started
+    starting_block: U256,
 }
