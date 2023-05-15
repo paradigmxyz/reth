@@ -30,8 +30,11 @@ pub struct ForkchoiceState {
     pub finalized_block_hash: H256,
 }
 
-/// A standalone forkchoice update result for RPC.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+/// A standalone forkchoice update errors for RPC.
+///
+/// These are considered hard RPC errors and are _not_ returned as [PayloadStatus] or
+/// [PayloadStatusEnum::Invalid].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ForkchoiceUpdateError {
     /// The forkchoice update has been processed, but the requested contained invalid
     /// [PayloadAttributes](crate::engine::PayloadAttributes).
@@ -42,6 +45,9 @@ pub enum ForkchoiceUpdateError {
     /// The given [ForkchoiceState] is invalid or inconsistent.
     #[error("Invalid forkchoice state")]
     InvalidState,
+    /// Thrown when a forkchoice final block does not exist in the database.
+    #[error("final block not available in database")]
+    UnknownFinalBlock,
 }
 
 impl From<ForkchoiceUpdateError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -55,6 +61,11 @@ impl From<ForkchoiceUpdateError> for jsonrpsee_types::error::ErrorObject<'static
                 )
             }
             ForkchoiceUpdateError::InvalidState => jsonrpsee_types::error::ErrorObject::owned(
+                INVALID_FORK_CHOICE_STATE_ERROR,
+                INVALID_FORK_CHOICE_STATE_ERROR_MSG,
+                None::<()>,
+            ),
+            ForkchoiceUpdateError::UnknownFinalBlock => jsonrpsee_types::error::ErrorObject::owned(
                 INVALID_FORK_CHOICE_STATE_ERROR,
                 INVALID_FORK_CHOICE_STATE_ERROR_MSG,
                 None::<()>,
