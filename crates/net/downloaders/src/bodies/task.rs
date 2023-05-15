@@ -18,7 +18,7 @@ use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tokio_util::sync::PollSender;
 
 /// The maximum number of [BodyDownloaderResult]s to hold in the buffer.
-pub const BODIES_TASK_BUFFER_SIZE: usize = 8;
+pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
 #[derive(Debug)]
