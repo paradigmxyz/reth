@@ -47,7 +47,7 @@ install:
 #
 # The resulting binaries will be created in the `target/` directory.
 build-x86_64:
-	cross --verbose build --bin reth --target x86_64-unknown-linux-gnu --features "$(CROSS_FEATURES)" --profile "$(CROSS_PROFILE)"
+	cross build --bin reth --target x86_64-unknown-linux-gnu --features "$(CROSS_FEATURES)" --profile "$(CROSS_PROFILE)"
 build-aarch64:
 	cross build --bin reth --target aarch64-unknown-linux-gnu --features "$(CROSS_FEATURES)" --profile "$(CROSS_PROFILE)"
 
