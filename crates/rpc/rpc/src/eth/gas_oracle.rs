@@ -59,6 +59,26 @@ impl Default for GasPriceOracleConfig {
     }
 }
 
+impl GasPriceOracleConfig {
+    /// Creating a new gpo config with blocks, ignoreprice, maxprice and percentile
+    pub fn new(
+        blocks: Option<u32>,
+        ignore_price: Option<u64>,
+        max_price: Option<u64>,
+        percentile: Option<u32>,
+    ) -> Self {
+        Self {
+            blocks: blocks.unwrap_or(20),
+            percentile: percentile.unwrap_or(60),
+            max_header_history: 1024,
+            max_block_history: 1024,
+            default: None,
+            max_price: max_price.map(U256::from).or(Some(DEFAULT_MAX_PRICE)),
+            ignore_price: ignore_price.map(U256::from).or(Some(DEFAULT_IGNORE_PRICE)),
+        }
+    }
+}
+
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
 pub struct GasPriceOracle<Client> {

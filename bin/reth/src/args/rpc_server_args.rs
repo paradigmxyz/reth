@@ -1,5 +1,6 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
+use crate::args::GasPriceOracleArgs;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
     Arg, Args, Command,
@@ -10,13 +11,13 @@ use reth_provider::{
     BlockProviderIdExt, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
     StateProviderFactory,
 };
-use reth_rpc::{JwtError, JwtSecret};
+use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
     error::RpcError,
-    IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleSelection, RpcServerConfig,
-    RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
+    EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleConfig,
+    RpcModuleSelection, RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::{EngineApi, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -38,8 +39,8 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 25;
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Args, PartialEq, Default)]
-#[command(next_help_heading = "Rpc")]
+#[derive(Debug, Args, PartialEq, Eq, Default)]
+#[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
     #[arg(long)]
@@ -116,6 +117,10 @@ pub struct RpcServerArgs {
     /// Maximum number of RPC server connections.
     #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS)]
     pub rpc_max_connections: u32,
+
+    /// Gas price oracle configuration.
+    #[clap(flatten)]
+    pub gas_price_oracle: GasPriceOracleArgs,
 }
 
 impl RpcServerArgs {
@@ -127,6 +132,21 @@ impl RpcServerArgs {
     /// Returns the max response size in bytes.
     pub fn rpc_max_response_size_bytes(&self) -> u32 {
         self.rpc_max_response_size * 1024 * 1024
+    }
+
+    /// Extracts the gas price oracle config from the args.
+    pub fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
+        GasPriceOracleConfig::new(
+            self.gas_price_oracle.blocks,
+            self.gas_price_oracle.ignore_price,
+            self.gas_price_oracle.max_price,
+            self.gas_price_oracle.percentile,
+        )
+    }
+
+    /// Extracts the [EthConfig] from the args.
+    pub fn eth_config(&self) -> EthConfig {
+        EthConfig::default().with_gpo_config(self.gas_price_oracle_config())
     }
 
     /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
@@ -293,8 +313,12 @@ impl RpcServerArgs {
     }
 
     /// Creates the [TransportRpcModuleConfig] from cli args.
+    ///
+    /// This sets all the api modules, and configures additional settings like gas price oracle
+    /// settings in the [TransportRpcModuleConfig].
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
-        let mut config = TransportRpcModuleConfig::default();
+        let mut config = TransportRpcModuleConfig::default()
+            .with_config(RpcModuleConfig::new(self.eth_config()));
         let rpc_modules =
             RpcModuleSelection::Selection(vec![RethRpcModule::Admin, RethRpcModule::Eth]);
         if self.http {
@@ -304,7 +328,6 @@ impl RpcServerArgs {
         if self.ws {
             config = config.with_ws(self.ws_api.as_ref().unwrap_or(&rpc_modules).clone());
         }
-
         config
     }
 
