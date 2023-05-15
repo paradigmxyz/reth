@@ -14,7 +14,7 @@ use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tokio_util::sync::PollSender;
 
 /// The maximum number of header results to hold in the buffer.
-pub const HEADERS_TASK_BUFFER_SIZE: usize = 4;
+pub const HEADERS_TASK_BUFFER_SIZE: usize = 8;
 
 /// A [HeaderDownloader] that drives a spawned [HeaderDownloader] on a spawned task.
 #[derive(Debug)]
