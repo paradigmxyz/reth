@@ -48,13 +48,9 @@ impl Default for EthConfig {
 }
 
 impl EthConfig {
-    /// Create a new config with the given gas price oracle config
-    pub fn with_gpo_config(gas_oracle_config: GasPriceOracleConfig) -> Self {
-        Self {
-            cache: EthStateCacheConfig::default(),
-            gas_oracle: gas_oracle_config,
-            max_tracing_requests: 10,
-            max_logs_per_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
-        }
+    /// Configures the gas price oracle settings
+    pub fn with_gpo_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
+        self.gas_oracle = gas_oracle_config;
+        self
     }
 }
