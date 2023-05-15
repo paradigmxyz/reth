@@ -615,7 +615,7 @@ mod tests {
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
 
-    const DEFAULT_REVM_ACCOUNT: Lazy<RevmAccount> = Lazy::new(|| RevmAccount {
+    static DEFAULT_REVM_ACCOUNT: Lazy<RevmAccount> = Lazy::new(|| RevmAccount {
         info: AccountInfo::default(),
         storage: hash_map::HashMap::default(),
         is_destroyed: false,
@@ -1151,6 +1151,42 @@ mod tests {
             &mut post_state,
         );
 
+        assert!(post_state.account_changes().is_empty());
+    }
+
+    /// If the account was touched, but remained unchanged over the course of multiple transactions,
+    /// no changeset should be generated.
+    #[test]
+    fn test_touched_unchanged_account() {
+        let address = Address::random();
+
+        let mut db = SubState::new(State::new(StateProviderTest::default()));
+        db.load_account(address).unwrap(); // hot load the non-existing account
+
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
+        let mut executor = Executor::new(chain_spec, db);
+        let mut post_state = PostState::default();
+
+        executor.commit_changes(
+            1,
+            hash_map::HashMap::from([(
+                address,
+                RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() },
+            )]),
+            true,
+            &mut post_state,
+        );
+        assert!(post_state.account_changes().is_empty());
+
+        executor.commit_changes(
+            1,
+            hash_map::HashMap::from([(
+                address,
+                RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() },
+            )]),
+            true,
+            &mut post_state,
+        );
         assert!(post_state.account_changes().is_empty());
     }
 }
