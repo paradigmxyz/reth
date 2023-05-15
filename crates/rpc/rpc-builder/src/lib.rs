@@ -845,12 +845,13 @@ where
                 }),
             );
 
-            let api = EthApi::new(
+            let api = EthApi::with_spawner(
                 self.client.clone(),
                 self.pool.clone(),
                 self.network.clone(),
                 cache.clone(),
                 gas_oracle,
+                Box::new(self.executor.clone()),
             );
             let filter = EthFilter::new(
                 self.client.clone(),

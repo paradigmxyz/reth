@@ -18,6 +18,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
+    Network: Send + Sync + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
         let state = self.state_at_block_id_or_latest(block_id)?;
@@ -70,15 +71,18 @@ where
         Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
     }
 
-    pub(crate) fn storage_at(
+    pub(crate) async fn storage_at(
         &self,
         address: Address,
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> EthResult<H256> {
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        let value = state.storage(address, index.0)?.unwrap_or_default();
-        Ok(H256(value.to_be_bytes()))
+        self.on_blocking_task(|this| async move {
+            let state = this.state_at_block_id_or_latest(block_id)?;
+            let value = state.storage(address, index.0)?.unwrap_or_default();
+            Ok(H256(value.to_be_bytes()))
+        })
+        .await
     }
 
     #[allow(unused)]
@@ -165,7 +169,7 @@ mod tests {
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
         );
         let address = Address::random();
-        let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
+        let storage = eth_api.storage_at(address, U256::ZERO.into(), None).await.unwrap();
         assert_eq!(storage, U256::ZERO.into());
 
         // === Mock ===
@@ -186,7 +190,7 @@ mod tests {
         );
 
         let storage_key: U256 = storage_key.into();
-        let storage = eth_api.storage_at(address, storage_key.into(), None).unwrap();
+        let storage = eth_api.storage_at(address, storage_key.into(), None).await.unwrap();
         assert_eq!(storage, storage_value.into());
     }
 }

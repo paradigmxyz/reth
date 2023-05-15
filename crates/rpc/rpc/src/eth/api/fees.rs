@@ -74,7 +74,7 @@ where
             }
         }
 
-        let mut fee_history_cache = self.fee_history_cache.0.lock().await;
+        let mut fee_history_cache = self.inner.fee_history_cache.0.lock().await;
 
         // Sorted map that's populated in two rounds:
         // 1. Cache entries until first non-cached block

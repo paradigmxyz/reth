@@ -249,22 +249,25 @@ where
             return Ok(Some(TransactionSource::Pool(tx)))
         }
 
-        match self.client().transaction_by_hash_with_meta(hash)? {
-            None => Ok(None),
-            Some((tx, meta)) => {
-                let transaction =
-                    tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+        self.on_blocking_task(|this| async move {
+            match this.client().transaction_by_hash_with_meta(hash)? {
+                None => Ok(None),
+                Some((tx, meta)) => {
+                    let transaction =
+                        tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-                let tx = TransactionSource::Block {
-                    transaction,
-                    index: meta.index,
-                    block_hash: meta.block_hash,
-                    block_number: meta.block_number,
-                    base_fee: meta.base_fee,
-                };
-                Ok(Some(tx))
+                    let tx = TransactionSource::Block {
+                        transaction,
+                        index: meta.index,
+                        block_hash: meta.block_hash,
+                        block_number: meta.block_number,
+                        base_fee: meta.base_fee,
+                    };
+                    Ok(Some(tx))
+                }
             }
-        }
+        })
+        .await
     }
 
     async fn transaction_by_hash_at(
@@ -312,17 +315,20 @@ where
     }
 
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
-        let (tx, meta) = match self.client().transaction_by_hash_with_meta(hash)? {
-            Some((tx, meta)) => (tx, meta),
-            None => return Ok(None),
-        };
+        self.on_blocking_task(|this| async move {
+            let (tx, meta) = match this.client().transaction_by_hash_with_meta(hash)? {
+                Some((tx, meta)) => (tx, meta),
+                None => return Ok(None),
+            };
 
-        let receipt = match self.client().receipt_by_hash(hash)? {
-            Some(recpt) => recpt,
-            None => return Ok(None),
-        };
+            let receipt = match this.client().receipt_by_hash(hash)? {
+                Some(recpt) => recpt,
+                None => return Ok(None),
+            };
 
-        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+            this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+        })
+        .await
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {

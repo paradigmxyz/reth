@@ -64,8 +64,11 @@ pub enum EthApiError {
     #[error("invalid reward percentile")]
     InvalidRewardPercentile(f64),
     /// Error thrown when a spawned tracing task failed to deliver an anticipated response.
-    #[error("Internal error while tracing")]
+    #[error("internal error while tracing")]
     InternalTracingError,
+    /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
+    #[error("internal eth error")]
+    InternalEthError,
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -91,6 +94,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InvalidRewardPercentile(msg) => internal_rpc_err(msg.to_string()),
             err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
+            err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
         }
     }
 }
