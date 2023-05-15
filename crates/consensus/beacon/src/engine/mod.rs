@@ -3,7 +3,7 @@ use crate::{
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt, TryFutureExt};
-use reth_db::{database::Database, tables, transaction::DbTx};
+use reth_db::{database::Database, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
     consensus::ForkchoiceState,
@@ -20,7 +20,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
-use reth_stages::{stages::FINISH, Pipeline};
+use reth_stages::Pipeline;
 use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{
@@ -50,6 +50,7 @@ mod event;
 pub(crate) mod sync;
 
 pub use event::BeaconConsensusEngineEvent;
+use reth_stages::stages::FINISH;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
@@ -145,8 +146,6 @@ where
     Client: HeadersClient + BodiesClient,
     BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker,
 {
-    /// The database handle.
-    db: DB,
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
     /// The type we can use to query both the database and the blockchain tree.
@@ -178,7 +177,6 @@ where
     /// Create a new instance of the [BeaconConsensusEngine].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        db: DB,
         client: Client,
         pipeline: Pipeline<DB>,
         blockchain: BT,
@@ -189,7 +187,6 @@ where
     ) -> (Self, BeaconConsensusEngineHandle) {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
-            db,
             client,
             pipeline,
             blockchain,
@@ -206,7 +203,6 @@ where
     /// the [BeaconEngineMessage] communication channel.
     #[allow(clippy::too_many_arguments)]
     pub fn with_channel(
-        db: DB,
         client: Client,
         pipeline: Pipeline<DB>,
         blockchain: BT,
@@ -226,7 +222,6 @@ where
             max_block,
         );
         let this = Self {
-            db,
             sync,
             blockchain,
             engine_message_rx: UnboundedReceiverStream::new(rx),
@@ -276,11 +271,6 @@ where
         self.blockchain.find_canonical_ancestor(parent_hash)
     }
 
-    /// Loads the header for the given `block_number` from the database.
-    fn load_header(&self, block_number: u64) -> Result<Option<Header>, Error> {
-        Ok(self.db.view(|tx| tx.get::<tables::Headers>(block_number))??)
-    }
-
     /// Checks if the given `head` points to an invalid header, which requires a specific response
     /// to a forkchoice update.
     fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
@@ -293,7 +283,7 @@ where
 
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Ok(Some(parent)) = self.load_header(parent_number) {
+        if let Ok(Some(parent)) = self.blockchain.header_by_number(parent_number) {
             if parent.difficulty != U256::ZERO {
                 latest_valid_hash = H256::zero();
             }
@@ -371,7 +361,8 @@ where
             match self.blockchain.make_canonical(&state.head_block_hash) {
                 Ok(_) => {
                     let head_block_number = self
-                        .get_block_number(state.head_block_hash)?
+                        .blockchain
+                        .block_number(state.head_block_hash)?
                         .expect("was canonicalized, so it exists");
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=head_block_number, "canonicalized new head");
 
@@ -388,7 +379,8 @@ where
                     if let Some(attrs) = attrs {
                         // get header for further validation
                         let header = self
-                            .load_header(head_block_number)?
+                            .blockchain
+                            .header_by_number(head_block_number)?
                             .expect("was canonicalized, so it exists");
 
                         let payload_response =
@@ -510,7 +502,7 @@ where
             // find the appropriate target to sync to, if we don't have the safe block hash then we
             // start syncing to the safe block via pipeline first
             let target = if !state.safe_block_hash.is_zero() &&
-                self.get_block_number(state.safe_block_hash).ok().flatten().is_none()
+                self.blockchain.block_number(state.safe_block_hash).ok().flatten().is_none()
             {
                 state.safe_block_hash
             } else {
@@ -709,15 +701,13 @@ where
         &mut self,
         state: ForkchoiceState,
     ) -> Result<(), reth_interfaces::Error> {
-        let needs_pipeline_run = match self.get_block_number(state.finalized_block_hash)? {
+        let needs_pipeline_run = match self.blockchain.block_number(state.finalized_block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
                 self.blockchain.restore_canonical_hashes(number)?;
 
                 // After restoring the tree, check if the head block is missing.
-                self.db
-                    .view(|tx| tx.get::<tables::HeaderNumbers>(state.head_block_hash))??
-                    .is_none()
+                self.blockchain.header_by_hash_or_number(state.head_block_hash.into())?.is_none()
             }
             None => true,
         };
@@ -726,11 +716,6 @@ where
             self.sync.set_pipeline_sync_target(state.head_block_hash);
         }
         Ok(())
-    }
-
-    /// Retrieve the block number for the given block hash.
-    fn get_block_number(&self, hash: H256) -> Result<Option<BlockNumber>, reth_interfaces::Error> {
-        Ok(self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??)
     }
 
     /// Event handler for events emitted by the [EngineSyncController].
@@ -994,7 +979,6 @@ mod tests {
         let latest = chain_spec.genesis_header().seal_slow();
         let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
         let (engine, handle) = BeaconConsensusEngine::new(
-            db.clone(),
             NoopFullBlockClient::default(),
             pipeline,
             blockchain_provider,

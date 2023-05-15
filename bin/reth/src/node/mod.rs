@@ -338,7 +338,6 @@ impl Command {
 
         let pipeline_events = pipeline.events();
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
-            Arc::clone(&db),
             network_client,
             pipeline,
             blockchain_db.clone(),
