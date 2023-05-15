@@ -1131,7 +1131,7 @@ mod tests {
         let address = Address::random();
 
         let mut db = SubState::new(State::new(StateProviderTest::default()));
-        db.load_account(address).unwrap(); // hot load the account
+        db.load_account(address).unwrap(); // hot load the non-existing account
 
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
         let mut executor = Executor::new(chain_spec, db);
