@@ -120,7 +120,7 @@ where
     Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn chain_info(&self) -> Result<ChainInfo> {
-        self.database.chain_info()
+        Ok(self.chain_info.chain_info())
     }
 
     fn best_block_number(&self) -> Result<BlockNumber> {

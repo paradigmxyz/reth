@@ -1,5 +1,5 @@
 use parking_lot::RwLock;
-use reth_primitives::{BlockNumHash, SealedHeader};
+use reth_primitives::{BlockNumHash, ChainInfo, SealedHeader};
 use std::{sync::Arc, time::Instant};
 
 /// Tracks the chain info: canonical head, safe block, finalized block.
@@ -19,6 +19,12 @@ impl ChainInfoTracker {
                 finalized_block: RwLock::new(None),
             }),
         }
+    }
+
+    /// Returns the [ChainInfo] for the canonical head.
+    pub(crate) fn chain_info(&self) -> ChainInfo {
+        let inner = self.inner.canonical_head.read();
+        ChainInfo { best_hash: inner.hash(), best_number: inner.number }
     }
 
     /// Update the timestamp when we received a forkchoice update.
