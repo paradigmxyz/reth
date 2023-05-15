@@ -39,14 +39,28 @@ impl From<reth_interfaces::db::Error> for BeaconConsensusEngineError {
 ///
 /// This represents all possible error cases, that must be returned as JSON RCP errors back to the
 /// beacon node.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum BeaconForkChoiceUpdateError {
     /// Thrown when a forkchoice update resulted in an error.
     #[error("Forkchoice update error: {0}")]
     ForkchoiceUpdateError(#[from] ForkchoiceUpdateError),
+    /// Internal errors, for example, error while reading from the database.
+    #[error(transparent)]
+    Internal(Box<reth_interfaces::Error>),
     /// Thrown when the engine task is unavailable/stopped.
     #[error("beacon consensus engine task stopped")]
     EngineUnavailable,
+}
+
+impl From<reth_interfaces::Error> for BeaconForkChoiceUpdateError {
+    fn from(e: reth_interfaces::Error) -> Self {
+        Self::Internal(Box::new(e))
+    }
+}
+impl From<reth_interfaces::db::Error> for BeaconForkChoiceUpdateError {
+    fn from(e: reth_interfaces::db::Error) -> Self {
+        Self::Internal(Box::new(e.into()))
+    }
 }
 
 /// Represents all error cases when handling a new payload.
