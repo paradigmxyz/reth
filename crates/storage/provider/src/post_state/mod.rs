@@ -417,7 +417,7 @@ impl PostState {
         account: Account,
     ) {
         self.accounts.insert(address, Some(account));
-        self.account_changes.insert(block_number, address, None);
+        self.account_changes.insert(block_number, address, None, Some(account));
     }
 
     /// Add a changed account to the post-state.
@@ -432,7 +432,7 @@ impl PostState {
         new: Account,
     ) {
         self.accounts.insert(address, Some(new));
-        self.account_changes.insert(block_number, address, Some(old));
+        self.account_changes.insert(block_number, address, Some(old), Some(new));
     }
 
     /// Mark an account as destroyed.
@@ -443,7 +443,7 @@ impl PostState {
         account: Account,
     ) {
         self.accounts.insert(address, None);
-        self.account_changes.insert(block_number, address, Some(account));
+        self.account_changes.insert(block_number, address, Some(account), None);
 
         let storage = self.storage.entry(address).or_default();
         storage.times_wiped += 1;
@@ -668,7 +668,7 @@ mod tests {
         a.create_account(1, Address::zero(), Account::default());
         a.destroy_account(1, Address::zero(), Account::default());
 
-        assert_eq!(a.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 1);
+        assert_eq!(a.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 0);
 
         let mut b = PostState::new();
         b.create_account(2, Address::repeat_byte(0xff), Account::default());
@@ -678,7 +678,7 @@ mod tests {
         let mut c = a.clone();
         c.extend(b.clone());
 
-        assert_eq!(c.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 2);
+        assert_eq!(c.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 1);
 
         let mut d = PostState::new();
         d.create_account(3, Address::zero(), Account::default());
@@ -1785,6 +1785,32 @@ mod tests {
             )]),
             "The latest state of the storage is incorrect in the merged state"
         );
+    }
+
+    #[test]
+    fn collapsible_account_changes() {
+        let address = Address::random();
+        let mut post_state = PostState::default();
+
+        // Create account on block #1
+        let account_at_block_1 = Account { nonce: 1, ..Default::default() };
+        post_state.create_account(1, address, account_at_block_1);
+
+        // Modify account on block #2 and return it to original state.
+        post_state.change_account(
+            2,
+            address,
+            Account { nonce: 1, ..Default::default() },
+            Account { nonce: 1, balance: U256::from(1), ..Default::default() },
+        );
+        post_state.change_account(
+            2,
+            address,
+            Account { nonce: 1, balance: U256::from(1), ..Default::default() },
+            Account { nonce: 1, ..Default::default() },
+        );
+
+        assert_eq!(post_state.account_changes().get(&2).and_then(|ch| ch.get(&address)), None);
     }
 
     #[test]
