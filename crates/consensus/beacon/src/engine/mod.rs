@@ -39,7 +39,10 @@ mod message;
 pub use message::BeaconEngineMessage;
 
 mod error;
-pub use error::{BeaconEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
+pub use error::{
+    BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError,
+};
 
 mod metrics;
 
@@ -74,10 +77,10 @@ impl BeaconConsensusEngineHandle {
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
-    ) -> BeaconEngineResult<PayloadStatus> {
+    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
-        rx.await.map_err(|_| BeaconEngineError::EngineUnavailable)?
+        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
@@ -313,7 +316,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-    ) -> Result<OnForkChoiceUpdated, BeaconEngineError> {
+    ) -> Result<OnForkChoiceUpdated, BeaconConsensusEngineError> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
@@ -370,7 +373,7 @@ where
                     if let Error::Execution(ref err) = error {
                         if err.is_fatal() {
                             tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
-                            return Err(BeaconEngineError::Common(error))
+                            return Err(BeaconConsensusEngineError::Common(error))
                         }
                     }
 
@@ -387,9 +390,13 @@ where
         Ok(OnForkChoiceUpdated::valid(status))
     }
 
-    /// Sets the state of the canon chain tracker based on the given forkchoice update. This should
-    /// be called before issuing a VALID forkchoice update.
-    fn update_canon_chain(&self, update: &ForkchoiceState) -> Result<(), BeaconEngineError> {
+    /// Sets the state of the canon chain tracker based on the given forkchoice update.
+    ///
+    /// This should be called before issuing a VALID forkchoice update.
+    fn update_canon_chain(
+        &self,
+        update: &ForkchoiceState,
+    ) -> Result<(), BeaconConsensusEngineError> {
         if !update.finalized_block_hash.is_zero() {
             let finalized = self
                 .blockchain
@@ -699,7 +706,7 @@ where
         &mut self,
         ev: EngineSyncEvent,
         current_state: &ForkchoiceState,
-    ) -> Option<Result<(), BeaconEngineError>> {
+    ) -> Option<Result<(), BeaconConsensusEngineError>> {
         match ev {
             EngineSyncEvent::FetchedFullBlock(block) => {
                 // it is guaranteed that the pipeline is not active at this point.
@@ -720,7 +727,7 @@ where
             }
             EngineSyncEvent::PipelineTaskDropped => {
                 error!(target: "consensus::engine", "Failed to receive spawned pipeline");
-                return Some(Err(BeaconEngineError::PipelineChannelClosed))
+                return Some(Err(BeaconConsensusEngineError::PipelineChannelClosed))
             }
             EngineSyncEvent::PipelineFinished { result, reached_max_block } => {
                 match result {
@@ -762,7 +769,7 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + Unpin + 'static,
 {
-    type Output = Result<(), BeaconEngineError>;
+    type Output = Result<(), BeaconConsensusEngineError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -896,7 +903,7 @@ mod tests {
         async fn send_new_payload(
             &self,
             payload: ExecutionPayload,
-        ) -> BeaconEngineResult<PayloadStatus> {
+        ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
             self.engine_handle.new_payload(payload).await
         }
 
@@ -905,7 +912,7 @@ mod tests {
         async fn send_new_payload_retry_on_syncing(
             &self,
             payload: ExecutionPayload,
-        ) -> BeaconEngineResult<PayloadStatus> {
+        ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
             loop {
                 let result = self.send_new_payload(payload.clone()).await?;
                 if !result.is_syncing() {
@@ -984,7 +991,7 @@ mod tests {
 
     fn spawn_consensus_engine(
         engine: TestBeaconConsensusEngine,
-    ) -> oneshot::Receiver<Result<(), BeaconEngineError>> {
+    ) -> oneshot::Receiver<Result<(), BeaconConsensusEngineError>> {
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
             let result = engine.await;
@@ -1018,7 +1025,7 @@ mod tests {
             .await;
         assert_matches!(
             res.await,
-            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -1056,7 +1063,7 @@ mod tests {
             .await;
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -1091,7 +1098,7 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
