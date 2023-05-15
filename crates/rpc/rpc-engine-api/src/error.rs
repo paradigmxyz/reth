@@ -88,9 +88,10 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
 
             // Error responses from the consensus engine
-            EngineApiError::ForkChoiceUpdate(err) => match err {
-                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => return err.into(),
+            EngineApiError::ForkChoiceUpdate(ref err) => match err {
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => return (*err).into(),
                 BeaconForkChoiceUpdateError::EngineUnavailable => INTERNAL_ERROR_CODE,
+                BeaconForkChoiceUpdateError::Internal(_) => INTERNAL_ERROR_CODE,
             },
             EngineApiError::NewPayload(ref err) => match err {
                 BeaconOnNewPayloadError::EngineUnavailable => INTERNAL_ERROR_CODE,
