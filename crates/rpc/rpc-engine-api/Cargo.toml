@@ -24,7 +24,7 @@ async-trait = "0.1"
 thiserror = "1.0.37"
 jsonrpsee-types = "0.18"
 jsonrpsee-core = "0.18"
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }

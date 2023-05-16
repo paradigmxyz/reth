@@ -30,7 +30,7 @@ hyper = "0.14"
 strum = { version = "0.24", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }

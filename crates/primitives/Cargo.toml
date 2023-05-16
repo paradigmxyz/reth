@@ -37,7 +37,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 crc = "3"
 
 # tracing
-tracing = "0.1"
+tracing = { workspace = true }
 
 # tokio
 tokio = { version = "1", default-features = false, features = ["sync"] }

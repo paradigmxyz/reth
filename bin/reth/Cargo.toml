@@ -52,7 +52,7 @@ secp256k1 = { version = "0.27.0", features = [
 ] }
 
 # tracing
-tracing = "0.1"
+tracing = { workspace = true }
 
 # io
 fdlimit = "0.2.1"
@@ -94,3 +94,6 @@ backon = "0.4"
 hex = "0.4"
 thiserror = "1.0"
 pretty_assertions = "1.3.0"
+
+[features]
+only-info-logs = ["tracing/release_max_level_info"]
