@@ -1,18 +1,20 @@
 //! Types for representing call trace items.
 
 use crate::tracing::utils::convert_memory;
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
+use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
-    geth::StructLog,
+    geth::{CallFrame, CallLogFrame, StructLog},
     parity::{
-        Action, ActionType, CallAction, CallOutput, CallType, CreateAction, CreateOutput,
-        SelfdestructAction, TraceOutput,
+        Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
+        CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TraceResult,
+        TransactionTrace,
     },
 };
 use revm::interpreter::{
     CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::btree_map::Entry;
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -26,6 +28,38 @@ pub enum CallKind {
     DelegateCall,
     Create,
     Create2,
+}
+
+impl CallKind {
+    /// Returns true if the call is a create
+    pub fn is_any_create(&self) -> bool {
+        matches!(self, CallKind::Create | CallKind::Create2)
+    }
+}
+
+impl std::fmt::Display for CallKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallKind::Call => {
+                write!(f, "CALL")
+            }
+            CallKind::StaticCall => {
+                write!(f, "STATICCALL")
+            }
+            CallKind::CallCode => {
+                write!(f, "CALLCODE")
+            }
+            CallKind::DelegateCall => {
+                write!(f, "DELEGATECALL")
+            }
+            CallKind::Create => {
+                write!(f, "CREATE")
+            }
+            CallKind::Create2 => {
+                write!(f, "CREATE2")
+            }
+        }
+    }
 }
 
 impl From<CallScheme> for CallKind {
@@ -111,6 +145,18 @@ pub(crate) struct CallTrace {
     pub(crate) steps: Vec<CallTraceStep>,
 }
 
+impl CallTrace {
+    // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
+    pub(crate) fn is_error(&self) -> bool {
+        self.status as u8 >= InstructionResult::Revert as u8
+    }
+
+    /// Returns the error message if it is an erroneous result.
+    pub(crate) fn as_error(&self) -> Option<String> {
+        self.is_error().then(|| format!("{:?}", self.status))
+    }
+}
+
 impl Default for CallTrace {
     fn default() -> Self {
         Self {
@@ -160,6 +206,68 @@ impl CallTraceNode {
         self.trace.status
     }
 
+    /// Updates the values of the state diff
+    pub(crate) fn parity_update_state_diff(&self, diff: &mut StateDiff) {
+        let addr = self.trace.address;
+        let acc = diff.entry(addr).or_default();
+
+        if self.kind().is_any_create() {
+            let code = self.trace.output.clone();
+            if acc.code == Delta::Unchanged {
+                acc.code = Delta::Added(code.into())
+            }
+        }
+
+        // TODO: track nonce and balance changes
+
+        // iterate over all storage diffs
+        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
+            let StorageChange { key, value, had_value } = change;
+            let value = H256::from(value);
+            match acc.storage.entry(key.into()) {
+                Entry::Vacant(entry) => {
+                    if let Some(had_value) = had_value {
+                        entry.insert(Delta::Changed(ChangedType {
+                            from: had_value.into(),
+                            to: value,
+                        }));
+                    } else {
+                        entry.insert(Delta::Added(value));
+                    }
+                }
+                Entry::Occupied(mut entry) => {
+                    let value = match entry.get() {
+                        Delta::Unchanged => Delta::Added(value),
+                        Delta::Added(added) => {
+                            if added == &value {
+                                Delta::Added(*added)
+                            } else {
+                                Delta::Changed(ChangedType { from: *added, to: value })
+                            }
+                        }
+                        Delta::Removed(_) => Delta::Added(value),
+                        Delta::Changed(c) => {
+                            Delta::Changed(ChangedType { from: c.from, to: value })
+                        }
+                    };
+                    entry.insert(value);
+                }
+            }
+        }
+    }
+
+    /// Converts this node into a parity `TransactionTrace`
+    pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
+        let action = self.parity_action();
+        let output = TraceResult::parity_success(self.parity_trace_output());
+        TransactionTrace {
+            action,
+            result: Some(output),
+            trace_address,
+            subtraces: self.children.len(),
+        }
+    }
+
     /// Returns the `Output` for a parity trace
     pub(crate) fn parity_trace_output(&self) -> TraceOutput {
         match self.kind() {
@@ -204,6 +312,47 @@ impl CallTraceNode {
                 init: self.trace.data.clone().into(),
             }),
         }
+    }
+
+    /// Converts this call trace into an _empty_ geth [CallFrame]
+    ///
+    /// Caution: this does not include any of the child calls
+    pub(crate) fn geth_empty_call_frame(&self, include_logs: bool) -> CallFrame {
+        let mut call_frame = CallFrame {
+            typ: self.trace.kind.to_string(),
+            from: self.trace.caller,
+            to: Some(self.trace.address),
+            value: Some(self.trace.value),
+            gas: U256::from(self.trace.gas_used),
+            gas_used: U256::from(self.trace.gas_used),
+            input: self.trace.data.clone().into(),
+            output: Some(self.trace.output.clone().into()),
+            error: None,
+            revert_reason: None,
+            calls: None,
+            logs: None,
+        };
+
+        // we need to populate error and revert reason
+        if !self.trace.success {
+            call_frame.revert_reason = decode_revert_reason(self.trace.output.clone());
+            call_frame.error = self.trace.as_error();
+        }
+
+        if include_logs {
+            call_frame.logs = Some(
+                self.logs
+                    .iter()
+                    .map(|log| CallLogFrame {
+                        address: Some(self.trace.address),
+                        topics: Some(log.topics.clone()),
+                        data: Some(log.data.clone().into()),
+                    })
+                    .collect(),
+            );
+        }
+
+        call_frame
     }
 }
 
@@ -252,7 +401,7 @@ pub struct CallTraceStep {
     /// Gas cost of step execution
     pub gas_cost: u64,
     /// Change of the contract state after step execution (effect of the SLOAD/SSTORE instructions)
-    pub state_diff: Option<(U256, U256)>,
+    pub storage_change: Option<StorageChange>,
     /// Final status of the call
     pub status: InstructionResult,
 }
@@ -289,4 +438,12 @@ impl From<&CallTraceStep> for StructLog {
             memory_size: step.memory_size as u64,
         }
     }
+}
+
+/// Represents a storage change during execution
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StorageChange {
+    pub key: U256,
+    pub value: U256,
+    pub had_value: Option<U256>,
 }

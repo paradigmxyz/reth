@@ -1,14 +1,15 @@
 use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
-    BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
+    BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
     ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
-    SealedBlock, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header,
+    Receipt, SealedBlock, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256,
+    U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -149,11 +150,11 @@ impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> BlockIdProvider for ShareableDatabase<DB> {
+impl<DB: Database> BlockNumProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
         let best_number = self.best_block_number()?;
         let best_hash = self.block_hash(best_number)?.unwrap_or_default();
-        Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
+        Ok(ChainInfo { best_hash, best_number })
     }
 
     fn best_block_number(&self) -> Result<BlockNumber> {
@@ -174,10 +175,10 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
         }
     }
 
-    fn block(&self, id: BlockId) -> Result<Option<Block>> {
-        if let Some(number) = self.block_number_for_id(id)? {
+    fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
+        if let Some(number) = self.convert_hash(id)? {
             if let Some(header) = self.header_by_number(number)? {
-                let id = BlockId::Number(number.into());
+                let id = BlockHashOrNumber::Number(number);
                 let tx = self.db.tx()?;
                 let transactions = self
                     .transactions_by_block(id)?
@@ -202,8 +203,8 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
         Ok(None)
     }
 
-    fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
-        if let Some(number) = self.block_number_for_id(id)? {
+    fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
+        if let Some(number) = self.convert_hash(id)? {
             let tx = self.db.tx()?;
             // TODO: this can be optimized to return empty Vec post-merge
             let ommers = tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
@@ -252,8 +253,8 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                         if let Some(block_number) =
                             transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
                         {
-                            if let Some(block_hash) =
-                                tx.get::<tables::CanonicalHeaders>(block_number)?
+                            if let Some((header, block_hash)) =
+                                read_sealed_header(tx, block_number)?
                             {
                                 if let Some(block_body) =
                                     tx.get::<tables::BlockBodyIndices>(block_number)?
@@ -269,6 +270,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                                         index,
                                         block_hash,
                                         block_number,
+                                        base_fee: header.base_fee_per_gas,
                                     };
 
                                     return Ok(Some((transaction.into(), meta)))
@@ -292,8 +294,11 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
             .map_err(Into::into)
     }
 
-    fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
-        if let Some(number) = self.block_number_for_id(id)? {
+    fn transactions_by_block(
+        &self,
+        id: BlockHashOrNumber,
+    ) -> Result<Option<Vec<TransactionSigned>>> {
+        if let Some(number) = self.convert_hash(id)? {
             let tx = self.db.tx()?;
             if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
                 let tx_range = body.tx_num_range();
@@ -355,8 +360,8 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
             .map_err(Into::into)
     }
 
-    fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
-        if let Some(number) = self.block_number_for_id(block)? {
+    fn receipts_by_block(&self, block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
+        if let Some(number) = self.convert_hash(block)? {
             let tx = self.db.tx()?;
             if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
                 let tx_range = body.tx_num_range();
@@ -377,9 +382,13 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
-    fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
+    fn withdrawals_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> Result<Option<Vec<Withdrawal>>> {
         if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp) {
-            if let Some(number) = self.block_number_for_id(id)? {
+            if let Some(number) = self.convert_hash(id)? {
                 // If we are past shanghai, then all blocks should have a withdrawal list, even if
                 // empty
                 return Ok(Some(
@@ -406,8 +415,13 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
-    fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
-        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
+    fn fill_env_at(
+        &self,
+        cfg: &mut CfgEnv,
+        block_env: &mut BlockEnv,
+        at: BlockHashOrNumber,
+    ) -> Result<()> {
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound)?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
         self.fill_env_with_header(cfg, block_env, &header)
     }
@@ -424,8 +438,8 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
         Ok(())
     }
 
-    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
-        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
+    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockHashOrNumber) -> Result<()> {
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound)?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
 
         self.fill_block_env_with_header(block_env, &header)
@@ -450,8 +464,8 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
         Ok(())
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockId) -> Result<()> {
-        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
+    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> Result<()> {
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound)?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
         self.fill_cfg_env_with_header(cfg, &header)
     }
@@ -461,6 +475,25 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
             self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
+    }
+}
+
+/// Fetches Header and its hash
+#[inline]
+fn read_sealed_header<'a, TX>(
+    tx: &TX,
+    block_number: u64,
+) -> std::result::Result<Option<(Header, BlockHash)>, reth_interfaces::db::Error>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    let block_hash = match tx.get::<tables::CanonicalHeaders>(block_number)? {
+        Some(block_hash) => block_hash,
+        None => return Ok(None),
+    };
+    match tx.get::<tables::Headers>(block_number)? {
+        Some(header) => Ok(Some((header, block_hash))),
+        None => Ok(None),
     }
 }
 
@@ -505,7 +538,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::ShareableDatabase;
-    use crate::BlockIdProvider;
+    use crate::BlockNumProvider;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_primitives::{ChainSpecBuilder, H256};
     use std::sync::Arc;
@@ -527,7 +560,5 @@ mod tests {
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);
         assert_eq!(chain_info.best_hash, H256::zero());
-        assert_eq!(chain_info.last_finalized, None);
-        assert_eq!(chain_info.safe_finalized, None);
     }
 }

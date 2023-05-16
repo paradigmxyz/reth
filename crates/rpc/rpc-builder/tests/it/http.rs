@@ -6,7 +6,7 @@ use jsonrpsee::{
         client::{ClientT, SubscriptionClientT},
         error::Error,
     },
-    types::error::{CallError, ErrorCode},
+    types::error::ErrorCode,
 };
 use reth_primitives::{
     hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, H256, H64,
@@ -22,7 +22,7 @@ use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
     match err {
-        Error::Call(CallError::Custom(error_obj)) => {
+        Error::Call(error_obj) => {
             error_obj.code() == ErrorCode::InternalError.code() &&
                 error_obj.message() == "unimplemented"
         }
@@ -97,8 +97,8 @@ where
     EthApiClient::send_transaction(client, transaction_request).await.unwrap_err();
     EthApiClient::hashrate(client).await.unwrap();
     EthApiClient::submit_hashrate(client, U256::default(), H256::default()).await.unwrap();
-    EthApiClient::gas_price(client).await.unwrap();
-    EthApiClient::max_priority_fee_per_gas(client).await.unwrap();
+    EthApiClient::gas_price(client).await.unwrap_err();
+    EthApiClient::max_priority_fee_per_gas(client).await.unwrap_err();
 
     // Unimplemented
     assert!(is_unimplemented(
@@ -162,11 +162,8 @@ where
         .await
         .err()
         .unwrap();
-    TraceApiClient::trace_block(client, block_id).await.err().unwrap();
-    TraceApiClient::replay_block_transactions(client, block_id, HashSet::default())
-        .await
-        .err()
-        .unwrap();
+    TraceApiClient::trace_block(client, block_id).await.unwrap();
+    TraceApiClient::replay_block_transactions(client, block_id, HashSet::default()).await.unwrap();
 
     assert!(is_unimplemented(
         TraceApiClient::trace_filter(client, trace_filter).await.err().unwrap()

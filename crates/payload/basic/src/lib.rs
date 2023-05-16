@@ -23,7 +23,7 @@ use reth_primitives::{
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{BlockProvider, BlockSource, PostState, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -98,7 +98,7 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {}
 
 impl<Client, Pool, Tasks> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Pool, Tasks>
 where
-    Client: StateProviderFactory + BlockProvider + Clone + Unpin + 'static,
+    Client: StateProviderFactory + BlockProviderIdExt + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
 {
@@ -111,7 +111,7 @@ where
         let parent_block = if attributes.parent.is_zero() {
             // use latest block if parent is zero: genesis block
             self.client
-                .block(BlockNumberOrTag::Latest.into())?
+                .block_by_number_or_tag(BlockNumberOrTag::Latest)?
                 .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?
                 .seal_slow()
         } else {
@@ -622,12 +622,15 @@ fn build_payload<Pool, Client>(
             cumulative_gas_used += gas_used;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
-            });
+            post_state.add_receipt(
+                block_number,
+                Receipt {
+                    tx_type: tx.tx_type(),
+                    success: result.is_success(),
+                    cumulative_gas_used,
+                    logs: result.logs().into_iter().map(into_reth_log).collect(),
+                },
+            );
 
             // update add to total fees
             let miner_fee = tx
@@ -654,8 +657,8 @@ fn build_payload<Pool, Client>(
             attributes.withdrawals,
         )?;
 
-        let receipts_root = post_state.receipts_root();
-        let logs_bloom = post_state.logs_bloom();
+        let receipts_root = post_state.receipts_root(block_number);
+        let logs_bloom = post_state.logs_bloom(block_number);
 
         // calculate the state root
         let state_root = db.db.0.state_root(post_state)?;

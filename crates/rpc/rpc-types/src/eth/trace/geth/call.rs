@@ -21,6 +21,8 @@ pub struct CallFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revert_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calls: Option<Vec<CallFrame>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logs: Option<Vec<CallLogFrame>>,
@@ -29,11 +31,11 @@ pub struct CallFrame {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallLogFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    address: Option<Address>,
+    pub address: Option<Address>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    topics: Option<Vec<H256>>,
+    pub topics: Option<Vec<H256>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    data: Option<Bytes>,
+    pub data: Option<Bytes>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

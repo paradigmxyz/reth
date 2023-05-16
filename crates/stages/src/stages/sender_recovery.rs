@@ -136,7 +136,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             }
         }
 
-        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Sync iteration finished");
+        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
     }
 
@@ -146,11 +146,15 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, "Unwinding");
+        let (_, unwind_to, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
+
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = tx.block_body_indices(input.unwind_to)?.last_tx_num();
+        let latest_tx_id = tx.block_body_indices(unwind_to)?.last_tx_num();
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+
+        info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput { stage_progress: unwind_to })
     }
 }
 

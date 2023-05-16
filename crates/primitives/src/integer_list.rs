@@ -1,4 +1,3 @@
-use crate::error::Error;
 use serde::{
     de::{Unexpected, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -24,8 +23,8 @@ impl IntegerList {
     /// [`sucds::EliasFano`] restricts its compilation to 64bits.
     ///
     /// List should be pre-sorted and not empty.
-    pub fn new<T: AsRef<[usize]>>(list: T) -> Result<Self, Error> {
-        Ok(Self(EliasFano::from_ints(list.as_ref()).map_err(|_| Error::InvalidInput)?))
+    pub fn new<T: AsRef<[usize]>>(list: T) -> Result<Self, EliasFanoError> {
+        Ok(Self(EliasFano::from_ints(list.as_ref()).map_err(|_| EliasFanoError::InvalidInput)?))
     }
 
     /// Serializes a [`IntegerList`] into a sequence of bytes.
@@ -44,8 +43,8 @@ impl IntegerList {
     }
 
     /// Deserializes a sequence of bytes into a proper [`IntegerList`].
-    pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
-        Ok(Self(EliasFano::deserialize_from(data).map_err(|_| Error::FailedDeserialize)?))
+    pub fn from_bytes(data: &[u8]) -> Result<Self, EliasFanoError> {
+        Ok(Self(EliasFano::deserialize_from(data).map_err(|_| EliasFanoError::FailedDeserialize)?))
     }
 }
 
@@ -111,6 +110,17 @@ impl<'a> Arbitrary<'a> for IntegerList {
     }
 }
 
+/// Primitives error type.
+#[derive(Debug, thiserror::Error)]
+pub enum EliasFanoError {
+    /// The provided input is invalid.
+    #[error("The provided input is invalid.")]
+    InvalidInput,
+    /// Failed to deserialize data into type.
+    #[error("Failed to deserialize data into type.")]
+    FailedDeserialize,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -118,10 +128,8 @@ mod test {
     #[test]
     fn test_integer_list() {
         let original_list = [1, 2, 3];
-
         let ef_list = IntegerList::new(original_list).unwrap();
-
-        assert!(ef_list.iter(0).collect::<Vec<usize>>() == original_list);
+        assert_eq!(ef_list.iter(0).collect::<Vec<usize>>(), original_list);
     }
 
     #[test]
@@ -130,6 +138,6 @@ mod test {
         let ef_list = IntegerList::new(original_list).unwrap();
 
         let blist = ef_list.to_bytes();
-        assert!(IntegerList::from_bytes(&blist).unwrap() == ef_list)
+        assert_eq!(IntegerList::from_bytes(&blist).unwrap(), ef_list)
     }
 }

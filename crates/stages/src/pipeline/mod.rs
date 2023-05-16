@@ -1,15 +1,10 @@
 use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_interfaces::sync::{NoopSyncStateUpdate, SyncState, SyncStateUpdater};
+use reth_interfaces::sync::{SyncState, SyncStateUpdater};
 use reth_primitives::{listener::EventListeners, BlockNumber, H256};
 use reth_provider::Transaction;
-use std::{
-    fmt::{Debug, Formatter},
-    ops::Deref,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{ops::Deref, pin::Pin};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -21,12 +16,22 @@ mod progress;
 mod set;
 mod sync_metrics;
 
+pub use crate::pipeline::ctrl::ControlFlow;
 pub use builder::*;
-use ctrl::*;
 pub use event::*;
 use progress::*;
 pub use set::*;
 use sync_metrics::*;
+
+/// A container for a queued stage.
+pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
+
+/// The future that returns the owned pipeline and the result of the pipeline run. See
+/// [Pipeline::run_as_fut].
+pub type PipelineFut<DB> = Pin<Box<dyn Future<Output = PipelineWithResult<DB>> + Send>>;
+
+/// The pipeline type itself with the result of [Pipeline::run_as_fut]
+pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineError>);
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
@@ -79,45 +84,23 @@ use sync_metrics::*;
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
 pub struct Pipeline<DB: Database> {
+    /// The Database
+    db: DB,
+    /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
+    /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    continuous: bool,
+    /// All listeners for events the pipeline emits.
     listeners: EventListeners<PipelineEvent>,
+    /// Used for emitting updates about whether the pipeline is running or not.
     sync_state_updater: Box<dyn SyncStateUpdater>,
+    /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
+    /// A receiver for the current chain tip to sync to
+    ///
+    /// Note: this is only used for debugging purposes.
     tip_tx: Option<watch::Sender<H256>>,
     metrics: Metrics,
-}
-
-/// The future that returns the owned pipeline and the result of the pipeline run. See
-/// [Pipeline::run_as_fut].
-pub type PipelineFut<DB> = Pin<Box<dyn Future<Output = PipelineWithResult<DB>> + Send>>;
-
-/// The pipeline type itself with the result of [Pipeline::run_as_fut]
-pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineError>);
-
-impl<DB: Database> Default for Pipeline<DB> {
-    fn default() -> Self {
-        Self {
-            stages: Vec::new(),
-            max_block: None,
-            continuous: false,
-            listeners: EventListeners::default(),
-            sync_state_updater: Box::<NoopSyncStateUpdate>::default(),
-            progress: PipelineProgress::default(),
-            tip_tx: None,
-            metrics: Metrics::default(),
-        }
-    }
-}
-
-impl<DB: Database> Debug for Pipeline<DB> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Pipeline")
-            .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
-            .field("max_block", &self.max_block)
-            .finish()
-    }
 }
 
 impl<DB> Pipeline<DB>
@@ -130,8 +113,8 @@ where
     }
 
     /// Return the minimum pipeline progress
-    pub fn minimum_progress(&self) -> &Option<u64> {
-        &self.progress.minimum_progress
+    pub fn minimum_progress(&self) -> Option<u64> {
+        self.progress.minimum_progress
     }
 
     /// Set tip for reverse sync.
@@ -148,12 +131,13 @@ where
     }
 
     /// Registers progress metrics for each registered stage
-    pub fn register_metrics(&mut self, db: Arc<DB>) {
+    pub fn register_metrics(&mut self) {
         for stage in &self.stages {
             let stage_id = stage.id();
             self.metrics.stage_checkpoint(
                 stage_id,
-                db.view(|tx| stage_id.get_progress(tx).ok().flatten().unwrap_or_default())
+                self.db
+                    .view(|tx| stage_id.get_progress(tx).ok().flatten().unwrap_or_default())
                     .ok()
                     .unwrap_or_default(),
             );
@@ -163,16 +147,16 @@ where
     /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
     /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, db: Arc<DB>, tip: Option<H256>) -> PipelineFut<DB> {
+    pub fn run_as_fut(mut self, tip: Option<H256>) -> PipelineFut<DB> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
-        self.register_metrics(db.clone());
+        self.register_metrics();
         Box::pin(async move {
             // NOTE: the tip should only be None if we are in continuous sync mode.
             if let Some(tip) = tip {
                 self.set_tip(tip);
             }
-            let result = self.run_loop(db).await;
+            let result = self.run_loop().await;
             trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
             (self, result)
         })
@@ -180,11 +164,11 @@ where
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub async fn run(&mut self, db: Arc<DB>) -> Result<(), PipelineError> {
-        self.register_metrics(db.clone());
+    pub async fn run(&mut self) -> Result<(), PipelineError> {
+        self.register_metrics();
 
         loop {
-            let next_action = self.run_loop(db.clone()).await?;
+            let next_action = self.run_loop().await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -212,7 +196,7 @@ where
     /// If any stage is unsuccessful at execution, we proceed to
     /// unwind. This will undo the progress across the entire pipeline
     /// up to the block that caused the error.
-    async fn run_loop(&mut self, db: Arc<DB>) -> Result<ControlFlow, PipelineError> {
+    async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
             let stage = &self.stages[stage_index];
@@ -227,7 +211,7 @@ where
 
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
             let next = self
-                .execute_stage_to_completion(db.as_ref(), previous_stage, stage_index)
+                .execute_stage_to_completion(previous_stage, stage_index)
                 .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
@@ -243,13 +227,15 @@ where
                 ControlFlow::Unwind { target, bad_block } => {
                     // reset the sync state
                     self.sync_state_updater.update_sync_state(SyncState::Syncing);
-                    self.unwind(db.as_ref(), target, bad_block).await?;
+                    self.unwind(target, bad_block).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
 
-            previous_stage =
-                Some((stage_id, db.view(|tx| stage_id.get_progress(tx))??.unwrap_or_default()));
+            previous_stage = Some((
+                stage_id,
+                self.db.view(|tx| stage_id.get_progress(tx))??.unwrap_or_default(),
+            ));
         }
 
         Ok(self.progress.next_ctrl())
@@ -260,14 +246,13 @@ where
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub async fn unwind(
         &mut self,
-        db: &DB,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let mut tx = Transaction::new(db)?;
+        let mut tx = Transaction::new(&self.db)?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -295,6 +280,8 @@ where
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
+
+                        tx.commit()?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -304,13 +291,11 @@ where
             }
         }
 
-        tx.commit()?;
         Ok(())
     }
 
     async fn execute_stage_to_completion(
         &mut self,
-        db: &DB,
         previous_stage: Option<(StageId, BlockNumber)>,
         stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
@@ -318,7 +303,7 @@ where
         let stage_id = stage.id();
         let mut made_progress = false;
         loop {
-            let mut tx = Transaction::new(db)?;
+            let mut tx = Transaction::new(&self.db)?;
 
             let prev_progress = stage_id.get_progress(tx.deref())?;
 
@@ -413,8 +398,16 @@ where
     }
 }
 
-/// A container for a queued stage.
-pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
+impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pipeline")
+            .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
+            .field("max_block", &self.max_block)
+            .field("listeners", &self.listeners)
+            .field("sync_state_updater", &self.sync_state_updater)
+            .finish()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -457,7 +450,7 @@ mod tests {
     async fn run_pipeline() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { stage_progress: 20, done: true })),
@@ -467,12 +460,12 @@ mod tests {
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
             )
             .with_max_block(10)
-            .build();
+            .build(db);
         let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
-            pipeline.run(db).await.unwrap();
+            pipeline.run().await.unwrap();
         });
 
         // Check that the stages were run in order
@@ -515,16 +508,16 @@ mod tests {
                     .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
             )
             .with_max_block(10)
-            .build();
+            .build(db);
         let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
             // Sync first
-            pipeline.run(db.clone()).await.expect("Could not run pipeline");
+            pipeline.run().await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline.unwind(&db, 1, None).await.expect("Could not unwind pipeline");
+            pipeline.unwind(1, None).await.expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order
@@ -592,16 +585,16 @@ mod tests {
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
             )
             .with_max_block(10)
-            .build();
+            .build(db);
         let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
             // Sync first
-            pipeline.run(db.clone()).await.expect("Could not run pipeline");
+            pipeline.run().await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline.unwind(&db, 50, None).await.expect("Could not unwind pipeline");
+            pipeline.unwind(50, None).await.expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order
@@ -667,12 +660,12 @@ mod tests {
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
             )
             .with_max_block(10)
-            .build();
+            .build(db);
         let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
-            pipeline.run(db).await.expect("Could not run pipeline");
+            pipeline.run().await.expect("Could not run pipeline");
         });
 
         // Check that the stages were unwound in reverse order
@@ -720,8 +713,8 @@ mod tests {
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
             )
             .with_max_block(10)
-            .build();
-        let result = pipeline.run(db).await;
+            .build(db);
+        let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
         // Fatal
@@ -730,8 +723,8 @@ mod tests {
             .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndices { number: 5 }),
             )))
-            .build();
-        let result = pipeline.run(db).await;
+            .build(db);
+        let result = pipeline.run().await;
         assert_matches!(
             result,
             Err(PipelineError::Stage(StageError::DatabaseIntegrity(

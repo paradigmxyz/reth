@@ -21,8 +21,8 @@ reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 # rpc/net
-jsonrpsee = { version = "0.16", features = ["server"] }
-tower-http = { version = "0.3", features = ["full"] }
+jsonrpsee = { version = "0.18", features = ["server"] }
+tower-http = { version = "0.4", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }
 hyper = "0.14"
 
@@ -30,7 +30,7 @@ hyper = "0.14"
 strum = { version = "0.24", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }

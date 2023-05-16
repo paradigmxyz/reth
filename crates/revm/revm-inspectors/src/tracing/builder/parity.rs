@@ -64,7 +64,7 @@ impl ParityTraceBuilder {
         info: TransactionInfo,
     ) -> impl Iterator<Item = LocalizedTransactionTrace> {
         self.into_transaction_traces_iter().map(move |trace| {
-            let TransactionInfo { hash, index, block_hash, block_number } = info;
+            let TransactionInfo { hash, index, block_hash, block_number, .. } = info;
             LocalizedTransactionTrace {
                 trace,
                 transaction_position: index,
@@ -104,30 +104,59 @@ impl ParityTraceBuilder {
     /// Returns the tracing types that are configured in the set
     pub fn into_trace_type_traces(
         self,
-        _trace_types: &HashSet<TraceType>,
+        trace_types: &HashSet<TraceType>,
     ) -> (Option<Vec<TransactionTrace>>, Option<VmTrace>, Option<StateDiff>) {
-        // TODO(mattsse): impl conversion
-        (None, None, None)
+        if trace_types.is_empty() || self.nodes.is_empty() {
+            return (None, None, None)
+        }
+
+        let with_traces = trace_types.contains(&TraceType::Trace);
+        let with_diff = trace_types.contains(&TraceType::StateDiff);
+
+        let vm_trace = if trace_types.contains(&TraceType::VmTrace) {
+            Some(vm_trace(&self.nodes))
+        } else {
+            None
+        };
+
+        let trace_addresses = self.trace_addresses();
+        let mut traces = Vec::with_capacity(if with_traces { self.nodes.len() } else { 0 });
+        let mut diff = StateDiff::default();
+
+        for (node, trace_address) in self.nodes.iter().zip(trace_addresses) {
+            if with_traces {
+                let trace = node.parity_transaction_trace(trace_address);
+                traces.push(trace);
+            }
+            if with_diff {
+                node.parity_update_state_diff(&mut diff);
+            }
+        }
+
+        let traces = with_traces.then_some(traces);
+        let diff = with_diff.then_some(diff);
+
+        (traces, vm_trace, diff)
     }
 
     /// Returns an iterator over all recorded traces  for `trace_transaction`
     pub fn into_transaction_traces_iter(self) -> impl Iterator<Item = TransactionTrace> {
         let trace_addresses = self.trace_addresses();
-
-        self.nodes.into_iter().zip(trace_addresses).map(|(node, trace_address)| {
-            let action = node.parity_action();
-            let output = TraceResult::parity_success(node.parity_trace_output());
-            TransactionTrace {
-                action,
-                result: Some(output),
-                trace_address,
-                subtraces: node.children.len(),
-            }
-        })
+        self.nodes
+            .into_iter()
+            .zip(trace_addresses)
+            .map(|(node, trace_address)| node.parity_transaction_trace(trace_address))
     }
 
     /// Returns the raw traces of the transaction
     pub fn into_transaction_traces(self) -> Vec<TransactionTrace> {
         self.into_transaction_traces_iter().collect()
     }
+}
+
+/// Construct the vmtrace for the entire callgraph
+fn vm_trace(nodes: &[CallTraceNode]) -> VmTrace {
+    // TODO: populate vm trace
+
+    VmTrace { code: nodes[0].trace.data.clone().into(), ops: vec![] }
 }

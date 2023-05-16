@@ -35,7 +35,7 @@ async-trait = "0.1"
 linked_hash_set = "0.1"
 schnellru = "0.2"
 thiserror = "1.0"
-tracing = "0.1"
+tracing = { workspace = true }
 parking_lot = "0.12"
 serde = { version = "1.0", optional = true }
 serde_with = { version = "2.1.0", optional = true }

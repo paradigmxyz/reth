@@ -13,6 +13,7 @@ reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-stages = { path = "../../stages" }
 reth-db = { path = "../../storage/db" }
+reth-provider = { path = "../../storage/provider" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-tasks = { path = "../../tasks" }
 reth-payload-builder = { path = "../../payload/builder" }
@@ -24,7 +25,7 @@ tokio-stream = "0.1.10"
 futures = "0.3"
 
 # misc
-tracing = "0.1"
+tracing = { workspace = true }
 thiserror = "1.0"
 metrics = "0.20.1"
 schnellru = "0.2"

@@ -1,8 +1,8 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
-use jsonrpsee::core::Error as RpcError;
-use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U256};
+use jsonrpsee::{core::Error as RpcError, types::ErrorObject};
+use reth_primitives::{abi::decode_revert_reason, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
@@ -63,9 +63,15 @@ pub enum EthApiError {
     /// Percentile array is invalid
     #[error("invalid reward percentile")]
     InvalidRewardPercentile(f64),
+    /// Error thrown when a spawned tracing task failed to deliver an anticipated response.
+    #[error("internal error while tracing")]
+    InternalTracingError,
+    /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
+    #[error("internal eth error")]
+    InternalEthError,
 }
 
-impl From<EthApiError> for RpcError {
+impl From<EthApiError> for ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
             EthApiError::FailedToDecodeSignedTransaction |
@@ -87,7 +93,15 @@ impl From<EthApiError> for RpcError {
             }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InvalidRewardPercentile(msg) => internal_rpc_err(msg.to_string()),
+            err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
+            err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
         }
+    }
+}
+
+impl From<EthApiError> for RpcError {
+    fn from(error: EthApiError) -> Self {
+        RpcError::Call(error.into())
     }
 }
 
@@ -227,7 +241,7 @@ impl InvalidTransactionError {
     }
 }
 
-impl From<InvalidTransactionError> for RpcError {
+impl From<InvalidTransactionError> for ErrorObject<'static> {
     fn from(err: InvalidTransactionError) -> Self {
         match err {
             InvalidTransactionError::Revert(revert) => {
@@ -390,16 +404,4 @@ pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
             Err(InvalidTransactionError::halt(reason, gas_used).into())
         }
     }
-}
-
-/// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.
-///
-/// **Note:** it's assumed the `out` buffer starts with the call's signature
-pub(crate) fn decode_revert_reason(out: impl AsRef<[u8]>) -> Option<String> {
-    use ethers_core::abi::AbiDecode;
-    let out = out.as_ref();
-    if out.len() < SELECTOR_LEN {
-        return None
-    }
-    String::decode(&out[SELECTOR_LEN..]).ok()
 }

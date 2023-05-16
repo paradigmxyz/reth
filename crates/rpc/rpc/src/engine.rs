@@ -1,9 +1,9 @@
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{filter::Filter, Address, BlockId, BlockNumberOrTag, Bytes, H256, U256, U64};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, H256, U256, U64};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_types::{state::StateOverride, CallRequest, Log, RichBlock, SyncStatus};
+use reth_rpc_types::{state::StateOverride, CallRequest, Filter, Log, RichBlock, SyncStatus};
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {

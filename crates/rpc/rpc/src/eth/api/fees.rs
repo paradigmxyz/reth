@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, BlockNumberOrTag, U256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 use std::collections::BTreeMap;
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
@@ -30,8 +30,7 @@ where
 
     /// Returns a suggestion for the priority fee (the tip)
     pub(crate) async fn suggested_priority_fee(&self) -> EthResult<U256> {
-        // TODO: properly implement sampling https://github.com/ethereum/pm/issues/328#issuecomment-853234014
-        Ok(U256::from(1e9 as u64))
+        self.gas_oracle().suggest_tip_cap().await
     }
 
     /// Reports the fee history, for the given amount of blocks, up until the newest block
@@ -75,7 +74,7 @@ where
             }
         }
 
-        let mut fee_history_cache = self.fee_history_cache.0.lock().await;
+        let mut fee_history_cache = self.inner.fee_history_cache.0.lock().await;
 
         // Sorted map that's populated in two rounds:
         // 1. Cache entries until first non-cached block
@@ -129,7 +128,7 @@ where
                 let mut sorter = Vec::with_capacity(transactions.len());
                 for transaction in transactions.iter() {
                     let reward = transaction
-                        .effective_gas_price(header.base_fee_per_gas)
+                        .effective_gas_tip(header.base_fee_per_gas)
                         .ok_or(InvalidTransactionError::FeeCapTooLow)?;
 
                     sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward })

@@ -3,7 +3,10 @@ use async_trait::async_trait;
 use reth_db::database::Database;
 use reth_primitives::BlockNumber;
 use reth_provider::Transaction;
-use std::{cmp::min, ops::RangeInclusive};
+use std::{
+    cmp::{max, min},
+    ops::RangeInclusive,
+};
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -42,8 +45,8 @@ impl ExecInput {
         &self,
         threshold: u64,
     ) -> (RangeInclusive<BlockNumber>, bool) {
-        // plus +1 is to skip present block and allways start from block number 1, not 0.
         let current_block = self.stage_progress.unwrap_or_default();
+        // +1 is to skip present block and always start from block number 1, not 0.
         let start = current_block + 1;
         let target = self.previous_stage_progress();
 
@@ -66,20 +69,26 @@ pub struct UnwindInput {
 }
 
 impl UnwindInput {
-    /// Return next block range that needs to be executed.
+    /// Return next block range that needs to be unwound.
     pub fn unwind_block_range(&self) -> RangeInclusive<BlockNumber> {
-        self.unwind_block_range_with_threshold(u64::MAX)
+        self.unwind_block_range_with_threshold(u64::MAX).0
     }
 
-    /// Return the next block range to execute.
-    pub fn unwind_block_range_with_threshold(&self, threshold: u64) -> RangeInclusive<BlockNumber> {
-        // plus +1 is to skip present block.
-        let start = self.unwind_to + 1;
-        let mut end = self.stage_progress;
+    /// Return the next block range to unwind and the block we're unwinding to.
+    pub fn unwind_block_range_with_threshold(
+        &self,
+        threshold: u64,
+    ) -> (RangeInclusive<BlockNumber>, BlockNumber, bool) {
+        // +1 is to skip the block we're unwinding to
+        let mut start = self.unwind_to + 1;
+        let end = self.stage_progress;
 
-        end = min(end, start.saturating_add(threshold));
+        start = max(start, end.saturating_sub(threshold));
 
-        start..=end
+        let unwind_to = start - 1;
+
+        let is_final_range = unwind_to == self.unwind_to;
+        (start..=end, unwind_to, is_final_range)
     }
 }
 

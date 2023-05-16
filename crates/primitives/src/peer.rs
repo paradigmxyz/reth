@@ -46,4 +46,9 @@ impl<T> WithPeerId<T> {
     pub fn split(self) -> (PeerId, T) {
         (self.0, self.1)
     }
+
+    /// Maps the inner value to a new value using the given function.
+    pub fn map<U, F: FnOnce(T) -> U>(self, op: F) -> WithPeerId<U> {
+        WithPeerId(self.0, op(self.1))
+    }
 }

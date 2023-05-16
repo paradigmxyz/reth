@@ -187,6 +187,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
     }
 }
 
+/// Error that can occur when handling payloads.
 #[derive(thiserror::Error, Debug)]
 pub enum PayloadError {
     /// Invalid payload extra data.
@@ -252,7 +253,7 @@ pub struct PayloadAttributes {
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
-/// This structure contains the result of processing a payload
+/// This structure contains the result of processing a payload or fork choice update.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadStatus {
@@ -393,12 +394,17 @@ impl PayloadStatusEnum {
     }
 }
 
-/// Various validation errors
+/// Various errors that can occur when validating a payload or forkchoice update.
+///
+/// This is intended for the [PayloadStatusEnum::Invalid] variant.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PayloadValidationError {
     /// Thrown when a forkchoice update's head links to a previously rejected payload.
     #[error("links to previously rejected block")]
     LinksToRejectedPayload,
+    /// Thrown when a new payload contains a wrong block number.
+    #[error("invalid block number")]
+    InvalidBlockNumber,
 }
 
 #[cfg(test)]

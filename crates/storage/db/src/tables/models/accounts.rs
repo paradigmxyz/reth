@@ -7,13 +7,15 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use reth_codecs::Compact;
+use bytes::Buf;
+use reth_codecs::{derive_arbitrary, Compact};
 use reth_primitives::{Account, Address, BlockNumber};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
 ///
 /// [`Address`] is the subkey.
+#[derive_arbitrary(compact)]
 #[derive(Debug, Default, Clone, Eq, PartialEq, Serialize)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
@@ -32,16 +34,29 @@ impl Compact for AccountBeforeTx {
     {
         // for now put full bytes and later compress it.
         buf.put_slice(&self.address.to_fixed_bytes()[..]);
-        self.info.to_compact(buf) + 32
+
+        let mut acc_len = 0;
+        if let Some(account) = self.info {
+            acc_len = account.to_compact(buf);
+        }
+        acc_len + 20
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8])
     where
         Self: Sized,
     {
         let address = Address::from_slice(&buf[..20]);
-        let (info, out) = <Option<Account>>::from_compact(&buf[20..], len - 20);
-        (Self { address, info }, out)
+        buf.advance(20);
+
+        let mut info = None;
+        if len - 20 > 0 {
+            let (acc, advanced_buf) = Account::from_compact(buf, len - 20);
+            buf = advanced_buf;
+            info = Some(acc);
+        }
+
+        (Self { address, info }, buf)
     }
 }
 

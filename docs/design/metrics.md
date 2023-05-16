@@ -75,8 +75,14 @@ This list may be non-exhaustive.
 #### Component: Transaction Pool
 
 - `transaction_pool.inserted_transactions`: Number of transactions inserted in the pool
-- `transaction_pool.invalid_transactions`: Number of invalid transactions 
+- `transaction_pool.invalid_transactions`: Number of invalid transactions
 - `transaction_pool.removed_transactions`: Number of removed transactions from the pool
+- `transaction_pool.pending_pool_transactions`: Number of transactions in the pending sub-pool
+- `transaction_pool.pending_pool_size_bytes`: Total amount of memory used by the transactions in the pending sub-pool in bytes
+- `transaction_pool.basefee_pool_transactions`: Number of transactions in the basefee sub-pool
+- `transaction_pool.basefee_pool_size_bytes`: Total amount of memory used by the transactions in the basefee sub-pool in bytes
+- `transaction_pool.queued_pool_transactions`: Number of transactions in the queued sub-pool
+- `transaction_pool.queued_pool_size_bytes`: Total amount of memory used by the transactions in the queued sub-pool in bytes
 
 #### Component: Network
 

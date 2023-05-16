@@ -63,7 +63,7 @@ impl RpcError {
                         }
                     }
                 }
-                RpcError::RpcError(err.into())
+                RpcError::RpcError(JsonRpseeError::Transport(err))
             }
             _ => err.into(),
         }

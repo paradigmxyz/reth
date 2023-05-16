@@ -10,7 +10,7 @@ use human_bytes::human_bytes;
 use reth_db::{database::Database, tables};
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::chainspec::genesis_value_parser;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use tracing::error;
 
 /// DB List TUI
@@ -26,13 +26,8 @@ pub struct Command {
     /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t, global = true)]
     datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The path to the database folder. If not specified, it will be set in the data dir for the
-    /// chain being used.
-    #[arg(long, value_name = "PATH", verbatim_doc_comment)]
-    db: Option<PathBuf>,
 
     /// The chain this node is running.
     ///
@@ -47,7 +42,8 @@ pub struct Command {
         value_name = "CHAIN_OR_PATH",
         verbatim_doc_comment,
         default_value = "mainnet",
-        value_parser = genesis_value_parser
+        value_parser = genesis_value_parser,
+        global = true,
     )]
     chain: Arc<ChainSpec>,
 
@@ -85,6 +81,9 @@ pub struct ListArgs {
     /// How many items to take from the walker
     #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
     len: usize,
+    /// Dump as JSON instead of using TUI.
+    #[arg(long, short)]
+    json: bool,
 }
 
 impl Command {
@@ -92,10 +91,7 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-
-        // use the overridden db path if specified
-        let db_path = self.db.clone().unwrap_or(data_dir.db_path());
-
+        let db_path = data_dir.db_path();
         std::fs::create_dir_all(&db_path)?;
 
         // TODO: Auto-impl for Database trait
@@ -177,9 +173,15 @@ impl Command {
                                         return Ok(());
                                     }
 
-                                    tui::DbListTUI::<_, tables::$table>::new(|start, count| {
-                                        tool.list::<tables::$table>(start, count).unwrap()
-                                    }, $start, $len, total_entries).run()
+                                    if args.json {
+                                        let list_result = tool.list::<tables::$table>(args.start, args.len)?.into_iter().collect::<Vec<_>>();
+                                        println!("{}", serde_json::to_string_pretty(&list_result)?);
+                                        Ok(())
+                                    } else {
+                                        tui::DbListTUI::<_, tables::$table>::new(|start, count| {
+                                            tool.list::<tables::$table>(start, count).unwrap()
+                                        }, $start, $len, total_entries).run()
+                                    }
                                 })??
                             },)*
                             _ => {
@@ -224,5 +226,17 @@ impl Command {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn parse_stats_globals() {
+        let cmd = Command::try_parse_from(["reth", "stats", "--datadir", "../mainnet"]).unwrap();
+        assert_eq!(cmd.datadir.as_ref(), Some(Path::new("../mainnet")));
     }
 }

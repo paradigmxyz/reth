@@ -1,18 +1,20 @@
 use crate::{
-    BlockHashProvider, BlockIdProvider, BlockProvider, BlockchainTreePendingStateProvider,
-    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
-    PostStateDataProvider, ReceiptProvider, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
+    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
+    ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
-    Result,
+    consensus::ForkchoiceState,
+    Error, Result,
 };
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash,
-    TxNumber, Withdrawal, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
+    ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
@@ -22,13 +24,15 @@ pub use state::{
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
+    time::Instant,
 };
 use tracing::trace;
 
+mod chain_info;
 mod database;
 mod post_state_provider;
 mod state;
-use crate::traits::BlockSource;
+use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
 
@@ -43,12 +47,30 @@ pub struct BlockchainProvider<DB, Tree> {
     database: ShareableDatabase<DB>,
     /// The blockchain tree instance.
     tree: Tree,
+    /// Tracks the chain info wrt forkchoice updates
+    chain_info: ChainInfoTracker,
 }
 
 impl<DB, Tree> BlockchainProvider<DB, Tree> {
-    /// Create new  provider instance that wraps the database and the blockchain tree.
-    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Self {
-        Self { database, tree }
+    /// Create new  provider instance that wraps the database and the blockchain tree, using the
+    /// provided latest header to initialize the chain info tracker.
+    pub fn with_latest(database: ShareableDatabase<DB>, tree: Tree, latest: SealedHeader) -> Self {
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
+    }
+}
+
+impl<DB, Tree> BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+{
+    /// Create a new provider using only the database and the tree, fetching the latest header from
+    /// the database to initialize the provider.
+    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Result<Self> {
+        let best = database.chain_info()?;
+        match database.header_by_number(best.best_number)? {
+            Some(header) => Ok(Self::with_latest(database, tree, header.seal(best.best_hash))),
+            None => Err(Error::Provider(ProviderError::Header { number: best.best_number })),
+        }
     }
 }
 
@@ -92,50 +114,39 @@ where
     }
 }
 
-impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
+impl<DB, Tree> BlockNumProvider for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn chain_info(&self) -> Result<ChainInfo> {
-        self.database.chain_info()
+        Ok(self.chain_info.chain_info())
     }
 
     fn best_block_number(&self) -> Result<BlockNumber> {
         self.database.best_block_number()
     }
 
-    fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<BlockNumber>> {
-        let num = match num {
-            BlockNumberOrTag::Latest => self.chain_info()?.best_number,
-            BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Pending => {
-                return Ok(self.tree.pending_block_num_hash().map(|b| b.number))
-            }
-            BlockNumberOrTag::Finalized => return Ok(self.chain_info()?.last_finalized),
-            BlockNumberOrTag::Safe => return Ok(self.chain_info()?.safe_finalized),
-            BlockNumberOrTag::Earliest => 0,
-        };
-        Ok(Some(num))
-    }
-
-    fn block_hash_for_id(&self, block_id: BlockId) -> Result<Option<H256>> {
-        match block_id {
-            BlockId::Hash(hash) => Ok(Some(hash.into())),
-            BlockId::Number(num) => match num {
-                BlockNumberOrTag::Latest => Ok(Some(self.chain_info()?.best_hash)),
-                BlockNumberOrTag::Pending => Ok(self.tree.pending_block_num_hash().map(|b| b.hash)),
-                _ => self
-                    .convert_block_number(num)?
-                    .map(|num| self.block_hash(num))
-                    .transpose()
-                    .map(|maybe_hash| maybe_hash.flatten()),
-            },
-        }
-    }
-
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.database.block_number(hash)
+    }
+}
+
+impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: BlockchainTreeViewer + Send + Sync,
+{
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(self.chain_info.get_safe_num_hash())
+    }
+
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(self.chain_info.get_finalized_num_hash())
+    }
+
+    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(self.tree.pending_block_num_hash())
     }
 }
 
@@ -163,18 +174,18 @@ where
         Ok(block)
     }
 
-    fn block(&self, id: BlockId) -> Result<Option<Block>> {
-        if id.is_pending() {
-            return Ok(self.tree.pending_block().map(SealedBlock::unseal))
+    fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
+        match id {
+            BlockHashOrNumber::Hash(hash) => self.find_block_by_hash(hash, BlockSource::Any),
+            BlockHashOrNumber::Number(num) => self.database.block_by_number(num),
         }
-        self.database.block(id)
     }
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(self.tree.pending_block())
     }
 
-    fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.database.ommers(id)
     }
 }
@@ -207,7 +218,10 @@ where
         self.database.transaction_block(id)
     }
 
-    fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+    fn transactions_by_block(
+        &self,
+        id: BlockHashOrNumber,
+    ) -> Result<Option<Vec<TransactionSigned>>> {
         self.database.transactions_by_block(id)
     }
 
@@ -232,7 +246,7 @@ where
         self.database.receipt_by_hash(hash)
     }
 
-    fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
+    fn receipts_by_block(&self, block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
         self.database.receipts_by_block(block)
     }
 }
@@ -242,7 +256,11 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
+    fn withdrawals_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> Result<Option<Vec<Withdrawal>>> {
         self.database.withdrawals_by_block(id, timestamp)
     }
 
@@ -256,7 +274,12 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
+    fn fill_env_at(
+        &self,
+        cfg: &mut CfgEnv,
+        block_env: &mut BlockEnv,
+        at: BlockHashOrNumber,
+    ) -> Result<()> {
         self.database.fill_env_at(cfg, block_env, at)
     }
 
@@ -269,7 +292,7 @@ where
         self.database.fill_env_with_header(cfg, block_env, header)
     }
 
-    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
+    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockHashOrNumber) -> Result<()> {
         self.database.fill_block_env_at(block_env, at)
     }
 
@@ -277,7 +300,7 @@ where
         self.database.fill_block_env_with_header(block_env, header)
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockId) -> Result<()> {
+    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> Result<()> {
         self.database.fill_cfg_env_at(cfg, at)
     }
 
@@ -382,6 +405,10 @@ where
         self.tree.blocks()
     }
 
+    fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
+        self.tree.header_by_hash(hash)
+    }
+
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         self.tree.block_by_hash(block_hash)
     }
@@ -404,6 +431,113 @@ where
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         self.tree.pending_block_num_hash()
+    }
+}
+
+impl<DB, Tree> CanonChainTracker for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: Send + Sync,
+    Self: BlockProvider,
+{
+    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
+        // update timestamp
+        self.chain_info.on_forkchoice_update_received();
+    }
+
+    fn last_received_update_timestamp(&self) -> Option<Instant> {
+        self.chain_info.last_forkchoice_update_received_at()
+    }
+
+    fn set_canonical_head(&self, header: SealedHeader) {
+        self.chain_info.set_canonical_head(header);
+    }
+
+    fn set_safe(&self, header: SealedHeader) {
+        self.chain_info.set_safe(header);
+    }
+
+    fn set_finalized(&self, header: SealedHeader) {
+        self.chain_info.set_finalized(header);
+    }
+}
+
+impl<DB, Tree> BlockProviderIdExt for BlockchainProvider<DB, Tree>
+where
+    Self: BlockProvider + BlockIdProvider,
+    Tree: BlockchainTreeEngine,
+{
+    fn block_by_id(&self, id: BlockId) -> Result<Option<Block>> {
+        match id {
+            BlockId::Number(num) => self.block_by_number_or_tag(num),
+            BlockId::Hash(hash) => {
+                // TODO: should we only apply this for the RPCs that are listed in EIP-1898?
+                // so not at the provider level?
+                // if we decide to do this at a higher level, then we can make this an automatic
+                // trait impl
+                if Some(true) == hash.require_canonical {
+                    // check the database, canonical blocks are only stored in the database
+                    self.find_block_by_hash(hash.block_hash, BlockSource::Database)
+                } else {
+                    self.block_by_hash(hash.block_hash)
+                }
+            }
+        }
+    }
+
+    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Header>> {
+        match id {
+            BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head().unseal())),
+            BlockNumberOrTag::Finalized => {
+                Ok(self.chain_info.get_finalized_header().map(|h| h.unseal()))
+            }
+            BlockNumberOrTag::Safe => Ok(self.chain_info.get_safe_header().map(|h| h.unseal())),
+            BlockNumberOrTag::Earliest => self.header_by_number(0),
+            BlockNumberOrTag::Pending => Ok(self.tree.pending_header().map(|h| h.unseal())),
+            BlockNumberOrTag::Number(num) => self.header_by_number(num),
+        }
+    }
+
+    fn sealed_header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<SealedHeader>> {
+        match id {
+            BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head())),
+            BlockNumberOrTag::Finalized => Ok(self.chain_info.get_finalized_header()),
+            BlockNumberOrTag::Safe => Ok(self.chain_info.get_safe_header()),
+            BlockNumberOrTag::Earliest => {
+                self.header_by_number(0)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+            }
+            BlockNumberOrTag::Pending => Ok(self.tree.pending_header()),
+            BlockNumberOrTag::Number(num) => {
+                self.header_by_number(num)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+            }
+        }
+    }
+
+    fn sealed_header_by_id(&self, id: BlockId) -> Result<Option<SealedHeader>> {
+        match id {
+            BlockId::Number(num) => self.sealed_header_by_number_or_tag(num),
+            BlockId::Hash(hash) => {
+                self.header(&hash.block_hash)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+            }
+        }
+    }
+
+    fn header_by_id(&self, id: BlockId) -> Result<Option<Header>> {
+        match id {
+            BlockId::Number(num) => self.header_by_number_or_tag(num),
+            BlockId::Hash(hash) => self.header(&hash.block_hash),
+        }
+    }
+
+    fn ommers_by_id(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
+        match id {
+            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
+            BlockId::Hash(hash) => {
+                // TODO: EIP-1898 question, see above
+                // here it is not handled
+                self.ommers(BlockHashOrNumber::Hash(hash.block_hash))
+            }
+        }
     }
 }
 

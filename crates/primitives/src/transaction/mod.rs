@@ -1,4 +1,7 @@
-use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
+use crate::{
+    compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
+    keccak256, Address, Bytes, ChainId, TxHash, H256,
+};
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
@@ -302,6 +305,11 @@ impl Transaction {
         }
     }
 
+    /// Get the transaction's nonce.
+    pub fn to(&self) -> Option<Address> {
+        self.kind().to()
+    }
+
     /// Get transaction type
     pub fn tx_type(&self) -> TxType {
         match self {
@@ -312,8 +320,8 @@ impl Transaction {
     }
 
     /// Gets the transaction's value field.
-    pub fn value(&self) -> &u128 {
-        match self {
+    pub fn value(&self) -> u128 {
+        *match self {
             Transaction::Legacy(TxLegacy { value, .. }) => value,
             Transaction::Eip2930(TxEip2930 { value, .. }) => value,
             Transaction::Eip1559(TxEip1559 { value, .. }) => value,
@@ -363,26 +371,6 @@ impl Transaction {
         }
     }
 
-    // TODO: dedup with effective_tip_per_gas
-    /// Determine the effective gas limit for the given transaction and base fee.
-    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
-    /// transactions is returned.
-    ///
-    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> Option<u128> {
-        if let Some(base_fee) = base_fee {
-            let max_fee_per_gas = self.max_fee_per_gas();
-            if max_fee_per_gas < base_fee as u128 {
-                None
-            } else {
-                let effective_max_fee = max_fee_per_gas - base_fee as u128;
-                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
-            }
-        } else {
-            Some(self.priority_fee_or_price())
-        }
-    }
-
     /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
     /// otherwise return the gas price.
     ///
@@ -400,7 +388,41 @@ impl Transaction {
         }
     }
 
-    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
+    /// Returns the effective gas price for the given base fee.
+    ///
+    /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        let dynamic_tx = match self {
+            Transaction::Legacy(tx) => return tx.gas_price,
+            Transaction::Eip2930(tx) => return tx.gas_price,
+            Transaction::Eip1559(dynamic_tx) => dynamic_tx,
+        };
+
+        dynamic_tx.effective_gas_price(base_fee)
+    }
+
+    // TODO: dedup with effective_tip_per_gas
+    /// Determine the effective gas limit for the given transaction and base fee.
+    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
+    /// transactions is returned.
+    ///
+    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
+    pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
+        if let Some(base_fee) = base_fee {
+            let max_fee_per_gas = self.max_fee_per_gas();
+            if max_fee_per_gas < base_fee as u128 {
+                None
+            } else {
+                let effective_max_fee = max_fee_per_gas - base_fee as u128;
+                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
+            }
+        } else {
+            Some(self.priority_fee_or_price())
+        }
+    }
+
+    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee:
+    /// `min(maxFeePerGas - baseFee, maxPriorityFeePerGas)`
     ///
     /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
     pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
@@ -633,6 +655,26 @@ impl Encodable for Transaction {
     }
 }
 
+impl TxEip1559 {
+    /// Returns the effective gas price for the given `base_fee`.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas - base_fee as u128;
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
+            }
+        }
+    }
+}
+
 /// Whether or not the transaction is a contract creation.
 #[derive_arbitrary(compact, rlp)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -642,6 +684,16 @@ pub enum TransactionKind {
     Create,
     /// A transaction that calls a contract or transfer.
     Call(Address),
+}
+
+impl TransactionKind {
+    /// Returns the address of the contract that will be called or will receive the transfer.
+    pub fn to(self) -> Option<Address> {
+        match self {
+            TransactionKind::Create => None,
+            TransactionKind::Call(to) => Some(to),
+        }
+    }
 }
 
 impl Compact for TransactionKind {
@@ -733,25 +785,70 @@ impl Compact for TransactionSignedNoHash {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let before = buf.as_mut().len();
+        let start = buf.as_mut().len();
 
-        // placeholder for bitflags
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
         buf.put_u8(0);
 
         let sig_bit = self.signature.to_compact(buf) as u8;
-        let tx_bit = self.transaction.to_compact(buf) as u8;
+        let zstd_bit = self.transaction.input().len() >= 32;
 
-        // replace with actual flags
-        buf.as_mut()[before] = sig_bit | (tx_bit << 1);
+        let tx_bits = if zstd_bit {
+            TRANSACTION_COMPRESSOR.with(|compressor| {
+                let mut compressor = compressor.borrow_mut();
+                let mut tmp = bytes::BytesMut::with_capacity(200);
+                let tx_bits = self.transaction.to_compact(&mut tmp);
 
-        buf.as_mut().len() - before
+                buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                tx_bits as u8
+            })
+        } else {
+            self.transaction.to_compact(buf) as u8
+        };
+
+        // Replace bitflags with the actual values
+        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+
+        buf.as_mut().len() - start
     }
 
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let prefix = buf.get_u8() as usize;
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+        let bitflags = buf.get_u8() as usize;
 
-        let (signature, buf) = Signature::from_compact(buf, prefix & 1);
-        let (transaction, buf) = Transaction::from_compact(buf, prefix >> 1);
+        let sig_bit = bitflags & 1;
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+
+        let zstd_bit = bitflags >> 3;
+        let (transaction, buf) = if zstd_bit != 0 {
+            TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                let mut decompressor = decompressor.borrow_mut();
+                let mut tmp: Vec<u8> = Vec::with_capacity(200);
+
+                // `decompress_to_buffer` will return an error if the output buffer doesn't have
+                // enough capacity. However we don't actually have information on the required
+                // length. So we hope for the best, and keep trying again with a fairly bigger size
+                // if it fails.
+                while let Err(err) = decompressor.decompress_to_buffer(buf, &mut tmp) {
+                    let err = err.to_string();
+                    if !err.contains("Destination buffer is too small") {
+                        panic!("Failed to decompress: {}", err);
+                    }
+                    tmp.reserve(tmp.capacity() + 24_000);
+                }
+
+                // TODO: enforce that zstd is only present at a "top" level type
+
+                let transaction_type = (bitflags & 0b110) >> 1;
+                let (transaction, _) = Transaction::from_compact(tmp.as_slice(), transaction_type);
+
+                (transaction, buf)
+            })
+        } else {
+            let transaction_type = bitflags >> 1;
+            Transaction::from_compact(buf, transaction_type)
+        };
 
         (TransactionSignedNoHash { signature, transaction }, buf)
     }

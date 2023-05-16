@@ -4,22 +4,25 @@ mod account;
 pub use account::AccountProvider;
 
 mod block;
-pub use block::{BlockProvider, BlockSource};
+pub use block::{BlockProvider, BlockProviderIdExt, BlockSource};
 
 mod block_hash;
 pub use block_hash::BlockHashProvider;
 
 mod block_id;
-pub use block_id::BlockIdProvider;
+pub use block_id::{BlockIdProvider, BlockNumProvider};
 
 mod evm_env;
 pub use evm_env::EvmEnvProvider;
+
+mod chain_info;
+pub use chain_info::CanonChainTracker;
 
 mod header;
 pub use header::HeaderProvider;
 
 mod receipts;
-pub use receipts::ReceiptProvider;
+pub use receipts::{ReceiptProvider, ReceiptProviderIdExt};
 
 mod state;
 pub use state::{

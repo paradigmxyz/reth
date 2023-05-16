@@ -74,8 +74,8 @@ use crate::{
         txpool::{SenderInfo, TxPool},
     },
     traits::{
-        BlockInfo, NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions,
-        TransactionOrigin,
+        AllPoolTransactions, BlockInfo, NewTransactionEvent, PoolSize, PoolTransaction,
+        PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
     CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
@@ -102,6 +102,7 @@ pub(crate) mod size;
 pub(crate) mod state;
 pub mod txpool;
 mod update;
+pub use listener::TransactionEvents;
 
 /// Transaction pool internals.
 pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
@@ -292,6 +293,19 @@ where
         }
     }
 
+    pub(crate) fn add_transaction_and_subscribe(
+        &self,
+        origin: TransactionOrigin,
+        tx: TransactionValidationOutcome<T::Transaction>,
+    ) -> PoolResult<TransactionEvents> {
+        let listener = {
+            let mut listener = self.event_listener.write();
+            listener.subscribe(tx.tx_hash())
+        };
+        self.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")?;
+        Ok(listener)
+    }
+
     /// Adds all transactions in the iterator to the pool, returning a list of results.
     pub fn add_transactions(
         &self,
@@ -331,7 +345,7 @@ where
                 if matches!(err, mpsc::error::TrySendError::Full(_)) {
                     warn!(
                         target: "txpool",
-                        "[{:?}] dropping full ready transaction listener",
+                        "[{:?}] failed to send pending tx; channel full",
                         ready,
                     );
                     true
@@ -394,6 +408,25 @@ where
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pool.read().best_transactions()
+    }
+
+    /// Returns all transactions from the pending sub-pool
+    pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().pending_transactions()
+    }
+
+    /// Returns all transactions from parked pools
+    pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().queued_transactions()
+    }
+
+    /// Returns all transactions in the pool
+    pub(crate) fn all_transactions(&self) -> AllPoolTransactions<T::Transaction> {
+        let pool = self.pool.read();
+        AllPoolTransactions {
+            pending: pool.pending_transactions(),
+            queued: pool.queued_transactions(),
+        }
     }
 
     /// Removes and returns all matching transactions from the pool.

@@ -53,6 +53,8 @@ allow = [
     "LicenseRef-ring",
     # https://github.com/briansmith/webpki/issues/148
     "LicenseRef-webpki",
+    # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
+    "LicenseRef-rustls-webpki",
 ]
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
@@ -75,6 +77,11 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [[licenses.clarify]]
 name = "webpki"
 expression = "LicenseRef-webpki"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+
+[[licenses.clarify]]
+name = "rustls-webpki"
+expression = "LicenseRef-rustls-webpki"
 license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 
 # This section is considered when running `cargo deny check sources`.

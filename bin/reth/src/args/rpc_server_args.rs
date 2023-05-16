@@ -1,31 +1,46 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use clap::Args;
+use crate::args::GasPriceOracleArgs;
+use clap::{
+    builder::{PossibleValue, TypedValueParser},
+    Arg, Args, Command,
+};
 use futures::FutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockProvider, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, StateProviderFactory,
+    BlockProviderIdExt, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
+    StateProviderFactory,
 };
-use reth_rpc::{JwtError, JwtSecret};
+use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
     error::RpcError,
-    IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleSelection, RpcServerConfig,
-    RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
+    EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleConfig,
+    RpcModuleSelection, RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::{EngineApi, EngineApiServer};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
+    ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
-use tracing::info;
+use tracing::{debug, info};
+
+/// Default max number of subscriptions per connection.
+pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
+/// Default max request size in MB.
+pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
+/// Default max response size in MB.
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 25;
+/// Default number of incoming connections.
+pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Args, PartialEq, Default)]
-#[command(next_help_heading = "Rpc")]
+#[derive(Debug, Args, PartialEq, Eq, Default)]
+#[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
     #[arg(long)]
@@ -39,8 +54,8 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port")]
     pub http_port: Option<u16>,
 
-    /// Rpc Modules to be configured for http server
-    #[arg(long = "http.api")]
+    /// Rpc Modules to be configured for the HTTP server
+    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
@@ -63,8 +78,8 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.origins", name = "ws.origins")]
     pub ws_allowed_origins: Option<String>,
 
-    /// Rpc Modules to be configured for Ws server
-    #[arg(long = "ws.api")]
+    /// Rpc Modules to be configured for the WS server
+    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC  server
@@ -85,10 +100,55 @@ pub struct RpcServerArgs {
 
     /// Path to a JWT secret to use for authenticated RPC endpoints
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
-    auth_jwtsecret: Option<PathBuf>,
+    pub auth_jwtsecret: Option<PathBuf>,
+
+    /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+    #[arg(long, default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB)]
+    pub rpc_max_request_size: u32,
+
+    /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
+    #[arg(long, default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB)]
+    pub rpc_max_response_size: u32,
+
+    /// Set the the maximum concurrent subscriptions per connection.
+    #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN)]
+    pub rpc_max_subscriptions_per_connection: u32,
+
+    /// Maximum number of RPC server connections.
+    #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS)]
+    pub rpc_max_connections: u32,
+
+    /// Gas price oracle configuration.
+    #[clap(flatten)]
+    pub gas_price_oracle: GasPriceOracleArgs,
 }
 
 impl RpcServerArgs {
+    /// Returns the max request size in bytes.
+    pub fn rpc_max_request_size_bytes(&self) -> u32 {
+        self.rpc_max_request_size * 1024 * 1024
+    }
+
+    /// Returns the max response size in bytes.
+    pub fn rpc_max_response_size_bytes(&self) -> u32 {
+        self.rpc_max_response_size * 1024 * 1024
+    }
+
+    /// Extracts the gas price oracle config from the args.
+    pub fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
+        GasPriceOracleConfig::new(
+            self.gas_price_oracle.blocks,
+            self.gas_price_oracle.ignore_price,
+            self.gas_price_oracle.max_price,
+            self.gas_price_oracle.percentile,
+        )
+    }
+
+    /// Extracts the [EthConfig] from the args.
+    pub fn eth_config(&self) -> EthConfig {
+        EthConfig::default().with_gpo_config(self.gas_price_oracle_config())
+    }
+
     /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
     /// jwt-secret, which designates a file containing the hex-encoded 256 bit secret key to be used
     /// for verifying/generating JWT tokens.
@@ -103,14 +163,17 @@ impl RpcServerArgs {
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
     /// jwt secret in case the `auth_jwtsecret` argument is not provided.
     pub(crate) fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        let arg = self.auth_jwtsecret.as_ref();
-        let path: Option<&Path> = arg.map(|p| p.as_ref());
-        match path {
-            Some(fpath) => JwtSecret::from_file(fpath),
+        match self.auth_jwtsecret.as_ref() {
+            Some(fpath) => {
+                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                JwtSecret::from_file(fpath)
+            }
             None => {
                 if default_jwt_path.exists() {
+                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
                     JwtSecret::from_file(&default_jwt_path)
                 } else {
+                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
                     JwtSecret::try_create(&default_jwt_path)
                 }
             }
@@ -134,7 +197,7 @@ impl RpcServerArgs {
         jwt_secret: JwtSecret,
     ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
     where
-        Client: BlockProvider
+        Client: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -149,13 +212,16 @@ impl RpcServerArgs {
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 
+        let module_config = self.transport_rpc_module_config();
+        debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
+
         let (rpc_modules, auth_module) = RpcModuleBuilder::default()
             .with_client(client)
             .with_pool(pool)
             .with_network(network)
             .with_events(events)
             .with_executor(executor)
-            .build_with_auth_server(self.transport_rpc_module_config(), engine_api);
+            .build_with_auth_server(module_config, engine_api);
 
         let server_config = self.rpc_server_config();
         let has_server = server_config.has_server();
@@ -183,7 +249,7 @@ impl RpcServerArgs {
         events: Events,
     ) -> Result<RpcServerHandle, RpcError>
     where
-        Client: BlockProvider
+        Client: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -218,7 +284,7 @@ impl RpcServerArgs {
         jwt_secret: JwtSecret,
     ) -> Result<AuthServerHandle, RpcError>
     where
-        Client: BlockProvider
+        Client: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -247,8 +313,12 @@ impl RpcServerArgs {
     }
 
     /// Creates the [TransportRpcModuleConfig] from cli args.
+    ///
+    /// This sets all the api modules, and configures additional settings like gas price oracle
+    /// settings in the [TransportRpcModuleConfig].
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
-        let mut config = TransportRpcModuleConfig::default();
+        let mut config = TransportRpcModuleConfig::default()
+            .with_config(RpcModuleConfig::new(self.eth_config()));
         let rpc_modules =
             RpcModuleSelection::Selection(vec![RethRpcModule::Admin, RethRpcModule::Eth]);
         if self.http {
@@ -258,8 +328,25 @@ impl RpcServerArgs {
         if self.ws {
             config = config.with_ws(self.ws_api.as_ref().unwrap_or(&rpc_modules).clone());
         }
-
         config
+    }
+
+    /// Returns the default server builder for http/ws
+    fn http_ws_server_builder(&self) -> ServerBuilder {
+        ServerBuilder::new()
+            .max_connections(self.rpc_max_connections)
+            .max_request_body_size(self.rpc_max_request_size_bytes())
+            .max_response_body_size(self.rpc_max_response_size_bytes())
+            .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection)
+    }
+
+    /// Returns the default ipc server builder
+    fn ipc_server_builder(&self) -> IpcServerBuilder {
+        IpcServerBuilder::default()
+            .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection)
+            .max_request_body_size(self.rpc_max_request_size_bytes())
+            .max_response_body_size(self.rpc_max_response_size_bytes())
+            .max_connections(self.rpc_max_connections)
     }
 
     /// Creates the [RpcServerConfig] from cli args.
@@ -273,7 +360,7 @@ impl RpcServerArgs {
             );
             config = config
                 .with_http_address(socket_address)
-                .with_http(ServerBuilder::new())
+                .with_http(self.http_ws_server_builder())
                 .with_http_cors(self.http_corsdomain.clone())
                 .with_ws_cors(self.ws_allowed_origins.clone());
         }
@@ -283,12 +370,11 @@ impl RpcServerArgs {
                 self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
                 self.ws_port.unwrap_or(constants::DEFAULT_WS_RPC_PORT),
             );
-            config = config.with_ws_address(socket_address).with_ws(ServerBuilder::new());
+            config = config.with_ws_address(socket_address).with_ws(self.http_ws_server_builder());
         }
 
         if !self.ipcdisable {
-            let ipc_builder = IpcServerBuilder::default();
-            config = config.with_ipc(ipc_builder).with_ipc_endpoint(
+            config = config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(
                 self.ipcpath.as_ref().unwrap_or(&constants::DEFAULT_IPC_ENDPOINT.to_string()),
             );
         }
@@ -304,6 +390,38 @@ impl RpcServerArgs {
         );
 
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+    }
+}
+
+/// clap value parser for [RpcModuleSelection].
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+struct RpcModuleSelectionValueParser;
+
+impl TypedValueParser for RpcModuleSelectionValueParser {
+    type Value = RpcModuleSelection;
+
+    fn parse_ref(
+        &self,
+        _cmd: &Command,
+        arg: Option<&Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        let val =
+            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        val.parse::<RpcModuleSelection>().map_err(|err| {
+            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let possible_values = RethRpcModule::all_variants().to_vec().join(",");
+            let msg = format!(
+                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
+            );
+            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+        })
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values = RethRpcModule::all_variants().iter().map(PossibleValue::new);
+        Some(Box::new(values))
     }
 }
 

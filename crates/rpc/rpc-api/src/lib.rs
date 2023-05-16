@@ -17,6 +17,7 @@ mod eth_filter;
 mod eth_pubsub;
 mod net;
 mod trace;
+mod txpool;
 mod web3;
 
 /// re-export of all server traits
@@ -33,6 +34,7 @@ pub mod servers {
         eth_pubsub::EthPubSubApiServer,
         net::NetApiServer,
         trace::TraceApiServer,
+        txpool::TxPoolApiServer,
         web3::Web3ApiServer,
     };
 }
@@ -51,6 +53,7 @@ pub mod clients {
         eth::EthApiClient,
         net::NetApiClient,
         trace::TraceApiClient,
+        txpool::TxPoolApiClient,
         web3::Web3ApiClient,
     };
 }

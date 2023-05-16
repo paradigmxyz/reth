@@ -48,6 +48,9 @@ impl<E: EnvironmentKind> Database for Env<E> {
     }
 }
 
+const GIGABYTE: usize = 1024 * 1024 * 1024;
+const TERABYTE: usize = GIGABYTE * 1024;
+
 impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
@@ -62,14 +65,19 @@ impl<E: EnvironmentKind> Env<E> {
             inner: Environment::new()
                 .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
-                    size: Some(0..(1024 * 1024 * 1024 * 1024 * 4)), // TODO: reevaluate (4 tb)
-                    growth_step: Some(1024 * 1024 * 256),           // TODO: reevaluate (256 mb)
+                    // Maximum database size of 4 terabytes
+                    size: Some(0..(4 * TERABYTE)),
+                    // We grow the database in increments of 4 gigabytes
+                    growth_step: Some(4 * GIGABYTE as isize),
+                    // The database never shrinks
                     shrink_threshold: None,
                     page_size: Some(PageSize::Set(default_page_size())),
                 })
                 .set_flags(EnvironmentFlags {
                     mode,
-                    no_rdahead: true, // TODO: reevaluate
+                    // We disable readahead because it improves performance for linear scans, but
+                    // worsens it for random access (which is our access pattern outside of sync)
+                    no_rdahead: true,
                     coalesce: true,
                     ..Default::default()
                 })
@@ -277,6 +285,47 @@ mod tests {
         assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
         assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
         // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
+    }
+
+    #[test]
+    fn db_cursor_walk_range_on_dup_table() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        let address0 = Address::zero();
+        let address1 = Address::from_low_u64_be(1);
+        let address2 = Address::from_low_u64_be(2);
+
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address0, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address1, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address2, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address0, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address1, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address2, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(2, AccountBeforeTx { address: address0, info: None }) // <- should not be returned by the walker
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<AccountChangeSet>().unwrap();
+
+        let entries = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(entries.len(), 7);
+
+        let mut walker = cursor.walk_range(0..=1).unwrap();
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address0, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address1, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address2, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address0, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address1, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address2, info: None }))));
         assert_eq!(walker.next(), None);
     }
 

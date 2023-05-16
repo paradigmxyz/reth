@@ -32,7 +32,7 @@ pub struct Peers {
 }
 
 /// Number of peers connected to.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PeerCount {
     /// Peer count as integer
@@ -98,7 +98,7 @@ pub struct PipProtocolInfo {
 }
 
 /// Sync status
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SyncStatus {
     /// Info when syncing
     Info(SyncInfo),

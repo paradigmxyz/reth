@@ -7,7 +7,9 @@ use reth_interfaces::{
     consensus::Consensus,
     Error,
 };
-use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{
+    BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
+};
 use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, ExecutorFactory,
     PostStateDataProvider,
@@ -82,7 +84,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
 {
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
         trace!(target: "blockchain_tree", "Returning all blocks in blockchain tree");
-        self.tree.read().block_indices().index_of_number_to_pending_blocks().clone()
+        self.tree.read().block_indices().block_number_to_block_hashes().clone()
+    }
+
+    fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
+        trace!(target: "blockchain_tree", ?hash, "Returning header by hash");
+        self.tree.read().block_by_hash(hash).map(|b| b.header.clone())
     }
 
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
@@ -92,11 +99,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
 
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
         trace!(target: "blockchain_tree", "Returning canonical blocks in tree");
-        self.tree.read().block_indices().canonical_chain().clone()
+        self.tree.read().block_indices().canonical_chain().inner().clone()
     }
 
-    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
-        let mut parent = hash;
+    fn find_canonical_ancestor(&self, mut parent: BlockHash) -> Option<BlockHash> {
         let tree = self.tree.read();
 
         // walk up the tree and check if the parent is in the sidechain

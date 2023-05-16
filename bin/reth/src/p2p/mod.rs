@@ -54,7 +54,7 @@ pub struct Command {
     /// Secret key to use for this node.
     ///
     /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH", global = true, required = false)]
+    #[arg(long, value_name = "PATH")]
     p2p_secret_key: Option<PathBuf>,
 
     /// Disable the discovery service.

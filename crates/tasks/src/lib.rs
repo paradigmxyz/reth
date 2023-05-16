@@ -7,7 +7,10 @@
 
 //! reth task management
 
-use crate::shutdown::{signal, Shutdown, Signal};
+use crate::{
+    metrics::TaskExecutorMetrics,
+    shutdown::{signal, Shutdown, Signal},
+};
 use dyn_clone::DynClone;
 use futures_util::{
     future::{select, BoxFuture},
@@ -25,6 +28,7 @@ use tokio::{
 use tracing::error;
 use tracing_futures::Instrument;
 
+pub mod metrics;
 pub mod shutdown;
 
 /// A type that can spawn tasks.
@@ -160,6 +164,7 @@ impl TaskManager {
             handle: self.handle.clone(),
             on_shutdown: self.on_shutdown.clone(),
             panicked_tasks_tx: self.panicked_tasks_tx.clone(),
+            metrics: Default::default(),
         }
     }
 }
@@ -192,6 +197,8 @@ pub struct TaskExecutor {
     on_shutdown: Shutdown,
     /// Sender half for sending panic signals to this type
     panicked_tasks_tx: UnboundedSender<&'static str>,
+    // Task Executor Metrics
+    metrics: TaskExecutorMetrics,
 }
 
 // === impl TaskExecutor ===
@@ -358,10 +365,12 @@ impl TaskExecutor {
 
 impl TaskSpawner for TaskExecutor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        self.metrics.inc_regular_task();
         self.spawn(fut)
     }
 
     fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        self.metrics.inc_critical_tasks();
         TaskExecutor::spawn_critical(self, name, fut)
     }
 
