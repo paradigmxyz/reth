@@ -4,6 +4,9 @@ pub mod download;
 /// Traits for implementing P2P block body clients.
 pub mod bodies;
 
+/// A downloader that combines two different downloaders/client implementations.
+pub mod either;
+
 /// An implementation that uses headers and bodies traits to download full blocks
 pub mod full_block;
 
