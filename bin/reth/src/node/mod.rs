@@ -33,6 +33,7 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
+        either::EitherDownloader,
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
     sync::SyncStateUpdater,
@@ -282,46 +283,6 @@ impl Command {
             None => None,
         };
 
-        // Configure the pipeline
-        let mut pipeline = if self.auto_mine {
-            let (_, client, mut task) = AutoSealBuilder::new(
-                Arc::clone(&self.chain),
-                blockchain_db.clone(),
-                transaction_pool.clone(),
-                consensus_engine_tx.clone(),
-                canon_state_notification_sender,
-            )
-            .build();
-
-            let mut pipeline = self
-                .build_networked_pipeline(
-                    &mut config,
-                    network.clone(),
-                    client,
-                    Arc::clone(&consensus),
-                    db.clone(),
-                    &ctx.task_executor,
-                )
-                .await?;
-
-            let pipeline_events = pipeline.events();
-            task.set_pipeline_events(pipeline_events);
-            debug!(target: "reth::cli", "Spawning auto mine task");
-            ctx.task_executor.spawn(Box::pin(task));
-
-            pipeline
-        } else {
-            self.build_networked_pipeline(
-                &mut config,
-                network.clone(),
-                network_client.clone(),
-                Arc::clone(&consensus),
-                db.clone(),
-                &ctx.task_executor,
-            )
-            .await?
-        };
-
         // configure the payload builder
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
@@ -336,10 +297,54 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
+        // Configure the pipeline
+        let (mut pipeline, client) = if self.auto_mine {
+            let (_, client, mut task) = AutoSealBuilder::new(
+                Arc::clone(&self.chain),
+                blockchain_db.clone(),
+                transaction_pool.clone(),
+                consensus_engine_tx.clone(),
+                canon_state_notification_sender,
+            )
+            .build();
+
+            let mut pipeline = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    client.clone(),
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            let pipeline_events = pipeline.events();
+            task.set_pipeline_events(pipeline_events);
+            debug!(target: "reth::cli", "Spawning auto mine task");
+            ctx.task_executor.spawn(Box::pin(task));
+
+            (pipeline, EitherDownloader::Left(client))
+        } else {
+            let pipeline = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    network_client.clone(),
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            (pipeline, EitherDownloader::Right(network_client))
+        };
+
         let pipeline_events = pipeline.events();
+
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
-            network_client,
+            client,
             pipeline,
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
