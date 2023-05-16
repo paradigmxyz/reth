@@ -5,7 +5,6 @@ use reth_primitives::{BlockNumber, StageCheckpoint};
 use reth_provider::Transaction;
 use std::{
     cmp::{max, min},
-    fmt::Display,
     ops::RangeInclusive,
 };
 

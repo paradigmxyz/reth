@@ -123,33 +123,6 @@ pub struct StorageHashingCheckpoint {
     pub to: u64,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::Rng;
-
-    #[test]
-    fn merkle_checkpoint_roundtrip() {
-        let mut rng = rand::thread_rng();
-        let checkpoint = MerkleCheckpoint {
-            target_block: rng.gen(),
-            last_account_key: H256::from_low_u64_be(rng.gen()),
-            last_walker_key: H256::from_low_u64_be(rng.gen()).to_vec(),
-            walker_stack: Vec::from([StoredSubNode {
-                key: H256::from_low_u64_be(rng.gen()).to_vec(),
-                nibble: Some(rng.gen()),
-                node: None,
-            }]),
-            state: HashBuilderState::default(),
-        };
-
-        let mut buf = Vec::new();
-        let encoded = checkpoint.clone().to_compact(&mut buf);
-        let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
-        assert_eq!(decoded, checkpoint);
-    }
-}
-
 #[main_codec]
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct StageCheckpoint {
@@ -186,38 +159,91 @@ impl Compact for StageUnitCheckpoint {
     {
         match self {
             StageUnitCheckpoint::Transaction(data) => {
-                data.to_compact(buf);
-                0
+                buf.put_u8(0);
+                1 + data.to_compact(buf)
             }
             StageUnitCheckpoint::Account(data) => {
-                data.to_compact(buf);
-                1
+                buf.put_u8(1);
+                1 + data.to_compact(buf)
             }
             StageUnitCheckpoint::Storage(data) => {
-                data.to_compact(buf);
-                2
+                buf.put_u8(2);
+                1 + data.to_compact(buf)
             }
         }
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
     where
         Self: Sized,
     {
-        match len {
+        match buf[0] {
             0 => {
-                let (data, buf) = TxNumber::from_compact(buf, buf.len());
+                let (data, buf) = TxNumber::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Transaction(data), buf)
             }
             1 => {
-                let (data, buf) = AccountHashingCheckpoint::from_compact(buf, buf.len());
+                let (data, buf) = AccountHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Account(data), buf)
             }
             2 => {
-                let (data, buf) = StorageHashingCheckpoint::from_compact(buf, buf.len());
+                let (data, buf) = StorageHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Storage(data), buf)
             }
             _ => unreachable!(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+
+    #[test]
+    fn merkle_checkpoint_roundtrip() {
+        let mut rng = rand::thread_rng();
+        let checkpoint = MerkleCheckpoint {
+            target_block: rng.gen(),
+            last_account_key: H256::from_low_u64_be(rng.gen()),
+            last_walker_key: H256::from_low_u64_be(rng.gen()).to_vec(),
+            walker_stack: Vec::from([StoredSubNode {
+                key: H256::from_low_u64_be(rng.gen()).to_vec(),
+                nibble: Some(rng.gen()),
+                node: None,
+            }]),
+            state: HashBuilderState::default(),
+        };
+
+        let mut buf = Vec::new();
+        let encoded = checkpoint.clone().to_compact(&mut buf);
+        let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn stage_unit_checkpoint_roundtrip() {
+        let mut rng = rand::thread_rng();
+        let checkpoints = vec![
+            StageUnitCheckpoint::Transaction(rng.gen()),
+            StageUnitCheckpoint::Account(AccountHashingCheckpoint {
+                address: Some(Address::from_low_u64_be(rng.gen())),
+                from: rng.gen(),
+                to: rng.gen(),
+            }),
+            StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+                address: Some(Address::from_low_u64_be(rng.gen())),
+                storage: Some(H256::from_low_u64_be(rng.gen())),
+                from: rng.gen(),
+                to: rng.gen(),
+            }),
+        ];
+
+        for checkpoint in checkpoints {
+            let mut buf = Vec::new();
+            let encoded = checkpoint.clone().to_compact(&mut buf);
+            let (decoded, _) = StageUnitCheckpoint::from_compact(&buf, encoded);
+            assert_eq!(decoded, checkpoint);
         }
     }
 }
