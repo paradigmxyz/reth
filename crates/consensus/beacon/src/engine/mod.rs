@@ -245,9 +245,6 @@ where
             metrics: Metrics::default(),
         };
 
-        // Optimistically assume that the network state is idle from the start.
-        this.sync_state_updater.update_sync_state(SyncState::Idle);
-
         (this, handle)
     }
 
@@ -702,6 +699,12 @@ where
                             block_number,
                             block_hash,
                         ));
+
+                        // Update the network sync state to `Idle`.
+                        // Handles the edge case where the pipeline is never triggered, because we
+                        // are sufficiently synced.
+                        self.sync_state_updater.update_sync_state(SyncState::Idle);
+
                         PayloadStatusEnum::Valid
                     }
                     BlockStatus::Accepted => {
@@ -776,7 +779,6 @@ where
                 let hash = block.hash;
                 if !self.try_insert_new_payload(block).is_valid() {
                     // if the payload is invalid, we run the pipeline
-                    self.sync_state_updater.update_sync_state(SyncState::Syncing);
                     self.sync.set_pipeline_sync_target(hash);
                 } else {
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
@@ -797,7 +799,6 @@ where
                         if ctrl.is_unwind() {
                             self.sync.set_pipeline_sync_target(current_state.head_block_hash);
                         } else if reached_max_block {
-                            // TODO: Idle?
                             // Terminate the sync early if it's reached the maximum user
                             // configured block.
                             return Some(Ok(()))
