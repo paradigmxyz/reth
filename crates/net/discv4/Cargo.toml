@@ -34,7 +34,7 @@ tokio = { version = "1", features = ["io-util", "net", "time"] }
 tokio-stream = "0.1"
 
 # misc
-tracing = "0.1"
+tracing = { workspace = true }
 thiserror = "1.0"
 hex = "0.4"
 rand = { version = "0.8", optional = true }

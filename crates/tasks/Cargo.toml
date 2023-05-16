@@ -15,7 +15,7 @@ tracing-futures = "0.2"
 futures-util = "0.3"
 
 ## misc
-tracing = { version = "0.1", default-features = false }
+tracing = { workspace = true, default-features = false }
 thiserror = "1.0"
 dyn-clone = "1.0"
 
