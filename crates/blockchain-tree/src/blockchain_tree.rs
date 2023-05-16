@@ -701,6 +701,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
+    /// Determines whether or not a block is canonical, checking the db if necessary.
+    pub fn is_block_hash_canonical(&self, hash: &BlockHash) -> Result<bool, Error> {
+        // first check the tree, then check whether or not the block is in the db.
+        if !self.block_indices.is_block_hash_canonical(hash) &&
+            self.externals.shareable_db().header(hash)?.is_none()
+        {
+            return Ok(false)
+        }
+
+        Ok(true)
+    }
+
     /// Make a block and its parent(s) part of the canonical chain.
     ///
     /// # Note
@@ -718,7 +730,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let old_buffered_blocks = self.buffered_blocks.parent_to_child.clone();
 
         // If block is already canonical don't return error.
-        if self.block_indices.is_block_hash_canonical(block_hash) {
+        if self.is_block_hash_canonical(block_hash)? {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
             let td = self
                 .externals
