@@ -162,7 +162,7 @@ fn measure_stage<F, S>(
         (
             ExecInput {
                 previous_stage: Some((StageId("Another"), block_interval.end)),
-                stage_progress: Some(block_interval.start),
+                checkpoint: Some(block_interval.start),
             },
             UnwindInput {
                 stage_progress: block_interval.end,

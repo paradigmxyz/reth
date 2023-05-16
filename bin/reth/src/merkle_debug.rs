@@ -2,7 +2,7 @@
 use crate::dirs::{DataDirPath, MaybePlatformPath};
 use clap::Parser;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, StageCheckpoint};
 use reth_provider::Transaction;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
 use reth_stages::{
@@ -65,14 +65,15 @@ impl Command {
         let db = Arc::new(init_db(db_path)?);
         let mut tx = Transaction::new(db.as_ref())?;
 
-        let execution_progress = EXECUTION.get_progress(tx.deref())?.unwrap_or_default();
-        assert!(execution_progress < self.to, "Nothing to run");
+        let execution_progress = EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default();
+        assert!(execution_progress.block_number < self.to, "Nothing to run");
 
         let should_reset_stages = !(execution_progress ==
-            ACCOUNT_HASHING.get_progress(tx.deref())?.unwrap_or_default() &&
-            execution_progress == STORAGE_HASHING.get_progress(tx.deref())?.unwrap_or_default() &&
+            ACCOUNT_HASHING.get_checkpoint(tx.deref())?.unwrap_or_default() &&
             execution_progress ==
-                MERKLE_EXECUTION.get_progress(tx.deref())?.unwrap_or_default());
+                STORAGE_HASHING.get_checkpoint(tx.deref())?.unwrap_or_default() &&
+            execution_progress ==
+                MERKLE_EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default());
 
         let factory = reth_revm::Factory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
@@ -88,9 +89,10 @@ impl Command {
         let mut storage_hashing_stage = StorageHashingStage::default();
         let mut merkle_stage = MerkleStage::default_execution();
 
-        for block in execution_progress + 1..=self.to {
+        for block in execution_progress.block_number + 1..=self.to {
             tracing::trace!(target: "reth::cli", block, "Executing block");
-            let progress = if (!should_reset_stages || block > execution_progress + 1) && block > 0
+            let progress = if (!should_reset_stages || block > execution_progress.block_number + 1) &&
+                block > 0
             {
                 Some(block - 1)
             } else {
@@ -101,8 +103,11 @@ impl Command {
                 .execute(
                     &mut tx,
                     ExecInput {
-                        previous_stage: Some((SENDER_RECOVERY, block)),
-                        stage_progress: block.checked_sub(1),
+                        previous_stage: Some((
+                            SENDER_RECOVERY,
+                            StageCheckpoint::block_number(block),
+                        )),
+                        checkpoint: block.checked_sub(1).map(StageCheckpoint::block_number),
                     },
                 )
                 .await?;
@@ -113,8 +118,8 @@ impl Command {
                     .execute(
                         &mut tx,
                         ExecInput {
-                            previous_stage: Some((EXECUTION, block)),
-                            stage_progress: progress,
+                            previous_stage: Some((EXECUTION, StageCheckpoint::block_number(block))),
+                            checkpoint: progress.map(StageCheckpoint::block_number),
                         },
                     )
                     .await?;
@@ -127,8 +132,11 @@ impl Command {
                     .execute(
                         &mut tx,
                         ExecInput {
-                            previous_stage: Some((ACCOUNT_HASHING, block)),
-                            stage_progress: progress,
+                            previous_stage: Some((
+                                ACCOUNT_HASHING,
+                                StageCheckpoint::block_number(block),
+                            )),
+                            checkpoint: progress.map(StageCheckpoint::block_number),
                         },
                     )
                     .await?;
@@ -139,8 +147,11 @@ impl Command {
                 .execute(
                     &mut tx,
                     ExecInput {
-                        previous_stage: Some((STORAGE_HASHING, block)),
-                        stage_progress: progress,
+                        previous_stage: Some((
+                            STORAGE_HASHING,
+                            StageCheckpoint::block_number(block),
+                        )),
+                        checkpoint: progress.map(StageCheckpoint::block_number),
                     },
                 )
                 .await;
@@ -157,8 +168,8 @@ impl Command {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let clean_input = ExecInput {
-                    previous_stage: Some((STORAGE_HASHING, block)),
-                    stage_progress: None,
+                    previous_stage: Some((STORAGE_HASHING, StageCheckpoint::block_number(block))),
+                    checkpoint: None,
                 };
                 loop {
                     let clean_result = merkle_stage.execute(&mut tx, clean_input).await;

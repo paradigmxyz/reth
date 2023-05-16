@@ -515,7 +515,7 @@ impl Command {
 
     fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
         db.view(|tx| {
-            let head = FINISH.get_progress(tx)?.unwrap_or_default();
+            let head = FINISH.get_checkpoint(tx)?.unwrap_or_default().block_number;
             let header = tx
                 .get::<tables::Headers>(head)?
                 .expect("the header for the latest block is missing, database is corrupt");

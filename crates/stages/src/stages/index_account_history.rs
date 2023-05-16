@@ -1,5 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
+use reth_primitives::StageCheckpoint;
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use tracing::*;
@@ -39,7 +40,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
-            return Ok(ExecOutput::done(*range.end()))
+            return Ok(ExecOutput::done(StageCheckpoint::block_number(*range.end())))
         }
 
         let indices = tx.get_account_transition_ids_from_changeset(range.clone())?;
@@ -47,7 +48,10 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::block_number(*range.end()),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -141,7 +145,7 @@ mod tests {
         let mut stage = IndexAccountHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
-        assert_eq!(out, ExecOutput { stage_progress: 5, done: true });
+        assert_eq!(out, ExecOutput { checkpoint: 5, done: true });
         tx.commit().unwrap();
     }
 

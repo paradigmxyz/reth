@@ -20,8 +20,8 @@ use reth_db::{
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered,
-    TxNumber, H256, U256,
+    SealedBlockWithSenders, StageCheckpoint, StorageEntry, TransactionSigned,
+    TransactionSignedEcRecovered, TxNumber, H256, U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{
@@ -1031,7 +1031,7 @@ where
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.cursor_write::<tables::SyncStage>()?;
         while let Some((stage_name, _)) = cursor.next()? {
-            cursor.upsert(stage_name, block_number)?
+            cursor.upsert(stage_name, StageCheckpoint::block_number(block_number))?
         }
 
         Ok(())

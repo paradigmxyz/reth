@@ -1,7 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_interfaces::p2p::headers::client::StatusUpdater;
-use reth_primitives::{BlockNumber, Head};
+use reth_primitives::{BlockNumber, Head, StageCheckpoint};
 use reth_provider::Transaction;
 
 /// The [`StageId`] of the finish stage.
@@ -65,8 +65,11 @@ where
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        self.updater.update_status(self.fetch_head(tx, input.previous_stage_progress())?);
-        Ok(ExecOutput { done: true, stage_progress: input.previous_stage_progress() })
+        self.updater.update_status(self.fetch_head(tx, input.previous_stage_checkpoint())?);
+        Ok(ExecOutput {
+            done: true,
+            checkpoint: StageCheckpoint::block_number(input.previous_stage_checkpoint()),
+        })
     }
 
     async fn unwind(
@@ -139,7 +142,7 @@ mod tests {
         type Seed = Vec<SealedHeader>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let start = input.stage_progress.unwrap_or_default();
+            let start = input.checkpoint.unwrap_or_default();
             let head = random_header(start, None);
             self.tx.insert_headers_with_td(std::iter::once(&head))?;
 
@@ -164,13 +167,13 @@ mod tests {
             if let Some(output) = output {
                 assert!(output.done, "stage should always be done");
                 assert_eq!(
-                    output.stage_progress,
-                    input.previous_stage_progress(),
+                    output.checkpoint,
+                    input.previous_stage_checkpoint(),
                     "stage progress should always match progress of previous stage"
                 );
                 assert_eq!(
                     self.current_status().number,
-                    output.stage_progress,
+                    output.checkpoint,
                     "incorrect block number in status update"
                 );
             }

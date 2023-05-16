@@ -47,13 +47,13 @@ impl NodeState {
                 }
             }
             PipelineEvent::Ran { stage_id, result } => {
-                let notable = result.stage_progress > self.current_checkpoint;
-                self.current_checkpoint = result.stage_progress;
+                let notable = result.checkpoint.block_number > self.current_checkpoint;
+                self.current_checkpoint = result.checkpoint.block_number;
                 if result.done {
                     self.current_stage = None;
-                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage finished executing");
+                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.checkpoint.block_number, "Stage finished executing");
                 } else if notable {
-                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage committed progress");
+                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.checkpoint.block_number, "Stage committed progress");
                 }
             }
             _ => (),

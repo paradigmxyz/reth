@@ -11,6 +11,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
+use reth_primitives::StageCheckpoint;
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
@@ -75,7 +76,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         if range.is_empty() {
             let (from, to) = range.into_inner();
             info!(target: "sync::stages::bodies", from, "Target block already reached");
-            return Ok(ExecOutput::done(to))
+            return Ok(ExecOutput::done(StageCheckpoint::block_number(to)))
         }
 
         // Update the header range on the downloader
@@ -156,7 +157,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // - We reached our target and the target was not limited by the batch size of the stage
         let done = highest_block == to_block;
         info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, is_final_range = done, "Stage iteration finished");
-        Ok(ExecOutput { stage_progress: highest_block, done })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::block_number(highest_block), done })
     }
 
     /// Unwind the stage.
@@ -234,7 +235,7 @@ mod tests {
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            checkpoint: Some(stage_progress),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -250,7 +251,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, done: false }) if stage_progress < 200
+            Ok(ExecOutput { checkpoint, done: false }) if stage_progress < 200
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -264,7 +265,7 @@ mod tests {
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            checkpoint: Some(stage_progress),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -277,7 +278,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
-        assert_matches!(output, Ok(ExecOutput { stage_progress: 20, done: true }));
+        assert_matches!(output, Ok(ExecOutput { checkpoint: 20, done: true }));
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
@@ -290,7 +291,7 @@ mod tests {
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            checkpoint: Some(stage_progress),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -303,14 +304,14 @@ mod tests {
         let first_run = rx.await.unwrap();
         assert_matches!(
             first_run,
-            Ok(ExecOutput { stage_progress, done: false }) if stage_progress >= 10
+            Ok(ExecOutput { checkpoint, done: false }) if stage_progress >= 10
         );
-        let first_run_progress = first_run.unwrap().stage_progress;
+        let first_run_progress = first_run.unwrap().checkpoint;
 
         // Execute again on top of the previous run
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(first_run_progress),
+            checkpoint: Some(first_run_progress),
         };
         let rx = runner.execute(input);
 
@@ -318,7 +319,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, done: true }) if stage_progress > first_run_progress
+            Ok(ExecOutput { checkpoint, done: true }) if stage_progress > first_run_progress
         );
         assert_matches!(
             runner.validate_execution(input, output.ok()),
@@ -336,7 +337,7 @@ mod tests {
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            checkpoint: Some(stage_progress),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -351,11 +352,11 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, done: true }) if stage_progress == previous_stage
+            Ok(ExecOutput { checkpoint, done: true }) if stage_progress == previous_stage
         );
-        let stage_progress = output.unwrap().stage_progress;
+        let stage_progress = output.unwrap().checkpoint;
         runner
-            .validate_db_blocks(input.stage_progress.unwrap_or_default(), stage_progress)
+            .validate_db_blocks(input.checkpoint.unwrap_or_default(), stage_progress)
             .expect("Written block data invalid");
 
         // Delete a transaction
@@ -492,8 +493,8 @@ mod tests {
             type Seed = Vec<SealedBlock>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let start = input.stage_progress.unwrap_or_default();
-                let end = input.previous_stage_progress();
+                let start = input.checkpoint.unwrap_or_default();
+                let end = input.previous_stage_checkpoint();
                 let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
@@ -536,8 +537,8 @@ mod tests {
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
                 let highest_block = match output.as_ref() {
-                    Some(output) => output.stage_progress,
-                    None => input.stage_progress.unwrap_or_default(),
+                    Some(output) => output.checkpoint,
+                    None => input.checkpoint.unwrap_or_default(),
                 };
                 self.validate_db_blocks(highest_block, highest_block)
             }

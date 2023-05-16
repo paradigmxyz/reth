@@ -1,9 +1,11 @@
 use crate::{
     trie::{hash_builder::HashBuilderState, StoredSubNode},
-    Address, BlockNumber, H256,
+    Address, BlockNumber, TxNumber, H256,
 };
-use bytes::Buf;
-use reth_codecs::{main_codec, Compact};
+use bytes::{Buf, BufMut};
+use reth_codecs::{derive_arbitrary, main_codec, Compact};
+use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -97,7 +99,7 @@ impl Compact for MerkleCheckpoint {
 
 /// Saves the progress of AccountHashing
 #[main_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct AccountHashingCheckpoint {
     /// The next account to start hashing from
     pub address: Option<Address>,
@@ -109,7 +111,7 @@ pub struct AccountHashingCheckpoint {
 
 /// Saves the progress of StorageHashing
 #[main_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct StorageHashingCheckpoint {
     /// The next account to start hashing from
     pub address: Option<Address>,
@@ -145,5 +147,77 @@ mod tests {
         let encoded = checkpoint.clone().to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
+    }
+}
+
+#[main_codec]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub struct StageCheckpoint {
+    /// Stage progress measured in block number it reached.
+    pub block_number: BlockNumber,
+    /// Stage-specific checkpoint. None if stage uses only block-based checkpoints.
+    pub stage_checkpoint: Option<StageUnitCheckpoint>,
+}
+
+impl StageCheckpoint {
+    pub fn block_number(block_number: BlockNumber) -> Self {
+        Self { block_number, ..Default::default() }
+    }
+}
+
+impl Display for StageCheckpoint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.block_number, f)
+    }
+}
+
+#[derive_arbitrary(compact)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+pub enum StageUnitCheckpoint {
+    Transaction(TxNumber),
+    Account(AccountHashingCheckpoint),
+    Storage(StorageHashingCheckpoint),
+}
+
+impl Compact for StageUnitCheckpoint {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: BufMut + AsMut<[u8]>,
+    {
+        match self {
+            StageUnitCheckpoint::Transaction(data) => {
+                data.to_compact(buf);
+                0
+            }
+            StageUnitCheckpoint::Account(data) => {
+                data.to_compact(buf);
+                1
+            }
+            StageUnitCheckpoint::Storage(data) => {
+                data.to_compact(buf);
+                2
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
+    where
+        Self: Sized,
+    {
+        match len {
+            0 => {
+                let (data, buf) = TxNumber::from_compact(buf, buf.len());
+                (Self::Transaction(data), buf)
+            }
+            1 => {
+                let (data, buf) = AccountHashingCheckpoint::from_compact(buf, buf.len());
+                (Self::Account(data), buf)
+            }
+            2 => {
+                let (data, buf) = StorageHashingCheckpoint::from_compact(buf, buf.len());
+                (Self::Storage(data), buf)
+            }
+            _ => unreachable!(),
+        }
     }
 }

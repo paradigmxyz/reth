@@ -1,5 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, models::BlockNumberAddress};
+use reth_primitives::StageCheckpoint;
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use tracing::*;
@@ -36,18 +37,21 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let target = input.previous_stage_progress();
+        let target = input.previous_stage_checkpoint();
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
-            return Ok(ExecOutput::done(target))
+            return Ok(ExecOutput::done(StageCheckpoint::block_number(target)))
         }
 
         let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;
         tx.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::block_number(*range.end()),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -151,7 +155,7 @@ mod tests {
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
-        assert_eq!(out, ExecOutput { stage_progress: 5, done: true });
+        assert_eq!(out, ExecOutput { checkpoint: 5, done: true });
         tx.commit().unwrap();
     }
 

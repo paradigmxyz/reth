@@ -6,7 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{consensus::Consensus, provider::ProviderError};
-use reth_primitives::U256;
+use reth_primitives::{StageCheckpoint, U256};
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
@@ -63,7 +63,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;
 
         // Get latest total difficulty
-        let last_header_number = input.stage_progress.unwrap_or_default();
+        let last_header_number = input.checkpoint.unwrap_or_default().block_number;
         let last_entry = cursor_td
             .seek_exact(last_header_number)?
             .ok_or(ProviderError::TotalDifficulty { number: last_header_number })?;
@@ -82,7 +82,10 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             cursor_td.append(block_number, td.into())?;
         }
         info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::block_number(end_block),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -128,7 +131,7 @@ mod tests {
 
         let first_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            checkpoint: Some(stage_progress),
         };
 
         // Seed only once with full input range
@@ -139,19 +142,19 @@ mod tests {
         let expected_progress = stage_progress + threshold;
         assert!(matches!(
             result,
-            Ok(ExecOutput { done: false, stage_progress })
+            Ok(ExecOutput { done: false, checkpoint })
                 if stage_progress == expected_progress
         ));
 
         // Execute second time
         let second_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(expected_progress),
+            checkpoint: Some(expected_progress),
         };
         let result = runner.execute(second_input).await.unwrap();
         assert!(matches!(
             result,
-            Ok(ExecOutput { done: true, stage_progress })
+            Ok(ExecOutput { done: true, checkpoint })
                 if stage_progress == previous_stage
         ));
 
@@ -194,7 +197,7 @@ mod tests {
         type Seed = Vec<SealedHeader>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let start = input.stage_progress.unwrap_or_default();
+            let start = input.checkpoint.unwrap_or_default();
             let head = random_header(start, None);
             self.tx.insert_headers(std::iter::once(&head))?;
             self.tx.commit(|tx| {
@@ -226,9 +229,9 @@ mod tests {
             input: ExecInput,
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
-            let initial_stage_progress = input.stage_progress.unwrap_or_default();
+            let initial_stage_progress = input.checkpoint.unwrap_or_default();
             match output {
-                Some(output) if output.stage_progress > initial_stage_progress => {
+                Some(output) if output.checkpoint > initial_stage_progress => {
                     self.tx.query(|tx| {
                         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
                         let (_, mut current_header) = header_cursor

@@ -73,7 +73,7 @@ impl Command {
                     tx.clear::<tables::AccountChangeSet>()?;
                     tx.clear::<tables::StorageChangeSet>()?;
                     tx.clear::<tables::Bytecodes>()?;
-                    tx.put::<tables::SyncStage>(EXECUTION.0.to_string(), 0)?;
+                    tx.put::<tables::SyncStage>(EXECUTION.0.to_string(), Default::default())?;
                     insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
                     Ok::<_, eyre::Error>(())
                 })??;
@@ -83,12 +83,12 @@ impl Command {
                     // Clear hashed accounts
                     tx.clear::<tables::HashedAccount>()?;
                     tx.put::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into(), Vec::new())?;
-                    tx.put::<tables::SyncStage>(ACCOUNT_HASHING.0.to_string(), 0)?;
+                    tx.put::<tables::SyncStage>(ACCOUNT_HASHING.0.to_string(), Default::default())?;
 
                     // Clear hashed storages
                     tx.clear::<tables::HashedStorage>()?;
                     tx.put::<tables::SyncStageProgress>(STORAGE_HASHING.0.into(), Vec::new())?;
-                    tx.put::<tables::SyncStage>(STORAGE_HASHING.0.to_string(), 0)?;
+                    tx.put::<tables::SyncStage>(STORAGE_HASHING.0.to_string(), Default::default())?;
 
                     Ok::<_, eyre::Error>(())
                 })??;
@@ -97,8 +97,11 @@ impl Command {
                 tool.db.update(|tx| {
                     tx.clear::<tables::AccountsTrie>()?;
                     tx.clear::<tables::StoragesTrie>()?;
-                    tx.put::<tables::SyncStage>(MERKLE_EXECUTION.0.to_string(), 0)?;
-                    tx.put::<tables::SyncStage>(MERKLE_UNWIND.0.to_string(), 0)?;
+                    tx.put::<tables::SyncStage>(
+                        MERKLE_EXECUTION.0.to_string(),
+                        Default::default(),
+                    )?;
+                    tx.put::<tables::SyncStage>(MERKLE_UNWIND.0.to_string(), Default::default())?;
                     tx.delete::<tables::SyncStageProgress>(MERKLE_EXECUTION.0.into(), None)?;
                     Ok::<_, eyre::Error>(())
                 })??;
@@ -107,8 +110,14 @@ impl Command {
                 tool.db.update(|tx| {
                     tx.clear::<tables::AccountHistory>()?;
                     tx.clear::<tables::StorageHistory>()?;
-                    tx.put::<tables::SyncStage>(INDEX_ACCOUNT_HISTORY.0.to_string(), 0)?;
-                    tx.put::<tables::SyncStage>(INDEX_STORAGE_HISTORY.0.to_string(), 0)?;
+                    tx.put::<tables::SyncStage>(
+                        INDEX_ACCOUNT_HISTORY.0.to_string(),
+                        Default::default(),
+                    )?;
+                    tx.put::<tables::SyncStage>(
+                        INDEX_STORAGE_HISTORY.0.to_string(),
+                        Default::default(),
+                    )?;
                     Ok::<_, eyre::Error>(())
                 })??;
             }

@@ -39,8 +39,8 @@ fn find_stage_range(db: &Path) -> StageRange {
 
             stage_range = Some((
                 ExecInput {
-                    previous_stage: Some((StageId("Another"), to)),
-                    stage_progress: Some(from),
+                    previous_stage: Some((StageId("Another"), StageCheckpoint::block_number(to))),
+                    checkpoint: Some(StageCheckpoint::block_number(from)),
                 },
                 UnwindInput { unwind_to: from, stage_progress: to, bad_block: None },
             ));

@@ -34,8 +34,8 @@ use crate::{
 };
 use reth_primitives::{
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSignedNoHash, TxHash, TxNumber, H256,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt,
+    StageCheckpoint, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -300,7 +300,7 @@ table!(
 
 table!(
     /// Stores the highest synced block number of each stage.
-    ( SyncStage ) StageId | BlockNumber
+    ( SyncStage ) StageId | StageCheckpoint
 );
 
 table!(

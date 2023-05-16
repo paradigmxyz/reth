@@ -7,7 +7,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable, RawValue,
 };
-use reth_primitives::{keccak256, TransactionSignedNoHash, TxNumber, H160};
+use reth_primitives::{keccak256, StageCheckpoint, TransactionSignedNoHash, TxNumber, H160};
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -52,7 +52,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     ) -> Result<ExecOutput, StageError> {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
         if range.is_empty() {
-            return Ok(ExecOutput::done(*range.end()))
+            return Ok(ExecOutput::done(StageCheckpoint::block_number(*range.end())))
         }
         let (start_block, end_block) = range.clone().into_inner();
 
@@ -65,7 +65,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // No transactions to walk over
         if first_tx_num > last_tx_num {
             info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Target transaction already reached");
-            return Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
+            return Ok(ExecOutput {
+                checkpoint: StageCheckpoint::block_number(end_block),
+                done: is_final_range,
+            })
         }
 
         // Acquire the cursor for inserting elements
@@ -137,7 +140,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         }
 
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { stage_progress: end_block, done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::block_number(end_block),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -194,12 +200,12 @@ mod tests {
         let runner = SenderRecoveryTestRunner::default();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            checkpoint: Some(stage_progress),
         };
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
         let non_empty_block_number = stage_progress + 10;
-        let blocks = (stage_progress..=input.previous_stage_progress())
+        let blocks = (stage_progress..=input.previous_stage_checkpoint())
             .map(|number| {
                 random_block(number, None, Some((number == non_empty_block_number) as u8), None)
             })
@@ -212,7 +218,7 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done, stage_progress })
+            Ok(ExecOutput { done, checkpoint })
                 if done && stage_progress == previous_stage
         );
 
@@ -229,7 +235,7 @@ mod tests {
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
         let first_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            checkpoint: Some(stage_progress),
         };
 
         // Seed only once with full input range
@@ -240,19 +246,19 @@ mod tests {
         let expected_progress = stage_progress + threshold;
         assert_matches!(
             result,
-            Ok(ExecOutput { done: false, stage_progress })
+            Ok(ExecOutput { done: false, checkpoint })
                 if stage_progress == expected_progress
         );
 
         // Execute second time
         let second_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(expected_progress),
+            checkpoint: Some(expected_progress),
         };
         let result = runner.execute(second_input).await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done: true, stage_progress })
+            Ok(ExecOutput { done: true, checkpoint })
                 if stage_progress == previous_stage
         );
 
@@ -313,8 +319,8 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.stage_progress.unwrap_or_default();
-            let end = input.previous_stage_progress();
+            let stage_progress = input.checkpoint.unwrap_or_default();
+            let end = input.previous_stage_checkpoint();
 
             let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
@@ -328,8 +334,8 @@ mod tests {
         ) -> Result<(), TestRunnerError> {
             match output {
                 Some(output) => self.tx.query(|tx| {
-                    let start_block = input.stage_progress.unwrap_or_default() + 1;
-                    let end_block = output.stage_progress;
+                    let start_block = input.checkpoint.unwrap_or_default() + 1;
+                    let end_block = output.checkpoint;
 
                     if start_block > end_block {
                         return Ok(())
@@ -352,9 +358,7 @@ mod tests {
 
                     Ok(())
                 })?,
-                None => {
-                    self.ensure_no_senders_by_block(input.stage_progress.unwrap_or_default())?
-                }
+                None => self.ensure_no_senders_by_block(input.checkpoint.unwrap_or_default())?,
             };
 
             Ok(())
