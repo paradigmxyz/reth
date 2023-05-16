@@ -245,6 +245,9 @@ where
             metrics: Metrics::default(),
         };
 
+        // Optimistically assume that the network state is idle from the start.
+        this.sync_state_updater.update_sync_state(SyncState::Idle);
+
         (this, handle)
     }
 
