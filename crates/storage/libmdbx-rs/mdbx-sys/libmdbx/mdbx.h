@@ -25,7 +25,7 @@ _The Future will (be) [Positive](https://www.ptsecurity.com). Всё будет 
 
 \section copyright LICENSE & COPYRIGHT
 
-\authors Copyright (c) 2015-2022, Leonid Yuriev <leo@yuriev.ru>
+\authors Copyright (c) 2015-2023, Leonid Yuriev <leo@yuriev.ru>
 and other _libmdbx_ authors: please see [AUTHORS](./AUTHORS) file.
 
 \copyright Redistribution and use in source and binary forms, with or without
@@ -77,10 +77,10 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #if defined(__riscv) || defined(__riscv__) || defined(__RISCV) ||              \
     defined(__RISCV__)
-#warning The RISC-V architecture is intentionally insecure by design. \
+#warning "The RISC-V architecture is intentionally insecure by design. \
   Please delete this admonition at your own risk, \
   if you make such decision informed and consciously. \
-  Refer to https://clck.ru/32d9xH for more information.
+  Refer to https://clck.ru/32d9xH for more information."
 #endif /* RISC-V */
 
 #ifdef _MSC_VER
@@ -695,9 +695,9 @@ extern LIBMDBX_VERINFO_API const struct MDBX_build_info {
  * automatically (de)initialization, releasing reader lock table slots
  * and so on.
  *
- * If MDBX is built as a DLL this is done out-of-the-box by DllEntry(),
- * function which called automatically by Windows core with passing corresponding
- * reason argument.
+ * If MDBX built as a DLL this is done out-of-the-box by DllEntry() function,
+ * which called automatically by Windows core with passing corresponding reason
+ * argument.
  *
  * Otherwise, if MDBX was built not as a DLL, some black magic
  * may be required depending of Windows version:
@@ -881,7 +881,7 @@ enum MDBX_constants {
 /* DEBUG & LOGGING ************************************************************/
 
 /** \addtogroup c_debug
- * \note Most of debug feature enabled only when libmdbx is built with
+ * \note Most of debug feature enabled only when libmdbx built with
  * \ref MDBX_DEBUG build option. @{ */
 
 /** Log level
@@ -946,7 +946,7 @@ typedef enum MDBX_log_level_t MDBX_log_level_t;
  *
  * \details `MDBX_DBG_DUMP` and `MDBX_DBG_LEGACY_MULTIOPEN` always have an
  * effect, but `MDBX_DBG_ASSERT`, `MDBX_DBG_AUDIT` and `MDBX_DBG_JITTER` only if
- * libmdbx is built with \ref MDBX_DEBUG. */
+ * libmdbx built with \ref MDBX_DEBUG. */
 enum MDBX_debug_flags_t {
   MDBX_DBG_NONE = 0,
 
@@ -1926,6 +1926,15 @@ enum MDBX_error_t {
   /** Overlapping read and write transactions for the current thread */
   MDBX_TXN_OVERLAPPING = -30415,
 
+  /** Внутренняя ошибка возвращаемая в случае нехватки запаса свободных страниц
+   * при обновлении GC. Используется как вспомогательное средство для отладки.
+   * \note С точки зрения пользователя семантически
+   *       равнозначна \ref MDBX_PROBLEM. */
+  MDBX_BACKLOG_DEPLETED = -30414,
+
+  /** Alternative/Duplicate LCK-file is exists and should be removed manually */
+  MDBX_DUPLICATED_CLK = -30413,
+
   /* The last of MDBX-added error codes */
   MDBX_LAST_ADDED_ERRCODE = MDBX_TXN_OVERLAPPING,
 
@@ -2051,7 +2060,9 @@ LIBMDBX_API const char *mdbx_strerror_r_ANSI2OEM(int errnum, char *buf,
  * \returns a non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_create(MDBX_env **penv);
 
-/** \brief MDBX environment options. */
+/** \brief MDBX environment extra runtime options.
+ * \ingroup c_settings
+ * \see mdbx_env_set_option() \see mdbx_env_get_option() */
 enum MDBX_option_t {
   /** \brief Controls the maximum number of named databases for the environment.
    *
@@ -2220,13 +2231,46 @@ enum MDBX_option_t {
    * to 50% (half empty) which corresponds to the range from 8192 and to 32768
    * in units respectively. */
   MDBX_opt_merge_threshold_16dot16_percent,
+
+  /** \brief Controls the choosing between use write-through disk writes and
+   * usual ones with followed flush by the `fdatasync()` syscall.
+   * \details Depending on the operating system, storage subsystem
+   * characteristics and the use case, higher performance can be achieved by
+   * either using write-through or a serie of usual/lazy writes followed by
+   * the flush-to-disk.
+   *
+   * Basically for N chunks the latency/cost of write-through is:
+   *  latency = N * (emit + round-trip-to-storage + storage-execution);
+   * And for serie of lazy writes with flush is:
+   *  latency = N * (emit + storage-execution) + flush + round-trip-to-storage.
+   *
+   * So, for large N and/or noteable round-trip-to-storage the write+flush
+   * approach is win. But for small N and/or near-zero NVMe-like latency
+   * the write-through is better.
+   *
+   * To solve this issue libmdbx provide `MDBX_opt_writethrough_threshold`:
+   *  - when N described above less or equal specified threshold,
+   *    a write-through approach will be used;
+   *  - otherwise, when N great than specified threshold,
+   *    a write-and-flush approach will be used.
+   *
+   * \note MDBX_opt_writethrough_threshold affects only \ref MDBX_SYNC_DURABLE
+   * mode without \ref MDBX_WRITEMAP, and not supported on Windows.
+   * On Windows a write-through is used always but \ref MDBX_NOMETASYNC could
+   * be used for switching to write-and-flush. */
+  MDBX_opt_writethrough_threshold,
+
+  /** \brief Controls prevention of page-faults of reclaimed and allocated pages
+   * in the \ref MDBX_WRITEMAP mode by clearing ones through file handle before
+   * touching. */
+  MDBX_opt_prefault_write_enable,
 };
 #ifndef __cplusplus
 /** \ingroup c_settings */
 typedef enum MDBX_option_t MDBX_option_t;
 #endif
 
-/** \brief Sets the value of a runtime options for an environment.
+/** \brief Sets the value of a extra runtime options for an environment.
  * \ingroup c_settings
  *
  * \param [in] env     An environment handle returned by \ref mdbx_env_create().
@@ -2239,7 +2283,7 @@ typedef enum MDBX_option_t MDBX_option_t;
 LIBMDBX_API int mdbx_env_set_option(MDBX_env *env, const MDBX_option_t option,
                                     uint64_t value);
 
-/** \brief Gets the value of runtime options from an environment.
+/** \brief Gets the value of extra runtime options from an environment.
  * \ingroup c_settings
  *
  * \param [in] env     An environment handle returned by \ref mdbx_env_create().
@@ -2259,6 +2303,8 @@ LIBMDBX_API int mdbx_env_get_option(const MDBX_env *env,
  * Indifferently this function will fails or not, the \ref mdbx_env_close() must
  * be called later to discard the \ref MDBX_env handle and release associated
  * resources.
+ *
+ * \note On Windows the \ref mdbx_env_openW() is recommended to use.
  *
  * \param [in] env       An environment handle returned
  *                       by \ref mdbx_env_create()
@@ -2327,8 +2373,11 @@ LIBMDBX_API int mdbx_env_get_option(const MDBX_env *env,
 LIBMDBX_API int mdbx_env_open(MDBX_env *env, const char *pathname,
                               MDBX_env_flags_t flags, mdbx_mode_t mode);
 
-#if defined(_WIN32) || defined(_WIN64)
-LIBMDBX_API int mdbx_env_openW(MDBX_env *env, const wchar_t *pathnameW,
+#if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
+/** \copydoc mdbx_env_open()
+ * \note Available only on Windows.
+ * \see mdbx_env_open() */
+LIBMDBX_API int mdbx_env_openW(MDBX_env *env, const wchar_t *pathname,
                                MDBX_env_flags_t flags, mdbx_mode_t mode);
 #endif /* Windows */
 
@@ -2358,6 +2407,8 @@ typedef enum MDBX_env_delete_mode_t MDBX_env_delete_mode_t;
 /** \brief Delete the environment's files in a proper and multiprocess-safe way.
  * \ingroup c_extra
  *
+ * \note On Windows the \ref mdbx_env_deleteW() is recommended to use.
+ *
  * \param [in] pathname  The pathname for the database or the directory in which
  *                       the database files reside.
  *
@@ -2374,8 +2425,12 @@ typedef enum MDBX_env_delete_mode_t MDBX_env_delete_mode_t;
  *                            so no deletion was performed. */
 LIBMDBX_API int mdbx_env_delete(const char *pathname,
                                 MDBX_env_delete_mode_t mode);
-#if defined(_WIN32) || defined(_WIN64)
-LIBMDBX_API int mdbx_env_deleteW(const wchar_t *pathnameW,
+
+#if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
+/** \copydoc mdbx_env_delete()
+ * \note Available only on Windows.
+ * \see mdbx_env_delete() */
+LIBMDBX_API int mdbx_env_deleteW(const wchar_t *pathname,
                                  MDBX_env_delete_mode_t mode);
 #endif /* Windows */
 
@@ -2387,6 +2442,8 @@ LIBMDBX_API int mdbx_env_deleteW(const wchar_t *pathnameW,
  * \note This call can trigger significant file size growth if run in
  * parallel with write transactions, because it employs a read-only
  * transaction. See long-lived transactions under \ref restrictions section.
+ *
+ * \note On Windows the \ref mdbx_env_copyW() is recommended to use.
  *
  * \param [in] env    An environment handle returned by mdbx_env_create().
  *                    It must have already been opened successfully.
@@ -2412,7 +2469,11 @@ LIBMDBX_API int mdbx_env_deleteW(const wchar_t *pathnameW,
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_copy(MDBX_env *env, const char *dest,
                               MDBX_copy_flags_t flags);
-#if defined(_WIN32) || defined(_WIN64)
+
+#if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
+/** \copydoc mdbx_env_copy()
+ * \note Available only on Windows.
+ * \see mdbx_env_copy() */
 LIBMDBX_API int mdbx_env_copyW(MDBX_env *env, const wchar_t *dest,
                                MDBX_copy_flags_t flags);
 #endif /* Windows */
@@ -2555,16 +2616,18 @@ struct MDBX_envinfo {
    * first process opened the database after everyone had previously closed it).
    */
   struct {
-    uint64_t newly;   /**< Quantity of a new pages added */
-    uint64_t cow;     /**< Quantity of pages copied for update */
-    uint64_t clone;   /**< Quantity of parent's dirty pages clones
-                           for nested transactions */
-    uint64_t split;   /**< Page splits */
-    uint64_t merge;   /**< Page merges */
-    uint64_t spill;   /**< Quantity of spilled dirty pages */
-    uint64_t unspill; /**< Quantity of unspilled/reloaded pages */
-    uint64_t wops;    /**< Number of explicit write operations (not a pages)
-                           to a disk */
+    uint64_t newly;    /**< Quantity of a new pages added */
+    uint64_t cow;      /**< Quantity of pages copied for update */
+    uint64_t clone;    /**< Quantity of parent's dirty pages clones
+                            for nested transactions */
+    uint64_t split;    /**< Page splits */
+    uint64_t merge;    /**< Page merges */
+    uint64_t spill;    /**< Quantity of spilled dirty pages */
+    uint64_t unspill;  /**< Quantity of unspilled/reloaded pages */
+    uint64_t wops;     /**< Number of explicit write operations (not a pages)
+                            to a disk */
+    uint64_t prefault; /**< Number of prefault write operations (not a pages) */
+    uint64_t mincore;  /**< Number of mincore() calls */
     uint64_t
         msync; /**< Number of explicit msync-to-disk operations (not a pages) */
     uint64_t
@@ -2951,6 +3014,8 @@ LIBMDBX_API int mdbx_env_get_flags(const MDBX_env *env, unsigned *flags);
 /** \brief Return the path that was used in mdbx_env_open().
  * \ingroup c_statinfo
  *
+ * \note On Windows the \ref mdbx_env_get_pathW() is recommended to use.
+ *
  * \param [in] env     An environment handle returned by \ref mdbx_env_create()
  * \param [out] dest   Address of a string pointer to contain the path.
  *                     This is the actual string in the environment, not a
@@ -2959,9 +3024,12 @@ LIBMDBX_API int mdbx_env_get_flags(const MDBX_env *env, unsigned *flags);
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_EINVAL  An invalid parameter was specified. */
-#if !(defined(_WIN32) || defined(_WIN64))
 LIBMDBX_API int mdbx_env_get_path(const MDBX_env *env, const char **dest);
-#else
+
+#if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
+/** \copydoc mdbx_env_get_path()
+ * \note Available only on Windows.
+ * \see mdbx_env_get_path() */
 LIBMDBX_API int mdbx_env_get_pathW(const MDBX_env *env, const wchar_t **dest);
 #endif /* Windows */
 
@@ -2988,6 +3056,8 @@ LIBMDBX_API int mdbx_env_get_fd(const MDBX_env *env, mdbx_filehandle_t *fd);
  * on the fly. From user point of view all of these just working. Nevertheless,
  * it is reasonable to know some details in order to make optimal decisions
  * when choosing parameters.
+ *
+ * \see mdbx_env_info_ex()
  *
  * Both \ref mdbx_env_set_geometry() and legacy \ref mdbx_env_set_mapsize() are
  * inapplicable to read-only opened environment.
@@ -3098,7 +3168,7 @@ LIBMDBX_API int mdbx_env_get_fd(const MDBX_env *env, mdbx_filehandle_t *fd);
  * \note Actual values may be different than your have specified because of
  * rounding to specified database page size, the system page size and/or the
  * size of the system virtual memory management unit. You can get actual values
- * by \ref mdbx_env_sync_ex() or see by using the tool `mdbx_chk` with the `-v`
+ * by \ref mdbx_env_info_ex() or see by using the tool `mdbx_chk` with the `-v`
  * option.
  *
  * Legacy \ref mdbx_env_set_mapsize() correspond to calling
@@ -3766,13 +3836,10 @@ struct MDBX_commit_latency {
     /** \brief Время "по настенным часам" затраченное на чтение и поиск внутри
      *  GC ради данных пользователя. */
     uint32_t work_rtime_monotonic;
-    /** \brief Монотонное время по "настенным часам" затраченное
+    /** \brief Время ЦПУ в режиме пользователе затраченное
      *   на подготовку страниц извлекаемых из GC для данных пользователя,
      *   включая подкачку с диска. */
-    uint32_t work_xtime_monotonic;
-    /** \brief Время ЦПУ в режиме пользователе затраченное на чтение и поиск
-     *  внтури GC ради данных пользователя. */
-    uint32_t work_rtime_cpu;
+    uint32_t work_xtime_cpu;
     /** \brief Количество итераций поиска внутри GC при выделении страниц
      *  ради данных пользователя. */
     uint32_t work_rsteps;
@@ -3789,13 +3856,10 @@ struct MDBX_commit_latency {
     /** \brief Время "по настенным часам" затраченное на чтение и поиск внутри
      *  GC для целей поддержки и обновления самой GC. */
     uint32_t self_rtime_monotonic;
-    /** \brief Монотонное время по "настенным часам" затраченное на подготовку
+    /** \brief Время ЦПУ в режиме пользователе затраченное на подготовку
      *  страниц извлекаемых из GC для целей поддержки и обновления самой GC,
      *  включая подкачку с диска. */
-    uint32_t self_xtime_monotonic;
-    /** \brief Время ЦПУ в режиме пользователе затраченное на чтение и поиск
-     *  внтури GC для целей поддержки и обновления самой GC. */
-    uint32_t self_rtime_cpu;
+    uint32_t self_xtime_cpu;
     /** \brief Количество итераций поиска внутри GC при выделении страниц
      *  для целей поддержки и обновления самой GC. */
     uint32_t self_rsteps;
@@ -4128,6 +4192,8 @@ typedef int(MDBX_cmp_func)(const MDBX_val *a,
  *                               by current thread. */
 LIBMDBX_API int mdbx_dbi_open(MDBX_txn *txn, const char *name,
                               MDBX_db_flags_t flags, MDBX_dbi *dbi);
+LIBMDBX_API int mdbx_dbi_open2(MDBX_txn *txn, const MDBX_val *name,
+                               MDBX_db_flags_t flags, MDBX_dbi *dbi);
 
 /** \deprecated Please
  * \ref avoid_custom_comparators "avoid using custom comparators" and use
@@ -4147,6 +4213,9 @@ LIBMDBX_API int mdbx_dbi_open(MDBX_txn *txn, const char *name,
 MDBX_DEPRECATED LIBMDBX_API int
 mdbx_dbi_open_ex(MDBX_txn *txn, const char *name, MDBX_db_flags_t flags,
                  MDBX_dbi *dbi, MDBX_cmp_func *keycmp, MDBX_cmp_func *datacmp);
+MDBX_DEPRECATED LIBMDBX_API int
+mdbx_dbi_open_ex2(MDBX_txn *txn, const MDBX_val *name, MDBX_db_flags_t flags,
+                  MDBX_dbi *dbi, MDBX_cmp_func *keycmp, MDBX_cmp_func *datacmp);
 
 /** \defgroup value2key Value-to-Key functions
  * \brief Value-to-Key functions to
@@ -5444,18 +5513,20 @@ typedef enum MDBX_page_type_t MDBX_page_type_t;
 #endif
 
 /** \brief Pseudo-name for MainDB */
-#define MDBX_PGWALK_MAIN ((const char *)((ptrdiff_t)0))
+#define MDBX_PGWALK_MAIN ((void *)((ptrdiff_t)0))
 /** \brief Pseudo-name for GarbageCollectorDB */
-#define MDBX_PGWALK_GC ((const char *)((ptrdiff_t)-1))
+#define MDBX_PGWALK_GC ((void *)((ptrdiff_t)-1))
 /** \brief Pseudo-name for MetaPages */
-#define MDBX_PGWALK_META ((const char *)((ptrdiff_t)-2))
+#define MDBX_PGWALK_META ((void *)((ptrdiff_t)-2))
 
 /** \brief Callback function for traverse the b-tree. \see mdbx_env_pgwalk() */
-typedef int MDBX_pgvisitor_func(
-    const uint64_t pgno, const unsigned number, void *const ctx, const int deep,
-    const char *const dbi, const size_t page_size, const MDBX_page_type_t type,
-    const MDBX_error_t err, const size_t nentries, const size_t payload_bytes,
-    const size_t header_bytes, const size_t unused_bytes) MDBX_CXX17_NOEXCEPT;
+typedef int
+MDBX_pgvisitor_func(const uint64_t pgno, const unsigned number, void *const ctx,
+                    const int deep, const MDBX_val *dbi_name,
+                    const size_t page_size, const MDBX_page_type_t type,
+                    const MDBX_error_t err, const size_t nentries,
+                    const size_t payload_bytes, const size_t header_bytes,
+                    const size_t unused_bytes) MDBX_CXX17_NOEXCEPT;
 
 /** \brief B-tree traversal function. */
 LIBMDBX_API int mdbx_env_pgwalk(MDBX_txn *txn, MDBX_pgvisitor_func *visitor,
@@ -5466,13 +5537,20 @@ LIBMDBX_API int mdbx_env_pgwalk(MDBX_txn *txn, MDBX_pgvisitor_func *visitor,
  *
  * This function mostly of internal API for `mdbx_chk` utility and subject to
  * change at any time. Do not use this function to avoid shooting your own
- * leg(s). */
+ * leg(s).
+ *
+ * \note On Windows the \ref mdbx_env_open_for_recoveryW() is recommended
+ * to use. */
 LIBMDBX_API int mdbx_env_open_for_recovery(MDBX_env *env, const char *pathname,
                                            unsigned target_meta,
                                            bool writeable);
-#if defined(_WIN32) || defined(_WIN64)
+
+#if defined(_WIN32) || defined(_WIN64) || defined(DOXYGEN)
+/** \copydoc mdbx_env_open_for_recovery()
+ * \note Available only on Windows.
+ * \see mdbx_env_open_for_recovery() */
 LIBMDBX_API int mdbx_env_open_for_recoveryW(MDBX_env *env,
-                                            const wchar_t *pathnameW,
+                                            const wchar_t *pathname,
                                             unsigned target_meta,
                                             bool writeable);
 #endif /* Windows */
