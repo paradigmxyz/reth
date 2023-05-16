@@ -61,7 +61,13 @@ where
         gas_oracle,
         Box::new(executor.clone()),
     );
-    let eth_filter = EthFilter::new(client, pool, eth_cache.clone(), DEFAULT_MAX_LOGS_IN_RESPONSE);
+    let eth_filter = EthFilter::new(
+        client,
+        pool,
+        eth_cache.clone(),
+        DEFAULT_MAX_LOGS_IN_RESPONSE,
+        Box::new(executor.clone()),
+    );
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 
