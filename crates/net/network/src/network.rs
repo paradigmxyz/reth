@@ -5,10 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_interfaces::{
-    p2p::headers::client::StatusUpdater,
-    sync::{SyncState, SyncStateProvider, SyncStateUpdater},
-};
+use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
     NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
@@ -243,23 +240,21 @@ impl NetworkInfo for NetworkHandle {
     }
 }
 
-impl StatusUpdater for NetworkHandle {
-    /// Update the status of the node.
-    fn update_status(&self, head: Head) {
-        self.send_message(NetworkHandleMessage::StatusUpdate { head });
-    }
-}
-
 impl SyncStateProvider for NetworkHandle {
     fn is_syncing(&self) -> bool {
         self.inner.is_syncing.load(Ordering::Relaxed)
     }
 }
 
-impl SyncStateUpdater for NetworkHandle {
+impl NetworkSyncUpdater for NetworkHandle {
     fn update_sync_state(&self, state: SyncState) {
         let is_syncing = state.is_syncing();
         self.inner.is_syncing.store(is_syncing, Ordering::Relaxed)
+    }
+
+    /// Update the status of the node.
+    fn update_status(&self, head: Head) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { head });
     }
 }
 

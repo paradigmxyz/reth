@@ -1,7 +1,6 @@
 use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_interfaces::sync::{SyncState, SyncStateUpdater};
 use reth_primitives::{listener::EventListeners, BlockNumber, H256};
 use reth_provider::Transaction;
 use std::{ops::Deref, pin::Pin};
@@ -92,8 +91,6 @@ pub struct Pipeline<DB: Database> {
     max_block: Option<BlockNumber>,
     /// All listeners for events the pipeline emits.
     listeners: EventListeners<PipelineEvent>,
-    /// Used for emitting updates about whether the pipeline is running or not.
-    sync_state_updater: Box<dyn SyncStateUpdater>,
     /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
     /// A receiver for the current chain tip to sync to
@@ -202,13 +199,6 @@ where
             let stage = &self.stages[stage_index];
             let stage_id = stage.id();
 
-            // Update sync state
-            if stage_id.is_finish() {
-                self.sync_state_updater.update_sync_state(SyncState::Idle);
-            } else {
-                self.sync_state_updater.update_sync_state(SyncState::Syncing);
-            }
-
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
             let next = self
                 .execute_stage_to_completion(previous_stage, stage_index)
@@ -225,8 +215,6 @@ where
                 }
                 ControlFlow::Continue { progress } => self.progress.update(progress),
                 ControlFlow::Unwind { target, bad_block } => {
-                    // reset the sync state
-                    self.sync_state_updater.update_sync_state(SyncState::Syncing);
                     self.unwind(target, bad_block).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
@@ -404,7 +392,6 @@ impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
             .field("listeners", &self.listeners)
-            .field("sync_state_updater", &self.sync_state_updater)
             .finish()
     }
 }
