@@ -1053,6 +1053,9 @@ mod tests {
         // genesis block 10 is already canonical
         assert_eq!(tree.make_canonical(&H256::zero()), Ok(()));
 
+        // make sure is_block_hash_canonical returns true for genesis block
+        assert!(tree.is_block_hash_canonical(&H256::zero()).unwrap());
+
         // make genesis block 10 as finalized
         tree.finalize_block(10);
 
@@ -1233,6 +1236,13 @@ mod tests {
             if *old.blocks() == BTreeMap::from([(block1.number,block1.clone()),(block2a.number,block2a.clone())])
                 && *new.blocks() == BTreeMap::from([(block1a.number,block1a.clone())]));
 
+        // check that b2 and b1 are not canonical
+        assert!(!tree.is_block_hash_canonical(&block2.hash).unwrap());
+        assert!(!tree.is_block_hash_canonical(&block1.hash).unwrap());
+
+        // ensure that b1a is canonical
+        assert!(tree.is_block_hash_canonical(&block1a.hash).unwrap());
+
         // make b2 canonical
         assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
 
@@ -1260,6 +1270,9 @@ mod tests {
             Ok(CanonStateNotification::Reorg{ old, new})
             if *old.blocks() == BTreeMap::from([(block1a.number,block1a.clone())])
                 && *new.blocks() == BTreeMap::from([(block1.number,block1.clone()),(block2.number,block2.clone())]));
+
+        // check that b2 is now canonical
+        assert!(tree.is_block_hash_canonical(&block2.hash).unwrap());
 
         // finalize b1 that would make b1a removed from tree
         tree.finalize_block(11);
