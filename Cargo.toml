@@ -62,4 +62,4 @@ incremental = false
 ruint = { git = "https://github.com/paradigmxyz/uint" }
 
 [workspace.dependencies]
-tracing = { version = "^0.1.0", default-features = false }
+tracing = "^0.1.0"
