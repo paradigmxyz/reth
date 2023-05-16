@@ -124,13 +124,10 @@ where
                     let mut storage = storage.write().await;
 
                     // check previous block for base fee
-                    let base_fee_per_gas = match storage.headers.get(&storage.best_block) {
-                        Some(parent) => parent.next_block_base_fee(),
-                        None => {
-                            warn!(target: "consensus::auto", "No parent block found for auto sealed block");
-                            return None
-                        }
-                    };
+                    let base_fee_per_gas = storage
+                        .headers
+                        .get(&storage.best_block)
+                        .and_then(|parent| parent.next_block_base_fee());
 
                     let mut header = Header {
                         parent_hash: storage.best_hash,
