@@ -7,7 +7,7 @@ use reth_primitives::{
     proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
     SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::{CanonStateNotificationSender, Chain, StateProviderFactory};
+use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     executor::Executor,
@@ -85,7 +85,7 @@ impl<Client, Pool: TransactionPool> MiningTask<Client, Pool> {
 
 impl<Client, Pool> Future for MiningTask<Client, Pool>
 where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
+    Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
@@ -248,6 +248,11 @@ where
                             let sealed_block_with_senders =
                                 SealedBlockWithSenders::new(sealed_block, senders)
                                     .expect("senders are valid");
+
+                            // update canon chain for rpc
+                            client.set_canonical_head(header.clone().seal(new_hash));
+                            client.set_safe(header.clone().seal(new_hash));
+                            client.set_finalized(header.clone().seal(new_hash));
 
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
