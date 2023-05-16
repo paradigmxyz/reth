@@ -1,7 +1,7 @@
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
 pub use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockHashOrNumber, Head, Header, HeadersDirection};
+use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection};
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -83,19 +83,4 @@ where
         let resp = resp.map(|res| res.map(|headers| headers.into_iter().next()));
         Poll::Ready(resp)
     }
-}
-
-/// The status updater for updating the status of the p2p node
-pub trait StatusUpdater: Send + Sync {
-    /// Updates the status of the p2p node
-    fn update_status(&self, head: Head);
-}
-
-/// A [StatusUpdater] implementation that does nothing.
-#[derive(Debug, Clone, Default)]
-#[non_exhaustive]
-pub struct NoopStatusUpdater;
-
-impl StatusUpdater for NoopStatusUpdater {
-    fn update_status(&self, _: Head) {}
 }

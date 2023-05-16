@@ -9,11 +9,12 @@ use reth_interfaces::{
     consensus::ForkchoiceState,
     executor::Error as ExecutorError,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
+    sync::{NetworkSyncUpdater, SyncState},
     Error,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    listener::EventListeners, BlockNumber, Header, SealedBlock, SealedHeader, H256, U256,
+    listener::EventListeners, BlockNumber, Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{BlockProvider, BlockSource, CanonChainTracker, ProviderError};
 use reth_rpc_types::engine::{
@@ -151,6 +152,8 @@ where
     sync: EngineSyncController<DB, Client>,
     /// The type we can use to query both the database and the blockchain tree.
     blockchain: BT,
+    /// Used for emitting updates about whether the engine is syncing or not.
+    sync_state_updater: Box<dyn NetworkSyncUpdater>,
     /// The Engine API message receiver.
     engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
     /// A clone of the handle
@@ -183,6 +186,7 @@ where
         pipeline: Pipeline<DB>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
+        sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
@@ -194,6 +198,7 @@ where
             pipeline,
             blockchain,
             task_spawner,
+            sync_state_updater,
             max_block,
             run_pipeline_continuously,
             payload_builder,
@@ -211,6 +216,7 @@ where
         pipeline: Pipeline<DB>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
+        sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
@@ -229,6 +235,7 @@ where
             db,
             sync,
             blockchain,
+            sync_state_updater,
             engine_message_rx: UnboundedReceiverStream::new(rx),
             handle: handle.clone(),
             forkchoice_state: None,
@@ -398,6 +405,8 @@ where
                             // properly updated
                             self.update_canon_chain(&state)?;
                         }
+                        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
+                        trace!(target: "consensus::engine", ?state, status = ?payload_response, "Returning forkchoice status");
                         return Ok(payload_response)
                     }
 
@@ -428,6 +437,7 @@ where
     }
 
     /// Sets the state of the canon chain tracker based on the given forkchoice update.
+    /// Additionally, updates the head used for p2p handshakes.
     ///
     /// This should be called before issuing a VALID forkchoice update.
     fn update_canon_chain(&self, update: &ForkchoiceState) -> Result<(), reth_interfaces::Error> {
@@ -458,8 +468,19 @@ where
             .ok_or_else(|| {
                 Error::Provider(ProviderError::UnknownBlockHash(update.head_block_hash))
             })?;
+        let head = head.header.seal(update.head_block_hash);
+        let head_td = self.blockchain.header_td_by_number(head.number)?.ok_or_else(|| {
+            Error::Provider(ProviderError::TotalDifficulty { number: head.number })
+        })?;
 
-        self.blockchain.set_canonical_head(head.header.seal(update.head_block_hash));
+        self.sync_state_updater.update_status(Head {
+            number: head.number,
+            hash: head.hash,
+            difficulty: head.difficulty,
+            timestamp: head.timestamp,
+            total_difficulty: head_td,
+        });
+        self.blockchain.set_canonical_head(head);
         self.blockchain.on_forkchoice_update_received(update);
         Ok(())
     }
@@ -678,6 +699,12 @@ where
                             block_number,
                             block_hash,
                         ));
+
+                        // Update the network sync state to `Idle`.
+                        // Handles the edge case where the pipeline is never triggered, because we
+                        // are sufficiently synced.
+                        self.sync_state_updater.update_sync_state(SyncState::Idle);
+
                         PayloadStatusEnum::Valid
                     }
                     BlockStatus::Accepted => {
@@ -753,11 +780,14 @@ where
                 if !self.try_insert_new_payload(block).is_valid() {
                     // if the payload is invalid, we run the pipeline
                     self.sync.set_pipeline_sync_target(hash);
+                } else {
+                    self.sync_state_updater.update_sync_state(SyncState::Idle);
                 }
             }
             EngineSyncEvent::PipelineStarted(target) => {
                 trace!(target: "consensus::engine", ?target, continuous = target.is_none(), "Started the pipeline");
                 self.metrics.pipeline_runs.increment(1);
+                self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
             EngineSyncEvent::PipelineTaskDropped => {
                 error!(target: "consensus::engine", "Failed to receive spawned pipeline");
@@ -774,11 +804,14 @@ where
                             return Some(Ok(()))
                         }
 
-                        // Update the state and hashes of the blockchain tree if possible
-                        if let Err(error) = self.restore_tree_if_possible(*current_state) {
-                            error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
-                            return Some(Err(error.into()))
-                        }
+                        // Update the state and hashes of the blockchain tree if possible.
+                        match self.restore_tree_if_possible(*current_state) {
+                            Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
+                            Err(error) => {
+                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
+                                return Some(Err(error.into()))
+                            }
+                        };
                     }
                     // Any pipeline error at this point is fatal.
                     Err(error) => return Some(Err(error.into())),
@@ -877,7 +910,10 @@ mod tests {
         BlockchainTree, ShareableBlockchainTree,
     };
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
-    use reth_interfaces::test_utils::{NoopFullBlockClient, TestConsensus};
+    use reth_interfaces::{
+        sync::NoopSyncStateUpdater,
+        test_utils::{NoopFullBlockClient, TestConsensus},
+    };
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::{
@@ -999,6 +1035,7 @@ mod tests {
             pipeline,
             blockchain_provider,
             Box::<TokioTaskExecutor>::default(),
+            Box::<NoopSyncStateUpdater>::default(),
             None,
             false,
             payload_builder,

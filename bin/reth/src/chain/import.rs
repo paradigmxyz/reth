@@ -12,7 +12,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
-use reth_interfaces::{consensus::Consensus, p2p::headers::client::NoopStatusUpdater};
+use reth_interfaces::consensus::Consensus;
 use reth_primitives::{ChainSpec, H256};
 use reth_staged_sync::{
     utils::{
@@ -157,14 +157,12 @@ impl ImportCommand {
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
             .with_max_block(file_client.max_block().unwrap_or(0))
-            .with_sync_state_updater(file_client)
             .add_stages(
                 DefaultStages::new(
                     HeaderSyncMode::Tip(tip_rx),
                     consensus.clone(),
                     header_downloader,
                     body_downloader,
-                    NoopStatusUpdater::default(),
                     factory.clone(),
                 )
                 .set(

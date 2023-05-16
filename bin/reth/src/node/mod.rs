@@ -34,9 +34,8 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
-        headers::{client::StatusUpdater, downloader::HeaderDownloader},
+        headers::downloader::HeaderDownloader,
     },
-    sync::SyncStateUpdater,
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
@@ -311,7 +310,6 @@ impl Command {
             let mut pipeline = self
                 .build_networked_pipeline(
                     &mut config,
-                    network.clone(),
                     client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
@@ -329,7 +327,6 @@ impl Command {
             let pipeline = self
                 .build_networked_pipeline(
                     &mut config,
-                    network.clone(),
                     network_client.clone(),
                     Arc::clone(&consensus),
                     db.clone(),
@@ -348,6 +345,7 @@ impl Command {
             pipeline,
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
+            Box::new(network.clone()),
             self.debug.max_block,
             self.debug.continuous,
             payload_builder.clone(),
@@ -417,7 +415,6 @@ impl Command {
     async fn build_networked_pipeline<DB, Client>(
         &self,
         config: &mut Config,
-        network: NetworkHandle,
         client: Client,
         consensus: Arc<dyn Consensus>,
         db: DB,
@@ -450,7 +447,6 @@ impl Command {
                 config,
                 header_downloader,
                 body_downloader,
-                network.clone(),
                 consensus,
                 max_block,
                 self.debug.continuous,
@@ -625,13 +621,12 @@ impl Command {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn build_pipeline<DB, H, B, U>(
+    async fn build_pipeline<DB, H, B>(
         &self,
         db: DB,
         config: &Config,
         header_downloader: H,
         body_downloader: B,
-        updater: U,
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
@@ -640,7 +635,6 @@ impl Command {
         DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
-        U: SyncStateUpdater + StatusUpdater + Clone + 'static,
     {
         let stage_conf = &config.stages;
 
@@ -673,7 +667,6 @@ impl Command {
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
-            .with_sync_state_updater(updater.clone())
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
@@ -681,7 +674,6 @@ impl Command {
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
-                    updater,
                     factory.clone(),
                 )
                 .set(
