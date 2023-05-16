@@ -1,11 +1,14 @@
 use reth_rpc::{
-    eth::cache::{EthStateCache, EthStateCacheConfig},
+    eth::{
+        cache::{EthStateCache, EthStateCacheConfig},
+        gas_oracle::GasPriceOracleConfig,
+    },
     EthApi, EthFilter, EthPubSub,
 };
 use serde::{Deserialize, Serialize};
 
 /// The default maximum of logs in a single response.
-pub(crate) const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 2_000;
+pub(crate) const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 10_000;
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
@@ -25,6 +28,8 @@ pub struct EthHandlers<Client, Pool, Network, Events> {
 pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
+    /// Settings for the gas price oracle
+    pub gas_oracle: GasPriceOracleConfig,
     /// The maximum number of tracing calls that can be executed in concurrently.
     pub max_tracing_requests: usize,
     /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
@@ -35,8 +40,17 @@ impl Default for EthConfig {
     fn default() -> Self {
         Self {
             cache: EthStateCacheConfig::default(),
+            gas_oracle: GasPriceOracleConfig::default(),
             max_tracing_requests: 10,
             max_logs_per_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
         }
+    }
+}
+
+impl EthConfig {
+    /// Configures the gas price oracle settings
+    pub fn with_gpo_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
+        self.gas_oracle = gas_oracle_config;
+        self
     }
 }

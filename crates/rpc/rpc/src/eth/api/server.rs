@@ -188,7 +188,7 @@ where
         block_number: Option<BlockId>,
     ) -> Result<H256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        Ok(EthApi::storage_at(self, address, index, block_number)?)
+        Ok(EthApi::storage_at(self, address, index, block_number).await?)
     }
 
     /// Handler for: `eth_getTransactionCount`
@@ -364,11 +364,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{eth::cache::EthStateCache, EthApi};
-    use jsonrpsee::{
-        core::{error::Error as RpcError, RpcResult},
-        types::error::{CallError, INVALID_PARAMS_CODE},
+    use crate::{
+        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        EthApi,
     };
+    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use rand::random;
     use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256};
@@ -379,11 +379,13 @@ mod tests {
     #[tokio::test]
     /// Handler for: `eth_test_fee_history`
     async fn test_fee_history() {
+        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
         let eth_api = EthApi::new(
             NoopProvider::default(),
             testing_pool(),
             NoopNetwork,
-            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
         );
 
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
@@ -393,8 +395,8 @@ mod tests {
             None,
         )
         .await;
-        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
-        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         let block_count = 10;
@@ -463,11 +465,13 @@ mod tests {
 
         gas_used_ratios.pop();
 
+        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
         let eth_api = EthApi::new(
-            mock_provider,
+            mock_provider.clone(),
             testing_pool(),
             NoopNetwork,
-            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(mock_provider, Default::default(), cache.clone()),
         );
 
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
@@ -477,8 +481,8 @@ mod tests {
             Some(vec![10.0]),
         )
         .await;
-        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
-        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         // newest_block is finalized

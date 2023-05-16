@@ -1,11 +1,13 @@
 //! `eth_` PubSub RPC handler implementation
 use crate::eth::logs_utils;
 use futures::StreamExt;
-use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
+use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{filter::FilteredParams, TxHash};
+use reth_primitives::TxHash;
 use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
+use reth_rpc_types::FilteredParams;
+
 use reth_rpc_types::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
@@ -15,6 +17,7 @@ use reth_rpc_types::{
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
+use serde::Serialize;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
@@ -54,6 +57,7 @@ impl<Client, Pool, Events, Network> EthPubSub<Client, Pool, Events, Network> {
     }
 }
 
+#[async_trait::async_trait]
 impl<Client, Pool, Events, Network> EthPubSubApiServer for EthPubSub<Client, Pool, Events, Network>
 where
     Client: BlockProvider + EvmEnvProvider + Clone + 'static,
@@ -62,17 +66,16 @@ where
     Network: NetworkInfo + Clone + 'static,
 {
     /// Handler for `eth_subscribe`
-    fn subscribe(
+    async fn subscribe(
         &self,
-        mut sink: SubscriptionSink,
+        pending: PendingSubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
-    ) -> SubscriptionResult {
-        sink.accept()?;
-
+    ) -> jsonrpsee::core::SubscriptionResult {
+        let sink = pending.accept().await?;
         let pubsub = self.inner.clone();
         self.subscription_task_spawner.spawn(Box::pin(async move {
-            handle_accepted(pubsub, sink, kind, params).await;
+            let _ = handle_accepted(pubsub, sink, kind, params).await;
         }));
 
         Ok(())
@@ -82,10 +85,11 @@ where
 /// The actual handler for and accepted [`EthPubSub::subscribe`] call.
 async fn handle_accepted<Client, Pool, Events, Network>(
     pubsub: EthPubSubInner<Client, Pool, Events, Network>,
-    mut accepted_sink: SubscriptionSink,
+    accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
-) where
+) -> Result<(), jsonrpsee::core::Error>
+where
     Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
@@ -96,7 +100,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
             let stream = pubsub
                 .into_new_headers_stream()
                 .map(|block| EthSubscriptionResult::Header(Box::new(block.into())));
-            accepted_sink.pipe_from_stream(stream).await;
+            pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Logs => {
             // if no params are provided, used default filter params
@@ -106,13 +110,13 @@ async fn handle_accepted<Client, Pool, Events, Network>(
             };
             let stream =
                 pubsub.into_log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
-            accepted_sink.pipe_from_stream(stream).await;
+            pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
             let stream = pubsub
                 .into_pending_transaction_stream()
                 .map(EthSubscriptionResult::TransactionHash);
-            accepted_sink.pipe_from_stream(stream).await;
+            pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Syncing => {
             // get new block subscription
@@ -123,7 +127,10 @@ async fn handle_accepted<Client, Pool, Events, Network>(
             let current_sub_res = pubsub.sync_status(initial_sync_status).await;
 
             // send the current status immediately
-            let _ = accepted_sink.send(&current_sub_res);
+            let msg = SubscriptionMessage::from_json(&current_sub_res)?;
+            if accepted_sink.send(msg).await.is_err() {
+                return Ok(())
+            }
 
             while (canon_state.next().await).is_some() {
                 let current_syncing = pubsub.network.is_syncing();
@@ -134,7 +141,44 @@ async fn handle_accepted<Client, Pool, Events, Network>(
 
                     // send a new message now that the status changed
                     let sync_status = pubsub.sync_status(current_syncing).await;
-                    let _ = accepted_sink.send(&sync_status);
+                    let msg = SubscriptionMessage::from_json(&sync_status)?;
+                    if accepted_sink.send(msg).await.is_err() {
+                        break
+                    }
+                }
+            }
+
+            Ok(())
+        }
+    }
+}
+
+/// Pipes all stream items to the subscription sink.
+async fn pipe_from_stream<T, St>(
+    sink: SubscriptionSink,
+    mut stream: St,
+) -> Result<(), jsonrpsee::core::Error>
+where
+    St: Stream<Item = T> + Unpin,
+    T: Serialize,
+{
+    loop {
+        tokio::select! {
+            _ = sink.closed() => {
+                // connection dropped
+                break Ok(())
+            },
+            maybe_item = stream.next() => {
+                let item = match maybe_item {
+                    Some(item) => item,
+                    None => {
+                        // stream ended
+                        break  Ok(())
+                    },
+                };
+                let msg = SubscriptionMessage::from_json(&item)?;
+                if sink.send(msg).await.is_err() {
+                    break Ok(());
                 }
             }
         }

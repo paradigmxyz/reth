@@ -2,19 +2,22 @@
 use futures::{stream::FuturesOrdered, StreamExt};
 use jsonrpsee::{
     core::{
-        server::{
-            helpers::{prepare_error, BatchResponse, BatchResponseBuilder, MethodResponse},
-            resource_limiting::Resources,
-            rpc_module::{MethodKind, Methods},
-        },
+        server::helpers::{prepare_error, BatchResponseBuilder, MethodResponse},
         tracing::{rx_log_from_json, tx_log_from_str},
         JsonRawValue,
     },
+    helpers::batch_response_error,
     server::{
         logger,
         logger::{Logger, TransportProtocol},
+        IdProvider,
     },
-    types::{error::ErrorCode, ErrorObject, Id, InvalidRequest, Notification, Params, Request},
+    types::{
+        error::{reject_too_many_subscriptions, ErrorCode},
+        ErrorObject, Id, InvalidRequest, Notification, Params, Request,
+    },
+    BoundedSubscriptions, CallOrSubscription, MethodCallback, MethodSink, Methods,
+    SubscriptionState,
 };
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
@@ -34,17 +37,19 @@ pub(crate) struct CallData<'a, L: Logger> {
     conn_id: usize,
     logger: &'a L,
     methods: &'a Methods,
+    id_provider: &'a dyn IdProvider,
+    sink: &'a MethodSink,
     max_response_body_size: u32,
     max_log_length: u32,
-    resources: &'a Resources,
     request_start: L::Instant,
+    bounded_subscriptions: BoundedSubscriptions,
 }
 
 // Batch responses must be sent back as a single message so we read the results from each
 // request in the batch and read the results off of a new channel, `rx_batch`, and then send the
 // complete batch response back to the client over `tx`.
 #[instrument(name = "batch", skip(b), level = "TRACE")]
-pub(crate) async fn process_batch_request<L>(b: Batch<'_, L>) -> BatchResponse
+pub(crate) async fn process_batch_request<L>(b: Batch<'_, L>) -> Option<String>
 where
     L: Logger,
 {
@@ -59,10 +64,10 @@ where
             .into_iter()
             .filter_map(|v| {
                 if let Ok(req) = serde_json::from_str::<Request<'_>>(v.get()) {
-                    Some(Either::Right(execute_call(req, call.clone())))
-                } else if let Ok(_notif) =
-                    serde_json::from_str::<Notification<'_, &JsonRawValue>>(v.get())
-                {
+                    Some(Either::Right(async {
+                        execute_call(req, call.clone()).await.into_response()
+                    }))
+                } else if let Ok(_notif) = serde_json::from_str::<Notif<'_>>(v.get()) {
                     // notifications should not be answered.
                     got_notif = true;
                     None
@@ -82,31 +87,31 @@ where
 
         while let Some(response) = pending_calls.next().await {
             if let Err(too_large) = batch_response.append(&response) {
-                return too_large
+                return Some(too_large)
             }
         }
 
         if got_notif && batch_response.is_empty() {
-            BatchResponse { result: String::new(), success: true }
+            None
         } else {
-            batch_response.finish()
+            Some(batch_response.finish())
         }
     } else {
-        BatchResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError))
+        Some(batch_response_error(Id::Null, ErrorObject::from(ErrorCode::ParseError)))
     }
 }
 
 pub(crate) async fn process_single_request<L: Logger>(
     data: Vec<u8>,
     call: CallData<'_, L>,
-) -> MethodResponse {
+) -> Option<CallOrSubscription> {
     if let Ok(req) = serde_json::from_slice::<Request<'_>>(&data) {
-        execute_call_with_tracing(req, call).await
-    } else if let Ok(notif) = serde_json::from_slice::<Notif<'_>>(&data) {
-        execute_notification(notif, call.max_log_length)
+        Some(execute_call_with_tracing(req, call).await)
+    } else if serde_json::from_slice::<Notif<'_>>(&data).is_ok() {
+        None
     } else {
         let (id, code) = prepare_error(&data);
-        MethodResponse::error(id, ErrorObject::from(code))
+        Some(CallOrSubscription::Call(MethodResponse::error(id, ErrorObject::from(code))))
     }
 }
 
@@ -114,22 +119,24 @@ pub(crate) async fn process_single_request<L: Logger>(
 pub(crate) async fn execute_call_with_tracing<'a, L: Logger>(
     req: Request<'a>,
     call: CallData<'_, L>,
-) -> MethodResponse {
+) -> CallOrSubscription {
     execute_call(req, call).await
 }
 
 pub(crate) async fn execute_call<L: Logger>(
     req: Request<'_>,
     call: CallData<'_, L>,
-) -> MethodResponse {
+) -> CallOrSubscription {
     let CallData {
-        resources,
         methods,
-        logger,
         max_response_body_size,
         max_log_length,
         conn_id,
+        id_provider,
+        sink,
+        logger,
         request_start,
+        bounded_subscriptions,
     } = call;
 
     rx_log_from_json(&req, call.max_log_length);
@@ -146,77 +153,73 @@ pub(crate) async fn execute_call<L: Logger>(
                 logger::MethodKind::Unknown,
                 TransportProtocol::Http,
             );
-            MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound))
+            let response = MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound));
+            CallOrSubscription::Call(response)
         }
-        Some((name, method)) => match &method.inner() {
-            MethodKind::Sync(callback) => {
+        Some((name, method)) => match method {
+            MethodCallback::Sync(callback) => {
                 logger.on_call(
                     name,
                     params.clone(),
                     logger::MethodKind::MethodCall,
                     TransportProtocol::Http,
                 );
-
-                match method.claim(name, resources) {
-                    Ok(guard) => {
-                        let r = (callback)(id, params, max_response_body_size as usize);
-                        drop(guard);
-                        r
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            "[Methods::execute_with_resources] failed to lock resources: {}",
-                            err
-                        );
-                        MethodResponse::error(id, ErrorObject::from(ErrorCode::ServerIsBusy))
-                    }
-                }
+                let response = (callback)(id, params, max_response_body_size as usize);
+                CallOrSubscription::Call(response)
             }
-            MethodKind::Async(callback) => {
+            MethodCallback::Async(callback) => {
                 logger.on_call(
                     name,
                     params.clone(),
                     logger::MethodKind::MethodCall,
                     TransportProtocol::Http,
                 );
-                match method.claim(name, resources) {
-                    Ok(guard) => {
-                        let id = id.into_owned();
-                        let params = params.into_owned();
-
-                        (callback)(
-                            id,
-                            params,
-                            conn_id,
-                            max_response_body_size as usize,
-                            Some(guard),
-                        )
-                        .await
+                let id = id.into_owned();
+                let params = params.into_owned();
+                let response =
+                    (callback)(id, params, conn_id, max_response_body_size as usize).await;
+                CallOrSubscription::Call(response)
+            }
+            MethodCallback::Subscription(callback) => {
+                if let Some(p) = bounded_subscriptions.acquire() {
+                    let conn_state =
+                        SubscriptionState { conn_id, id_provider, subscription_permit: p };
+                    match callback(id, params, sink.clone(), conn_state).await {
+                        Ok(r) => CallOrSubscription::Subscription(r),
+                        Err(id) => {
+                            let response = MethodResponse::error(
+                                id,
+                                ErrorObject::from(ErrorCode::InternalError),
+                            );
+                            CallOrSubscription::Call(response)
+                        }
                     }
-                    Err(err) => {
-                        tracing::error!(
-                            "[Methods::execute_with_resources] failed to lock resources: {}",
-                            err
-                        );
-                        MethodResponse::error(id, ErrorObject::from(ErrorCode::ServerIsBusy))
-                    }
+                } else {
+                    let response = MethodResponse::error(
+                        id,
+                        reject_too_many_subscriptions(bounded_subscriptions.max()),
+                    );
+                    CallOrSubscription::Call(response)
                 }
             }
-            MethodKind::Subscription(_) | MethodKind::Unsubscription(_) => {
+            MethodCallback::Unsubscription(callback) => {
                 logger.on_call(
                     name,
                     params.clone(),
-                    logger::MethodKind::Unknown,
-                    TransportProtocol::Http,
+                    logger::MethodKind::Unsubscription,
+                    TransportProtocol::WebSocket,
                 );
-                tracing::error!("Subscriptions not supported on HTTP");
-                MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError))
+
+                // Don't adhere to any resource or subscription limits; always let unsubscribing
+                // happen!
+                let result = callback(id, params, conn_id, max_response_body_size as usize);
+                CallOrSubscription::Call(result)
             }
         },
     };
 
-    tx_log_from_str(&response.result, max_log_length);
-    logger.on_result(name, response.success, request_start, TransportProtocol::Http);
+    tx_log_from_str(&response.as_response().result, max_log_length);
+    logger.on_result(name, response.as_response().success, request_start, TransportProtocol::Http);
     response
 }
 
@@ -231,23 +234,30 @@ fn execute_notification(notif: Notif<'_>, max_log_length: u32) -> MethodResponse
 #[allow(unused)]
 pub(crate) struct HandleRequest<L: Logger> {
     pub(crate) methods: Methods,
-    pub(crate) resources: Resources,
     pub(crate) max_request_body_size: u32,
     pub(crate) max_response_body_size: u32,
     pub(crate) max_log_length: u32,
     pub(crate) batch_requests_supported: bool,
     pub(crate) logger: L,
     pub(crate) conn: Arc<OwnedSemaphorePermit>,
+    pub(crate) bounded_subscriptions: BoundedSubscriptions,
+    pub(crate) method_sink: MethodSink,
+    pub(crate) id_provider: Arc<dyn IdProvider>,
 }
 
-pub(crate) async fn handle_request<L: Logger>(request: String, input: HandleRequest<L>) -> String {
+pub(crate) async fn handle_request<L: Logger>(
+    request: String,
+    input: HandleRequest<L>,
+) -> Option<String> {
     let HandleRequest {
         methods,
-        resources,
         max_response_body_size,
         max_log_length,
         logger,
         conn,
+        bounded_subscriptions,
+        method_sink,
+        id_provider,
         ..
     } = input;
 
@@ -271,18 +281,27 @@ pub(crate) async fn handle_request<L: Logger>(request: String, input: HandleRequ
         conn_id: 0,
         logger: &logger,
         methods: &methods,
+        id_provider: &*id_provider,
+        sink: &method_sink,
         max_response_body_size,
         max_log_length,
-        resources: &resources,
         request_start,
+        bounded_subscriptions,
     };
     // Single request or notification
     let res = if matches!(request_kind, Kind::Single) {
         let response = process_single_request(request.into_bytes(), call).await;
-        response.result
+        match response {
+            Some(CallOrSubscription::Call(response)) => Some(response.result),
+            Some(CallOrSubscription::Subscription(_)) => {
+                // subscription responses are sent directly over the sink, return a response here
+                // would lead to duplicate responses for the subscription response
+                None
+            }
+            None => None,
+        }
     } else {
-        let response = process_batch_request(Batch { data: request.into_bytes(), call }).await;
-        response.result
+        process_batch_request(Batch { data: request.into_bytes(), call }).await
     };
 
     drop(conn);

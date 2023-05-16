@@ -714,9 +714,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     #[track_caller]
     #[instrument(skip(self), target = "blockchain_tree")]
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<(), Error> {
+        let old_block_indices = self.block_indices.clone();
+        let old_buffered_blocks = self.buffered_blocks.parent_to_child.clone();
+
         // If block is already canonical don't return error.
         if self.block_indices.is_block_hash_canonical(block_hash) {
-            trace!(target: "blockchain_tree", "Block is already canonical");
+            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
             let td = self
                 .externals
                 .shareable_db()
@@ -729,7 +732,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
-            debug!(target: "blockchain_tree", "Block hash not found in block indices");
+            info!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
             return Err(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
@@ -762,7 +765,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // event about new canonical chain.
         let chain_notification;
-
+        info!(
+            target: "blockchain_tree",
+            "Committing new canonical chain: {:?}",
+            new_canon_chain.blocks().iter().map(|(_, b)| b.num_hash()).collect::<Vec<_>>()
+        );
         // if joins to the tip;
         if new_canon_chain.fork_block_hash() == old_tip.hash {
             chain_notification =
@@ -772,13 +779,28 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         } else {
             // it forks to canonical block that is not the tip.
 
-            let canon_fork = new_canon_chain.fork_block();
+            let canon_fork: BlockNumHash = new_canon_chain.fork_block();
             // sanity check
             if self.block_indices.canonical_hash(&canon_fork.number) != Some(canon_fork.hash) {
                 unreachable!("all chains should point to canonical chain.");
             }
 
-            let old_canon_chain = self.revert_canonical(canon_fork.number)?;
+            let old_canon_chain = self.revert_canonical(canon_fork.number);
+
+            let old_canon_chain = match old_canon_chain {
+                val @ Err(_) => {
+                    error!(
+                        target: "blockchain_tree",
+                        "Reverting canonical chain failed with error: {:?}\n\
+                            Old BlockIndices are:{:?}\n\
+                            New BlockIndices are: {:?}\n\
+                            Old BufferedBlocks are:{:?}",
+                        val, old_block_indices, self.block_indices, old_buffered_blocks
+                    );
+                    val?
+                }
+                Ok(val) => val,
+            };
 
             // commit new canonical chain.
             self.commit_canonical(new_canon_chain.clone())?;
@@ -793,7 +815,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 self.insert_chain(AppendableChain::new(old_canon_chain));
             } else {
                 // error here to confirm that we are reverting nothing from db.
-                error!("Reverting nothing from db on block: #{:?}", block_hash);
+                error!(target: "blockchain_tree", "Reverting nothing from db on block: #{:?}", block_hash);
 
                 chain_notification =
                     CanonStateNotification::Commit { new: Arc::new(new_canon_chain) };
@@ -855,12 +877,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let mut tx = Transaction::new(&self.externals.db)?;
 
         let tip = tx.tip_number()?;
+        let revert_range = (revert_until + 1)..=tip;
+        info!(target: "blockchain_tree", "Revert canonical chain range: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
-            .take_block_and_execution_range(
-                self.externals.chain_spec.as_ref(),
-                (revert_until + 1)..=tip,
-            )
+            .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)
             .map_err(|e| ExecError::CanonicalRevert { inner: e.to_string() })?;
 
         tx.commit()?;

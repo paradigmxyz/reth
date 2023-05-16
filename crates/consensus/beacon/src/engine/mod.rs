@@ -1,16 +1,21 @@
-use crate::engine::{message::OnForkChoiceUpdated, metrics::Metrics};
-use futures::{Future, FutureExt, StreamExt, TryFutureExt};
+use crate::{
+    engine::{message::OnForkChoiceUpdated, metrics::Metrics},
+    sync::{EngineSyncController, EngineSyncEvent},
+};
+use futures::{Future, StreamExt, TryFutureExt};
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
     consensus::ForkchoiceState,
     executor::Error as ExecutorError,
+    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     Error,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, BlockNumber, Header, SealedBlock, SealedHeader, H256, U256,
 };
+use reth_provider::{BlockProvider, BlockSource, CanonChainTracker, ProviderError};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
@@ -34,15 +39,16 @@ mod message;
 pub use message::BeaconEngineMessage;
 
 mod error;
-pub use error::{BeaconEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError};
+pub use error::{
+    BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError,
+};
 
 mod metrics;
 
-mod pipeline_state;
-
-pub use pipeline_state::PipelineState;
-
 mod event;
+pub(crate) mod sync;
+
 pub use event::BeaconConsensusEngineEvent;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
@@ -71,10 +77,10 @@ impl BeaconConsensusEngineHandle {
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
-    ) -> BeaconEngineResult<PayloadStatus> {
+    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
-        rx.await.map_err(|_| BeaconEngineError::EngineUnavailable)?
+        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
@@ -88,7 +94,7 @@ impl BeaconConsensusEngineHandle {
         Ok(self
             .send_fork_choice_updated(state, payload_attrs)
             .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
-            .await?
+            .await??
             .await?)
     }
 
@@ -98,7 +104,7 @@ impl BeaconConsensusEngineHandle {
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
-    ) -> oneshot::Receiver<OnForkChoiceUpdated> {
+    ) -> oneshot::Receiver<Result<OnForkChoiceUpdated, reth_interfaces::Error>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
             state,
@@ -133,22 +139,18 @@ impl BeaconConsensusEngineHandle {
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, TS, BT>
+pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
-    TS: TaskSpawner,
-    BT: BlockchainTreeEngine,
+    Client: HeadersClient + BodiesClient,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker,
 {
     /// The database handle.
     db: DB,
-    /// Task spawner for spawning the pipeline.
-    task_spawner: TS,
-    /// The current state of the pipeline.
-    /// Must always be [Some] unless the state is being reevaluated.
-    /// The pipeline is used for historical sync by setting the current forkchoice head.
-    pipeline_state: Option<PipelineState<DB>>,
-    /// The blockchain tree used for live sync and reorg tracking.
-    blockchain_tree: BT,
+    /// Controls syncing triggered by engine updates.
+    sync: EngineSyncController<DB, Client>,
+    /// The type we can use to query both the database and the blockchain tree.
+    blockchain: BT,
     /// The Engine API message receiver.
     engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
     /// A clone of the handle
@@ -156,14 +158,6 @@ where
     /// Current forkchoice state. The engine must receive the initial state in order to start
     /// syncing.
     forkchoice_state: Option<ForkchoiceState>,
-    /// Next action that the engine should take after the pipeline finished running.
-    next_action: BeaconEngineAction,
-    /// Max block after which the consensus engine would terminate the sync. Used for debugging
-    /// purposes.
-    max_block: Option<BlockNumber>,
-    /// If true, the engine will run the pipeline continuously, regardless of whether or not there
-    /// is a new fork choice state.
-    continuous: bool,
     /// The payload store.
     payload_builder: PayloadBuilderHandle,
     /// Listeners for engine events.
@@ -175,30 +169,33 @@ where
     metrics: Metrics,
 }
 
-impl<DB, TS, BT> BeaconConsensusEngine<DB, TS, BT>
+impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    TS: TaskSpawner,
-    BT: BlockchainTreeEngine + 'static,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + 'static,
+    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: DB,
-        task_spawner: TS,
+        client: Client,
         pipeline: Pipeline<DB>,
-        blockchain_tree: BT,
+        blockchain: BT,
+        task_spawner: Box<dyn TaskSpawner>,
         max_block: Option<BlockNumber>,
-        continuous: bool,
+        run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
     ) -> (Self, BeaconConsensusEngineHandle) {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             db,
-            task_spawner,
+            client,
             pipeline,
-            blockchain_tree,
+            blockchain,
+            task_spawner,
             max_block,
-            continuous,
+            run_pipeline_continuously,
             payload_builder,
             to_engine,
             rx,
@@ -210,27 +207,31 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn with_channel(
         db: DB,
-        task_spawner: TS,
+        client: Client,
         pipeline: Pipeline<DB>,
-        blockchain_tree: BT,
+        blockchain: BT,
+        task_spawner: Box<dyn TaskSpawner>,
         max_block: Option<BlockNumber>,
-        continuous: bool,
+        run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
     ) -> (Self, BeaconConsensusEngineHandle) {
         let handle = BeaconConsensusEngineHandle { to_engine };
+        let sync = EngineSyncController::new(
+            pipeline,
+            client,
+            task_spawner,
+            run_pipeline_continuously,
+            max_block,
+        );
         let this = Self {
             db,
-            task_spawner,
-            pipeline_state: Some(PipelineState::Idle(pipeline)),
-            blockchain_tree,
+            sync,
+            blockchain,
             engine_message_rx: UnboundedReceiverStream::new(rx),
             handle: handle.clone(),
             forkchoice_state: None,
-            next_action: BeaconEngineAction::None,
-            max_block,
-            continuous,
             payload_builder,
             listeners: EventListeners::default(),
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
@@ -246,17 +247,6 @@ where
     /// [`BeaconConsensusEngine`]
     pub fn handle(&self) -> BeaconConsensusEngineHandle {
         self.handle.clone()
-    }
-
-    /// Returns `true` if the pipeline is currently idle.
-    fn is_pipeline_idle(&self) -> bool {
-        self.pipeline_state.as_ref().expect("pipeline state is set").is_idle()
-    }
-
-    /// Set next action to [BeaconEngineAction::RunPipeline] to indicate that
-    /// consensus engine needs to run the pipeline as soon as it becomes available.
-    fn require_pipeline_run(&mut self, target: PipelineTarget) {
-        self.next_action = BeaconEngineAction::RunPipeline(target);
     }
 
     /// If validation fails, the response MUST contain the latest valid hash:
@@ -279,7 +269,11 @@ where
             return Some(H256::zero())
         }
 
-        self.blockchain_tree.find_canonical_ancestor(parent_hash)
+        // TODO(mattsse): This could be invoked on new payload which does not make tree canonical,
+        //  which would make this inaccurate, e.g. if an invalid payload is received in this
+        //  scenario: FUC (unknown head) -> valid payload  -> invalid payload
+
+        self.blockchain.find_canonical_ancestor(parent_hash)
     }
 
     /// Loads the header for the given `block_number` from the database.
@@ -313,16 +307,53 @@ where
         Some(status)
     }
 
+    /// Invoked when we receive a new forkchoice update message.
+    ///
+    /// Returns `true` if the engine now reached its maximum block number, See
+    /// [EngineSyncController::has_reached_max_block].
+    fn on_forkchoice_updated(
+        &mut self,
+        state: ForkchoiceState,
+        attrs: Option<PayloadAttributes>,
+        tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
+    ) -> bool {
+        self.metrics.forkchoice_updated_messages.increment(1);
+
+        let on_updated = match self.forkchoice_updated(state, attrs) {
+            Ok(response) => response,
+            Err(error) => {
+                let _ = tx.send(Err(error));
+                return false
+            }
+        };
+
+        let is_valid_response = on_updated.is_valid_update();
+        let _ = tx.send(Ok(on_updated));
+
+        // Terminate the sync early if it's reached the maximum user
+        // configured block.
+        if is_valid_response {
+            let tip_number = self.blockchain.canonical_tip().number;
+            if self.sync.has_reached_max_block(tip_number) {
+                return true
+            }
+        }
+
+        false
+    }
+
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
     /// valid chain.
     ///
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_forkchoiceUpdated`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1).
-    fn on_forkchoice_updated(
+    ///
+    /// Returns an error if an internal error occurred like a database error.
+    fn forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
-    ) -> Result<OnForkChoiceUpdated, BeaconEngineError> {
+    ) -> Result<OnForkChoiceUpdated, reth_interfaces::Error> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
@@ -333,8 +364,11 @@ where
 
         let is_first_forkchoice = self.forkchoice_state.is_none();
         self.forkchoice_state = Some(state);
-        let status = if self.is_pipeline_idle() {
-            match self.blockchain_tree.make_canonical(&state.head_block_hash) {
+
+        let status = if self.sync.is_pipeline_idle() {
+            // We can only process new forkchoice updates if the pipeline is idle, since it requires
+            // exclusive access to the database
+            match self.blockchain.make_canonical(&state.head_block_hash) {
                 Ok(_) => {
                     let head_block_number = self
                         .get_block_number(state.head_block_hash)?
@@ -346,7 +380,9 @@ where
 
                     if pipeline_min_progress < head_block_number {
                         debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=head_block_number, "pipeline run to head required");
-                        self.require_pipeline_run(PipelineTarget::Head);
+
+                        // TODO(mattsse) ideally sync blockwise
+                        self.sync.set_pipeline_sync_target(state.head_block_hash);
                     }
 
                     if let Some(attrs) = attrs {
@@ -354,16 +390,27 @@ where
                         let header = self
                             .load_header(head_block_number)?
                             .expect("was canonicalized, so it exists");
-                        return Ok(self.process_payload_attributes(attrs, header, state))
+
+                        let payload_response =
+                            self.process_payload_attributes(attrs, header, state);
+                        if payload_response.is_valid_update() {
+                            // we will return VALID, so let's make sure the info tracker is
+                            // properly updated
+                            self.update_canon_chain(&state)?;
+                        }
+                        return Ok(payload_response)
                     }
 
+                    // we will return VALID, so let's make sure the info tracker is
+                    // properly updated
+                    self.update_canon_chain(&state)?;
                     PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
                     if let Error::Execution(ref err) = error {
                         if err.is_fatal() {
                             tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
-                            return Err(BeaconEngineError::Common(error))
+                            return Err(error)
                         }
                     }
 
@@ -380,19 +427,57 @@ where
         Ok(OnForkChoiceUpdated::valid(status))
     }
 
+    /// Sets the state of the canon chain tracker based on the given forkchoice update.
+    ///
+    /// This should be called before issuing a VALID forkchoice update.
+    fn update_canon_chain(&self, update: &ForkchoiceState) -> Result<(), reth_interfaces::Error> {
+        if !update.finalized_block_hash.is_zero() {
+            let finalized = self
+                .blockchain
+                .find_block_by_hash(update.finalized_block_hash, BlockSource::Any)?
+                .ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(update.finalized_block_hash))
+                })?;
+            self.blockchain.set_finalized(finalized.header.seal(update.finalized_block_hash));
+        }
+
+        if !update.safe_block_hash.is_zero() {
+            let safe = self
+                .blockchain
+                .find_block_by_hash(update.safe_block_hash, BlockSource::Any)?
+                .ok_or_else(|| {
+                    Error::Provider(ProviderError::UnknownBlockHash(update.safe_block_hash))
+                })?;
+            self.blockchain.set_safe(safe.header.seal(update.safe_block_hash));
+        }
+
+        // the consensus engine should ensure the head is not zero so we always update the head
+        let head = self
+            .blockchain
+            .find_block_by_hash(update.head_block_hash, BlockSource::Any)?
+            .ok_or_else(|| {
+                Error::Provider(ProviderError::UnknownBlockHash(update.head_block_hash))
+            })?;
+
+        self.blockchain.set_canonical_head(head.header.seal(update.head_block_hash));
+        self.blockchain.on_forkchoice_update_received(update);
+        Ok(())
+    }
+
     /// Handler for a failed a forkchoice update due to a canonicalization error.
     ///
     /// This will determine if the state's head is invalid, and if so, return immediately.
     ///
     /// If the newest head is not invalid, then this will trigger a new pipeline run to sync the gap
     ///
-    /// See [Self::on_forkchoice_updated] and [BlockchainTreeEngine::make_canonical].
+    /// See [Self::forkchoice_updated] and [BlockchainTreeEngine::make_canonical].
     fn on_failed_canonical_forkchoice_update(
         &mut self,
         state: &ForkchoiceState,
         error: Error,
         is_first_forkchoice: bool,
     ) -> PayloadStatus {
+        debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
         warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
 
         // check if the new head was previously invalidated, if so then we deem this FCU
@@ -402,29 +487,48 @@ where
             return invalid_ancestor
         }
 
-        // If this is the first forkchoice received, start downloading from safe block
-        // hash, if we have that block.
-        let target = if is_first_forkchoice &&
-            !state.safe_block_hash.is_zero() &&
-            self.get_block_number(state.safe_block_hash).ok().flatten().is_none()
-        {
-            PipelineTarget::Safe
-        } else {
-            PipelineTarget::Head
-        };
-        self.require_pipeline_run(target);
-        match error {
+        #[allow(clippy::single_match)]
+        match &error {
             Error::Execution(error @ ExecutorError::BlockPreMerge { .. }) => {
-                PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
                 .with_latest_valid_hash(H256::zero())
             }
-            _ => PayloadStatus::from_status(PayloadStatusEnum::Syncing),
+            _ => {
+                // TODO(mattsse) better error handling before attempting to sync (FCU could be
+                // invalid): only trigger sync if we can't determine whether the FCU is invalid
+            }
         }
+
+        // we assume the FCU is valid and at least the head is missing, so we need to start syncing
+        // to it
+
+        // if this is the first FCU we received from the beacon node, then we start triggering the
+        // pipeline
+        if is_first_forkchoice {
+            // find the appropriate target to sync to, if we don't have the safe block hash then we
+            // start syncing to the safe block via pipeline first
+            let target = if !state.safe_block_hash.is_zero() &&
+                self.get_block_number(state.safe_block_hash).ok().flatten().is_none()
+            {
+                state.safe_block_hash
+            } else {
+                state.head_block_hash
+            };
+            self.sync.set_pipeline_sync_target(target);
+        } else {
+            // trigger a full block download for the _missing_ new head
+            self.sync.download_full_block(state.head_block_hash)
+        }
+
+        PayloadStatus::from_status(PayloadStatusEnum::Syncing)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
+    ///
+    /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
+    /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
         attrs: PayloadAttributes,
@@ -478,16 +582,41 @@ where
     ///
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
+    #[instrument(level = "trace", skip(self, payload), fields(block_hash= ?payload.block_hash, block_number = %payload.block_number.as_u64()), target = "consensus::engine")]
     fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
-        let block_number = payload.block_number.as_u64();
-        let block_hash = payload.block_hash;
-        let parent_hash = payload.parent_hash;
+        trace!(target: "consensus::engine", "Received new payload");
 
-        trace!(target: "consensus::engine", ?block_hash, block_number, "Received new payload");
+        let block = match self.ensure_well_formed_payload(payload) {
+            Ok(block) => block,
+            Err(status) => return status,
+        };
+
+        let status = if self.sync.is_pipeline_idle() {
+            // we can only insert new payloads if the pipeline is _not_ running, because it holds
+            // exclusive access to the database
+            self.try_insert_new_payload(block)
+        } else {
+            self.try_buffer_payload(block)
+        };
+
+        trace!(target: "consensus::engine", ?status, "Returning payload status");
+        status
+    }
+
+    /// Ensures that the given payload does not violate any consensus rules that concern the block's
+    /// layout, like:
+    ///    - missing or invalid base fee
+    ///    - invalid extra data
+    ///    - invalid transactions
+    fn ensure_well_formed_payload(
+        &self,
+        payload: ExecutionPayload,
+    ) -> Result<SealedBlock, PayloadStatus> {
+        let parent_hash = payload.parent_hash;
         let block = match SealedBlock::try_from(payload) {
             Ok(block) => block,
             Err(error) => {
-                error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
+                error!(target: "consensus::engine", ?error, "Invalid payload");
 
                 let mut latest_valid_hash = None;
                 if !error.is_block_hash_mismatch() {
@@ -498,47 +627,25 @@ where
                 }
                 let status = PayloadStatusEnum::from(error);
 
-                return PayloadStatus::new(status, latest_valid_hash)
+                return Err(PayloadStatus::new(status, latest_valid_hash))
             }
         };
 
-        let header = block.header.clone();
+        Ok(block)
+    }
 
-        let status = if self.is_pipeline_idle() {
-            match self.blockchain_tree.insert_block_without_senders(block) {
-                Ok(status) => {
-                    let mut latest_valid_hash = None;
-                    let status = match status {
-                        BlockStatus::Valid => {
-                            latest_valid_hash = Some(block_hash);
-                            self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                                block_number,
-                                block_hash,
-                            ));
-                            PayloadStatusEnum::Valid
-                        }
-                        BlockStatus::Accepted => {
-                            self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(
-                                block_number,
-                                block_hash,
-                            ));
-                            PayloadStatusEnum::Accepted
-                        }
-                        BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
-                    };
-                    PayloadStatus::new(status, latest_valid_hash)
-                }
-                Err(error) => {
-                    // payload is deemed invalid, insert it into the cache
-                    self.invalid_headers.insert(header);
-
-                    let latest_valid_hash =
-                        self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-                    let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
-                    PayloadStatus::new(status, latest_valid_hash)
-                }
-            }
-        } else if let Err(error) = self.blockchain_tree.buffer_block_without_sender(block) {
+    /// When the pipeline is actively syncing the tree is unable to commit any additional blocks
+    /// since the pipeline holds exclusive access to the database.
+    ///
+    /// In this scenario we buffer the payload in the tree if the payload is valid, once the
+    /// pipeline finished syncing the tree is then able to also use the buffered payloads to commit
+    /// to a (newer) canonical chain.
+    ///
+    /// This will return `SYNCING` on success, since the pipeline is running. and `INVALID` if we
+    /// were unable to buffer the payload because it is considered invalid.
+    fn try_buffer_payload(&mut self, block: SealedBlock) -> PayloadStatus {
+        let parent_hash = block.parent_hash;
+        if let Err(error) = self.blockchain.buffer_block_without_sender(block) {
             // received a new payload while we're still syncing to the target
             let latest_valid_hash =
                 self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
@@ -547,45 +654,52 @@ where
         } else {
             // successfully buffered the block
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
-        };
-        trace!(target: "consensus::engine", ?block_hash, block_number, ?status, "Returning payload status");
-        status
+        }
     }
 
-    /// Returns the next pipeline state depending on the current value of the next action.
-    /// Resets the next action to the default value.
-    fn next_pipeline_state(
-        &mut self,
-        pipeline: Pipeline<DB>,
-        forkchoice_state: ForkchoiceState,
-    ) -> PipelineState<DB> {
-        let next_action = std::mem::take(&mut self.next_action);
+    /// Attempts to insert a new payload into the tree.
+    ///
+    /// Caution: This expects that the pipeline is idle.
+    fn try_insert_new_payload(&mut self, block: SealedBlock) -> PayloadStatus {
+        debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
-        let (tip, should_run_pipeline) = match next_action {
-            BeaconEngineAction::RunPipeline(target) => {
-                let tip = match target {
-                    PipelineTarget::Head => forkchoice_state.head_block_hash,
-                    PipelineTarget::Safe => forkchoice_state.safe_block_hash,
+        let parent_hash = block.parent_hash;
+        let block_hash = block.hash;
+        let block_number = block.number;
+        let header = block.header.clone();
+
+        match self.blockchain.insert_block_without_senders(block) {
+            Ok(status) => {
+                let mut latest_valid_hash = None;
+                let status = match status {
+                    BlockStatus::Valid => {
+                        latest_valid_hash = Some(block_hash);
+                        self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(
+                            block_number,
+                            block_hash,
+                        ));
+                        PayloadStatusEnum::Valid
+                    }
+                    BlockStatus::Accepted => {
+                        self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(
+                            block_number,
+                            block_hash,
+                        ));
+                        PayloadStatusEnum::Accepted
+                    }
+                    BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
                 };
-                (Some(tip), true)
+                PayloadStatus::new(status, latest_valid_hash)
             }
-            BeaconEngineAction::None => (None, self.continuous),
-        };
+            Err(error) => {
+                // payload is deemed invalid, insert it into the cache
+                self.invalid_headers.insert(header);
 
-        if should_run_pipeline {
-            self.metrics.pipeline_runs.increment(1);
-            trace!(target: "consensus::engine", ?tip, continuous = tip.is_none(), "Starting the pipeline");
-            let (tx, rx) = oneshot::channel();
-            self.task_spawner.spawn_critical_blocking(
-                "pipeline",
-                Box::pin(async move {
-                    let result = pipeline.run_as_fut(tip).await;
-                    let _ = tx.send(result);
-                }),
-            );
-            PipelineState::Running(rx)
-        } else {
-            PipelineState::Idle(pipeline)
+                let latest_valid_hash =
+                    self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
+                let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+                PayloadStatus::new(status, latest_valid_hash)
+            }
         }
     }
 
@@ -598,7 +712,7 @@ where
         let needs_pipeline_run = match self.get_block_number(state.finalized_block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
-                self.blockchain_tree.restore_canonical_hashes(number)?;
+                self.blockchain.restore_canonical_hashes(number)?;
 
                 // After restoring the tree, check if the head block is missing.
                 self.db
@@ -607,30 +721,72 @@ where
             }
             None => true,
         };
+
         if needs_pipeline_run {
-            self.require_pipeline_run(PipelineTarget::Head);
+            self.sync.set_pipeline_sync_target(state.head_block_hash);
         }
         Ok(())
-    }
-
-    /// Check if the engine reached max block as specified by `max_block` parameter.
-    fn has_reached_max_block(&self, progress: BlockNumber) -> bool {
-        if self.max_block.map_or(false, |target| progress >= target) {
-            trace!(
-                target: "consensus::engine",
-                ?progress,
-                max_block = ?self.max_block,
-                "Consensus engine reached max block."
-            );
-            true
-        } else {
-            false
-        }
     }
 
     /// Retrieve the block number for the given block hash.
     fn get_block_number(&self, hash: H256) -> Result<Option<BlockNumber>, reth_interfaces::Error> {
         Ok(self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??)
+    }
+
+    /// Event handler for events emitted by the [EngineSyncController].
+    ///
+    /// This returns a result to indicate whether the engine future should resolve (fatal error).
+    fn on_sync_event(
+        &mut self,
+        ev: EngineSyncEvent,
+        current_state: &ForkchoiceState,
+    ) -> Option<Result<(), BeaconConsensusEngineError>> {
+        match ev {
+            EngineSyncEvent::FetchedFullBlock(block) => {
+                // it is guaranteed that the pipeline is not active at this point.
+
+                // TODO(mattsse): better error handling and start closing the gap if there's any by
+                //  closing the gap either via pipeline, or by fetching the blocks via block number
+                //  [head..FCU.number]
+
+                let hash = block.hash;
+                if !self.try_insert_new_payload(block).is_valid() {
+                    // if the payload is invalid, we run the pipeline
+                    self.sync.set_pipeline_sync_target(hash);
+                }
+            }
+            EngineSyncEvent::PipelineStarted(target) => {
+                trace!(target: "consensus::engine", ?target, continuous = target.is_none(), "Started the pipeline");
+                self.metrics.pipeline_runs.increment(1);
+            }
+            EngineSyncEvent::PipelineTaskDropped => {
+                error!(target: "consensus::engine", "Failed to receive spawned pipeline");
+                return Some(Err(BeaconConsensusEngineError::PipelineChannelClosed))
+            }
+            EngineSyncEvent::PipelineFinished { result, reached_max_block } => {
+                match result {
+                    Ok(ctrl) => {
+                        if ctrl.is_unwind() {
+                            self.sync.set_pipeline_sync_target(current_state.head_block_hash);
+                        } else if reached_max_block {
+                            // Terminate the sync early if it's reached the maximum user
+                            // configured block.
+                            return Some(Ok(()))
+                        }
+
+                        // Update the state and hashes of the blockchain tree if possible
+                        if let Err(error) = self.restore_tree_if_possible(*current_state) {
+                            error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
+                            return Some(Err(error.into()))
+                        }
+                    }
+                    // Any pipeline error at this point is fatal.
+                    Err(error) => return Some(Err(error.into())),
+                };
+            }
+        };
+
+        None
     }
 }
 
@@ -641,136 +797,51 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, TS, BT> Future for BeaconConsensusEngine<DB, TS, BT>
+impl<DB, BT, Client> Future for BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    TS: TaskSpawner + Unpin,
-    BT: BlockchainTreeEngine + Unpin + 'static,
+    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + Unpin + 'static,
 {
-    type Output = Result<(), BeaconEngineError>;
+    type Output = Result<(), BeaconConsensusEngineError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // Set the next pipeline state.
-        loop {
-            // Process all incoming messages first.
-            while let Poll::Ready(Some(msg)) = this.engine_message_rx.poll_next_unpin(cx) {
-                match msg {
-                    BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                        this.metrics.forkchoice_updated_messages.increment(1);
-                        let on_updated = match this.on_forkchoice_updated(state, payload_attrs) {
-                            Ok(response) => response,
-                            Err(error) => {
-                                error!(target: "consensus::engine", ?state, ?error, "Error getting forkchoice updated response");
-                                return Poll::Ready(Err(error))
-                            }
-                        };
-                        let is_valid_response = on_updated.is_valid_update();
-                        let _ = tx.send(on_updated);
-
-                        // Terminate the sync early if it's reached the maximum user
-                        // configured block.
-                        if is_valid_response {
-                            let tip_number = this.blockchain_tree.canonical_tip().number;
-                            if this.has_reached_max_block(tip_number) {
-                                return Poll::Ready(Ok(()))
-                            }
-                        }
-                    }
-                    BeaconEngineMessage::NewPayload { payload, tx } => {
-                        this.metrics.new_payload_messages.increment(1);
-                        let status = this.on_new_payload(payload);
-                        let _ = tx.send(Ok(status));
-                    }
-                    BeaconEngineMessage::EventListener(tx) => {
-                        this.listeners.push_listener(tx);
+        // Process all incoming messages first.
+        while let Poll::Ready(Some(msg)) = this.engine_message_rx.poll_next_unpin(cx) {
+            match msg {
+                BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                    if this.on_forkchoice_updated(state, payload_attrs, tx) {
+                        return Poll::Ready(Ok(()))
                     }
                 }
-            }
-
-            // Lookup the forkchoice state. We can't launch the pipeline without the tip.
-            let forkchoice_state = match &this.forkchoice_state {
-                Some(state) => *state,
-                None => return Poll::Pending,
-            };
-
-            let next_state = match this.pipeline_state.take().expect("pipeline state is set") {
-                PipelineState::Running(mut fut) => {
-                    match fut.poll_unpin(cx) {
-                        Poll::Ready(Ok((pipeline, result))) => {
-                            if let Err(error) = result {
-                                return Poll::Ready(Err(error.into()))
-                            }
-
-                            match result {
-                                Ok(ctrl) => {
-                                    if ctrl.is_unwind() {
-                                        this.require_pipeline_run(PipelineTarget::Head);
-                                    } else {
-                                        // Terminate the sync early if it's reached the maximum user
-                                        // configured block.
-                                        let minimum_pipeline_progress =
-                                            pipeline.minimum_progress().unwrap_or_default();
-                                        if this.has_reached_max_block(minimum_pipeline_progress) {
-                                            return Poll::Ready(Ok(()))
-                                        }
-                                    }
-                                }
-                                // Any pipeline error at this point is fatal.
-                                Err(error) => return Poll::Ready(Err(error.into())),
-                            };
-
-                            // Update the state and hashes of the blockchain tree if possible
-                            if let Err(error) = this.restore_tree_if_possible(forkchoice_state) {
-                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
-                                return Poll::Ready(Err(error.into()))
-                            }
-
-                            // Get next pipeline state.
-                            this.next_pipeline_state(pipeline, forkchoice_state)
-                        }
-                        Poll::Ready(Err(error)) => {
-                            error!(target: "consensus::engine", ?error, "Failed to receive pipeline result");
-                            return Poll::Ready(Err(BeaconEngineError::PipelineChannelClosed))
-                        }
-                        Poll::Pending => {
-                            this.pipeline_state = Some(PipelineState::Running(fut));
-                            return Poll::Pending
-                        }
-                    }
+                BeaconEngineMessage::NewPayload { payload, tx } => {
+                    this.metrics.new_payload_messages.increment(1);
+                    let status = this.on_new_payload(payload);
+                    let _ = tx.send(Ok(status));
                 }
-                PipelineState::Idle(pipeline) => {
-                    this.next_pipeline_state(pipeline, forkchoice_state)
+                BeaconEngineMessage::EventListener(tx) => {
+                    this.listeners.push_listener(tx);
                 }
-            };
-            this.pipeline_state = Some(next_state);
-
-            // If the pipeline is idle, break from the loop.
-            if this.is_pipeline_idle() {
-                return Poll::Pending
             }
         }
+
+        // Lookup the forkchoice state. We can't launch the pipeline without the tip.
+        let forkchoice_state = match &this.forkchoice_state {
+            Some(state) => *state,
+            None => return Poll::Pending,
+        };
+
+        // poll sync controller
+        while let Poll::Ready(sync_event) = this.sync.poll(cx) {
+            if let Some(res) = this.on_sync_event(sync_event, &forkchoice_state) {
+                return Poll::Ready(res)
+            }
+        }
+
+        Poll::Pending
     }
-}
-
-/// Denotes the next action that the [BeaconConsensusEngine] should take.
-#[derive(Debug, Default)]
-enum BeaconEngineAction {
-    #[default]
-    None,
-    /// Contains the type of target hash to pass to the pipeline
-    RunPipeline(PipelineTarget),
-}
-
-/// The target hash to pass to the pipeline.
-#[derive(Debug, Default)]
-enum PipelineTarget {
-    /// Corresponds to the head block hash.
-    #[default]
-    Head,
-    /// Corresponds to the safe block hash.
-    Safe,
 }
 
 /// Keeps track of invalid headers.
@@ -806,10 +877,13 @@ mod tests {
         BlockchainTree, ShareableBlockchainTree,
     };
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
-    use reth_interfaces::test_utils::TestConsensus;
+    use reth_interfaces::test_utils::{NoopFullBlockClient, TestConsensus};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
-    use reth_provider::{test_utils::TestExecutorFactory, Transaction};
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::TestExecutorFactory, ShareableDatabase,
+        Transaction,
+    };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, sync::Arc, time::Duration};
@@ -820,8 +894,11 @@ mod tests {
 
     type TestBeaconConsensusEngine = BeaconConsensusEngine<
         Arc<Env<WriteMap>>,
-        TokioTaskExecutor,
-        ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
+        BlockchainProvider<
+            Arc<Env<WriteMap>>,
+            ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
+        >,
+        NoopFullBlockClient,
     >;
 
     struct TestEnv<DB> {
@@ -844,7 +921,7 @@ mod tests {
         async fn send_new_payload(
             &self,
             payload: ExecutionPayload,
-        ) -> BeaconEngineResult<PayloadStatus> {
+        ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
             self.engine_handle.new_payload(payload).await
         }
 
@@ -853,7 +930,7 @@ mod tests {
         async fn send_new_payload_retry_on_syncing(
             &self,
             payload: ExecutionPayload,
-        ) -> BeaconEngineResult<PayloadStatus> {
+        ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
             loop {
                 let result = self.send_new_payload(payload.clone()).await?;
                 if !result.is_syncing() {
@@ -905,18 +982,23 @@ mod tests {
             .build(db.clone());
 
         // Setup blockchain tree
-        let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
+        let externals =
+            TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec.clone());
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, canon_state_notification_sender, config)
                 .expect("failed to create tree"),
         );
+        let shareable_db = ShareableDatabase::new(db.clone(), chain_spec.clone());
+        let latest = chain_spec.genesis_header().seal_slow();
+        let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
         let (engine, handle) = BeaconConsensusEngine::new(
             db.clone(),
-            TokioTaskExecutor::default(),
+            NoopFullBlockClient::default(),
             pipeline,
-            tree,
+            blockchain_provider,
+            Box::<TokioTaskExecutor>::default(),
             None,
             false,
             payload_builder,
@@ -927,7 +1009,7 @@ mod tests {
 
     fn spawn_consensus_engine(
         engine: TestBeaconConsensusEngine,
-    ) -> oneshot::Receiver<Result<(), BeaconEngineError>> {
+    ) -> oneshot::Receiver<Result<(), BeaconConsensusEngineError>> {
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
             let result = engine.await;
@@ -961,7 +1043,7 @@ mod tests {
             .await;
         assert_matches!(
             res.await,
-            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -999,7 +1081,7 @@ mod tests {
             .await;
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -1034,7 +1116,7 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -1053,7 +1135,7 @@ mod tests {
             VecDeque::from([Ok(ExecOutput { stage_progress: max_block, done: true })]),
             Vec::default(),
         );
-        consensus_engine.max_block = Some(max_block);
+        consensus_engine.sync.set_max_block(max_block);
         let rx = spawn_consensus_engine(consensus_engine);
 
         let _ = env
@@ -1099,7 +1181,7 @@ mod tests {
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
             let res = env.send_forkchoice_updated(ForkchoiceState::default()).await;
-            assert_eq!(
+            assert_matches!(
                 res,
                 Err(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
                     ForkchoiceUpdateError::InvalidState

@@ -12,7 +12,7 @@ use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet
 ///
 /// It contains a list of canonical block hashes, forks to child blocks, and a mapping of block hash
 /// to chain ID.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockIndices {
     /// Last finalized block.
     last_finalized_block: BlockNumber,

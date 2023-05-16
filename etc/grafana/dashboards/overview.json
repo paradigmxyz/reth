@@ -2141,7 +2141,31 @@
           "hide": false,
           "legendFormat": "Buffered responses",
           "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_buffered_blocks",
+          "hide": false,
+          "legendFormat": "Buffered blocks",
+          "range": true,
           "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_queued_blocks",
+          "hide": false,
+          "legendFormat": "Queued blocks",
+          "range": true,
+          "refId": "G"
         }
       ],
       "title": "I/O",

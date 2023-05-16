@@ -31,7 +31,7 @@ revm-primitives = { version = "1.1", features = ["serde"] }
 
 
 # rpc
-jsonrpsee = { version = "0.16" }
+jsonrpsee = { version = "0.18" }
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
@@ -56,10 +56,10 @@ serde_json = "1.0"
 thiserror = "1.0"
 hex = "0.4"
 rand = "0.8.5"
-tracing = "0.1"
+tracing = { workspace = true }
 tracing-futures = "0.2"
 schnellru = "0.2"
 futures = "0.3.26"
 
 [dev-dependencies]
-jsonrpsee = { version = "0.16", features = ["client"] }
+jsonrpsee = { version = "0.18", features = ["client"] }

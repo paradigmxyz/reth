@@ -22,3 +22,6 @@ pub use payload_build_args::PayloadBuilderArgs;
 /// Stage related arguments
 mod stage_args;
 pub use stage_args::StageEnum;
+
+mod gas_price_oracle_args;
+pub use gas_price_oracle_args::GasPriceOracleArgs;

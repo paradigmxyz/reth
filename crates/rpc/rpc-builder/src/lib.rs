@@ -100,9 +100,8 @@
 use constants::*;
 use error::{RpcError, ServerKind};
 use jsonrpsee::{
-    core::server::rpc_module::Methods,
     server::{IdProvider, Server, ServerHandle},
-    RpcModule,
+    Methods, RpcModule,
 };
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
@@ -111,8 +110,9 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_rpc::{
-    eth::cache::EthStateCache, AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
-    EthSubscriptionIdProvider, NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
+    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
+    NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -348,6 +348,10 @@ impl RpcModuleConfig {
     /// Convenience method to create a new [RpcModuleConfigBuilder]
     pub fn builder() -> RpcModuleConfigBuilder {
         RpcModuleConfigBuilder::default()
+    }
+    /// Returns a new RPC module config given the eth namespace config
+    pub fn new(eth: EthConfig) -> Self {
+        Self { eth }
     }
 }
 
@@ -673,9 +677,32 @@ where
         let eth_api = self.eth_api();
         self.modules.insert(
             RethRpcModule::Debug,
-            DebugApi::new(self.client.clone(), eth_api, self.tracing_call_guard.clone())
-                .into_rpc()
-                .into(),
+            DebugApi::new(
+                self.client.clone(),
+                eth_api,
+                Box::new(self.executor.clone()),
+                self.tracing_call_guard.clone(),
+            )
+            .into_rpc()
+            .into(),
+        );
+        self
+    }
+
+    /// Register Trace Namespace
+    pub fn register_trace(&mut self) -> &mut Self {
+        let eth = self.eth_handlers();
+        self.modules.insert(
+            RethRpcModule::Trace,
+            TraceApi::new(
+                self.client.clone(),
+                eth.api.clone(),
+                eth.cache,
+                Box::new(self.executor.clone()),
+                self.tracing_call_guard.clone(),
+            )
+            .into_rpc()
+            .into(),
         );
         self
     }
@@ -750,6 +777,7 @@ where
                         RethRpcModule::Debug => DebugApi::new(
                             self.client.clone(),
                             eth_api.clone(),
+                            Box::new(self.executor.clone()),
                             self.tracing_call_guard.clone(),
                         )
                         .into_rpc()
@@ -769,6 +797,7 @@ where
                             self.client.clone(),
                             eth_api.clone(),
                             eth_cache.clone(),
+                            Box::new(self.executor.clone()),
                             self.tracing_call_guard.clone(),
                         )
                         .into_rpc()
@@ -802,6 +831,11 @@ where
                 self.config.eth.cache.clone(),
                 self.executor.clone(),
             );
+            let gas_oracle = GasPriceOracle::new(
+                self.client.clone(),
+                self.config.eth.gas_oracle.clone(),
+                cache.clone(),
+            );
             let new_canonical_blocks = self.events.canonical_state_stream();
             let c = cache.clone();
             self.executor.spawn_critical(
@@ -811,17 +845,21 @@ where
                 }),
             );
 
-            let api = EthApi::new(
+            let executor = Box::new(self.executor.clone());
+            let api = EthApi::with_spawner(
                 self.client.clone(),
                 self.pool.clone(),
                 self.network.clone(),
                 cache.clone(),
+                gas_oracle,
+                executor.clone(),
             );
             let filter = EthFilter::new(
                 self.client.clone(),
                 self.pool.clone(),
                 cache.clone(),
                 self.config.eth.max_logs_per_response,
+                executor.clone(),
             );
 
             let pubsub = EthPubSub::with_spawner(
@@ -829,7 +867,7 @@ where
                 self.pool.clone(),
                 self.events.clone(),
                 self.network.clone(),
-                Box::new(self.executor.clone()),
+                executor,
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub };

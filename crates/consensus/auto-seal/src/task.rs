@@ -7,7 +7,7 @@ use reth_primitives::{
     proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
     SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::{CanonStateNotificationSender, Chain, StateProviderFactory};
+use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     executor::Executor,
@@ -85,7 +85,7 @@ impl<Client, Pool: TransactionPool> MiningTask<Client, Pool> {
 
 impl<Client, Pool> Future for MiningTask<Client, Pool>
 where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
+    Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
@@ -122,6 +122,13 @@ where
                 // the pipeline
                 this.insert_task = Some(Box::pin(async move {
                     let mut storage = storage.write().await;
+
+                    // check previous block for base fee
+                    let base_fee_per_gas = storage
+                        .headers
+                        .get(&storage.best_block)
+                        .and_then(|parent| parent.next_block_base_fee());
+
                     let mut header = Header {
                         parent_hash: storage.best_hash,
                         ommers_hash: EMPTY_OMMER_ROOT,
@@ -141,7 +148,7 @@ where
                             .as_secs(),
                         mix_hash: Default::default(),
                         nonce: 0,
-                        base_fee_per_gas: None,
+                        base_fee_per_gas,
                         extra_data: Default::default(),
                     };
 
@@ -178,11 +185,11 @@ where
                             // clear all transactions from pool
                             pool.remove_transactions(body.iter().map(|tx| tx.hash()));
 
-                            header.receipts_root = if post_state.receipts().is_empty() {
+                            let receipts = post_state.receipts(header.number);
+                            header.receipts_root = if receipts.is_empty() {
                                 EMPTY_RECEIPTS
                             } else {
-                                let receipts_with_bloom = post_state
-                                    .receipts()
+                                let receipts_with_bloom = receipts
                                     .iter()
                                     .map(|r| r.clone().into())
                                     .collect::<Vec<ReceiptWithBloom>>();
@@ -231,15 +238,22 @@ where
 
                             // seal the block
                             let block = Block {
-                                header,
+                                header: header.clone(),
                                 body: transactions,
                                 ommers: vec![],
                                 withdrawals: None,
                             };
                             let sealed_block = block.seal_slow();
+
                             let sealed_block_with_senders =
                                 SealedBlockWithSenders::new(sealed_block, senders)
                                     .expect("senders are valid");
+
+                            // update canon chain for rpc
+                            client.set_canonical_head(header.clone().seal(new_hash));
+                            client.set_safe(header.clone().seal(new_hash));
+                            client.set_finalized(header.clone().seal(new_hash));
+
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
                             let chain =

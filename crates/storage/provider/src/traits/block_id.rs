@@ -104,9 +104,29 @@ pub trait BlockIdProvider: BlockNumProvider + Send + Sync {
     /// Get the current pending block number and hash.
     fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>>;
 
+    /// Get the current safe block number and hash.
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>>;
+
+    /// Get the current finalized block number and hash.
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>>;
+
     /// Get the safe block number.
-    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>>;
+    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+        self.safe_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.number))
+    }
 
     /// Get the finalized block number.
-    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>>;
+    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+        self.finalized_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.number))
+    }
+
+    /// Get the safe block hash.
+    fn safe_block_hash(&self) -> Result<Option<H256>> {
+        self.safe_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
+    }
+
+    /// Get the finalized block hash.
+    fn finalized_block_hash(&self) -> Result<Option<H256>> {
+        self.finalized_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
+    }
 }

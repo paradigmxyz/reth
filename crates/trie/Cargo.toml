@@ -20,7 +20,7 @@ reth-db = { path = "../storage/db" }
 tokio = { version = "1.21.2", default-features = false, features = ["sync"] }
 
 # tracing
-tracing = "0.1"
+tracing = { workspace = true }
 
 # misc 
 hex = "0.4"

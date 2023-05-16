@@ -89,37 +89,36 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        // TODO: can it be smaller?
-        buf.put_u16(self.len() as u16);
+        encode_varuint(self.len(), buf);
+
+        let mut tmp: Vec<u8> = Vec::with_capacity(64);
 
         for element in self {
-            let length_index = buf.as_mut().len();
+            tmp.clear();
 
-            // Placeholder for the length, since it can only be known after compacting the element
-            // and BufMut doesn't support going back
-            buf.put_slice(&[0, 0]);
+            // We don't know the length until we compact it
+            let length = element.to_compact(&mut tmp);
+            encode_varuint(length, buf);
 
-            let len = element.to_compact(buf);
-
-            // Replace placeholder with the real length
-            buf.as_mut()[length_index..=length_index + 1]
-                .copy_from_slice(&(len as u16).to_be_bytes());
+            buf.put_slice(&tmp);
         }
+
         0
     }
 
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let length = buf.get_u16();
-        let mut list = Vec::with_capacity(length as usize);
-
+    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
+        let (length, mut buf) = decode_varuint(buf);
+        let mut list = Vec::with_capacity(length);
+        #[allow(unused_assignments)]
+        let mut len = 0;
         for _ in 0..length {
             #[allow(unused_assignments)]
             let mut element = T::default();
 
-            let len = buf.get_u16();
+            (len, buf) = decode_varuint(buf);
 
-            (element, _) = T::from_compact(&buf[..(len as usize)], len as usize);
-            buf.advance(len as usize);
+            (element, _) = T::from_compact(&buf[..len], len);
+            buf.advance(len);
 
             list.push(element);
         }
@@ -132,7 +131,7 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        buf.put_u16(self.len() as u16);
+        encode_varuint(self.len(), buf);
 
         for element in self {
             element.to_compact(buf);
@@ -141,9 +140,9 @@ where
     }
 
     /// To be used by fixed sized types like `Vec<H256>`.
-    fn specialized_from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let length = buf.get_u16();
-        let mut list = Vec::with_capacity(length as usize);
+    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (length, mut buf) = decode_varuint(buf);
+        let mut list = Vec::with_capacity(length);
 
         for _ in 0..length {
             #[allow(unused_assignments)]
@@ -167,33 +166,30 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
+        let mut tmp = Vec::with_capacity(64);
+
         if let Some(element) = self {
-            let length_index = buf.as_mut().len();
+            // We don't know the length until we compact it
+            let length = element.to_compact(&mut tmp);
 
-            // Placeholder for the length, since it can only be known after compacting the element
-            // and BufMut doesn't support going back
-            buf.put_slice(&[0, 0]);
+            encode_varuint(length, buf);
 
-            let len = element.to_compact(buf);
-
-            // Replace placeholder with the real length
-            buf.as_mut()[length_index..=length_index + 1]
-                .copy_from_slice(&(len as u16).to_be_bytes());
+            buf.put_slice(&tmp);
 
             return 1
         }
         0
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
             return (None, buf)
         }
 
-        let len = buf.get_u16();
+        let (len, mut buf) = decode_varuint(buf);
 
-        let (element, _) = T::from_compact(&buf[..(len as usize)], len as usize);
-        buf.advance(len as usize);
+        let (element, _) = T::from_compact(&buf[..len], len);
+        buf.advance(len);
 
         (Some(element), buf)
     }
@@ -313,6 +309,32 @@ impl Compact for bool {
     }
 }
 
+fn encode_varuint<B>(mut n: usize, buf: &mut B)
+where
+    B: bytes::BufMut + AsMut<[u8]>,
+{
+    while n >= 0x80 {
+        buf.put_u8((n as u8) | 0x80);
+        n >>= 7;
+    }
+    buf.put_u8(n as u8);
+}
+
+fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
+    let mut value: usize = 0;
+
+    for i in 0..33 {
+        let byte = buf.get_u8();
+        if byte < 128 {
+            value |= usize::from(byte) << (i * 7);
+            return (value, buf)
+        } else {
+            value |= usize::from(byte & 0x7F) << (i * 7);
+        }
+    }
+    panic!("Could not correctly decode value.");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,7 +408,7 @@ mod tests {
 
         assert_eq!(None::<H256>.to_compact(&mut buf), 0);
         assert_eq!(opt.to_compact(&mut buf), 1);
-        assert_eq!(buf.len(), 34);
+        assert_eq!(buf.len(), 1 + 32);
 
         assert_eq!(Option::<H256>::from_compact(&buf, 1), (opt, vec![].as_slice()));
 
@@ -411,7 +433,7 @@ mod tests {
         buf.extend([1u8, 2]);
 
         let mut remaining_buf = buf.as_slice();
-        remaining_buf.advance(2 + 2 + 32 + 2 + 32);
+        remaining_buf.advance(1 + 1 + 32 + 1 + 32);
 
         assert_eq!(Vec::<H256>::from_compact(&buf, 0), (list, remaining_buf));
         assert_eq!(remaining_buf, &[1u8, 2]);
@@ -449,6 +471,17 @@ mod tests {
         assert_eq!(u64::from_compact(&buf, 8), (0xffffffffffffffffu64, vec![].as_slice()));
     }
 
+    #[test]
+    fn variable_uint() {
+        proptest::proptest!(|(val: usize)| {
+            let mut buf = vec![];
+            encode_varuint(val, &mut buf);
+            let (decoded, read_buf) = decode_varuint(&buf);
+            assert_eq!(val, decoded);
+            assert!(!read_buf.has_remaining());
+        });
+    }
+
     #[main_codec]
     #[derive(Debug, PartialEq, Clone)]
     pub struct TestStruct {
@@ -472,9 +505,9 @@ mod tests {
                 f_bool_t: true,                               // 1 bit  | 0 bytes
                 f_option_none: None,                          // 1 bit  | 0 bytes
                 f_option_some: Some(H256::zero()),            // 1 bit  | 32 bytes
-                f_option_some_u64: Some(0xffffu64),           // 1 bit  | 2 + 2 bytes
-                f_vec_empty: vec![],                          // 0 bits | 2 bytes
-                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 2 + 20*2 bytes
+                f_option_some_u64: Some(0xffffu64),           // 1 bit  | 1 + 2 bytes
+                f_vec_empty: vec![],                          // 0 bits | 1 bytes
+                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 1 + 20*2 bytes
             }
         }
     }
@@ -490,9 +523,9 @@ mod tests {
             1 +
             // 0 + 0 + 0 +
             32 +
-            2 + 2 +
-            2 +
-            2 + 20 * 2
+            1 + 2 +
+            1 +
+            1 + 20 * 2
         );
 
         assert_eq!(

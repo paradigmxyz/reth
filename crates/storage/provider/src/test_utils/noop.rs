@@ -7,8 +7,8 @@ use crate::{
 use reth_interfaces::Result;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
-    ChainInfo, Header, Receipt, SealedBlock, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY, U256,
+    ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey, StorageValue,
+    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
@@ -66,6 +66,14 @@ impl BlockProviderIdExt for NoopProvider {
         Ok(None)
     }
 
+    fn sealed_header_by_id(&self, _id: BlockId) -> Result<Option<SealedHeader>> {
+        Ok(None)
+    }
+
+    fn header_by_id(&self, _id: BlockId) -> Result<Option<Header>> {
+        Ok(None)
+    }
+
     fn ommers_by_id(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
         Ok(None)
     }
@@ -76,11 +84,11 @@ impl BlockIdProvider for NoopProvider {
         Ok(None)
     }
 
-    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 
-    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 }

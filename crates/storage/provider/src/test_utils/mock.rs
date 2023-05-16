@@ -5,11 +5,11 @@ use crate::{
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use parking_lot::Mutex;
-use reth_interfaces::Result;
+use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, StorageKey, StorageValue,
-    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey,
+    StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -243,7 +243,7 @@ impl BlockNumProvider for MockEthProvider {
             .iter()
             .find(|(_, header)| header.number == best_block_number)
             .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
-            .expect("provider is empty"))
+            .unwrap_or_default())
     }
 
     fn best_block_number(&self) -> Result<BlockNumber> {
@@ -252,7 +252,7 @@ impl BlockNumProvider for MockEthProvider {
             .iter()
             .max_by_key(|h| h.1.number)
             .map(|(_, header)| header.number)
-            .expect("provider is empty"))
+            .ok_or(ProviderError::HeaderNotFound)?)
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
@@ -263,7 +263,7 @@ impl BlockNumProvider for MockEthProvider {
 }
 
 impl BlockIdProvider for MockEthProvider {
-    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 
@@ -271,7 +271,7 @@ impl BlockIdProvider for MockEthProvider {
         Ok(None)
     }
 
-    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 }
@@ -303,6 +303,17 @@ impl BlockProviderIdExt for MockEthProvider {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
             BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+        }
+    }
+
+    fn sealed_header_by_id(&self, id: BlockId) -> Result<Option<SealedHeader>> {
+        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+    }
+
+    fn header_by_id(&self, id: BlockId) -> Result<Option<Header>> {
+        match self.block_by_id(id)? {
+            None => Ok(None),
+            Some(block) => Ok(Some(block.header)),
         }
     }
 

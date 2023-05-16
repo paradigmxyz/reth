@@ -20,7 +20,7 @@ tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 
 # tracing
-tracing = "0.1"
+tracing = { workspace = true }
 
 # misc
 thiserror = "1.0.37"
@@ -28,10 +28,10 @@ auto_impl = "1.0"
 itertools = "0.10"
 pin-project = "1.0"
 derive_more = "0.99"
+parking_lot = "0.12"
 
 # test-utils
 reth-rlp = { path = "../../rlp", optional = true }
-parking_lot = { version = "0.12", optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
@@ -42,4 +42,4 @@ parking_lot = "0.12"
 
 [features]
 bench = []
-test-utils = ["reth-rlp", "parking_lot"]
+test-utils = ["reth-rlp"]

@@ -67,6 +67,11 @@ impl<Client> FetchFullBlockFuture<Client>
 where
     Client: BodiesClient + HeadersClient,
 {
+    /// Returns the hash of the block being requested.
+    pub fn hash(&self) -> &H256 {
+        &self.hash
+    }
+
     /// If the header request is already complete, this returns the block number
     pub fn block_number(&self) -> Option<u64> {
         self.header.as_ref().map(|h| h.number)
