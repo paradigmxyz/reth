@@ -11,7 +11,7 @@ use crate::{
 use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
-use futures::{pin_mut, stream::select as stream_select, StreamExt};
+use futures::{future::Either, pin_mut, stream::select as stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
@@ -33,6 +33,7 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
+        download::DownloadClient,
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
     sync::SyncStateUpdater,
@@ -282,46 +283,6 @@ impl Command {
             None => None,
         };
 
-        // Configure the pipeline
-        let mut pipeline = if self.auto_mine {
-            let (_, client, mut task) = AutoSealBuilder::new(
-                Arc::clone(&self.chain),
-                blockchain_db.clone(),
-                transaction_pool.clone(),
-                consensus_engine_tx.clone(),
-                canon_state_notification_sender,
-            )
-            .build();
-
-            let mut pipeline = self
-                .build_networked_pipeline(
-                    &mut config,
-                    network.clone(),
-                    client,
-                    Arc::clone(&consensus),
-                    db.clone(),
-                    &ctx.task_executor,
-                )
-                .await?;
-
-            let pipeline_events = pipeline.events();
-            task.set_pipeline_events(pipeline_events);
-            debug!(target: "reth::cli", "Spawning auto mine task");
-            ctx.task_executor.spawn(Box::pin(task));
-
-            pipeline
-        } else {
-            self.build_networked_pipeline(
-                &mut config,
-                network.clone(),
-                network_client.clone(),
-                Arc::clone(&consensus),
-                db.clone(),
-                &ctx.task_executor,
-            )
-            .await?
-        };
-
         // configure the payload builder
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
@@ -336,10 +297,54 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
+        // Configure the pipeline
+        let (mut pipeline, client) = if self.auto_mine {
+            let (_, client, mut task) = AutoSealBuilder::new(
+                Arc::clone(&self.chain),
+                blockchain_db.clone(),
+                transaction_pool.clone(),
+                consensus_engine_tx.clone(),
+                canon_state_notification_sender,
+            )
+            .build();
+
+            let mut pipeline = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    client.clone(),
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            let pipeline_events = pipeline.events();
+            task.set_pipeline_events(pipeline_events);
+            debug!(target: "reth::cli", "Spawning auto mine task");
+            ctx.task_executor.spawn(Box::pin(task));
+
+            (pipeline, EitherDownloader::Left(client))
+        } else {
+            let pipeline = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    network_client.clone(),
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            (pipeline, EitherDownloader::Right(network_client))
+        };
+
         let pipeline_events = pipeline.events();
+
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
-            network_client,
+            client,
             pipeline,
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
@@ -700,6 +705,80 @@ impl Command {
             .build(db);
 
         Ok(pipeline)
+    }
+}
+
+/// A sum type to make initializing a consensus engine with different client types easier.
+#[derive(Debug, Clone)]
+pub enum EitherDownloader<A, B> {
+    /// The first downloader variant
+    Left(A),
+    /// The second downloader variant
+    Right(B),
+}
+
+impl<A, B> DownloadClient for EitherDownloader<A, B>
+where
+    A: DownloadClient,
+    B: DownloadClient,
+{
+    fn report_bad_message(&self, peer_id: reth_primitives::PeerId) {
+        match self {
+            EitherDownloader::Left(a) => a.report_bad_message(peer_id),
+            EitherDownloader::Right(b) => b.report_bad_message(peer_id),
+        }
+    }
+    fn num_connected_peers(&self) -> usize {
+        match self {
+            EitherDownloader::Left(a) => a.num_connected_peers(),
+            EitherDownloader::Right(b) => b.num_connected_peers(),
+        }
+    }
+}
+
+impl<A, B> BodiesClient for EitherDownloader<A, B>
+where
+    A: BodiesClient,
+    B: BodiesClient,
+{
+    type Output = Either<A::Output, B::Output>;
+
+    fn get_block_bodies_with_priority(
+        &self,
+        hashes: Vec<H256>,
+        priority: reth_interfaces::p2p::priority::Priority,
+    ) -> Self::Output {
+        match self {
+            EitherDownloader::Left(a) => {
+                Either::Left(a.get_block_bodies_with_priority(hashes, priority))
+            }
+            EitherDownloader::Right(b) => {
+                Either::Right(b.get_block_bodies_with_priority(hashes, priority))
+            }
+        }
+    }
+}
+
+impl<A, B> HeadersClient for EitherDownloader<A, B>
+where
+    A: HeadersClient,
+    B: HeadersClient,
+{
+    type Output = Either<A::Output, B::Output>;
+
+    fn get_headers_with_priority(
+        &self,
+        request: reth_interfaces::p2p::headers::client::HeadersRequest,
+        priority: reth_interfaces::p2p::priority::Priority,
+    ) -> Self::Output {
+        match self {
+            EitherDownloader::Left(a) => {
+                Either::Left(a.get_headers_with_priority(request, priority))
+            }
+            EitherDownloader::Right(b) => {
+                Either::Right(b.get_headers_with_priority(request, priority))
+            }
+        }
     }
 }
 
