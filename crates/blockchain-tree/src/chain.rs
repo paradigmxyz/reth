@@ -197,9 +197,6 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        dbg!(self.fork_block_number());
-        dbg!(self.fork_block_hash());
-
         let block_state =
             Self::validate_and_execute(block.clone(), parent_block, post_state_data, externals)?;
         self.state.extend(block_state);
