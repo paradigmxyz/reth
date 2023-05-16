@@ -122,6 +122,13 @@ where
                 // the pipeline
                 this.insert_task = Some(Box::pin(async move {
                     let mut storage = storage.write().await;
+
+                    // check previous block for base fee
+                    let base_fee_per_gas = storage
+                        .headers
+                        .get(&storage.best_block)
+                        .and_then(|parent| parent.next_block_base_fee());
+
                     let mut header = Header {
                         parent_hash: storage.best_hash,
                         ommers_hash: EMPTY_OMMER_ROOT,
@@ -141,7 +148,7 @@ where
                             .as_secs(),
                         mix_hash: Default::default(),
                         nonce: 0,
-                        base_fee_per_gas: None,
+                        base_fee_per_gas,
                         extra_data: Default::default(),
                     };
 
@@ -231,15 +238,17 @@ where
 
                             // seal the block
                             let block = Block {
-                                header,
+                                header: header.clone(),
                                 body: transactions,
                                 ommers: vec![],
                                 withdrawals: None,
                             };
                             let sealed_block = block.seal_slow();
+
                             let sealed_block_with_senders =
                                 SealedBlockWithSenders::new(sealed_block, senders)
                                     .expect("senders are valid");
+
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
                             let chain =
