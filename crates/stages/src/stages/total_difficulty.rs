@@ -100,7 +100,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
         info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_to) })
     }
 }
 

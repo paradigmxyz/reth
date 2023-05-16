@@ -183,7 +183,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_to) })
     }
 }
 

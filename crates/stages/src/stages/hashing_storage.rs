@@ -217,7 +217,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
         info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_progress })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_progress) })
     }
 }
 

@@ -210,7 +210,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         }
 
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(input.unwind_to) })
     }
 }
 
@@ -372,11 +372,11 @@ mod tests {
 
         // Unwind all of it
         let unwind_to = 1;
-        let input = UnwindInput { bad_block: None, stage_progress, unwind_to };
+        let input = UnwindInput { bad_block: None, checkpoint: stage_progress, unwind_to };
         let res = runner.unwind(input).await;
         assert_matches!(
             res,
-            Ok(UnwindOutput { stage_progress }) if stage_progress == 1
+            Ok(UnwindOutput { checkpoint }) if stage_progress == 1
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");

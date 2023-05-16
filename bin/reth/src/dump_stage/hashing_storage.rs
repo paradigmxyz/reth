@@ -38,7 +38,11 @@ async fn unwind_and_copy<DB: Database>(
     exec_stage
         .unwind(
             &mut unwind_tx,
-            UnwindInput { unwind_to: from, stage_progress: tip_block_number, bad_block: None },
+            UnwindInput {
+                unwind_to: from,
+                checkpoint: StageCheckpoint::block_number(tip_block_number),
+                bad_block: None,
+            },
         )
         .await?;
     let unwind_inner_tx = unwind_tx.deref_mut();

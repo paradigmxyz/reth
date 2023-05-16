@@ -252,7 +252,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
         if range.is_empty() {
-            return Ok(UnwindOutput { stage_progress: input.unwind_to })
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(input.unwind_to) })
         }
 
         // get all batches for account change
@@ -309,7 +309,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_to) })
     }
 }
 
@@ -523,11 +523,11 @@ mod tests {
 
         let mut stage = stage();
         let o = stage
-            .unwind(&mut tx, UnwindInput { stage_progress: 1, unwind_to: 0, bad_block: None })
+            .unwind(&mut tx, UnwindInput { checkpoint: 1, unwind_to: 0, bad_block: None })
             .await
             .unwrap();
 
-        assert_eq!(o, UnwindOutput { stage_progress: 0 });
+        assert_eq!(o, UnwindOutput { checkpoint: 0 });
 
         // assert unwind stage
         let db_tx = tx.deref();

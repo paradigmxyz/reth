@@ -165,7 +165,7 @@ fn measure_stage<F, S>(
                 checkpoint: Some(block_interval.start),
             },
             UnwindInput {
-                stage_progress: block_interval.end,
+                checkpoint: block_interval.end,
                 unwind_to: block_interval.start,
                 bad_block: None,
             },

@@ -207,13 +207,16 @@ impl Command {
             checkpoint: Some(StageCheckpoint::block_number(self.from)),
         };
 
-        let mut unwind =
-            UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
+        let mut unwind = UnwindInput {
+            checkpoint: StageCheckpoint::block_number(self.to),
+            unwind_to: self.from,
+            bad_block: None,
+        };
 
         if !self.skip_unwind {
-            while unwind.stage_progress > self.from {
+            while unwind.checkpoint.block_number > self.from {
                 let unwind_output = unwind_stage.unwind(&mut tx, unwind).await?;
-                unwind.stage_progress = unwind_output.stage_progress;
+                unwind.checkpoint = unwind_output.checkpoint;
             }
         }
 

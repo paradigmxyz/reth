@@ -160,7 +160,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_to) })
     }
 }
 

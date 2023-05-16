@@ -293,7 +293,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx.unwind_account_hashing(range)?;
 
         info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_progress })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_progress) })
     }
 }
 

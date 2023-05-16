@@ -63,8 +63,8 @@ impl ExecInput {
 /// Stage unwind input, see [Stage::unwind].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
-    /// The current highest block of the stage.
-    pub stage_progress: BlockNumber,
+    /// The current highest progress of the stage.
+    pub checkpoint: StageCheckpoint,
     /// The block to unwind to.
     pub unwind_to: BlockNumber,
     /// The bad block that caused the unwind, if any.
@@ -84,14 +84,14 @@ impl UnwindInput {
     ) -> (RangeInclusive<BlockNumber>, BlockNumber, bool) {
         // +1 is to skip the block we're unwinding to
         let mut start = self.unwind_to + 1;
-        let end = self.stage_progress;
+        let end = self.checkpoint;
 
-        start = max(start, end.saturating_sub(threshold));
+        start = max(start, end.block_number.saturating_sub(threshold));
 
         let unwind_to = start - 1;
 
         let is_final_range = unwind_to == self.unwind_to;
-        (start..=end, unwind_to, is_final_range)
+        (start..=end.block_number, unwind_to, is_final_range)
     }
 }
 
@@ -115,7 +115,7 @@ impl ExecOutput {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwindOutput {
     /// The block at which the stage has unwound to.
-    pub stage_progress: BlockNumber,
+    pub checkpoint: StageCheckpoint,
 }
 
 /// A stage is a segmented part of the syncing process of the node.

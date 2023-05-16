@@ -66,7 +66,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
 
         info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_progress })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_progress) })
     }
 }
 
@@ -160,11 +160,11 @@ mod tests {
     }
 
     async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
-        let input = UnwindInput { stage_progress: unwind_from, unwind_to, ..Default::default() };
+        let input = UnwindInput { checkpoint: unwind_from, unwind_to, ..Default::default() };
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.unwind(&mut tx, input).await.unwrap();
-        assert_eq!(out, UnwindOutput { stage_progress: unwind_to });
+        assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_to) });
         tx.commit().unwrap();
     }
 

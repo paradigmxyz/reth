@@ -248,7 +248,7 @@ where
         tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         info!(target: "sync::stages::headers", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(input.unwind_to) })
     }
 }
 

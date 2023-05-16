@@ -48,7 +48,11 @@ async fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let (from, to) = range;
     let mut unwind_tx = Transaction::new(db_tool.db)?;
-    let unwind = UnwindInput { unwind_to: from, stage_progress: tip_block_number, bad_block: None };
+    let unwind = UnwindInput {
+        unwind_to: from,
+        checkpoint: StageCheckpoint::block_number(tip_block_number),
+        bad_block: None,
+    };
     let execute_input = reth_stages::ExecInput {
         previous_stage: Some((StageId("Another"), StageCheckpoint::block_number(to))),
         checkpoint: Some(StageCheckpoint::block_number(from)),
@@ -73,7 +77,11 @@ async fn unwind_and_copy<DB: Database>(
     exec_stage
         .unwind(
             &mut unwind_tx,
-            UnwindInput { unwind_to: to, stage_progress: tip_block_number, bad_block: None },
+            UnwindInput {
+                unwind_to: to,
+                checkpoint: StageCheckpoint::block_number(tip_block_number),
+                bad_block: None,
+            },
         )
         .await?;
 

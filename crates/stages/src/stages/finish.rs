@@ -78,7 +78,7 @@ where
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.updater.update_status(self.fetch_head(tx, input.unwind_to)?);
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(input.unwind_to) })
     }
 }
 
