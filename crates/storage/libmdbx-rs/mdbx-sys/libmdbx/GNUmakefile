@@ -320,7 +320,7 @@ IOARENA := $(shell \
   (test -x ../ioarena/@BUILD/src/ioarena && echo ../ioarena/@BUILD/src/ioarena) || \
   (test -x ../../@BUILD/src/ioarena && echo ../../@BUILD/src/ioarena) || \
   (test -x ../../src/ioarena && echo ../../src/ioarena) || which ioarena 2>&- || \
-  (echo false && echo '$(TIP) Clone and build the https://github.com/pmwkaa/ioarena.git within a neighbouring directory for availability of benchmarking.' >&2))
+  (echo false && echo '$(TIP) Clone and build the https://abf.io/erthink/ioarena.git within a neighbouring directory for availability of benchmarking.' >&2))
 endif
 NN	?= 25000000
 BENCH_CRUD_MODE ?= nosync
@@ -334,7 +334,7 @@ re-bench: bench-clean bench
 ifeq ($(or $(IOARENA),false),false)
 bench bench-quartet bench-triplet bench-couple:
 	$(QUIET)echo 'The `ioarena` benchmark is required.' >&2 && \
-	echo 'Please clone and build the https://github.com/pmwkaa/ioarena.git within a neighbouring `ioarena` directory.' >&2 && \
+	echo 'Please clone and build the https://abf.io/erthink/ioarena.git within a neighbouring `ioarena` directory.' >&2 && \
 	false
 
 else
@@ -345,14 +345,19 @@ define bench-rule
 bench-$(1)_$(2).txt: $(3) $(IOARENA) $(lastword $(MAKEFILE_LIST))
 	@echo '  RUNNING ioarena for $1/$2...'
 	$(QUIET)(export LD_LIBRARY_PATH="./:$$$${LD_LIBRARY_PATH}"; \
-		ldd $(IOARENA) && \
+		ldd $(IOARENA) | grep -i $(1) && \
+		$(IOARENA) -D $(1) -B batch -m $(BENCH_CRUD_MODE) -n $(2) \
+			| tee $$@ | grep throughput | sed 's/throughput/batch×N/' && \
 		$(IOARENA) -D $(1) -B crud -m $(BENCH_CRUD_MODE) -n $(2) \
-			| tee $$@ | grep throughput && \
+			| tee -a $$@ | grep throughput | sed 's/throughput/   crud/' && \
 		$(IOARENA) -D $(1) -B iterate,get,iterate,get,iterate -m $(BENCH_CRUD_MODE) -r 4 -n $(2) \
-			| tee -a $$@ | grep throughput \
-	) || mv -f $$@ $$@.error
+			| tee -a $$@ | grep throughput | sed '0,/throughput/{s/throughput/iterate/};s/throughput/    get/' && \
+		$(IOARENA) -D $(1) -B delete -m $(BENCH_CRUD_MODE) -n $(2) \
+			| tee -a $$@ | grep throughput | sed 's/throughput/ delete/' && \
+	true) || mv -f $$@ $$@.error
 
 endef
+
 
 $(eval $(call bench-rule,mdbx,$(NN),libmdbx.$(SO_SUFFIX)))
 
