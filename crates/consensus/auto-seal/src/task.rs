@@ -7,7 +7,7 @@ use reth_primitives::{
     proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
     SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::{CanonStateNotificationSender, Chain, StateProviderFactory, CanonChainTracker};
+use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     executor::Executor,
