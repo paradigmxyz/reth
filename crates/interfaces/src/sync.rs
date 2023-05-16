@@ -1,4 +1,5 @@
 //! Traits used when interacting with the sync status of the network.
+use reth_primitives::Head;
 
 /// A type that provides information about whether the node is currently syncing and the network is
 /// currently serving syncing related requests.
@@ -8,7 +9,7 @@ pub trait SyncStateProvider: Send + Sync {
     fn is_syncing(&self) -> bool;
 }
 
-/// An updater for updating the [SyncState] of the network.
+/// An updater for updating the [SyncState] and status of the network.
 ///
 /// The node is either syncing, or it is idle.
 /// While syncing, the node will download data from the network and process it. The processing
@@ -16,9 +17,12 @@ pub trait SyncStateProvider: Send + Sync {
 /// Eventually the node reaches the `Finish` stage and will transition to [`SyncState::Idle`], it
 /// which point the node is considered fully synced.
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait SyncStateUpdater: std::fmt::Debug + Send + Sync + 'static {
+pub trait NetworkSyncUpdater: std::fmt::Debug + Send + Sync + 'static {
     /// Notifies about an [SyncState] update.
     fn update_sync_state(&self, state: SyncState);
+
+    /// Updates the status of the p2p node
+    fn update_status(&self, head: Head);
 }
 
 /// The state the network is currently in when it comes to synchronization.
@@ -41,17 +45,18 @@ impl SyncState {
     }
 }
 
-/// A [SyncStateUpdater] implementation that does nothing.
+/// A [NetworkSyncUpdater] implementation that does nothing.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct NoopSyncStateUpdate;
+pub struct NoopSyncStateUpdater;
 
-impl SyncStateProvider for NoopSyncStateUpdate {
+impl SyncStateProvider for NoopSyncStateUpdater {
     fn is_syncing(&self) -> bool {
         false
     }
 }
 
-impl SyncStateUpdater for NoopSyncStateUpdate {
+impl NetworkSyncUpdater for NoopSyncStateUpdater {
     fn update_sync_state(&self, _state: SyncState) {}
+    fn update_status(&self, _: Head) {}
 }

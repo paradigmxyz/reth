@@ -49,10 +49,7 @@ use crate::{
 use reth_db::database::Database;
 use reth_interfaces::{
     consensus::Consensus,
-    p2p::{
-        bodies::downloader::BodyDownloader,
-        headers::{client::StatusUpdater, downloader::HeaderDownloader},
-    },
+    p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
 };
 use reth_provider::ExecutorFactory;
 use std::sync::Arc;
@@ -65,23 +62,20 @@ use std::sync::Arc;
 /// - [`OfflineStages`]
 /// - [`FinishStage`]
 #[derive(Debug)]
-pub struct DefaultStages<H, B, S, EF> {
+pub struct DefaultStages<H, B, EF> {
     /// Configuration for the online stages
     online: OnlineStages<H, B>,
     /// Executor factory needs for execution stage
     executor_factory: EF,
-    /// Configuration for the [`FinishStage`] stage.
-    status_updater: S,
 }
 
-impl<H, B, S, EF> DefaultStages<H, B, S, EF> {
+impl<H, B, EF> DefaultStages<H, B, EF> {
     /// Create a new set of default stages with default values.
     pub fn new(
         header_mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
         header_downloader: H,
         body_downloader: B,
-        status_updater: S,
         executor_factory: EF,
     ) -> Self
     where
@@ -90,38 +84,32 @@ impl<H, B, S, EF> DefaultStages<H, B, S, EF> {
         Self {
             online: OnlineStages::new(header_mode, consensus, header_downloader, body_downloader),
             executor_factory,
-            status_updater,
         }
     }
 }
 
-impl<H, B, S, EF> DefaultStages<H, B, S, EF>
+impl<H, B, EF> DefaultStages<H, B, EF>
 where
-    S: StatusUpdater + 'static,
     EF: ExecutorFactory,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<DB: Database>(
         default_offline: StageSetBuilder<DB>,
-        status_updater: S,
         executor_factory: EF,
     ) -> StageSetBuilder<DB> {
-        default_offline
-            .add_set(OfflineStages::new(executor_factory))
-            .add_stage(FinishStage::new(status_updater))
+        default_offline.add_set(OfflineStages::new(executor_factory)).add_stage(FinishStage)
     }
 }
 
-impl<DB, H, B, S, EF> StageSet<DB> for DefaultStages<H, B, S, EF>
+impl<DB, H, B, EF> StageSet<DB> for DefaultStages<H, B, EF>
 where
     DB: Database,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    S: StatusUpdater + 'static,
     EF: ExecutorFactory,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        Self::add_offline_stages(self.online.builder(), self.status_updater, self.executor_factory)
+        Self::add_offline_stages(self.online.builder(), self.executor_factory)
     }
 }
 
