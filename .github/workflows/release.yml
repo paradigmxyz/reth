@@ -103,7 +103,7 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           export GPG_TTY=$(tty)
-          echo "$GPG_SIGNING_KEY" | gpg --batch --import
+          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --import
           mkdir artifacts
           mv ~/.cargo/bin/reth ./artifacts
           cd artifacts
@@ -117,7 +117,7 @@ jobs:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          echo $env:GPG_SIGNING_KEY | gpg --batch --import
+          echo $env:GPG_SIGNING_KEY | base64 --decode | gpg --batch --import
           mkdir artifacts
           move $env:USERPROFILE/.cargo/bin/reth.exe ./artifacts
           cd artifacts
