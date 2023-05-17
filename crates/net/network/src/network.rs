@@ -54,7 +54,7 @@ impl NetworkHandle {
             peers,
             network_mode,
             bandwidth_meter,
-            is_syncing: Arc::new(AtomicBool::new(true)),
+            is_syncing: Arc::new(AtomicBool::new(false)),
             chain_id,
         };
         Self { inner: Arc::new(inner) }
