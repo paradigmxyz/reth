@@ -870,8 +870,14 @@ where
 
                         // update the canon chain if continuous is enabled
                         if self.sync.run_pipeline_continuously() {
-                            let max_block = match self.blockchain.best_block_number() {
-                                Ok(block) => block,
+                            let max_block = ctrl.progress().unwrap_or_default();
+                            let max_hash = match self.blockchain.block_hash(max_block) {
+                                Ok(Some(block)) => block,
+                                Ok(None) => {
+                                    return Some(Err(BeaconConsensusEngineError::Common(
+                                        ProviderError::CanonicalHeader { block_number: max_block }.into(),
+                                    )))
+                                }
                                 Err(error) => return Some(Err(error.into())),
                             };
                             let max_header = match self.blockchain.block_by_number(max_block) {
@@ -883,7 +889,7 @@ where
                                 }
                                 Err(error) => return Some(Err(error.into())),
                             };
-                            self.blockchain.set_canonical_head(max_header.header.seal_slow());
+                            self.blockchain.set_canonical_head(max_header.header.seal(max_hash));
                         }
 
                         // Update the state and hashes of the blockchain tree if possible.
