@@ -2,7 +2,7 @@
 
 use crate::{
     eth::{
-        error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
+        error::{ensure_success, EthApiError, EthResult, InvalidTransactionError, RevertError},
         revm_utils::{
             build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
             transact,
@@ -13,13 +13,13 @@ use crate::{
 };
 use ethers_core::utils::get_contract_address;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, U256};
+use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::{
     access_list::AccessListInspector,
     database::{State, SubState},
 };
-use reth_rpc_types::CallRequest;
+use reth_rpc_types::{state::StateOverride, CallRequest};
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -46,6 +46,24 @@ where
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
         self.estimate_gas_with(cfg, block_env, request, state)
+    }
+
+    /// Executes the call request (`eth_call`) and returns the output
+    pub(crate) async fn call(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+    ) -> EthResult<Bytes> {
+        let (res, _env) = self
+            .transact_call_at(
+                request,
+                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+                state_overrides,
+            )
+            .await?;
+
+        ensure_success(res.result)
     }
 
     /// Estimates the gas usage of the `request` with the state.
