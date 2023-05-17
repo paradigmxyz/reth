@@ -42,10 +42,7 @@ impl<'tx> TableObject<'tx> for Cow<'tx, [u8]> {
         #[cfg(not(feature = "return-borrowed"))]
         {
             let is_dirty = (!K::ONLY_CLEAN) &&
-                crate::error::mdbx_result::mdbx_result(ffi::mdbx_is_dirty(
-                    _txn,
-                    data_val.iov_base,
-                ))?;
+                crate::error::mdbx_result(ffi::mdbx_is_dirty(_txn, data_val.iov_base))?;
 
             Ok(if is_dirty { Cow::Owned(s.to_vec()) } else { Cow::Borrowed(s) })
         }
