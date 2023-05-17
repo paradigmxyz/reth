@@ -138,6 +138,15 @@ impl StageCheckpoint {
     pub fn new(block_number: BlockNumber) -> Self {
         Self { block_number, ..Default::default() }
     }
+
+    /// Sets the stage checkpoint to account hashing.
+    pub fn with_account_hashing_stage_checkpoint(
+        mut self,
+        checkpoint: AccountHashingCheckpoint,
+    ) -> Self {
+        self.stage_checkpoint = Some(StageUnitCheckpoint::Account(checkpoint));
+        self
+    }
 }
 
 // TODO(alexey): ideally, we'd want to display block number + stage-specific metric (if available)
