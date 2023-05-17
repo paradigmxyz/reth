@@ -46,6 +46,11 @@ install:
 # - The current user is in the `docker` group.
 #
 # The resulting binaries will be created in the `target/` directory.
+#
+# Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
+# See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
+build-x86_64 build-aarch64: export RUSTFLAGS=-C link-arg=-lgcc -Clink-arg=-static-libgcc
+
 build-x86_64:
 	cross build --bin reth --target x86_64-unknown-linux-gnu --features "$(CROSS_FEATURES)" --profile "$(CROSS_PROFILE)"
 build-aarch64:
