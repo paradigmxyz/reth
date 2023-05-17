@@ -69,7 +69,7 @@ where
         let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let (head_num, _) = header_cursor
             .seek_exact(stage_progress)?
-            .ok_or(ProviderError::CanonicalHeader { block_number: stage_progress })?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(stage_progress.into()))?;
         // Check if the next entry is congruent
         Ok(header_cursor.next()?.map(|(next_num, _)| head_num + 1 == next_num).unwrap_or_default())
     }
@@ -89,12 +89,12 @@ where
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
             .seek_exact(stage_progress)?
-            .ok_or(ProviderError::CanonicalHeader { block_number: stage_progress })?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(stage_progress.into()))?;
 
         // Construct head
         let (_, head) = header_cursor
             .seek_exact(head_num)?
-            .ok_or(ProviderError::Header { number: head_num })?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(head_num.into()))?;
         let local_head = head.seal(head_hash);
 
         // Look up the next header
@@ -103,7 +103,7 @@ where
             .map(|(next_num, next_hash)| -> Result<SealedHeader, StageError> {
                 let (_, next) = header_cursor
                     .seek_exact(next_num)?
-                    .ok_or(ProviderError::Header { number: next_num })?;
+                    .ok_or_else(|| ProviderError::HeaderNotFound(next_num.into()))?;
                 Ok(next.seal(next_hash))
             })
             .transpose()?;
@@ -494,8 +494,8 @@ mod tests {
         // Empty database
         assert_matches!(
             stage.get_sync_gap(&tx, stage_progress).await,
-            Err(StageError::DatabaseIntegrity(ProviderError::CanonicalHeader { block_number }))
-                if block_number == stage_progress
+            Err(StageError::DatabaseIntegrity(ProviderError::HeaderNotFound(block_number)))
+                if block_number.as_number().unwrap() == stage_progress
         );
 
         // Checkpoint and no gap

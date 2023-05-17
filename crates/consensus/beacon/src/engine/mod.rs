@@ -470,7 +470,7 @@ where
             })?;
         let head = head.header.seal(update.head_block_hash);
         let head_td = self.blockchain.header_td_by_number(head.number)?.ok_or_else(|| {
-            Error::Provider(ProviderError::TotalDifficulty { number: head.number })
+            Error::Provider(ProviderError::TotalDifficultyNotFound { number: head.number })
         })?;
 
         self.sync_state_updater.update_status(Head {
