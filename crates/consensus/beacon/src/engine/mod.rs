@@ -1597,7 +1597,8 @@ mod tests {
                 .await;
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }.to_string(),
+                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
+                    .to_string(),
             })
             .with_latest_valid_hash(H256::zero());
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
