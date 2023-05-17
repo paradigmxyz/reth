@@ -74,7 +74,7 @@ impl<DB: Database> ShareableDatabase<DB> {
         // get block number
         let mut block_number = tx
             .get::<tables::HeaderNumbers>(block_hash)?
-            .ok_or(ProviderError::BlockHash { block_hash })?;
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
         if is_latest_block_number(&tx, block_number)? {
             return Ok(Box::new(LatestStateProvider::new(tx)))
@@ -182,7 +182,7 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
                 let tx = self.db.tx()?;
                 let transactions = self
                     .transactions_by_block(id)?
-                    .ok_or(ProviderError::BlockBodyIndices { number })?;
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
 
                 let ommers = tx.get::<tables::BlockOmmers>(header.number)?.map(|o| o.ommers);
                 let withdrawals = self.withdrawals_by_block(id, header.timestamp)?;
@@ -421,8 +421,8 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
     ) -> Result<()> {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
         self.fill_env_with_header(cfg, block_env, &header)
     }
 
@@ -432,22 +432,24 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
         block_env: &mut BlockEnv,
         header: &Header,
     ) -> Result<()> {
-        let total_difficulty =
-            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
         fill_cfg_and_block_env(cfg, block_env, &self.chain_spec, header, total_difficulty);
         Ok(())
     }
 
     fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockHashOrNumber) -> Result<()> {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
 
         self.fill_block_env_with_header(block_env, &header)
     }
 
     fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> Result<()> {
-        let total_difficulty =
-            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
         let spec_id = revm_spec(
             &self.chain_spec,
             Head {
@@ -465,14 +467,15 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
     }
 
     fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> Result<()> {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound)?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
         self.fill_cfg_env_with_header(cfg, &header)
     }
 
     fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
-        let total_difficulty =
-            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
     }

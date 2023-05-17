@@ -90,7 +90,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
             .db
             .cursor_read::<tables::Headers>()?
             .last()?
-            .ok_or(ProviderError::Header { number: 0 })?
+            .ok_or_else(|| ProviderError::HeaderNotFound(0.into()))?
             .1
             .state_root;
 

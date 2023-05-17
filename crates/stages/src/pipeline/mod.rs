@@ -708,14 +708,14 @@ mod tests {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
         let mut pipeline = Pipeline::builder()
             .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
-                StageError::DatabaseIntegrity(ProviderError::BlockBodyIndices { number: 5 }),
+                StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))
             .build(db);
         let result = pipeline.run().await;
         assert_matches!(
             result,
             Err(PipelineError::Stage(StageError::DatabaseIntegrity(
-                ProviderError::BlockBodyIndices { number: 5 }
+                ProviderError::BlockBodyIndicesNotFound(5)
             )))
         );
     }

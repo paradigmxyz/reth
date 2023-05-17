@@ -69,7 +69,7 @@ where
         let best = database.chain_info()?;
         match database.header_by_number(best.best_number)? {
             Some(header) => Ok(Self::with_latest(database, tree, header.seal(best.best_hash))),
-            None => Err(Error::Provider(ProviderError::Header { number: best.best_number })),
+            None => Err(Error::Provider(ProviderError::HeaderNotFound(best.best_number.into()))),
         }
     }
 }
