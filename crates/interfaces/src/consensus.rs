@@ -67,8 +67,6 @@ pub enum ConsensusError {
     BodyStateRootDiff { got: H256, expected: H256 },
     #[error("Block transaction root ({got:?}) is different from expected ({expected:?})")]
     BodyTransactionRootDiff { got: H256, expected: H256 },
-    #[error("Block receipts root ({got:?}) is different from expected ({expected:?})")]
-    BodyReceiptsRootDiff { got: H256, expected: H256 },
     #[error("Block withdrawals root ({got:?}) is different from expected ({expected:?})")]
     BodyWithdrawalsRootDiff { got: H256, expected: H256 },
     #[error("Block with [hash:{hash:?},number: {number}] is already known.")]
@@ -95,12 +93,6 @@ pub enum ConsensusError {
     BaseFeeDiff { expected: u64, got: u64 },
     #[error("Transaction signer recovery error.")]
     TransactionSignerRecoveryError,
-    #[error(
-        "Transaction count {transaction_count} is different from receipt count {receipt_count}"
-    )]
-    TransactionReceiptCountDiff { transaction_count: usize, receipt_count: usize },
-    #[error("Transaction had receipt of different type")]
-    TransactionTypeReceiptTypeDiff,
     #[error("Extra data {len} exceeds max length: ")]
     ExtraDataExceedsMax { len: usize },
     #[error("Difficulty after merge is not zero")]
@@ -109,8 +101,6 @@ pub enum ConsensusError {
     TheMergeNonceIsNotZero,
     #[error("Ommer root after merge is not empty")]
     TheMergeOmmerRootIsNotEmpty,
-    #[error("Mix hash after merge is not zero")]
-    TheMergeMixHashIsNotZero,
     #[error("Missing withdrawals root")]
     WithdrawalsRootMissing,
     #[error("Unexpected withdrawals root")]
