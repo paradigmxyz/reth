@@ -43,7 +43,6 @@ members = [
     "crates/transaction-pool",
     "crates/trie",
 ]
-exclude = ["crate-template"]
 default-members = ["bin/reth"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
