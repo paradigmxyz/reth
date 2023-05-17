@@ -223,7 +223,7 @@ jobs:
           
           [See pre-built binaries documentation.](https://https://paradigmxyz.github.io/reth/installation/binaries.html)
           
-          The binaries are signed with the PGP key: `TODO`
+          The binaries are signed with the PGP key: `A3AE 097C 8909 3A12 4049  DF1F 5391 A3C4 1005 30B4`
           
           | System | Architecture | Binary | PGP Signature |
           |:---:|:---:|:---:|:---|
