@@ -22,20 +22,10 @@ pub enum BlockExecutionError {
     BlockGasUsed { got: u64, expected: u64 },
     #[error("Provider error")]
     ProviderError,
-    #[error("BlockChainId can't be found in BlockchainTree with internal index {chain_id}")]
-    BlockSideChainIdConsistency { chain_id: u64 },
     #[error(
         "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
     AppendChainDoesntConnect { chain_tip: BlockNumHash, other_chain_fork: BlockNumHash },
-    #[error("Canonical chain header #{block_hash} can't be found ")]
-    CanonicalChain { block_hash: BlockHash },
-    #[error("Can't insert #{block_number} {block_hash} as last finalized block number is {last_finalized}")]
-    PendingBlockIsFinalized {
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        last_finalized: BlockNumber,
-    },
     #[error("Block number #{block_number} not found in blockchain tree chain")]
     BlockNumberNotFoundInChain { block_number: BlockNumber },
     #[error("Block hash {block_hash} not found in blockchain tree chain")]

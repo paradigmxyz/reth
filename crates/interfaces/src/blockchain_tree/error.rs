@@ -1,8 +1,27 @@
 //! Error handling for the blockchain tree
 
-use crate::{consensus::ConsensusError, Error};
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
+use crate::{consensus::ConsensusError, executor::BlockExecutionError};
+use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 use std::fmt::Formatter;
+
+/// Various error cases that can occur when a block violates tree assumptions.
+#[derive(Debug, thiserror::Error)]
+pub enum BlockchainTreeError {
+    /// Thrown if the block number is lower than the last finalized block number.
+    #[error("Block number is lower than the last finalized block number #{last_finalized}")]
+    PendingBlockIsFinalized {
+        /// The block number of the last finalized block.
+        last_finalized: BlockNumber,
+    },
+    /// Thrown if no side chain could be found for the block.
+    #[error("BlockChainId can't be found in BlockchainTree with internal index {chain_id}")]
+    BlockSideChainIdConsistency {
+        /// The internal identifier for the side chain.
+        chain_id: u64,
+    },
+    #[error("Canonical chain header #{block_hash} can't be found ")]
+    CanonicalChain { block_hash: BlockHash },
+}
 
 /// Error thrown when inserting a block failed because the block is considered invalid.
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +38,11 @@ impl InsertInvalidBlockError {
         Self { inner: InsertInvalidBlockData::boxed(block, kind) }
     }
 
+    /// Create a new InsertInvalidBlockError from a tree error
+    pub fn tree_error(error: BlockchainTreeError, block: SealedBlock) -> Self {
+        Self::new(block, InsertInvalidBlockErrorKind::Tree(error))
+    }
+
     /// Create a new InsertInvalidBlockError from a consensus error
     pub fn consensus_error(error: ConsensusError, block: SealedBlock) -> Self {
         Self::new(block, InsertInvalidBlockErrorKind::Consensus(error))
@@ -30,7 +54,7 @@ impl InsertInvalidBlockError {
     }
 
     /// Create a new InsertInvalidBlockError from an execution error
-    pub fn execution_error(error: Error, block: SealedBlock) -> Self {
+    pub fn execution_error(error: BlockExecutionError, block: SealedBlock) -> Self {
         Self::new(block, InsertInvalidBlockErrorKind::Execution(error))
     }
 
@@ -86,14 +110,26 @@ pub enum InsertInvalidBlockErrorKind {
     Consensus(ConsensusError),
     /// Block execution failed.
     #[error(transparent)]
-    Execution(Error),
+    Execution(BlockExecutionError),
+    /// Block violated tree invariants.
+    #[error(transparent)]
+    Tree(#[from] BlockchainTreeError),
+    /// An internal error occurred, like interacting with the database.
+    #[error("Internal error")]
+    Internal(Box<dyn std::error::Error + Send + Sync>),
+}
 
-    #[error("Can't insert #{block_number} {block_hash} as last finalized block number is {last_finalized}")]
-    PendingBlockIsFinalized {
-        block_hash: BlockHash,
-        block_number: BlockNumber,
-        last_finalized: BlockNumber,
-    },
-    #[error("Database error")]
-    DatabaseError,
+// This is a convenience impl to convert from crate::Error to InsertInvalidBlockErrorKind, most
+impl From<crate::Error> for InsertInvalidBlockErrorKind {
+    fn from(err: crate::Error) -> Self {
+        use crate::Error;
+
+        match err {
+            Error::Execution(err) => InsertInvalidBlockErrorKind::Execution(err),
+            Error::Consensus(err) => InsertInvalidBlockErrorKind::Consensus(err),
+            Error::Database(err) => InsertInvalidBlockErrorKind::Internal(Box::new(err)),
+            Error::Provider(err) => InsertInvalidBlockErrorKind::Internal(Box::new(err)),
+            Error::Network(err) => InsertInvalidBlockErrorKind::Internal(Box::new(err)),
+        }
+    }
 }

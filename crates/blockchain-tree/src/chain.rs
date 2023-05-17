@@ -4,7 +4,10 @@
 //! blocks, as well as a list of the blocks the chain is composed of.
 use crate::{post_state::PostState, PostStateDataRef};
 use reth_db::database::Database;
-use reth_interfaces::{consensus::Consensus, executor::BlockExecutionError, Error};
+use reth_interfaces::{
+    blockchain_tree::error::InsertInvalidBlockError, consensus::Consensus,
+    executor::BlockExecutionError, Error,
+};
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
 };
@@ -55,12 +58,12 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of the canonical chain.
     pub fn new_canonical_fork<DB, C, EF>(
-        block: &SealedBlockWithSenders,
+        block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, InsertInvalidBlockError>
     where
         DB: Database,
         C: Consensus,
@@ -77,9 +80,9 @@ impl AppendableChain {
         };
 
         let changeset =
-            Self::validate_and_execute(block.clone(), parent_header, state_provider, externals)?;
+            Self::validate_and_execute(block.clone(), parent_header, state_provider, externals).map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?;
 
-        Ok(Self { chain: Chain::new(vec![(block.clone(), changeset)]) })
+        Ok(Self { chain: Chain::new(vec![(block, changeset)]) })
     }
 
     /// Create a new chain that forks off of an existing sidechain.
@@ -164,7 +167,7 @@ impl AppendableChain {
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<(), Error>
+    ) -> Result<(), InsertInvalidBlockError>
     where
         DB: Database,
         C: Consensus,
@@ -180,7 +183,8 @@ impl AppendableChain {
         };
 
         let block_state =
-            Self::validate_and_execute(block.clone(), parent_block, post_state_data, externals)?;
+            Self::validate_and_execute(block.clone(), parent_block, post_state_data, externals)
+                .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?;
         self.state.extend(block_state);
         self.blocks.insert(block.number, block);
         Ok(())
