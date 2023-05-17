@@ -19,6 +19,7 @@ use std::{
     sync::Arc,
 };
 use tracing::trace;
+use reth_interfaces::blockchain_tree::error::InsertInvalidBlockError;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
 #[derive(Clone)]
@@ -28,7 +29,7 @@ pub struct ShareableBlockchainTree<DB: Database, C: Consensus, EF: ExecutorFacto
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB, C, EF> {
-    /// Create New sharable database.
+    /// Create a new sharable database.
     pub fn new(tree: BlockchainTree<DB, C, EF>) -> Self {
         Self { tree: Arc::new(RwLock::new(tree)) }
     }
@@ -37,23 +38,24 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
+    fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, InsertInvalidBlockError> {
         let mut tree = self.tree.write();
         // check if block is known before recovering all senders.
         if let Some(status) = tree.is_block_known(block.num_hash())? {
             return Ok(status)
         }
-        let block = block
-            .seal_with_senders()
-            .ok_or(reth_interfaces::executor::Error::SenderRecoveryError)?;
-        tree.insert_block_inner(block, true)
+
+        match block.try_seal_with_senders() {
+            Ok(block) => tree.insert_block_inner(block, true),
+            Err(block) => Err(InsertInvalidBlockError::sender_recovery_error(block)),
+        }
     }
 
-    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), Error> {
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertInvalidBlockError> {
         self.tree.write().buffer_block(block)
     }
 
-    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, Error> {
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertInvalidBlockError> {
         trace!(target: "blockchain_tree", ?block, "Inserting block");
         self.tree.write().insert_block(block)
     }

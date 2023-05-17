@@ -25,6 +25,7 @@ use std::{
     sync::Arc,
 };
 use tracing::{debug, error, info, instrument, trace};
+use reth_interfaces::blockchain_tree::error::InsertInvalidBlockError;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Tree of chains and its identifications.
@@ -135,14 +136,17 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         })
     }
 
-    /// Check if block is known to blockchain tree or database and return its status.
+    /// Check if then block is known to blockchain tree or database and return its status.
     ///
     /// Function will check:
     /// * if block is inside database and return [BlockStatus::Valid] if it is.
     /// * if block is inside buffer and return [BlockStatus::Disconnected] if it is.
     /// * if block is part of the side chain and return [BlockStatus::Accepted] if it is.
-    /// * if block is part of the canonical chain that tree knowns, return [BlockStatus::Valid]. if
-    ///   it is.
+    /// * if block is part of the canonical chain that tree knows, return [BlockStatus::Valid], if it is.
+    ///
+    /// Returns an error if
+    ///    - an error occurred while reading from the database.
+    ///    - the block is already finalized
     pub(crate) fn is_block_known(&self, block: BlockNumHash) -> Result<Option<BlockStatus>, Error> {
         let last_finalized_block = self.block_indices.last_finalized_block();
         // check db if block is finalized.
@@ -154,7 +158,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 }
             }
             // check if block is inside database
-            if self.externals.shareable_db().block_number(block.hash)?.is_some() {
+            if self.externals.database().block_number(block.hash)?.is_some() {
                 return Ok(Some(BlockStatus::Valid))
             }
 
@@ -316,7 +320,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // TODO save pending block to database
         // https://github.com/paradigmxyz/reth/issues/1713
 
-        let db = self.externals.shareable_db();
+        let db = self.externals.database();
 
         // Validate that the block is post merge
         let parent_td = db
@@ -562,7 +566,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// If the senders have not already been recovered, call
     /// [`BlockchainTree::insert_block_without_senders`] instead.
-    pub fn insert_block(&mut self, block: SealedBlockWithSenders) -> Result<BlockStatus, Error> {
+    pub fn insert_block(&mut self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertInvalidBlockError> {
         self.insert_block_inner(block, true)
     }
 
@@ -572,8 +576,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlockWithSenders,
         do_is_known_check: bool,
-    ) -> Result<BlockStatus, Error> {
-        // is block is known
+    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+        // check if we already know this block
         if do_is_known_check {
             if let Some(status) = self.is_block_known(block.num_hash())? {
                 return Ok(status)
@@ -722,7 +726,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
             let td = self
                 .externals
-                .shareable_db()
+                .database()
                 .header_td(block_hash)?
                 .ok_or(ExecError::MissingTotalDifficulty { hash: *block_hash })?;
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {

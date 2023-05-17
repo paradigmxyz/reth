@@ -145,7 +145,7 @@ impl AppendableChain {
         let unseal = unseal.unseal();
 
         //get state provider.
-        let db = externals.shareable_db();
+        let db = externals.database();
         // TODO, small perf can check if caonical fork is the latest state.
         let canonical_fork = post_state_data_provider.canonical_fork();
         let history_provider = db.history_by_block_number(canonical_fork.number)?;
