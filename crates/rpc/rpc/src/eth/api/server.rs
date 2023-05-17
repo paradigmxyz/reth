@@ -3,10 +3,7 @@
 
 use super::EthApiSpec;
 use crate::{
-    eth::{
-        api::{EthApi, EthTransactions},
-        error::ensure_success,
-    },
+    eth::api::{EthApi, EthTransactions},
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
@@ -177,7 +174,7 @@ where
     /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
-        Ok(EthApi::balance(self, address, block_number)?)
+        Ok(self.on_blocking_task(|this| async move { this.balance(address, block_number) }).await?)
     }
 
     /// Handler for: `eth_getStorageAt`
@@ -188,7 +185,9 @@ where
         block_number: Option<BlockId>,
     ) -> Result<H256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        Ok(EthApi::storage_at(self, address, index, block_number).await?)
+        Ok(self
+            .on_blocking_task(|this| async move { this.storage_at(address, index, block_number) })
+            .await?)
     }
 
     /// Handler for: `eth_getTransactionCount`
@@ -198,13 +197,19 @@ where
         block_number: Option<BlockId>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
-        Ok(EthApi::get_transaction_count(self, address, block_number)?)
+        Ok(self
+            .on_blocking_task(
+                |this| async move { this.get_transaction_count(address, block_number) },
+            )
+            .await?)
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
-        Ok(EthApi::get_code(self, address, block_number)?)
+        Ok(self
+            .on_blocking_task(|this| async move { this.get_code(address, block_number) })
+            .await?)
     }
 
     /// Handler for: `eth_call`
@@ -215,15 +220,11 @@ where
         state_overrides: Option<StateOverride>,
     ) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, "Serving eth_call");
-        let (res, _env) = self
-            .transact_call_at(
-                request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                state_overrides,
-            )
-            .await?;
-
-        Ok(ensure_success(res.result)?)
+        Ok(self
+            .on_blocking_task(|this| async move {
+                this.call(request, block_number, state_overrides).await
+            })
+            .await?)
     }
 
     /// Handler for: `eth_createAccessList`
@@ -233,11 +234,15 @@ where
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let access_list = self.create_access_list_at(request.clone(), block_number).await?;
-        request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_at(request, block_id).await?;
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        Ok(self
+            .on_blocking_task(|this| async move {
+                let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+                let access_list = this.create_access_list_at(request.clone(), block_number).await?;
+                request.access_list = Some(access_list.clone());
+                let gas_used = this.estimate_gas_at(request, block_id).await?;
+                Ok(AccessListWithGasUsed { access_list, gas_used })
+            })
+            .await?)
     }
 
     /// Handler for: `eth_estimateGas`
@@ -247,12 +252,15 @@ where
         block_number: Option<BlockId>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
-        Ok(EthApi::estimate_gas_at(
-            self,
-            request,
-            block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-        )
-        .await?)
+        Ok(self
+            .on_blocking_task(|this| async move {
+                this.estimate_gas_at(
+                    request,
+                    block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+                )
+                .await
+            })
+            .await?)
     }
 
     /// Handler for: `eth_gasPrice`
