@@ -1345,6 +1345,56 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn forkchoice_updated_pre_merge() {
+            let chain_spec = Arc::new(
+                ChainSpecBuilder::default()
+                    .chain(MAINNET.chain)
+                    .genesis(MAINNET.genesis.clone())
+                    .london_activated()
+                    .paris_at_ttd(U256::from(3))
+                    .build(),
+            );
+            let (consensus_engine, env) = setup_consensus_engine(
+                chain_spec,
+                VecDeque::from([
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                ]),
+                Vec::default(),
+            );
+
+            let genesis = random_block(0, None, None, Some(0));
+            let mut block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            block1.header.difficulty = U256::from(1);
+
+            // a second pre-merge block
+            let mut block2 = random_block(1, Some(genesis.hash), None, Some(0));
+            block2.header.difficulty = U256::from(1);
+
+            // a transition block
+            let mut block3 = random_block(1, Some(genesis.hash), None, Some(0));
+            block3.header.difficulty = U256::from(1);
+
+            insert_blocks(env.db.as_ref(), [&genesis, &block1, &block2, &block3].into_iter());
+
+            let _engine = spawn_consensus_engine(consensus_engine);
+
+            let res = env
+                .send_forkchoice_updated(ForkchoiceState {
+                    head_block_hash: block1.hash,
+                    finalized_block_hash: block1.hash,
+                    ..Default::default()
+                })
+                .await;
+
+            assert_matches!(res, Ok(result) => {
+                let ForkchoiceUpdated { payload_status, .. } = result;
+                assert_matches!(payload_status.status, PayloadStatusEnum::Invalid { .. });
+                assert_eq!(payload_status.latest_valid_hash, Some(H256::zero()));
+            });
+        }
+
+        #[tokio::test]
         async fn forkchoice_updated_invalid_pow() {
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
