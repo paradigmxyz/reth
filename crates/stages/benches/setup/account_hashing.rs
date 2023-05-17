@@ -1,6 +1,6 @@
 use super::{constants, StageRange};
 use reth_db::{
-    cursor::DbCursorRO, database::Database, tables, transaction::DbTx, Error as DbError,
+    cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},

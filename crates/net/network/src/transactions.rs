@@ -733,7 +733,7 @@ pub enum NetworkTransactionEvent {
 mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
-    use reth_interfaces::sync::{SyncState, SyncStateUpdater};
+    use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
     use reth_provider::test_utils::NoopProvider;
     use reth_rlp::Decodable;

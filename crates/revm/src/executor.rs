@@ -7,7 +7,7 @@ use crate::{
     to_reth_acc,
 };
 use reth_consensus_common::calc;
-use reth_interfaces::executor::Error;
+use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
     Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
@@ -76,15 +76,17 @@ where
         &self,
         body: &[TransactionSigned],
         senders: Option<Vec<Address>>,
-    ) -> Result<Vec<Address>, Error> {
+    ) -> Result<Vec<Address>, BlockExecutionError> {
         if let Some(senders) = senders {
             if body.len() == senders.len() {
                 Ok(senders)
             } else {
-                Err(Error::SenderRecoveryError)
+                Err(BlockExecutionError::SenderRecoveryError)
             }
         } else {
-            body.iter().map(|tx| tx.recover_signer().ok_or(Error::SenderRecoveryError)).collect()
+            body.iter()
+                .map(|tx| tx.recover_signer().ok_or(BlockExecutionError::SenderRecoveryError))
+                .collect()
         }
     }
 
@@ -134,14 +136,15 @@ where
         &mut self,
         block_number: BlockNumber,
         post_state: &mut PostState,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BlockExecutionError> {
         let db = self.db();
 
         let mut drained_balance = U256::ZERO;
 
         // drain all accounts ether
         for address in DAO_HARDKFORK_ACCOUNTS {
-            let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
+            let db_account =
+                db.load_account(address).map_err(|_| BlockExecutionError::ProviderError)?;
             let old = to_reth_acc(&db_account.info);
             // drain balance
             drained_balance += core::mem::take(&mut db_account.info.balance);
@@ -164,9 +167,9 @@ where
         address: Address,
         increment: U256,
         post_state: &mut PostState,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BlockExecutionError> {
         increment_account_balance(self.db(), post_state, block_number, address, increment)
-            .map_err(|_| Error::ProviderError)
+            .map_err(|_| BlockExecutionError::ProviderError)
     }
 
     /// Runs a single transaction in the configured environment and proceeds
@@ -177,7 +180,7 @@ where
         &mut self,
         transaction: &TransactionSigned,
         sender: Address,
-    ) -> Result<ResultAndState, Error> {
+    ) -> Result<ResultAndState, BlockExecutionError> {
         // Fill revm structure.
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
@@ -195,7 +198,7 @@ where
             // main execution.
             self.evm.transact()
         };
-        out.map_err(|e| Error::EVM { hash, message: format!("{e:?}") })
+        out.map_err(|e| BlockExecutionError::EVM { hash, message: format!("{e:?}") })
     }
 
     /// Runs the provided transactions and commits their state to the run-time database.
@@ -213,7 +216,7 @@ where
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<(PostState, u64), Error> {
+    ) -> Result<(PostState, u64), BlockExecutionError> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
             return Ok((PostState::default(), 0))
@@ -229,7 +232,7 @@ where
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
-                return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
+                return Err(BlockExecutionError::TransactionGasLimitMoreThenAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 })
@@ -276,13 +279,16 @@ where
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<PostState, Error> {
+    ) -> Result<PostState, BlockExecutionError> {
         let (mut post_state, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
-            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
+            return Err(BlockExecutionError::BlockGasUsed {
+                got: cumulative_gas_used,
+                expected: block.gas_used,
+            })
         }
 
         // Add block rewards
@@ -303,7 +309,7 @@ where
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<PostState, Error> {
+    ) -> Result<PostState, BlockExecutionError> {
         let post_state = self.execute(block, total_difficulty, senders)?;
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive
@@ -496,18 +502,21 @@ pub fn verify_receipt<'a>(
     expected_receipts_root: H256,
     expected_logs_bloom: Bloom,
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
-) -> Result<(), Error> {
+) -> Result<(), BlockExecutionError> {
     // Check receipts root.
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
-        return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
+        return Err(BlockExecutionError::ReceiptRootDiff {
+            got: receipts_root,
+            expected: expected_receipts_root,
+        })
     }
 
     // Create header log bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
-        return Err(Error::BloomLogDiff {
+        return Err(BlockExecutionError::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
         })

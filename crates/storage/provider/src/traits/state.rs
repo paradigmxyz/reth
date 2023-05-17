@@ -119,7 +119,7 @@ pub trait StateProviderFactory: BlockIdProvider + Send + Sync {
                 // we can only get the finalized state by hash, not by num
                 let hash = match self.finalized_block_hash()? {
                     Some(hash) => hash,
-                    None => return Err(ProviderError::HeaderNotFound.into()),
+                    None => return Err(ProviderError::FinalizedBlockNotFound.into()),
                 };
 
                 self.state_by_block_hash(hash)
@@ -128,7 +128,7 @@ pub trait StateProviderFactory: BlockIdProvider + Send + Sync {
                 // we can only get the safe state by hash, not by num
                 let hash = match self.safe_block_hash()? {
                     Some(hash) => hash,
-                    None => return Err(ProviderError::HeaderNotFound.into()),
+                    None => return Err(ProviderError::SafeBlockNotFound.into()),
                 };
 
                 self.state_by_block_hash(hash)
@@ -182,7 +182,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     ) -> Result<Box<dyn PostStateDataProvider>> {
         Ok(self
             .find_pending_state_provider(block_hash)
-            .ok_or(ProviderError::UnknownBlockHash(block_hash))?)
+            .ok_or(ProviderError::StateForHashNotFound(block_hash))?)
     }
 
     /// Returns state provider if a matching block exists.

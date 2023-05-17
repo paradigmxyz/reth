@@ -7,7 +7,7 @@ use reth_db::{
     mdbx::test_utils::create_test_rw_db,
     tables,
     transaction::{DbTx, DbTxMut},
-    Error as DbError,
+    DatabaseError as DbError,
 };
 use reth_primitives::{
     keccak256, Account as RethAccount, Address, Bytecode, ChainSpec, JsonU256, SealedBlock,

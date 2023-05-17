@@ -214,7 +214,7 @@ pub enum DownloadError {
     RequestError(#[from] RequestError),
     /// Error while reading data from database.
     #[error(transparent)]
-    DatabaseError(#[from] db::Error),
+    DatabaseError(#[from] db::DatabaseError),
 }
 
 #[cfg(test)]

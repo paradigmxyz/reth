@@ -59,7 +59,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
                 .cursor_dup_read::<tables::AccountChangeSet>()?
                 .seek_by_key_subkey(changeset_block_number, address)?
                 .filter(|acc| acc.address == address)
-                .ok_or(ProviderError::AccountChangeset {
+                .ok_or(ProviderError::AccountChangesetNotFound {
                     block_number: changeset_block_number,
                     address,
                 })?;
@@ -120,7 +120,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
                 .cursor_dup_read::<tables::StorageChangeSet>()?
                 .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
                 .filter(|entry| entry.key == storage_key)
-                .ok_or(ProviderError::StorageChangeset {
+                .ok_or(ProviderError::StorageChangesetNotFound {
                     block_number: changeset_block_number,
                     address,
                     storage_key,

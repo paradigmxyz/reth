@@ -2,7 +2,7 @@ use crate::{
     common::{Bounds, Sealed},
     table::TableImporter,
     transaction::{DbTx, DbTxMut},
-    Error,
+    DatabaseError,
 };
 use std::sync::Arc;
 
@@ -20,14 +20,14 @@ pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + S
 /// Main Database trait that spawns transactions to be executed.
 pub trait Database: for<'a> DatabaseGAT<'a> {
     /// Create read only transaction.
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error>;
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError>;
 
     /// Create read write transaction only possible if database is open with write access.
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error>;
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError>;
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
-    fn view<T, F>(&self, f: F) -> Result<T, Error>
+    fn view<T, F>(&self, f: F) -> Result<T, DatabaseError>
     where
         F: FnOnce(&<Self as DatabaseGAT<'_>>::TX) -> T,
     {
@@ -41,7 +41,7 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
 
     /// Takes a function and passes a write-read transaction into it, making sure it's committed in
     /// the end of the execution.
-    fn update<T, F>(&self, f: F) -> Result<T, Error>
+    fn update<T, F>(&self, f: F) -> Result<T, DatabaseError>
     where
         F: FnOnce(&<Self as DatabaseGAT<'_>>::TXMut) -> T,
     {
@@ -61,11 +61,11 @@ impl<'a, DB: Database> DatabaseGAT<'a> for Arc<DB> {
 }
 
 impl<DB: Database> Database for Arc<DB> {
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
         <DB as Database>::tx(self)
     }
 
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
     }
 }
@@ -77,11 +77,11 @@ impl<'a, DB: Database> DatabaseGAT<'a> for &DB {
 }
 
 impl<DB: Database> Database for &DB {
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
         <DB as Database>::tx(self)
     }
 
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
     }
 }

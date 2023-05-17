@@ -38,7 +38,7 @@ pub enum InitDatabaseError {
 
     /// Low-level database error.
     #[error(transparent)]
-    DBError(#[from] reth_db::Error),
+    DBError(#[from] reth_db::DatabaseError),
 }
 
 /// Write the genesis block if it has not already been written

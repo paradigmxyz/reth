@@ -6,7 +6,7 @@ use crate::stages::{
 use reth_db::{
     tables::SyncStage,
     transaction::{DbTx, DbTxMut},
-    Error as DbError,
+    DatabaseError as DbError,
 };
 use reth_primitives::StageCheckpoint;
 use std::fmt::Display;

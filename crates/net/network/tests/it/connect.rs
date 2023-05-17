@@ -7,7 +7,7 @@ use reth_discv4::Discv4Config;
 use reth_eth_wire::DisconnectReason;
 use reth_interfaces::{
     p2p::headers::client::{HeadersClient, HeadersRequest},
-    sync::{SyncState, SyncStateUpdater},
+    sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_net_common::ban_list::BanList;
 use reth_network::{

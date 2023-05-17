@@ -24,7 +24,7 @@
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
-//! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient, TestStatusUpdater};
+//! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::{PeerId, MAINNET, H256};
 //! # use reth_stages::Pipeline;
@@ -44,13 +44,12 @@
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(H256::default());
 //! # let factory = Factory::new(Arc::new(MAINNET.clone()));
-//! # let (status_updater, _) = TestStatusUpdater::new();
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
 //!     .add_stages(
-//!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, status_updater, factory)
+//!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)
 //!     )
 //!     .build(db);
 //! ```

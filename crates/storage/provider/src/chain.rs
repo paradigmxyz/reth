@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::PostState;
-use reth_interfaces::{executor::Error as ExecError, Error};
+use reth_interfaces::{executor::BlockExecutionError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TxHash,
@@ -151,7 +151,7 @@ impl Chain {
     pub fn append_chain(&mut self, chain: Chain) -> Result<(), Error> {
         let chain_tip = self.tip();
         if chain_tip.hash != chain.fork_block_hash() {
-            return Err(ExecError::AppendChainDoesntConnect {
+            return Err(BlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: chain_tip.num_hash(),
                 other_chain_fork: chain.fork_block(),
             }
