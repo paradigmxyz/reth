@@ -4,23 +4,11 @@ use thiserror::Error;
 /// BlockExecutor Errors
 #[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum Error {
+pub enum BlockExecutionError {
     #[error("EVM reported invalid transaction ({hash:?}): {message}")]
     EVM { hash: H256, message: String },
-    #[error("Verification failed.")]
-    VerificationFailed,
-    #[error("Fatal internal error")]
-    ExecutionFatalError,
     #[error("Failed to recover sender for transaction")]
     SenderRecoveryError,
-    #[error("Receipt cumulative gas used {got:?} is different from expected {expected:?}")]
-    ReceiptCumulativeGasUsedDiff { got: u64, expected: u64 },
-    #[error("Receipt log count {got:?} is different from expected {expected:?}.")]
-    ReceiptLogCountDiff { got: usize, expected: usize },
-    #[error("Receipt log is different.")]
-    ReceiptLogDiff,
-    #[error("Receipt log is different.")]
-    ExecutionSuccessDiff { got: bool, expected: bool },
     #[error("Receipt root {got:?} is different than expected {expected:?}.")]
     ReceiptRootDiff { got: H256, expected: H256 },
     #[error("Header bloom filter {got:?} is different than expected {expected:?}.")]
@@ -56,15 +44,18 @@ pub enum Error {
     CanonicalRevert { inner: String },
     #[error("Transaction error on commit: {inner:?}")]
     CanonicalCommit { inner: String },
-    #[error("Transaction error on pipeline status update: {inner:?}")]
-    PipelineStatusUpdate { inner: String },
     #[error("Block {hash:?} is pre merge")]
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
+
+    /// Only used for TestExecutor
+    #[cfg(feature = "test-utils")]
+    #[error("Execution unavailable for tests")]
+    UnavailableForTest,
 }
 
-impl Error {
+impl BlockExecutionError {
     /// Returns `true` if the error is fatal.
     pub fn is_fatal(&self) -> bool {
         matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
