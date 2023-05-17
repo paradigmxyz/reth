@@ -66,7 +66,7 @@ fn main() {
         .prepend_enum_name(false)
         .generate_comments(false)
         .disable_header_comment()
-        .formatter(Formatter::None)
+        .formatter(Formatter::Rustfmt)
         .generate()
         .expect("Unable to generate bindings");
 
