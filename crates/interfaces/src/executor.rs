@@ -1,4 +1,4 @@
-use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, Bloom, H256};
+use reth_primitives::{BlockHash, BlockNumHash, Bloom, H256};
 use thiserror::Error;
 
 /// BlockExecutor Errors
@@ -22,14 +22,13 @@ pub enum BlockExecutionError {
     BlockGasUsed { got: u64, expected: u64 },
     #[error("Provider error")]
     ProviderError,
+    // TODO(mattsse): move this to tree error
+    #[error("Block hash {block_hash} not found in blockchain tree chain")]
+    BlockHashNotFoundInChain { block_hash: BlockHash },
     #[error(
         "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
     AppendChainDoesntConnect { chain_tip: BlockNumHash, other_chain_fork: BlockNumHash },
-    #[error("Block number #{block_number} not found in blockchain tree chain")]
-    BlockNumberNotFoundInChain { block_number: BlockNumber },
-    #[error("Block hash {block_hash} not found in blockchain tree chain")]
-    BlockHashNotFoundInChain { block_hash: BlockHash },
     #[error("Transaction error on revert: {inner:?}")]
     CanonicalRevert { inner: String },
     #[error("Transaction error on commit: {inner:?}")]

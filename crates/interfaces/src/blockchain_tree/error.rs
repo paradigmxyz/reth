@@ -5,7 +5,8 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 use std::fmt::Formatter;
 
 /// Various error cases that can occur when a block violates tree assumptions.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, Copy, thiserror::Error, Eq, PartialEq)]
+#[allow(missing_docs)]
 pub enum BlockchainTreeError {
     /// Thrown if the block number is lower than the last finalized block number.
     #[error("Block number is lower than the last finalized block number #{last_finalized}")]
@@ -21,6 +22,10 @@ pub enum BlockchainTreeError {
     },
     #[error("Canonical chain header #{block_hash} can't be found ")]
     CanonicalChain { block_hash: BlockHash },
+    #[error("Block number #{block_number} not found in blockchain tree chain")]
+    BlockNumberNotFoundInChain { block_number: BlockNumber },
+    #[error("Block hash {block_hash} not found in blockchain tree chain")]
+    BlockHashNotFoundInChain { block_hash: BlockHash },
 }
 
 /// Error thrown when inserting a block failed because the block is considered invalid.
@@ -117,6 +122,55 @@ pub enum InsertInvalidBlockErrorKind {
     /// An internal error occurred, like interacting with the database.
     #[error("Internal error")]
     Internal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl InsertInvalidBlockErrorKind {
+    /// Returns true if the error is a tree error
+    pub fn is_tree_error(&self) -> bool {
+        matches!(self, InsertInvalidBlockErrorKind::Tree(_))
+    }
+
+    /// Returns true if the error is a consensus error
+    pub fn is_consensus_error(&self) -> bool {
+        matches!(self, InsertInvalidBlockErrorKind::Consensus(_))
+    }
+
+    /// Returns true if this is a block pre merge error.
+    pub fn is_block_pre_merge(&self) -> bool {
+        matches!(
+            self,
+            InsertInvalidBlockErrorKind::Execution(BlockExecutionError::BlockPreMerge { .. })
+        )
+    }
+
+    /// Returns true if the error is an execution error
+    pub fn is_execution_error(&self) -> bool {
+        matches!(self, InsertInvalidBlockErrorKind::Execution(_))
+    }
+
+    /// Returns the error if it is a tree error
+    pub fn as_tree_error(&self) -> Option<BlockchainTreeError> {
+        match self {
+            InsertInvalidBlockErrorKind::Tree(err) => Some(*err),
+            _ => None,
+        }
+    }
+
+    /// Returns the error if it is a consensus error
+    pub fn as_consensus_error(&self) -> Option<&ConsensusError> {
+        match self {
+            InsertInvalidBlockErrorKind::Consensus(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    /// Returns the error if it is an execution error
+    pub fn as_execution_error(&self) -> Option<&BlockExecutionError> {
+        match self {
+            InsertInvalidBlockErrorKind::Execution(err) => Some(err),
+            _ => None,
+        }
+    }
 }
 
 // This is a convenience impl to convert from crate::Error to InsertInvalidBlockErrorKind, most

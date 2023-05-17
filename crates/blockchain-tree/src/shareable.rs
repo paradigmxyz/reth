@@ -43,14 +43,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         &self,
         block: SealedBlock,
     ) -> Result<BlockStatus, InsertInvalidBlockError> {
-        let mut tree = self.tree.write();
-        // check if block is known before recovering all senders.
-        if let Some(status) = tree.is_block_known(block.num_hash())? {
-            return Ok(status)
-        }
-
         match block.try_seal_with_senders() {
-            Ok(block) => tree.insert_block_inner(block, true),
+            Ok(block) => self.tree.write().insert_block_inner(block, true),
             Err(block) => Err(InsertInvalidBlockError::sender_recovery_error(block)),
         }
     }

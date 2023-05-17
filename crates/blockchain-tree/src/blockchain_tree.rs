@@ -306,7 +306,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // if there is a parent inside the buffer, validate against it.
         if let Some(buffered_parent) = self.buffered_blocks.block(parent) {
-            self.externals.consensus.validate_header_against_parent(&block, buffered_parent)?
+            self.externals
+                .consensus
+                .validate_header_against_parent(&block, buffered_parent)
+                .map_err(|err| {
+                    InsertInvalidBlockError::consensus_error(err, block.block.clone())
+                })?;
         }
 
         // insert block inside unconnected block buffer. Delaying it execution.
@@ -332,15 +337,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // Validate that the block is post merge
         let parent_td = db
             .header_td(&block.parent_hash)
-            .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))
-            ?
-            .ok_or_else( || {
-                InsertInvalidBlockError::tree_error( BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash }, block.block.clone())
+            .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?
+            .ok_or_else(|| {
+                InsertInvalidBlockError::tree_error(
+                    BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
+                    block.block.clone(),
+                )
             })?;
+
         // Pass the parent total difficulty to short-circuit unnecessary calculations.
         if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
-           return Err(InsertInvalidBlockError::execution_error(
-               BlockExecutionError::BlockPreMerge { hash: block.hash },
+            return Err(InsertInvalidBlockError::execution_error(
+                BlockExecutionError::BlockPreMerge { hash: block.hash },
                 block.block,
             ))
         }
@@ -353,9 +361,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         };
 
         let parent_header = db
-            .header(&block.parent_hash)?
-            .ok_or(BlockExecutionError::CanonicalChain { block_hash: block.parent_hash })?
+            .header(&block.parent_hash)
+            .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?
+            .ok_or_else(|| {
+                InsertInvalidBlockError::tree_error(
+                    BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
+                    block.block.clone(),
+                )
+            })?
             .seal(block.parent_hash);
+
         let chain = AppendableChain::new_canonical_fork(
             block,
             &parent_header,
@@ -778,6 +793,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
             info!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
+            // TODO: better error
             return Err(BlockExecutionError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
@@ -1087,7 +1103,7 @@ mod tests {
         tree.finalize_block(10);
 
         // block 2 parent is not known, block2 is buffered.
-        assert_eq!(tree.insert_block(block2.clone()), Ok(BlockStatus::Disconnected));
+        assert_eq!(tree.insert_block(block2.clone()).unwrap(), BlockStatus::Disconnected);
 
         // Buffered block: [block2]
         // Trie state:
@@ -1102,19 +1118,19 @@ mod tests {
             )]))
             .assert(&tree);
 
-        assert_eq!(tree.is_block_known(block2.num_hash()), Ok(Some(BlockStatus::Disconnected)));
+        assert_eq!(
+            tree.is_block_known(block2.num_hash()).unwrap(),
+            Some(BlockStatus::Disconnected)
+        );
 
         // check if random block is known
         let old_block = BlockNumHash::new(1, H256([32; 32]));
-        let err = BlockExecutionError::PendingBlockIsFinalized {
-            block_number: old_block.number,
-            block_hash: old_block.hash,
-            last_finalized: 10,
-        };
-        assert_eq!(tree.is_block_known(old_block), Err(err.into()));
+        let err = BlockchainTreeError::PendingBlockIsFinalized { last_finalized: 10 };
+
+        assert_eq!(tree.is_block_known(old_block).unwrap_err().as_tree_error(), Some(err));
 
         // insert block1 and buffered block2 is inserted
-        assert_eq!(tree.insert_block(block1.clone()), Ok(BlockStatus::Valid));
+        assert_eq!(tree.insert_block(block1.clone()).unwrap(), BlockStatus::Valid);
 
         // Buffered blocks: []
         // Trie state:
@@ -1134,10 +1150,10 @@ mod tests {
             .assert(&tree);
 
         // already inserted block will return true.
-        assert_eq!(tree.insert_block(block1.clone()), Ok(BlockStatus::Valid));
+        assert_eq!(tree.insert_block(block1.clone()).unwrap(), BlockStatus::Valid);
 
         // block two is already inserted.
-        assert_eq!(tree.insert_block(block2.clone()), Ok(BlockStatus::Valid));
+        assert_eq!(tree.insert_block(block2.clone()).unwrap(), BlockStatus::Valid);
 
         // make block1 canonical
         assert_eq!(tree.make_canonical(&block1.hash()), Ok(()));
@@ -1174,7 +1190,7 @@ mod tests {
         block2a.hash = block2a_hash;
 
         // reinsert two blocks that point to canonical chain
-        assert_eq!(tree.insert_block(block1a.clone()), Ok(BlockStatus::Accepted));
+        assert_eq!(tree.insert_block(block1a.clone()).unwrap(), BlockStatus::Accepted);
 
         TreeTester::default()
             .with_chain_num(1)
@@ -1186,7 +1202,7 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::from([])))
             .assert(&tree);
 
-        assert_eq!(tree.insert_block(block2a.clone()), Ok(BlockStatus::Accepted));
+        assert_eq!(tree.insert_block(block2a.clone()).unwrap(), BlockStatus::Accepted);
         // Trie state:
         // b2   b2a (side chain)
         // |   /
@@ -1358,7 +1374,7 @@ mod tests {
         block2b.hash = H256([0x99; 32]);
         block2b.parent_hash = H256([0x88; 32]);
 
-        assert_eq!(tree.insert_block(block2b.clone()), Ok(BlockStatus::Disconnected));
+        assert_eq!(tree.insert_block(block2b.clone()).unwrap(), BlockStatus::Disconnected);
         TreeTester::default()
             .with_buffered_blocks(BTreeMap::from([(
                 block2b.number,
@@ -1369,7 +1385,8 @@ mod tests {
         // update canonical block to b2, this would make b2a be removed
         assert_eq!(tree.restore_canonical_hashes(12), Ok(()));
 
-        assert_eq!(tree.is_block_known(block2.num_hash()), Ok(Some(BlockStatus::Valid)));
+        assert_eq!(tree.is_block_known(block2.num_hash()).unwrap(), Some(BlockStatus::Valid));
+
         // Trie state:
         // b2 (finalized)
         // |

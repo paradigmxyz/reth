@@ -5,8 +5,9 @@
 use crate::{post_state::PostState, PostStateDataRef};
 use reth_db::database::Database;
 use reth_interfaces::{
-    blockchain_tree::error::InsertInvalidBlockError, consensus::Consensus,
-    executor::BlockExecutionError, Error,
+    blockchain_tree::error::{BlockchainTreeError, InsertInvalidBlockError},
+    consensus::Consensus,
+    Error,
 };
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
@@ -80,29 +81,33 @@ impl AppendableChain {
         };
 
         let changeset =
-            Self::validate_and_execute(block.clone(), parent_header, state_provider, externals).map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?;
+            Self::validate_and_execute(block.clone(), parent_header, state_provider, externals)
+                .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?;
 
         Ok(Self { chain: Chain::new(vec![(block, changeset)]) })
     }
 
     /// Create a new chain that forks off of an existing sidechain.
-    pub fn new_chain_fork<DB, C, EF>(
+    pub(crate) fn new_chain_fork<DB, C, EF>(
         &self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, InsertInvalidBlockError>
     where
         DB: Database,
         C: Consensus,
         EF: ExecutorFactory,
     {
         let parent_number = block.number - 1;
-        let parent = self.blocks().get(&parent_number).ok_or(
-            BlockExecutionError::BlockNumberNotFoundInChain { block_number: parent_number },
-        )?;
+        let parent = self.blocks().get(&parent_number).ok_or_else(|| {
+            InsertInvalidBlockError::tree_error(
+                BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
+                block.block.clone(),
+            )
+        })?;
 
         let mut state = self.state.clone();
 
@@ -117,7 +122,8 @@ impl AppendableChain {
             canonical_fork,
         };
         let block_state =
-            Self::validate_and_execute(block.clone(), parent, post_state_data, externals)?;
+            Self::validate_and_execute(block.clone(), parent, post_state_data, externals)
+                .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?;
         state.extend(block_state);
 
         let chain =
