@@ -4,7 +4,7 @@ use crate::{
     database::{Database, DatabaseGAT},
     tables::{TableType, TABLES},
     utils::default_page_size,
-    Error,
+    DatabaseError,
 };
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
@@ -39,12 +39,16 @@ impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
 }
 
 impl<E: EnvironmentKind> Database for Env<E> {
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
-        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::InitTransaction(e.into()))?))
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
+        Ok(Tx::new(
+            self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?,
+        ))
     }
 
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
-        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?))
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
+        Ok(Tx::new(
+            self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?,
+        ))
     }
 }
 
@@ -55,7 +59,7 @@ impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
     /// It does not create the tables, for that call [`Env::create_tables`].
-    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, Error> {
+    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, DatabaseError> {
         let mode = match kind {
             EnvKind::RO => Mode::ReadOnly,
             EnvKind::RW => Mode::ReadWrite { sync_mode: SyncMode::Durable },
@@ -82,15 +86,15 @@ impl<E: EnvironmentKind> Env<E> {
                     ..Default::default()
                 })
                 .open(path)
-                .map_err(|e| Error::FailedToOpen(e.into()))?,
+                .map_err(|e| DatabaseError::FailedToOpen(e.into()))?,
         };
 
         Ok(env)
     }
 
     /// Creates all the defined tables, if necessary.
-    pub fn create_tables(&self) -> Result<(), Error> {
-        let tx = self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?;
+    pub fn create_tables(&self) -> Result<(), DatabaseError> {
+        let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?;
 
         for (table_type, table) in TABLES {
             let flags = match table_type {
@@ -98,10 +102,10 @@ impl<E: EnvironmentKind> Env<E> {
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
 
-            tx.create_db(Some(table), flags).map_err(|e| Error::TableCreation(e.into()))?;
+            tx.create_db(Some(table), flags).map_err(|e| DatabaseError::TableCreation(e.into()))?;
         }
 
-        tx.commit().map_err(|e| Error::Commit(e.into()))?;
+        tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
 
         Ok(())
     }
@@ -158,7 +162,7 @@ mod tests {
         models::{AccountBeforeTx, ShardedKey},
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         transaction::{DbTx, DbTxMut},
-        AccountChangeSet, Error,
+        AccountChangeSet, DatabaseError,
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H160, H256, U256};
@@ -504,7 +508,7 @@ mod tests {
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         // INSERT (failure)
-        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(Error::Write(-30799)));
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(DatabaseError::Write(-30799)));
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         tx.commit().expect(ERROR_COMMIT);
@@ -639,7 +643,7 @@ mod tests {
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(-30418)));
+        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(DatabaseError::Write(-30418)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
         tx.commit().expect(ERROR_COMMIT);
 
@@ -714,14 +718,14 @@ mod tests {
                 transition_id,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(Error::Write(-30418))
+            Err(DatabaseError::Write(-30418))
         );
         assert_eq!(
             cursor.append(
                 transition_id - 1,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(Error::Write(-30418))
+            Err(DatabaseError::Write(-30418))
         );
         assert_eq!(
             cursor.append(

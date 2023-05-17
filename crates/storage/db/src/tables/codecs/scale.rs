@@ -1,6 +1,6 @@
 use crate::{
     table::{Compress, Decompress},
-    Error,
+    DatabaseError,
 };
 use reth_primitives::*;
 
@@ -30,8 +30,9 @@ impl<T> Decompress for T
 where
     T: ScaleValue + parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
 {
-    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<T, Error> {
-        parity_scale_codec::Decode::decode(&mut value.as_ref()).map_err(|_| Error::DecodeError)
+    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<T, DatabaseError> {
+        parity_scale_codec::Decode::decode(&mut value.as_ref())
+            .map_err(|_| DatabaseError::DecodeError)
     }
 }
 

@@ -5,7 +5,7 @@ use std::ops::{Range, RangeInclusive};
 use crate::{
     impl_fixed_arbitrary,
     table::{Decode, Encode},
-    Error,
+    DatabaseError,
 };
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
@@ -113,9 +113,10 @@ impl Encode for BlockNumberAddress {
 }
 
 impl Decode for BlockNumberAddress {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let value = value.as_ref();
-        let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| Error::DecodeError)?);
+        let num =
+            u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::DecodeError)?);
         let hash = Address::from_slice(&value[8..]);
 
         Ok(BlockNumberAddress((num, hash)))

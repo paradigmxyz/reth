@@ -1,6 +1,6 @@
 use super::TrieCursor;
 use crate::updates::TrieKey;
-use reth_db::{cursor::DbCursorRO, tables, Error};
+use reth_db::{cursor::DbCursorRO, tables, DatabaseError};
 use reth_primitives::trie::{BranchNodeCompact, StoredNibbles};
 
 /// A cursor over the account trie.
@@ -20,15 +20,18 @@ where
     fn seek_exact(
         &mut self,
         key: StoredNibbles,
-    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error> {
+    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self.0.seek_exact(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
     }
 
-    fn seek(&mut self, key: StoredNibbles) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error> {
+    fn seek(
+        &mut self,
+        key: StoredNibbles,
+    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self.0.seek(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
     }
 
-    fn current(&mut self) -> Result<Option<TrieKey>, Error> {
+    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
         Ok(self.0.current()?.map(|(k, _)| TrieKey::AccountNode(k)))
     }
 }
