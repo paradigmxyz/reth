@@ -2,7 +2,7 @@ use super::TrieCursor;
 use crate::updates::TrieKey;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    tables, Error,
+    tables, DatabaseError,
 };
 use reth_primitives::{
     trie::{BranchNodeCompact, StoredNibblesSubKey},
@@ -30,7 +30,7 @@ where
     fn seek_exact(
         &mut self,
         key: StoredNibblesSubKey,
-    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error> {
+    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, key.clone())?
@@ -41,14 +41,14 @@ where
     fn seek(
         &mut self,
         key: StoredNibblesSubKey,
-    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error> {
+    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, key)?
             .map(|value| (value.nibbles.inner.to_vec(), value.node)))
     }
 
-    fn current(&mut self) -> Result<Option<TrieKey>, Error> {
+    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(k, v)| TrieKey::StorageNode(k, v.nibbles)))
     }
 }

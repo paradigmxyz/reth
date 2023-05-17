@@ -486,7 +486,7 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
 fn read_sealed_header<'a, TX>(
     tx: &TX,
     block_number: u64,
-) -> std::result::Result<Option<(Header, BlockHash)>, reth_interfaces::db::Error>
+) -> std::result::Result<Option<(Header, BlockHash)>, reth_interfaces::db::DatabaseError>
 where
     TX: DbTx<'a> + Send + Sync,
 {
@@ -505,7 +505,7 @@ where
 fn is_latest_block_number<'a, TX>(
     tx: &TX,
     block_number: BlockNumber,
-) -> std::result::Result<bool, reth_interfaces::db::Error>
+) -> std::result::Result<bool, reth_interfaces::db::DatabaseError>
 where
     TX: DbTx<'a> + Send + Sync,
 {
@@ -520,7 +520,7 @@ where
 #[inline]
 fn best_block_number<'a, TX>(
     tx: &TX,
-) -> std::result::Result<Option<BlockNumber>, reth_interfaces::db::Error>
+) -> std::result::Result<Option<BlockNumber>, reth_interfaces::db::DatabaseError>
 where
     TX: DbTx<'a> + Send + Sync,
 {
@@ -531,7 +531,7 @@ where
 #[inline]
 fn last_canonical_header<'a, TX>(
     tx: &TX,
-) -> std::result::Result<Option<(BlockNumber, BlockHash)>, reth_interfaces::db::Error>
+) -> std::result::Result<Option<(BlockNumber, BlockHash)>, reth_interfaces::db::DatabaseError>
 where
     TX: DbTx<'a> + Send + Sync,
 {
