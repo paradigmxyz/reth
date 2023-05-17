@@ -1,4 +1,4 @@
-use bindgen::callbacks::{IntKind, ParseCallbacks};
+use bindgen::{Formatter, callbacks::{IntKind, ParseCallbacks}};
 use std::{env, path::PathBuf};
 
 #[derive(Debug)]
@@ -66,7 +66,7 @@ fn main() {
         .prepend_enum_name(false)
         .generate_comments(false)
         .disable_header_comment()
-        .rustfmt_bindings(true)
+        .formatter(Formatter::None)
         .generate()
         .expect("Unable to generate bindings");
 
