@@ -671,7 +671,7 @@ where
             // received a new payload while we're still syncing to the target
             let latest_valid_hash =
                 self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-            let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+            let status = PayloadStatusEnum::Invalid { validation_error: error.kind().to_string() };
             PayloadStatus::new(status, latest_valid_hash)
         } else {
             // successfully buffered the block
@@ -725,7 +725,8 @@ where
 
                 let latest_valid_hash =
                     self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-                let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+                let status =
+                    PayloadStatusEnum::Invalid { validation_error: error.kind().to_string() };
                 PayloadStatus::new(status, latest_valid_hash)
             }
         }
