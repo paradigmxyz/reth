@@ -1,7 +1,7 @@
 //! Error handling for the blockchain tree
 
 use crate::{consensus::ConsensusError, Error};
-use reth_primitives::{SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
 use std::fmt::Formatter;
 
 /// Error thrown when inserting a block failed because the block is considered invalid.
@@ -14,7 +14,6 @@ pub struct InsertInvalidBlockError {
 // === impl InsertInvalidBlockError ===
 
 impl InsertInvalidBlockError {
-
     /// Create a new InsertInvalidBlockError
     pub fn new(block: SealedBlock, kind: InsertInvalidBlockErrorKind) -> Self {
         Self { inner: InsertInvalidBlockData::boxed(block, kind) }
@@ -82,10 +81,19 @@ pub enum InsertInvalidBlockErrorKind {
     /// Failed to recover senders for the block
     #[error("Failed to recover senders for block")]
     SenderRecovery,
-    /// Block violated consensus rules
+    /// Block violated consensus rules.
     #[error(transparent)]
     Consensus(ConsensusError),
-    /// Block violated consensus rules
+    /// Block execution failed.
     #[error(transparent)]
     Execution(Error),
+
+    #[error("Can't insert #{block_number} {block_hash} as last finalized block number is {last_finalized}")]
+    PendingBlockIsFinalized {
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        last_finalized: BlockNumber,
+    },
+    #[error("Database error")]
+    DatabaseError,
 }

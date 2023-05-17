@@ -5,7 +5,7 @@ use crate::{
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
-    blockchain_tree::BlockStatus,
+    blockchain_tree::{error::InsertInvalidBlockError, BlockStatus},
     consensus::{Consensus, ConsensusError},
     executor::BlockExecutionError,
     Error,
@@ -25,7 +25,6 @@ use std::{
     sync::Arc,
 };
 use tracing::{debug, error, info, instrument, trace};
-use reth_interfaces::blockchain_tree::error::InsertInvalidBlockError;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Tree of chains and its identifications.
@@ -142,7 +141,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// * if block is inside database and return [BlockStatus::Valid] if it is.
     /// * if block is inside buffer and return [BlockStatus::Disconnected] if it is.
     /// * if block is part of the side chain and return [BlockStatus::Accepted] if it is.
-    /// * if block is part of the canonical chain that tree knows, return [BlockStatus::Valid], if it is.
+    /// * if block is part of the canonical chain that tree knows, return [BlockStatus::Valid], if
+    ///   it is.
     ///
     /// Returns an error if
     ///    - an error occurred while reading from the database.
@@ -566,7 +566,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// If the senders have not already been recovered, call
     /// [`BlockchainTree::insert_block_without_senders`] instead.
-    pub fn insert_block(&mut self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertInvalidBlockError> {
+    pub fn insert_block(
+        &mut self,
+        block: SealedBlockWithSenders,
+    ) -> Result<BlockStatus, InsertInvalidBlockError> {
         self.insert_block_inner(block, true)
     }
 

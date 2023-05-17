@@ -3,7 +3,9 @@ use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
-    blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
+    blockchain_tree::{
+        error::InsertInvalidBlockError, BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer,
+    },
     consensus::Consensus,
     Error,
 };
@@ -19,7 +21,6 @@ use std::{
     sync::Arc,
 };
 use tracing::trace;
-use reth_interfaces::blockchain_tree::error::InsertInvalidBlockError;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
 #[derive(Clone)]
@@ -38,7 +39,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, InsertInvalidBlockError> {
+    fn insert_block_without_senders(
+        &self,
+        block: SealedBlock,
+    ) -> Result<BlockStatus, InsertInvalidBlockError> {
         let mut tree = self.tree.write();
         // check if block is known before recovering all senders.
         if let Some(status) = tree.is_block_known(block.num_hash())? {
@@ -55,7 +59,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         self.tree.write().buffer_block(block)
     }
 
-    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertInvalidBlockError> {
+    fn insert_block(
+        &self,
+        block: SealedBlockWithSenders,
+    ) -> Result<BlockStatus, InsertInvalidBlockError> {
         trace!(target: "blockchain_tree", ?block, "Inserting block");
         self.tree.write().insert_block(block)
     }

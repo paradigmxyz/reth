@@ -146,7 +146,7 @@ impl SealedBlock {
 
     /// Seal sealed block with recovered transaction senders.
     pub fn seal_with_senders(self) -> Option<SealedBlockWithSenders> {
-       self.try_seal_with_senders().ok()
+        self.try_seal_with_senders().ok()
     }
 
     /// Seal sealed block with recovered transaction senders.
