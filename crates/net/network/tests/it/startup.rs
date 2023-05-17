@@ -28,7 +28,7 @@ async fn test_is_default_syncing() {
         .listener_port(0)
         .build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
-    assert!(network.handle().is_syncing());
+    assert!(!network.handle().is_syncing());
 }
 
 #[tokio::test(flavor = "multi_thread")]
