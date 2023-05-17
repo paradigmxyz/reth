@@ -7,7 +7,7 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{
     blockchain_tree::BlockStatus,
     consensus::{Consensus, ConsensusError},
-    executor::Error as ExecError,
+    executor::BlockExecutionError,
     Error,
 };
 use reth_primitives::{
@@ -158,7 +158,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 return Ok(Some(BlockStatus::Valid))
             }
 
-            return Err(ExecError::PendingBlockIsFinalized {
+            return Err(BlockExecutionError::PendingBlockIsFinalized {
                 block_number: block.number,
                 block_hash: block.hash,
                 last_finalized: last_finalized_block,
@@ -321,10 +321,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // Validate that the block is post merge
         let parent_td = db
             .header_td(&block.parent_hash)?
-            .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?;
+            .ok_or(BlockExecutionError::CanonicalChain { block_hash: block.parent_hash })?;
         // Pass the parent total difficulty to short-circuit unnecessary calculations.
         if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
-            return Err(ExecError::BlockPreMerge { hash: block.hash }.into())
+            return Err(BlockExecutionError::BlockPreMerge { hash: block.hash }.into())
         }
 
         let canonical_chain = self.canonical_chain();
@@ -336,7 +336,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let parent_header = db
             .header(&block.parent_hash)?
-            .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?
+            .ok_or(BlockExecutionError::CanonicalChain { block_hash: block.parent_hash })?
             .seal(block.parent_hash);
         let chain = AppendableChain::new_canonical_fork(
             &block,
@@ -366,13 +366,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // get canonical fork.
         let canonical_fork = self
             .canonical_fork(chain_id)
-            .ok_or(ExecError::BlockSideChainIdConsistency { chain_id })?;
+            .ok_or(BlockExecutionError::BlockSideChainIdConsistency { chain_id })?;
 
         // get chain that block needs to join to.
         let parent_chain = self
             .chains
             .get_mut(&chain_id)
-            .ok_or(ExecError::BlockSideChainIdConsistency { chain_id })?;
+            .ok_or(BlockExecutionError::BlockSideChainIdConsistency { chain_id })?;
         let chain_tip = parent_chain.tip().hash();
 
         let canonical_block_hashes = self.block_indices.canonical_chain();
@@ -486,7 +486,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlock,
     ) -> Result<BlockStatus, Error> {
-        let block = block.seal_with_senders().ok_or(ExecError::SenderRecoveryError)?;
+        let block = block.seal_with_senders().ok_or(BlockExecutionError::SenderRecoveryError)?;
         self.insert_block(block)
     }
 
@@ -724,16 +724,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 .externals
                 .shareable_db()
                 .header_td(block_hash)?
-                .ok_or(ExecError::MissingTotalDifficulty { hash: *block_hash })?;
+                .ok_or(BlockExecutionError::MissingTotalDifficulty { hash: *block_hash })?;
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
-                return Err(ExecError::BlockPreMerge { hash: *block_hash }.into())
+                return Err(BlockExecutionError::BlockPreMerge { hash: *block_hash }.into())
             }
             return Ok(())
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
             info!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
-            return Err(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
+            return Err(BlockExecutionError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
 
@@ -842,7 +842,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let (blocks, state) = chain.into_inner();
 
         tx.append_blocks_with_post_state(blocks.into_blocks().collect(), state)
-            .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
+            .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;
 
         tx.commit()?;
 
@@ -882,7 +882,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
             .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)
-            .map_err(|e| ExecError::CanonicalRevert { inner: e.to_string() })?;
+            .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
 
         tx.commit()?;
 
@@ -1061,7 +1061,7 @@ mod tests {
 
         // check if random block is known
         let old_block = BlockNumHash::new(1, H256([32; 32]));
-        let err = ExecError::PendingBlockIsFinalized {
+        let err = BlockExecutionError::PendingBlockIsFinalized {
             block_number: old_block.number,
             block_hash: old_block.hash,
             last_finalized: 10,

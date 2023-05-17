@@ -6,7 +6,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[allow(missing_docs)]
 pub enum Error {
     #[error(transparent)]
-    Execution(#[from] crate::executor::Error),
+    Execution(#[from] crate::executor::BlockExecutionError),
 
     #[error(transparent)]
     Consensus(#[from] crate::consensus::ConsensusError),

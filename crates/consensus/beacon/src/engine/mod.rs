@@ -7,7 +7,7 @@ use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
     consensus::ForkchoiceState,
-    executor::Error as ExecutorError,
+    executor::BlockExecutionError,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     sync::{NetworkSyncUpdater, SyncState},
     Error,
@@ -272,7 +272,7 @@ where
         tree_error: Option<&Error>,
     ) -> Option<H256> {
         // check pre merge block error
-        if let Some(Error::Execution(ExecutorError::BlockPreMerge { .. })) = tree_error {
+        if let Some(Error::Execution(BlockExecutionError::BlockPreMerge { .. })) = tree_error {
             return Some(H256::zero())
         }
 
@@ -510,7 +510,7 @@ where
 
         #[allow(clippy::single_match)]
         match &error {
-            Error::Execution(error @ ExecutorError::BlockPreMerge { .. }) => {
+            Error::Execution(error @ BlockExecutionError::BlockPreMerge { .. }) => {
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
@@ -1393,7 +1393,8 @@ mod tests {
                 .await
                 .unwrap();
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
-                validation_error: ExecutorError::BlockPreMerge { hash: block1.hash }.to_string(),
+                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
+                    .to_string(),
             })
             .with_latest_valid_hash(H256::zero());
 
@@ -1404,7 +1405,7 @@ mod tests {
     mod new_payload {
         use super::*;
         use reth_interfaces::{
-            executor::Error as ExecutorError, test_utils::generators::random_block,
+            executor::BlockExecutionError, test_utils::generators::random_block,
         };
         use reth_primitives::{Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
@@ -1572,7 +1573,8 @@ mod tests {
                 env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: ExecutorError::BlockPreMerge { hash: block2.hash }.to_string(),
+                validation_error: BlockExecutionError::BlockPreMerge { hash: block2.hash }
+                    .to_string(),
             })
             .with_latest_valid_hash(H256::zero());
             assert_eq!(result, expected_result);
