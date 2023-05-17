@@ -944,6 +944,7 @@ mod tests {
         for i in 0..10 {
             tx_mut.put::<tables::CanonicalHeaders>(i, H256([100 + i as u8; 32])).unwrap();
         }
+        tx_mut.put::<tables::SyncStage>("Finish".to_string(), 10).unwrap();
         tx_mut.commit().unwrap();
     }
 
