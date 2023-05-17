@@ -75,3 +75,7 @@ build-release-tarballs:
 	$(call tarball_release_binary,$(BUILD_PATH_X86_64),$(X86_64_TAG),"")
 	$(MAKE) build-aarch64
 	$(call tarball_release_binary,$(BUILD_PATH_AARCH64),$(AARCH64_TAG),"")
+
+# Performs a `cargo` clean
+clean:
+	cargo clean
