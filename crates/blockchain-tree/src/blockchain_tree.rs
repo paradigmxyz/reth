@@ -167,7 +167,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // check if block is part of canonical chain
-        if self.block_indices.canonical_hash(&block.number) == Some(block.hash) {
+        if self.is_block_hash_canonical(&block.hash)? {
             return Ok(Some(BlockStatus::Valid))
         }
 
@@ -275,7 +275,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // if not found, check if the parent can be found inside canonical chain.
-        if Some(parent.hash) == self.block_indices.canonical_hash(&parent.number) {
+        if self.is_block_hash_canonical(&parent.hash)? {
             return self.try_append_canonical_chain(block, parent)
         }
 
