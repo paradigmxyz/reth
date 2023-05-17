@@ -1,4 +1,4 @@
-use crate::{executor::Error as ExecutionError, Error};
+use crate::{executor::BlockExecutionError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
@@ -14,13 +14,13 @@ use std::collections::{BTreeMap, HashSet};
 pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Recover senders and call [`BlockchainTreeEngine::insert_block`].
     fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
-        let block = block.seal_with_senders().ok_or(ExecutionError::SenderRecoveryError)?;
+        let block = block.seal_with_senders().ok_or(BlockExecutionError::SenderRecoveryError)?;
         self.insert_block(block)
     }
 
     /// Recover senders and call [`BlockchainTreeEngine::buffer_block`].
     fn buffer_block_without_sender(&self, block: SealedBlock) -> Result<(), Error> {
-        let block = block.seal_with_senders().ok_or(ExecutionError::SenderRecoveryError)?;
+        let block = block.seal_with_senders().ok_or(BlockExecutionError::SenderRecoveryError)?;
         self.buffer_block(block)
     }
 

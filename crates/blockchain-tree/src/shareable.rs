@@ -45,7 +45,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         }
         let block = block
             .seal_with_senders()
-            .ok_or(reth_interfaces::executor::Error::SenderRecoveryError)?;
+            .ok_or(reth_interfaces::executor::BlockExecutionError::SenderRecoveryError)?;
         tree.insert_block_inner(block, true)
     }
 
