@@ -18,7 +18,7 @@
 //! and can reduce overall performance of all concurrent requests handled via the jsonrpsee server.
 //!
 //! To avoid this, all blocking or CPU intensive handlers must be spawned to a separate task. See
-//! [EthApi] handler implementations for examples. The rpc-api traits make no use of the available
+//! the [EthApi] handler implementations for examples. The rpc-api traits make no use of the available
 //! jsonrpsee `blocking` attribute to give implementors more freedom because the `blocking` attribute
 //! and async handlers are mutually exclusive. However, as mentioned above, a lot of handlers make
 //! use of async functions, for example, for caching and are also using blocking disk-io, hence
