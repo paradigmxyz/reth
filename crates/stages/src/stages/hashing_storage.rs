@@ -181,11 +181,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             if current_key.is_some() {
                 // `from_block` is correct here as were are iteration over state for this
                 // particular block.
-                info!(target: "sync::stages::hashing_storage", stage_progress = input.checkpoint(), is_final_range = false, "Stage iteration finished");
-                return Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new_with_block_number(input.checkpoint()),
-                    done: false,
-                })
+                info!(target: "sync::stages::hashing_storage", stage_progress = %input.checkpoint(), is_final_range = false, "Stage iteration finished");
+                return Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
             }
         } else {
             // Aggregate all changesets and and make list of storages that have been

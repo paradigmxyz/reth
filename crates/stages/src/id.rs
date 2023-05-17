@@ -106,7 +106,7 @@ impl StageId {
     }
 
     /// Save the progress of this stage.
-    pub fn save_progress<'db>(
+    pub fn save_checkpoint<'db>(
         &self,
         tx: &impl DbTxMut<'db>,
         checkpoint: StageCheckpoint,

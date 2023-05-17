@@ -383,10 +383,10 @@ where
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=head_block_number, "canonicalized new head");
 
                     let pipeline_min_progress =
-                        FINISH.get_checkpoint(&self.db.tx()?)?.unwrap_or_default();
+                        FINISH.get_checkpoint(&self.db.tx()?)?.unwrap_or_default().block_number;
 
-                    if pipeline_min_progress.block_number < head_block_number {
-                        debug!(target: "consensus::engine", last_finished=pipeline_min_progress.block_number, head_number=head_block_number, "pipeline run to head required");
+                    if pipeline_min_progress < head_block_number {
+                        debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=head_block_number, "pipeline run to head required");
 
                         // TODO(mattsse) ideally sync blockwise
                         self.sync.set_pipeline_sync_target(state.head_block_hash);
@@ -1262,7 +1262,8 @@ mod tests {
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
             env.db
                 .update(|tx| {
-                    FINISH.save_progress(tx, StageCheckpoint::new_with_block_number(block1.number))
+                    FINISH
+                        .save_checkpoint(tx, StageCheckpoint::new_with_block_number(block1.number))
                 })
                 .unwrap()
                 .unwrap();

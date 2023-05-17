@@ -2,6 +2,7 @@ use super::{constants, StageRange};
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
+use reth_primitives::StageCheckpoint;
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
     test_utils::TestTransaction,
@@ -35,12 +36,12 @@ fn find_stage_range(db: &Path) -> StageRange {
         .view(|tx| {
             let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let from = cursor.first()?.unwrap().0;
-            let to = cursor.last()?.unwrap().0;
+            let to = StageCheckpoint::new_with_block_number(cursor.last()?.unwrap().0);
 
             stage_range = Some((
                 ExecInput {
-                    previous_stage: Some((StageId("Another"), StageCheckpoint::block_number(to))),
-                    checkpoint: Some(StageCheckpoint::block_number(from)),
+                    previous_stage: Some((StageId("Another"), to)),
+                    checkpoint: Some(StageCheckpoint::new_with_block_number(from)),
                 },
                 UnwindInput { unwind_to: from, checkpoint: to, bad_block: None },
             ));
@@ -69,7 +70,10 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         path,
         (
             ExecInput {
-                previous_stage: Some((StageId("Another"), num_blocks)),
+                previous_stage: Some((
+                    StageId("Another"),
+                    StageCheckpoint::new_with_block_number(num_blocks),
+                )),
                 ..Default::default()
             },
             UnwindInput::default(),

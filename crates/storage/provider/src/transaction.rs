@@ -1031,8 +1031,9 @@ where
     ) -> Result<(), TransactionError> {
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.cursor_write::<tables::SyncStage>()?;
-        while let Some((stage_name, _)) = cursor.next()? {
-            cursor.upsert(stage_name, StageCheckpoint::new_with_block_number(block_number))?
+        while let Some((stage_name, checkpoint)) = cursor.next()? {
+            // TODO(alexey): do we want to invalidate stage-specific checkpoint data?
+            cursor.upsert(stage_name, StageCheckpoint { block_number, ..checkpoint })?
         }
 
         Ok(())

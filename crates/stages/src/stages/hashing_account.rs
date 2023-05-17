@@ -255,11 +255,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             if next_address.is_some() {
                 // from block is correct here as were are iteration over state for this
                 // particular block
-                info!(target: "sync::stages::hashing_account", stage_progress = input.checkpoint(), is_final_range = false, "Stage iteration finished");
-                return Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new_with_block_number(input.checkpoint()),
-                    done: false,
-                })
+                info!(target: "sync::stages::hashing_account", stage_progress = %input.checkpoint(), is_final_range = false, "Stage iteration finished");
+                return Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
             }
         } else {
             // Aggregate all transition changesets and and make list of account that have been

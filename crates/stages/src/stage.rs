@@ -19,8 +19,8 @@ pub struct ExecInput {
 
 impl ExecInput {
     /// Return the progress of the stage or default.
-    pub fn checkpoint(&self) -> BlockNumber {
-        self.checkpoint.unwrap_or_default().block_number
+    pub fn checkpoint(&self) -> StageCheckpoint {
+        self.checkpoint.unwrap_or_default()
     }
 
     /// Return the progress of the previous stage or default.
@@ -103,8 +103,8 @@ pub struct ExecOutput {
 
 impl ExecOutput {
     /// Mark the stage as done, checkpointing at the given place.
-    pub fn done(stage_progress: StageCheckpoint) -> Self {
-        Self { checkpoint: stage_progress, done: true }
+    pub fn done(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: true }
     }
 }
 

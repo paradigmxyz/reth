@@ -148,6 +148,8 @@ impl Display for StageCheckpoint {
     }
 }
 
+// TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
+//  is not a Copy type.
 /// Stage-specific checkpoint metrics.
 #[derive_arbitrary(compact)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]

@@ -65,14 +65,14 @@ impl Command {
         let db = Arc::new(init_db(db_path)?);
         let mut tx = Transaction::new(db.as_ref())?;
 
-        let execution_progress = EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default();
-        assert!(execution_progress.block_number < self.to, "Nothing to run");
+        let execution_checkpoint = EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default();
+        assert!(execution_checkpoint.block_number < self.to, "Nothing to run");
 
-        let should_reset_stages = !(execution_progress ==
+        let should_reset_stages = !(execution_checkpoint ==
             ACCOUNT_HASHING.get_checkpoint(tx.deref())?.unwrap_or_default() &&
-            execution_progress ==
+            execution_checkpoint ==
                 STORAGE_HASHING.get_checkpoint(tx.deref())?.unwrap_or_default() &&
-            execution_progress ==
+            execution_checkpoint ==
                 MERKLE_EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default());
 
         let factory = reth_revm::Factory::new(self.chain.clone());
@@ -89,9 +89,10 @@ impl Command {
         let mut storage_hashing_stage = StorageHashingStage::default();
         let mut merkle_stage = MerkleStage::default_execution();
 
-        for block in execution_progress.block_number + 1..=self.to {
+        for block in execution_checkpoint.block_number + 1..=self.to {
             tracing::trace!(target: "reth::cli", block, "Executing block");
-            let progress = if (!should_reset_stages || block > execution_progress.block_number + 1) &&
+            let progress = if (!should_reset_stages ||
+                block > execution_checkpoint.block_number + 1) &&
                 block > 0
             {
                 Some(block - 1)

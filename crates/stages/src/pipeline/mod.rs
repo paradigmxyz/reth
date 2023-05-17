@@ -264,7 +264,7 @@ where
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.checkpoint;
                         self.metrics.stage_checkpoint(stage_id, stage_progress);
-                        stage_id.save_progress(tx.deref(), stage_progress)?;
+                        stage_id.save_checkpoint(tx.deref(), stage_progress)?;
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
@@ -293,9 +293,9 @@ where
         loop {
             let mut tx = Transaction::new(&self.db)?;
 
-            let prev_progress = stage_id.get_checkpoint(tx.deref())?;
+            let prev_checkpoint = stage_id.get_checkpoint(tx.deref())?;
 
-            let stage_reached_max_block = prev_progress
+            let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
                 .map_or(false, |(prev_progress, target)| prev_progress.block_number >= target);
             if stage_reached_max_block {
@@ -303,37 +303,37 @@ where
                     target: "sync::pipeline",
                     stage = %stage_id,
                     max_block = self.max_block,
-                    prev_block = prev_progress.map(|progress| progress.block_number),
+                    prev_block = prev_checkpoint.map(|progress| progress.block_number),
                     "Stage reached maximum block, skipping."
                 );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
 
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress {
-                    stage_progress: prev_progress.map(|progress| progress.block_number),
+                    stage_progress: prev_checkpoint.map(|progress| progress.block_number),
                 })
             }
 
             self.listeners.notify(PipelineEvent::Running {
                 stage_id,
-                stage_progress: prev_progress.map(|progress| progress.block_number),
+                stage_progress: prev_checkpoint.map(|progress| progress.block_number),
             });
 
             match stage
-                .execute(&mut tx, ExecInput { previous_stage, checkpoint: prev_progress })
+                .execute(&mut tx, ExecInput { previous_stage, checkpoint: prev_checkpoint })
                 .await
             {
-                Ok(out @ ExecOutput { checkpoint: stage_progress, done }) => {
-                    made_progress |= stage_progress != prev_progress.unwrap_or_default();
+                Ok(out @ ExecOutput { checkpoint, done }) => {
+                    made_progress |= checkpoint != prev_checkpoint.unwrap_or_default();
                     info!(
                         target: "sync::pipeline",
                         stage = %stage_id,
-                        %stage_progress,
+                        %checkpoint,
                         %done,
                         "Stage made progress"
                     );
-                    self.metrics.stage_checkpoint(stage_id, stage_progress);
-                    stage_id.save_progress(tx.deref(), stage_progress)?;
+                    self.metrics.stage_checkpoint(stage_id, checkpoint);
+                    stage_id.save_checkpoint(tx.deref(), checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });
 
@@ -341,12 +341,11 @@ where
                     tx.commit()?;
 
                     if done {
+                        let stage_progress = checkpoint.block_number;
                         return Ok(if made_progress {
-                            ControlFlow::Continue { progress: stage_progress.block_number }
+                            ControlFlow::Continue { progress: stage_progress }
                         } else {
-                            ControlFlow::NoProgress {
-                                stage_progress: Some(stage_progress.block_number),
-                            }
+                            ControlFlow::NoProgress { stage_progress: Some(stage_progress) }
                         })
                     }
                 }
@@ -365,7 +364,7 @@ where
                         // we bail entirely, otherwise we restart the execution loop from the
                         // beginning.
                         Ok(ControlFlow::Unwind {
-                            target: prev_progress.unwrap_or_default().block_number,
+                            target: prev_checkpoint.unwrap_or_default().block_number,
                             bad_block: Some(block),
                         })
                     } else if err.is_fatal() {

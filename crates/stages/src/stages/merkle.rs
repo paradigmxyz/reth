@@ -205,10 +205,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         state.hash_builder.into(),
                     );
                     self.save_execution_checkpoint(tx, Some(checkpoint))?;
-                    return Ok(ExecOutput {
-                        checkpoint: StageCheckpoint::new_with_block_number(input.checkpoint()),
-                        done: false,
-                    })
+                    return Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
                 }
                 StateRootProgress::Complete(root, updates) => {
                     updates.flush(tx.deref_mut())?;
