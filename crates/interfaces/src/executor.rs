@@ -51,7 +51,7 @@ pub enum BlockExecutionError {
 
     /// Only used for TestExecutor
     ///
-    /// Note: this is only used during testing, but is not feature gated for convenience.
+    /// Note: this is not feature gated for convenience.
     #[error("Execution unavailable for tests")]
     UnavailableForTest,
 }
