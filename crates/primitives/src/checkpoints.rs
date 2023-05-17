@@ -127,7 +127,7 @@ pub struct StorageHashingCheckpoint {
 #[main_codec]
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct StageCheckpoint {
-    /// Stage progress measured in block number it reached.
+    /// The maximum block processed by the stage.
     pub block_number: BlockNumber,
     /// Stage-specific checkpoint. None if stage uses only block-based checkpoints.
     pub stage_checkpoint: Option<StageUnitCheckpoint>,
