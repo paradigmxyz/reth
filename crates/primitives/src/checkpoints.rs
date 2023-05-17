@@ -200,7 +200,7 @@ impl Compact for StageUnitCheckpoint {
                 let (data, buf) = StorageHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Storage(data), buf)
             }
-            _ => unreachable!(),
+            _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
         }
     }
 }
