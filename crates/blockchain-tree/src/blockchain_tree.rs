@@ -6,7 +6,7 @@ use crate::{
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{
-        error::{BlockchainTreeError, InsertInvalidBlockError, InsertInvalidBlockErrorKind},
+        error::{BlockchainTreeError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus,
     },
     consensus::{Consensus, ConsensusError},
@@ -153,7 +153,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub(crate) fn is_block_known(
         &self,
         block: BlockNumHash,
-    ) -> Result<Option<BlockStatus>, InsertInvalidBlockErrorKind> {
+    ) -> Result<Option<BlockStatus>, InsertBlockErrorKind> {
         let last_finalized_block = self.block_indices.last_finalized_block();
         // check db if block is finalized.
         if block.number <= last_finalized_block {
@@ -273,7 +273,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn try_insert_block(
         &mut self,
         block: SealedBlockWithSenders,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> Result<BlockStatus, InsertBlockError> {
         let parent = block.parent_num_hash();
 
         // check if block parent can be found in Tree
@@ -294,7 +294,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         {
             // we found the parent block in canonical chain
             if canonical_parent_number != parent.number {
-                return Err(InsertInvalidBlockError::consensus_error(
+                return Err(InsertBlockError::consensus_error(
                     ConsensusError::ParentBlockNumberMismatch {
                         parent_block_number: canonical_parent_number,
                         block_number: block.number,
@@ -309,9 +309,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             self.externals
                 .consensus
                 .validate_header_against_parent(&block, buffered_parent)
-                .map_err(|err| {
-                    InsertInvalidBlockError::consensus_error(err, block.block.clone())
-                })?;
+                .map_err(|err| InsertBlockError::consensus_error(err, block.block.clone()))?;
         }
 
         // insert block inside unconnected block buffer. Delaying it execution.
@@ -324,7 +322,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlockWithSenders,
         parent: BlockNumHash,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> Result<BlockStatus, InsertBlockError> {
         let block_num_hash = block.num_hash();
         debug!(target: "blockchain_tree", ?parent, "Appending block to canonical chain");
         // create new chain that points to that block
@@ -337,9 +335,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // Validate that the block is post merge
         let parent_td = db
             .header_td(&block.parent_hash)
-            .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?
+            .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
             .ok_or_else(|| {
-                InsertInvalidBlockError::tree_error(
+                InsertBlockError::tree_error(
                     BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
                     block.block.clone(),
                 )
@@ -347,7 +345,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // Pass the parent total difficulty to short-circuit unnecessary calculations.
         if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
-            return Err(InsertInvalidBlockError::execution_error(
+            return Err(InsertBlockError::execution_error(
                 BlockExecutionError::BlockPreMerge { hash: block.hash },
                 block.block,
             ))
@@ -362,9 +360,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let parent_header = db
             .header(&block.parent_hash)
-            .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?
+            .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
             .ok_or_else(|| {
-                InsertInvalidBlockError::tree_error(
+                InsertBlockError::tree_error(
                     BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
                     block.block.clone(),
                 )
@@ -389,7 +387,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlockWithSenders,
         chain_id: BlockChainId,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> Result<BlockStatus, InsertBlockError> {
         debug!(target: "blockchain_tree", "Inserting block into side chain");
         let block_num_hash = block.num_hash();
         // Create a new sidechain by forking the given chain, or append the block if the parent
@@ -399,7 +397,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // get canonical fork.
         let canonical_fork = match self.canonical_fork(chain_id) {
             None => {
-                return Err(InsertInvalidBlockError::tree_error(
+                return Err(InsertBlockError::tree_error(
                     BlockchainTreeError::BlockSideChainIdConsistency { chain_id },
                     block.block,
                 ))
@@ -411,7 +409,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let parent_chain = match self.chains.get_mut(&chain_id) {
             Some(parent_chain) => parent_chain,
             None => {
-                return Err(InsertInvalidBlockError::tree_error(
+                return Err(InsertBlockError::tree_error(
                     BlockchainTreeError::BlockSideChainIdConsistency { chain_id },
                     block.block,
                 ))
@@ -529,23 +527,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn insert_block_without_senders(
         &mut self,
         block: SealedBlock,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> Result<BlockStatus, InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.insert_block(block),
-            Err(block) => Err(InsertInvalidBlockError::sender_recovery_error(block)),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
     /// Insert block for future execution.
     ///
     /// Returns an error if the block is invalid.
-    pub fn buffer_block(
-        &mut self,
-        block: SealedBlockWithSenders,
-    ) -> Result<(), InsertInvalidBlockError> {
+    pub fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertInvalidBlockError::consensus_error(err, block.block))
+            return Err(InsertBlockError::consensus_error(err, block.block))
         }
 
         self.buffered_blocks.insert_block(block);
@@ -618,7 +613,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn insert_block(
         &mut self,
         block: SealedBlockWithSenders,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> Result<BlockStatus, InsertBlockError> {
         self.insert_block_inner(block, true)
     }
 
@@ -628,19 +623,19 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlockWithSenders,
         do_is_known_check: bool,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> Result<BlockStatus, InsertBlockError> {
         // check if we already know this block
         if do_is_known_check {
             match self.is_block_known(block.num_hash()) {
                 Ok(Some(status)) => return Ok(status),
-                Err(err) => return Err(InsertInvalidBlockError::new(block.block, err)),
+                Err(err) => return Err(InsertBlockError::new(block.block, err)),
                 _ => {}
             }
         }
 
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertInvalidBlockError::consensus_error(err, block.block))
+            return Err(InsertBlockError::consensus_error(err, block.block))
         }
 
         // try to insert block

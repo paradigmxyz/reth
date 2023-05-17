@@ -51,7 +51,7 @@ mod event;
 pub(crate) mod sync;
 
 pub use event::BeaconConsensusEngineEvent;
-use reth_interfaces::blockchain_tree::error::InsertInvalidBlockError;
+use reth_interfaces::blockchain_tree::error::InsertBlockError;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
@@ -270,7 +270,7 @@ where
     fn latest_valid_hash_for_invalid_payload(
         &self,
         parent_hash: H256,
-        tree_error: Option<&InsertInvalidBlockError>,
+        tree_error: Option<&InsertBlockError>,
     ) -> Option<H256> {
         // check pre merge block error
         if tree_error.map(|err| err.kind().is_block_pre_merge()).unwrap_or_default() {

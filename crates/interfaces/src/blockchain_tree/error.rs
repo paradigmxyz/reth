@@ -31,41 +31,41 @@ pub enum BlockchainTreeError {
 /// Error thrown when inserting a block failed because the block is considered invalid.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-pub struct InsertInvalidBlockError {
-    inner: Box<InsertInvalidBlockData>,
+pub struct InsertBlockError {
+    inner: Box<InsertBlockErrorData>,
 }
 
-// === impl InsertInvalidBlockError ===
+// === impl InsertBlockError ===
 
-impl InsertInvalidBlockError {
+impl InsertBlockError {
     /// Create a new InsertInvalidBlockError
-    pub fn new(block: SealedBlock, kind: InsertInvalidBlockErrorKind) -> Self {
-        Self { inner: InsertInvalidBlockData::boxed(block, kind) }
+    pub fn new(block: SealedBlock, kind: InsertBlockErrorKind) -> Self {
+        Self { inner: InsertBlockErrorData::boxed(block, kind) }
     }
 
     /// Create a new InsertInvalidBlockError from a tree error
     pub fn tree_error(error: BlockchainTreeError, block: SealedBlock) -> Self {
-        Self::new(block, InsertInvalidBlockErrorKind::Tree(error))
+        Self::new(block, InsertBlockErrorKind::Tree(error))
     }
 
     /// Create a new InsertInvalidBlockError from a consensus error
     pub fn consensus_error(error: ConsensusError, block: SealedBlock) -> Self {
-        Self::new(block, InsertInvalidBlockErrorKind::Consensus(error))
+        Self::new(block, InsertBlockErrorKind::Consensus(error))
     }
 
     /// Create a new InsertInvalidBlockError from a consensus error
     pub fn sender_recovery_error(block: SealedBlock) -> Self {
-        Self::new(block, InsertInvalidBlockErrorKind::SenderRecovery)
+        Self::new(block, InsertBlockErrorKind::SenderRecovery)
     }
 
     /// Create a new InsertInvalidBlockError from an execution error
     pub fn execution_error(error: BlockExecutionError, block: SealedBlock) -> Self {
-        Self::new(block, InsertInvalidBlockErrorKind::Execution(error))
+        Self::new(block, InsertBlockErrorKind::Execution(error))
     }
 
     /// Returns the error kind
     #[inline]
-    pub fn kind(&self) -> &InsertInvalidBlockErrorKind {
+    pub fn kind(&self) -> &InsertBlockErrorKind {
         &self.inner.kind
     }
 
@@ -77,36 +77,36 @@ impl InsertInvalidBlockError {
 }
 
 #[derive(Debug)]
-struct InsertInvalidBlockData {
+struct InsertBlockErrorData {
     block: SealedBlock,
-    kind: InsertInvalidBlockErrorKind,
+    kind: InsertBlockErrorKind,
 }
 
-impl std::fmt::Display for InsertInvalidBlockData {
+impl std::fmt::Display for InsertBlockErrorData {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Failed to insert block {:?}: {}", self.block.hash, self.kind)
     }
 }
 
-impl std::error::Error for InsertInvalidBlockData {
+impl std::error::Error for InsertBlockErrorData {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.kind)
     }
 }
 
-impl InsertInvalidBlockData {
-    fn new(block: SealedBlock, kind: InsertInvalidBlockErrorKind) -> Self {
+impl InsertBlockErrorData {
+    fn new(block: SealedBlock, kind: InsertBlockErrorKind) -> Self {
         Self { block, kind }
     }
 
-    fn boxed(block: SealedBlock, kind: InsertInvalidBlockErrorKind) -> Box<Self> {
+    fn boxed(block: SealedBlock, kind: InsertBlockErrorKind) -> Box<Self> {
         Box::new(Self::new(block, kind))
     }
 }
 
 /// All error variants possible when inserting a block
 #[derive(Debug, thiserror::Error)]
-pub enum InsertInvalidBlockErrorKind {
+pub enum InsertBlockErrorKind {
     /// Failed to recover senders for the block
     #[error("Failed to recover senders for block")]
     SenderRecovery,
@@ -124,34 +124,31 @@ pub enum InsertInvalidBlockErrorKind {
     Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl InsertInvalidBlockErrorKind {
+impl InsertBlockErrorKind {
     /// Returns true if the error is a tree error
     pub fn is_tree_error(&self) -> bool {
-        matches!(self, InsertInvalidBlockErrorKind::Tree(_))
+        matches!(self, InsertBlockErrorKind::Tree(_))
     }
 
     /// Returns true if the error is a consensus error
     pub fn is_consensus_error(&self) -> bool {
-        matches!(self, InsertInvalidBlockErrorKind::Consensus(_))
+        matches!(self, InsertBlockErrorKind::Consensus(_))
     }
 
     /// Returns true if this is a block pre merge error.
     pub fn is_block_pre_merge(&self) -> bool {
-        matches!(
-            self,
-            InsertInvalidBlockErrorKind::Execution(BlockExecutionError::BlockPreMerge { .. })
-        )
+        matches!(self, InsertBlockErrorKind::Execution(BlockExecutionError::BlockPreMerge { .. }))
     }
 
     /// Returns true if the error is an execution error
     pub fn is_execution_error(&self) -> bool {
-        matches!(self, InsertInvalidBlockErrorKind::Execution(_))
+        matches!(self, InsertBlockErrorKind::Execution(_))
     }
 
     /// Returns the error if it is a tree error
     pub fn as_tree_error(&self) -> Option<BlockchainTreeError> {
         match self {
-            InsertInvalidBlockErrorKind::Tree(err) => Some(*err),
+            InsertBlockErrorKind::Tree(err) => Some(*err),
             _ => None,
         }
     }
@@ -159,7 +156,7 @@ impl InsertInvalidBlockErrorKind {
     /// Returns the error if it is a consensus error
     pub fn as_consensus_error(&self) -> Option<&ConsensusError> {
         match self {
-            InsertInvalidBlockErrorKind::Consensus(err) => Some(err),
+            InsertBlockErrorKind::Consensus(err) => Some(err),
             _ => None,
         }
     }
@@ -167,23 +164,23 @@ impl InsertInvalidBlockErrorKind {
     /// Returns the error if it is an execution error
     pub fn as_execution_error(&self) -> Option<&BlockExecutionError> {
         match self {
-            InsertInvalidBlockErrorKind::Execution(err) => Some(err),
+            InsertBlockErrorKind::Execution(err) => Some(err),
             _ => None,
         }
     }
 }
 
-// This is a convenience impl to convert from crate::Error to InsertInvalidBlockErrorKind, most
-impl From<crate::Error> for InsertInvalidBlockErrorKind {
+// This is a convenience impl to convert from crate::Error to InsertBlockErrorKind, most
+impl From<crate::Error> for InsertBlockErrorKind {
     fn from(err: crate::Error) -> Self {
         use crate::Error;
 
         match err {
-            Error::Execution(err) => InsertInvalidBlockErrorKind::Execution(err),
-            Error::Consensus(err) => InsertInvalidBlockErrorKind::Consensus(err),
-            Error::Database(err) => InsertInvalidBlockErrorKind::Internal(Box::new(err)),
-            Error::Provider(err) => InsertInvalidBlockErrorKind::Internal(Box::new(err)),
-            Error::Network(err) => InsertInvalidBlockErrorKind::Internal(Box::new(err)),
+            Error::Execution(err) => InsertBlockErrorKind::Execution(err),
+            Error::Consensus(err) => InsertBlockErrorKind::Consensus(err),
+            Error::Database(err) => InsertBlockErrorKind::Internal(Box::new(err)),
+            Error::Provider(err) => InsertBlockErrorKind::Internal(Box::new(err)),
+            Error::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
         }
     }
 }

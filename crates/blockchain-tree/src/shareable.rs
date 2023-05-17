@@ -4,7 +4,7 @@ use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::InsertInvalidBlockError, BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer,
+        error::InsertBlockError, BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer,
     },
     consensus::Consensus,
     Error,
@@ -42,21 +42,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     fn insert_block_without_senders(
         &self,
         block: SealedBlock,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> Result<BlockStatus, InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.tree.write().insert_block_inner(block, true),
-            Err(block) => Err(InsertInvalidBlockError::sender_recovery_error(block)),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
-    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertInvalidBlockError> {
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         self.tree.write().buffer_block(block)
     }
 
-    fn insert_block(
-        &self,
-        block: SealedBlockWithSenders,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError> {
         trace!(target: "blockchain_tree", ?block, "Inserting block");
         self.tree.write().insert_block(block)
     }

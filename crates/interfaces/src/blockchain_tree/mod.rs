@@ -1,4 +1,4 @@
-use crate::{blockchain_tree::error::InsertInvalidBlockError, Error};
+use crate::{blockchain_tree::error::InsertBlockError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
@@ -18,32 +18,26 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn insert_block_without_senders(
         &self,
         block: SealedBlock,
-    ) -> Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> Result<BlockStatus, InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.insert_block(block),
-            Err(block) => Err(InsertInvalidBlockError::sender_recovery_error(block)),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
     /// Recover senders and call [`BlockchainTreeEngine::buffer_block`].
-    fn buffer_block_without_sender(
-        &self,
-        block: SealedBlock,
-    ) -> Result<(), InsertInvalidBlockError> {
+    fn buffer_block_without_sender(&self, block: SealedBlock) -> Result<(), InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.buffer_block(block),
-            Err(block) => Err(InsertInvalidBlockError::sender_recovery_error(block)),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
     /// Buffer block with senders
-    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertInvalidBlockError>;
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError>;
 
     /// Insert block with senders
-    fn insert_block(
-        &self,
-        block: SealedBlockWithSenders,
-    ) -> Result<BlockStatus, InsertInvalidBlockError>;
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     fn finalize_block(&self, finalized_block: BlockNumber);

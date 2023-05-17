@@ -5,7 +5,7 @@
 use crate::{post_state::PostState, PostStateDataRef};
 use reth_db::database::Database;
 use reth_interfaces::{
-    blockchain_tree::error::{BlockchainTreeError, InsertInvalidBlockError},
+    blockchain_tree::error::{BlockchainTreeError, InsertBlockError},
     consensus::Consensus,
     Error,
 };
@@ -64,7 +64,7 @@ impl AppendableChain {
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<Self, InsertInvalidBlockError>
+    ) -> Result<Self, InsertBlockError>
     where
         DB: Database,
         C: Consensus,
@@ -82,7 +82,7 @@ impl AppendableChain {
 
         let changeset =
             Self::validate_and_execute(block.clone(), parent_header, state_provider, externals)
-                .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?;
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
         Ok(Self { chain: Chain::new(vec![(block, changeset)]) })
     }
@@ -95,7 +95,7 @@ impl AppendableChain {
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<Self, InsertInvalidBlockError>
+    ) -> Result<Self, InsertBlockError>
     where
         DB: Database,
         C: Consensus,
@@ -103,7 +103,7 @@ impl AppendableChain {
     {
         let parent_number = block.number - 1;
         let parent = self.blocks().get(&parent_number).ok_or_else(|| {
-            InsertInvalidBlockError::tree_error(
+            InsertBlockError::tree_error(
                 BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
                 block.block.clone(),
             )
@@ -123,7 +123,7 @@ impl AppendableChain {
         };
         let block_state =
             Self::validate_and_execute(block.clone(), parent, post_state_data, externals)
-                .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?;
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         state.extend(block_state);
 
         let chain =
@@ -173,7 +173,7 @@ impl AppendableChain {
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<(), InsertInvalidBlockError>
+    ) -> Result<(), InsertBlockError>
     where
         DB: Database,
         C: Consensus,
@@ -190,7 +190,7 @@ impl AppendableChain {
 
         let block_state =
             Self::validate_and_execute(block.clone(), parent_block, post_state_data, externals)
-                .map_err(|err| InsertInvalidBlockError::new(block.block.clone(), err.into()))?;
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         self.state.extend(block_state);
         self.blocks.insert(block.number, block);
         Ok(())

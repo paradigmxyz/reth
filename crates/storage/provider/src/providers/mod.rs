@@ -35,7 +35,7 @@ mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
-use reth_interfaces::blockchain_tree::error::InsertInvalidBlockError;
+use reth_interfaces::blockchain_tree::error::InsertBlockError;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -375,14 +375,14 @@ where
     fn buffer_block(
         &self,
         block: SealedBlockWithSenders,
-    ) -> std::result::Result<(), InsertInvalidBlockError> {
+    ) -> std::result::Result<(), InsertBlockError> {
         self.tree.buffer_block(block)
     }
 
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
-    ) -> std::result::Result<BlockStatus, InsertInvalidBlockError> {
+    ) -> std::result::Result<BlockStatus, InsertBlockError> {
         self.tree.insert_block(block)
     }
 
