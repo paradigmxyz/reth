@@ -202,13 +202,13 @@ impl Command {
         let mut input = ExecInput {
             previous_stage: Some((
                 StageId("No Previous Stage"),
-                StageCheckpoint::block_number(self.to),
+                StageCheckpoint::new_with_block_number(self.to),
             )),
-            checkpoint: Some(StageCheckpoint::block_number(self.from)),
+            checkpoint: Some(StageCheckpoint::new_with_block_number(self.from)),
         };
 
         let mut unwind = UnwindInput {
-            checkpoint: StageCheckpoint::block_number(self.to),
+            checkpoint: StageCheckpoint::new_with_block_number(self.to),
             unwind_to: self.from,
             bad_block: None,
         };

@@ -123,6 +123,7 @@ pub struct StorageHashingCheckpoint {
     pub to: u64,
 }
 
+/// Saves the progress of a stage.
 #[main_codec]
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct StageCheckpoint {
@@ -133,22 +134,29 @@ pub struct StageCheckpoint {
 }
 
 impl StageCheckpoint {
-    pub fn block_number(block_number: BlockNumber) -> Self {
+    /// Creates a new [`StageCheckpoint`] with only `block_number` set.
+    pub fn new_with_block_number(block_number: BlockNumber) -> Self {
         Self { block_number, ..Default::default() }
     }
 }
 
+// TODO(alexey): ideally, we'd want to display block number + stage-specific metric (if available)
+//  in places like logs or traces
 impl Display for StageCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&self.block_number, f)
     }
 }
 
+/// Stage-specific checkpoint metrics.
 #[derive_arbitrary(compact)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum StageUnitCheckpoint {
+    /// Saves the progress of transaction-indexed stages.
     Transaction(TxNumber),
+    /// Saves the progress of AccountHashing stage.
     Account(AccountHashingCheckpoint),
+    /// Saves the progress of StorageHashing stage.
     Storage(StorageHashingCheckpoint),
 }
 

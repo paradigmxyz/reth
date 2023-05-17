@@ -85,7 +85,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     ) -> Result<ExecOutput, StageError> {
         let range = input.next_block_range();
         if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::block_number(*range.end())))
+            return Ok(ExecOutput::done(StageCheckpoint::new_with_block_number(*range.end())))
         }
         let (from_block, to_block) = range.into_inner();
 
@@ -183,7 +183,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 // particular block.
                 info!(target: "sync::stages::hashing_storage", stage_progress = input.checkpoint(), is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::block_number(input.checkpoint()),
+                    checkpoint: StageCheckpoint::new_with_block_number(input.checkpoint()),
                     done: false,
                 })
             }
@@ -198,11 +198,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             tx.insert_storage_for_hashing(storages.into_iter())?;
         }
 
-        info!(target: "sync::stages::hashing_storage", stage_progress = input.previous_stage_checkpoint(), is_final_range = true, "Stage iteration finished");
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::block_number(input.previous_stage_checkpoint()),
-            done: true,
-        })
+        info!(target: "sync::stages::hashing_storage", stage_progress = %input.previous_stage_checkpoint(), is_final_range = true, "Stage iteration finished");
+        Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
     }
 
     /// Unwind the stage.
@@ -217,7 +214,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
         info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_progress) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(unwind_progress) })
     }
 }
 
@@ -257,8 +254,11 @@ mod tests {
         runner.set_commit_threshold(1);
 
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            checkpoint: Some(stage_progress),
+            previous_stage: Some((
+                PREV_STAGE_ID,
+                StageCheckpoint::new_with_block_number(previous_stage),
+            )),
+            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -269,7 +269,7 @@ mod tests {
                     // Continue from checkpoint
                     continue
                 } else {
-                    assert!(result.checkpoint == previous_stage);
+                    assert!(result.checkpoint.block_number == previous_stage);
 
                     // Validate the stage execution
                     assert!(
@@ -293,8 +293,11 @@ mod tests {
         runner.set_commit_threshold(500);
 
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            checkpoint: Some(stage_progress),
+            previous_stage: Some((
+                PREV_STAGE_ID,
+                StageCheckpoint::new_with_block_number(previous_stage),
+            )),
+            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -302,7 +305,10 @@ mod tests {
         // first run, hash first half of storages.
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput {done, checkpoint}) if !done && stage_progress == 100);
+        assert_matches!(
+            result,
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number: 100, .. }, done: false })
+        );
         assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 500);
         let (progress_address, progress_key) = runner
             .tx
@@ -333,7 +339,10 @@ mod tests {
         runner.set_commit_threshold(2);
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput {done, checkpoint}) if !done && stage_progress == 100);
+        assert_matches!(
+            result,
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number: 100, .. }, done: false })
+        );
         assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 502);
         let (progress_address, progress_key) = runner
             .tx
@@ -366,7 +375,10 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {done, checkpoint}) if done && stage_progress == 500);
+        assert_matches!(
+            result,
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number: 500, .. }, done: true })
+        );
         assert_eq!(
             runner.tx.table::<tables::HashedStorage>().unwrap().len(),
             runner.tx.table::<tables::PlainStorageState>().unwrap().len()
@@ -408,8 +420,8 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.checkpoint.unwrap_or_default() + 1;
-            let end = input.previous_stage_checkpoint();
+            let stage_progress = input.checkpoint.unwrap_or_default().block_number + 1;
+            let end = input.previous_stage_checkpoint().block_number;
 
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
@@ -489,8 +501,8 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             if let Some(output) = output {
-                let start_block = input.checkpoint.unwrap_or_default() + 1;
-                let end_block = output.checkpoint;
+                let start_block = input.checkpoint.unwrap_or_default().block_number + 1;
+                let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
                     return Ok(())
                 }

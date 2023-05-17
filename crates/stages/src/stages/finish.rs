@@ -65,11 +65,9 @@ where
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        self.updater.update_status(self.fetch_head(tx, input.previous_stage_checkpoint())?);
-        Ok(ExecOutput {
-            done: true,
-            checkpoint: StageCheckpoint::block_number(input.previous_stage_checkpoint()),
-        })
+        self.updater
+            .update_status(self.fetch_head(tx, input.previous_stage_checkpoint().block_number)?);
+        Ok(ExecOutput { done: true, checkpoint: input.previous_stage_checkpoint() })
     }
 
     async fn unwind(
@@ -78,7 +76,7 @@ where
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.updater.update_status(self.fetch_head(tx, input.unwind_to)?);
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(input.unwind_to) })
     }
 }
 
@@ -142,12 +140,12 @@ mod tests {
         type Seed = Vec<SealedHeader>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let start = input.checkpoint.unwrap_or_default();
+            let start = input.checkpoint.unwrap_or_default().block_number;
             let head = random_header(start, None);
             self.tx.insert_headers_with_td(std::iter::once(&head))?;
 
             // use previous progress as seed size
-            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
+            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default().block_number + 1;
 
             if start + 1 >= end {
                 return Ok(Vec::default())
@@ -173,7 +171,7 @@ mod tests {
                 );
                 assert_eq!(
                     self.current_status().number,
-                    output.checkpoint,
+                    output.checkpoint.block_number,
                     "incorrect block number in status update"
                 );
             }

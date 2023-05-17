@@ -76,7 +76,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         if range.is_empty() {
             let (from, to) = range.into_inner();
             info!(target: "sync::stages::bodies", from, "Target block already reached");
-            return Ok(ExecOutput::done(StageCheckpoint::block_number(to)))
+            return Ok(ExecOutput::done(StageCheckpoint::new_with_block_number(to)))
         }
 
         // Update the header range on the downloader
@@ -157,7 +157,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // - We reached our target and the target was not limited by the batch size of the stage
         let done = highest_block == to_block;
         info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, is_final_range = done, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::block_number(highest_block), done })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new_with_block_number(highest_block), done })
     }
 
     /// Unwind the stage.
@@ -210,7 +210,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         }
 
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(input.unwind_to) })
     }
 }
 
@@ -234,8 +234,11 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            checkpoint: Some(stage_progress),
+            previous_stage: Some((
+                PREV_STAGE_ID,
+                StageCheckpoint::new_with_block_number(previous_stage),
+            )),
+            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -251,7 +254,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint, done: false }) if stage_progress < 200
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false }) if block_number < 200
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -264,8 +267,11 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            checkpoint: Some(stage_progress),
+            previous_stage: Some((
+                PREV_STAGE_ID,
+                StageCheckpoint::new_with_block_number(previous_stage),
+            )),
+            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -278,7 +284,13 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
-        assert_matches!(output, Ok(ExecOutput { checkpoint: 20, done: true }));
+        assert_matches!(
+            output,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint { block_number: 20, stage_checkpoint: None },
+                done: true
+            })
+        );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
@@ -290,8 +302,11 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            checkpoint: Some(stage_progress),
+            previous_stage: Some((
+                PREV_STAGE_ID,
+                StageCheckpoint::new_with_block_number(previous_stage),
+            )),
+            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -304,14 +319,17 @@ mod tests {
         let first_run = rx.await.unwrap();
         assert_matches!(
             first_run,
-            Ok(ExecOutput { checkpoint, done: false }) if stage_progress >= 10
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false }) if block_number >= 10
         );
-        let first_run_progress = first_run.unwrap().checkpoint;
+        let first_run_checkpoint = first_run.unwrap().checkpoint;
 
         // Execute again on top of the previous run
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            checkpoint: Some(first_run_progress),
+            previous_stage: Some((
+                PREV_STAGE_ID,
+                StageCheckpoint::new_with_block_number(previous_stage),
+            )),
+            checkpoint: Some(first_run_checkpoint),
         };
         let rx = runner.execute(input);
 
@@ -319,7 +337,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint, done: true }) if stage_progress > first_run_progress
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true }) if block_number > first_run_checkpoint.block_number
         );
         assert_matches!(
             runner.validate_execution(input, output.ok()),
@@ -336,8 +354,11 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            checkpoint: Some(stage_progress),
+            previous_stage: Some((
+                PREV_STAGE_ID,
+                StageCheckpoint::new_with_block_number(previous_stage),
+            )),
+            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -352,11 +373,14 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint, done: true }) if stage_progress == previous_stage
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true }) if block_number == previous_stage
         );
-        let stage_progress = output.unwrap().checkpoint;
+        let checkpoint = output.unwrap().checkpoint;
         runner
-            .validate_db_blocks(input.checkpoint.unwrap_or_default(), stage_progress)
+            .validate_db_blocks(
+                input.checkpoint.unwrap_or_default().block_number,
+                checkpoint.block_number,
+            )
             .expect("Written block data invalid");
 
         // Delete a transaction
@@ -372,11 +396,11 @@ mod tests {
 
         // Unwind all of it
         let unwind_to = 1;
-        let input = UnwindInput { bad_block: None, checkpoint: stage_progress, unwind_to };
+        let input = UnwindInput { bad_block: None, checkpoint, unwind_to };
         let res = runner.unwind(input).await;
         assert_matches!(
             res,
-            Ok(UnwindOutput { checkpoint }) if stage_progress == 1
+            Ok(UnwindOutput { checkpoint: StageCheckpoint { block_number: 1, .. } })
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");
@@ -493,8 +517,8 @@ mod tests {
             type Seed = Vec<SealedBlock>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let start = input.checkpoint.unwrap_or_default();
-                let end = input.previous_stage_checkpoint();
+                let start = input.checkpoint.unwrap_or_default().block_number;
+                let end = input.previous_stage_checkpoint().block_number;
                 let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
@@ -539,7 +563,8 @@ mod tests {
                 let highest_block = match output.as_ref() {
                     Some(output) => output.checkpoint,
                     None => input.checkpoint.unwrap_or_default(),
-                };
+                }
+                .block_number;
                 self.validate_db_blocks(highest_block, highest_block)
             }
         }

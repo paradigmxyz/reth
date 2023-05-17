@@ -1031,7 +1031,7 @@ where
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.cursor_write::<tables::SyncStage>()?;
         while let Some((stage_name, _)) = cursor.next()? {
-            cursor.upsert(stage_name, StageCheckpoint::block_number(block_number))?
+            cursor.upsert(stage_name, StageCheckpoint::new_with_block_number(block_number))?
         }
 
         Ok(())

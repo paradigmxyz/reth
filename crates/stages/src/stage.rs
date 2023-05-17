@@ -24,11 +24,8 @@ impl ExecInput {
     }
 
     /// Return the progress of the previous stage or default.
-    pub fn previous_stage_checkpoint(&self) -> BlockNumber {
-        self.previous_stage
-            .as_ref()
-            .map(|(_, checkpoint)| checkpoint.block_number)
-            .unwrap_or_default()
+    pub fn previous_stage_checkpoint(&self) -> StageCheckpoint {
+        self.previous_stage.map(|(_, checkpoint)| checkpoint).unwrap_or_default()
     }
 
     /// Return next block range that needs to be executed.
@@ -51,7 +48,7 @@ impl ExecInput {
         let current_block = self.checkpoint.unwrap_or_default();
         // +1 is to skip present block and always start from block number 1, not 0.
         let start = current_block.block_number + 1;
-        let target = self.previous_stage_checkpoint();
+        let target = self.previous_stage_checkpoint().block_number;
 
         let end = min(target, current_block.block_number.saturating_add(threshold));
 

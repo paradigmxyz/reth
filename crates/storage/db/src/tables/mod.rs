@@ -299,7 +299,7 @@ table!(
 );
 
 table!(
-    /// Stores the highest synced block number of each stage.
+    /// Stores the highest synced block number and stage-specific checkpoint of each stage.
     ( SyncStage ) StageId | StageCheckpoint
 );
 

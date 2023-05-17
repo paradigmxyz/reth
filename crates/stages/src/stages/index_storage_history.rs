@@ -41,7 +41,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::block_number(target)))
+            return Ok(ExecOutput::done(target))
         }
 
         let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;
@@ -49,7 +49,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
         info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
-            checkpoint: StageCheckpoint::block_number(*range.end()),
+            checkpoint: StageCheckpoint::new_with_block_number(*range.end()),
             done: is_final_range,
         })
     }
@@ -66,7 +66,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
 
         info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_progress) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(unwind_progress) })
     }
 }
 
@@ -150,21 +150,33 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let input =
-            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new_with_block_number(run_to))),
+            ..Default::default()
+        };
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: 5, done: true });
+        assert_eq!(
+            out,
+            ExecOutput { checkpoint: StageCheckpoint::new_with_block_number(5), done: true }
+        );
         tx.commit().unwrap();
     }
 
     async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
-        let input = UnwindInput { checkpoint: unwind_from, unwind_to, ..Default::default() };
+        let input = UnwindInput {
+            checkpoint: StageCheckpoint::new_with_block_number(unwind_from),
+            unwind_to,
+            ..Default::default()
+        };
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.unwind(&mut tx, input).await.unwrap();
-        assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::block_number(unwind_to) });
+        assert_eq!(
+            out,
+            UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(unwind_to) }
+        );
         tx.commit().unwrap();
     }
 
@@ -223,7 +235,10 @@ mod tests {
     async fn insert_index_to_full_shard() {
         // init
         let tx = TestTransaction::default();
-        let _input = ExecInput { previous_stage: Some((PREV_STAGE_ID, 5)), ..Default::default() };
+        let _input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new_with_block_number(5))),
+            ..Default::default()
+        };
 
         // change does not matter only that account is present in changeset.
         let full_list = vec![3; NUM_OF_INDICES_IN_SHARD];

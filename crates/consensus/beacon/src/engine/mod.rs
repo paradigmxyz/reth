@@ -879,7 +879,9 @@ mod tests {
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
     use reth_interfaces::test_utils::{NoopFullBlockClient, TestConsensus};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
+    use reth_primitives::{
+        ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, StageCheckpoint, H256, MAINNET,
+    };
     use reth_provider::{
         providers::BlockchainProvider, test_utils::TestExecutorFactory, ShareableDatabase,
         Transaction,
@@ -1100,7 +1102,10 @@ mod tests {
         let (consensus_engine, env) = setup_consensus_engine(
             chain_spec,
             VecDeque::from([
-                Ok(ExecOutput { checkpoint: 1, done: true }),
+                Ok(ExecOutput {
+                    checkpoint: StageCheckpoint::new_with_block_number(1),
+                    done: true,
+                }),
                 Err(StageError::ChannelClosed),
             ]),
             Vec::default(),
@@ -1132,7 +1137,10 @@ mod tests {
         );
         let (mut consensus_engine, env) = setup_consensus_engine(
             chain_spec,
-            VecDeque::from([Ok(ExecOutput { checkpoint: max_block, done: true })]),
+            VecDeque::from([Ok(ExecOutput {
+                checkpoint: StageCheckpoint::new_with_block_number(max_block),
+                done: true,
+            })]),
             Vec::default(),
         );
         consensus_engine.sync.set_max_block(max_block);
@@ -1174,7 +1182,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, checkpoint: 0 })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                })]),
                 Vec::default(),
             );
 
@@ -1202,14 +1213,22 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, checkpoint: 0 })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                })]),
                 Vec::default(),
             );
 
             let genesis = random_block(0, None, None, Some(0));
             let block1 = random_block(1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
-            env.db.update(|tx| FINISH.save_progress(tx, block1.number)).unwrap().unwrap();
+            env.db
+                .update(|tx| {
+                    FINISH.save_progress(tx, StageCheckpoint::new_with_block_number(block1.number))
+                })
+                .unwrap()
+                .unwrap();
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
@@ -1244,8 +1263,14 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
                 VecDeque::from([
-                    Ok(ExecOutput { done: true, checkpoint: 0 }),
-                    Ok(ExecOutput { done: true, checkpoint: 0 }),
+                    Ok(ExecOutput {
+                        done: true,
+                        checkpoint: StageCheckpoint::new_with_block_number(0),
+                    }),
+                    Ok(ExecOutput {
+                        done: true,
+                        checkpoint: StageCheckpoint::new_with_block_number(0),
+                    }),
                 ]),
                 Vec::default(),
             );
@@ -1290,7 +1315,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, checkpoint: 0 })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                })]),
                 Vec::default(),
             );
 
@@ -1324,8 +1352,14 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
                 VecDeque::from([
-                    Ok(ExecOutput { done: true, checkpoint: 0 }),
-                    Ok(ExecOutput { done: true, checkpoint: 0 }),
+                    Ok(ExecOutput {
+                        done: true,
+                        checkpoint: StageCheckpoint::new_with_block_number(0),
+                    }),
+                    Ok(ExecOutput {
+                        done: true,
+                        checkpoint: StageCheckpoint::new_with_block_number(0),
+                    }),
                 ]),
                 Vec::default(),
             );
@@ -1383,7 +1417,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, checkpoint: 0 })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                })]),
                 Vec::default(),
             );
 
@@ -1413,7 +1450,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, checkpoint: 0 })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                })]),
                 Vec::default(),
             );
 
@@ -1456,7 +1496,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, checkpoint: 0 })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                })]),
                 Vec::default(),
             );
 
@@ -1510,7 +1553,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, checkpoint: 0 })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                })]),
                 Vec::from([exec_result2]),
             );
 

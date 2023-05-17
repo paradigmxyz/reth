@@ -197,7 +197,8 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         // Call execution stage
         let input = ExecInput {
-            previous_stage: last_block.map(|b| (StageId(""), StageCheckpoint::block_number(b))),
+            previous_stage: last_block
+                .map(|b| (StageId(""), StageCheckpoint::new_with_block_number(b))),
             checkpoint: None,
         };
         {
