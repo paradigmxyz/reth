@@ -90,7 +90,7 @@ These crates implement the main syncing drivers of reth.
 
 ### RPC
 
-Crates related to the RPC component (including JSONRPC and IPC transports)
+Crates related to the RPC component (including IPC transport)
 
 The RPC component mainly lives in [`rpc/rpc`](../../crates/rpc/rpc), which implements the following namespaces:
 
