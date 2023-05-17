@@ -102,7 +102,7 @@ The RPC component mainly lives in [`rpc/rpc`](../../crates/rpc/rpc), which imple
 - `txpool_`
 - `web3_`
 
-The engine API (`engine_`) lives in [`rpc/rpc-engine-api`](../../crates/rpc/rpc-engine-api) (this is *not* an interface crate despite the confusing name).
+The engine API ([`engine_`][engine-spec]) lives in [`rpc/rpc-engine-api`](../../crates/rpc/rpc-engine-api) (this is *not* an interface crate despite the confusing name).
 
 There is also a crate to easily configure an RPC server: [`rpc/rpc-builder`](../../crates/rpc/rpc-builder).
 
@@ -153,3 +153,4 @@ Small utility crates.
 [jsonrpsee]: https://github.com/paritytech/jsonrpsee/
 [tracing]: https://crates.io/crates/tracing
 [eip-1459]: https://eips.ethereum.org/EIPS/eip-1459
+[engine-spec]: https://github.com/ethereum/execution-apis/tree/main/src/engine
