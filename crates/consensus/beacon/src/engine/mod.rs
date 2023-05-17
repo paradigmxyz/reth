@@ -700,11 +700,6 @@ where
                             block_hash,
                         ));
 
-                        // Update the network sync state to `Idle`.
-                        // Handles the edge case where the pipeline is never triggered, because we
-                        // are sufficiently synced.
-                        self.sync_state_updater.update_sync_state(SyncState::Idle);
-
                         PayloadStatusEnum::Valid
                     }
                     BlockStatus::Accepted => {
