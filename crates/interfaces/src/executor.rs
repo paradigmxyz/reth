@@ -48,6 +48,11 @@ pub enum BlockExecutionError {
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
+
+    /// Only used for TestExecutor
+    #[cfg(feature = "test-utils")]
+    #[error("Execution unavailable for tests")]
+    UnavailableForTest,
 }
 
 impl BlockExecutionError {

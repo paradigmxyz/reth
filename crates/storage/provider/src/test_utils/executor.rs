@@ -13,7 +13,7 @@ impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
     ) -> Result<PostState, BlockExecutionError> {
-        self.0.clone().ok_or_else(|| panic!("TestExecutor should have a result"))
+        self.0.clone().ok_or(BlockExecutionError::UnavailableForTest)
     }
 
     fn execute_and_verify_receipt(
@@ -22,7 +22,7 @@ impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
     ) -> Result<PostState, BlockExecutionError> {
-        self.0.clone().ok_or_else(|| panic!("TestExecutor should have a result"))
+        self.0.clone().ok_or(BlockExecutionError::UnavailableForTest)
     }
 }
 
