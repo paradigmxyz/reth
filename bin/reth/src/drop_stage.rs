@@ -82,7 +82,6 @@ impl Command {
                 tool.db.update(|tx| {
                     // Clear hashed accounts
                     tx.clear::<tables::HashedAccount>()?;
-                    tx.put::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into(), Vec::new())?;
                     tx.put::<tables::SyncStage>(ACCOUNT_HASHING.0.to_string(), Default::default())?;
 
                     // Clear hashed storages
