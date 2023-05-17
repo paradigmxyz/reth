@@ -50,7 +50,8 @@ pub enum BlockExecutionError {
     MissingTotalDifficulty { hash: H256 },
 
     /// Only used for TestExecutor
-    #[cfg(feature = "test-utils")]
+    ///
+    /// Note: this is not feature gated for convenience.
     #[error("Execution unavailable for tests")]
     UnavailableForTest,
 }

@@ -126,6 +126,9 @@ where
     }
 
     /// Executes the future on a new blocking task.
+    ///
+    /// This accepts a closure that creates a new future using a clone of this type and spawns the
+    /// future onto a new task that is allowed to block.
     pub(crate) async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
     where
         C: FnOnce(Self) -> F,

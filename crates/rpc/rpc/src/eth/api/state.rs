@@ -71,18 +71,15 @@ where
         Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
     }
 
-    pub(crate) async fn storage_at(
+    pub(crate) fn storage_at(
         &self,
         address: Address,
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> EthResult<H256> {
-        self.on_blocking_task(|this| async move {
-            let state = this.state_at_block_id_or_latest(block_id)?;
-            let value = state.storage(address, index.0)?.unwrap_or_default();
-            Ok(H256(value.to_be_bytes()))
-        })
-        .await
+        let state = self.state_at_block_id_or_latest(block_id)?;
+        let value = state.storage(address, index.0)?.unwrap_or_default();
+        Ok(H256(value.to_be_bytes()))
     }
 
     #[allow(unused)]
@@ -169,7 +166,7 @@ mod tests {
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
         );
         let address = Address::random();
-        let storage = eth_api.storage_at(address, U256::ZERO.into(), None).await.unwrap();
+        let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
         assert_eq!(storage, U256::ZERO.into());
 
         // === Mock ===
@@ -190,7 +187,7 @@ mod tests {
         );
 
         let storage_key: U256 = storage_key.into();
-        let storage = eth_api.storage_at(address, storage_key.into(), None).await.unwrap();
+        let storage = eth_api.storage_at(address, storage_key.into(), None).unwrap();
         assert_eq!(storage, storage_value.into());
     }
 }
