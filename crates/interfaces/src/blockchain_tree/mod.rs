@@ -1,6 +1,6 @@
 use crate::{
     blockchain_tree::error::InsertInvalidBlockError, consensus::ConsensusError,
-    executor::Error as ExecutionError, Error,
+    executor::BlockExecutionError, Error,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,

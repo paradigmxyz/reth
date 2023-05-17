@@ -47,14 +47,9 @@ mod tests {
 
     stage_test_suite_ext!(FinishTestRunner, finish);
 
+    #[derive(Default)]
     struct FinishTestRunner {
         tx: TestTransaction,
-    }
-
-    impl Default for FinishTestRunner {
-        fn default() -> Self {
-            FinishTestRunner { tx: TestTransaction::default() }
-        }
     }
 
     impl StageTestRunner for FinishTestRunner {

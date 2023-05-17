@@ -4,7 +4,7 @@
 //! blocks, as well as a list of the blocks the chain is composed of.
 use crate::{post_state::PostState, PostStateDataRef};
 use reth_db::database::Database;
-use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
+use reth_interfaces::{consensus::Consensus, executor::BlockExecutionError, Error};
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
 };
@@ -97,10 +97,9 @@ impl AppendableChain {
         EF: ExecutorFactory,
     {
         let parent_number = block.number - 1;
-        let parent = self
-            .blocks()
-            .get(&parent_number)
-            .ok_or(ExecError::BlockNumberNotFoundInChain { block_number: parent_number })?;
+        let parent = self.blocks().get(&parent_number).ok_or(
+            BlockExecutionError::BlockNumberNotFoundInChain { block_number: parent_number },
+        )?;
 
         let mut state = self.state.clone();
 

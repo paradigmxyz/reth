@@ -30,7 +30,7 @@ pub enum StageError {
         block: BlockNumber,
         /// The underlying execution error.
         #[source]
-        error: executor::Error,
+        error: executor::BlockExecutionError,
     },
     /// Invalid checkpoint passed to the stage
     #[error("Invalid stage progress: {0}")]
