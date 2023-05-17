@@ -1,4 +1,7 @@
-use bindgen::{Formatter, callbacks::{IntKind, ParseCallbacks}};
+use bindgen::{
+    callbacks::{IntKind, ParseCallbacks},
+    Formatter,
+};
 use std::{env, path::PathBuf};
 
 #[derive(Debug)]
