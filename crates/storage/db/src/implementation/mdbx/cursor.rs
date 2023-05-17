@@ -10,7 +10,7 @@ use crate::{
     },
     table::{Compress, DupSort, Encode, Table},
     tables::utils::*,
-    Error,
+    DatabaseError,
 };
 use reth_libmdbx::{self, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 
@@ -36,7 +36,7 @@ pub struct Cursor<'tx, K: TransactionKind, T: Table> {
 #[macro_export]
 macro_rules! decode {
     ($v:expr) => {
-        $v.map_err(|e| Error::Read(e.into()))?.map(decoder::<T>).transpose()
+        $v.map_err(|e| $crate::DatabaseError::Read(e.into()))?.map(decoder::<T>).transpose()
     };
 }
 
@@ -86,14 +86,14 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     fn walk<'cursor>(
         &'cursor mut self,
         start_key: Option<T::Key>,
-    ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<Walker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
         let start = if let Some(start_key) = start_key {
             self.inner
                 .set_range(start_key.encode().as_ref())
-                .map_err(|e| Error::Read(e.into()))?
+                .map_err(|e| DatabaseError::Read(e.into()))?
                 .map(decoder::<T>)
         } else {
             self.first().transpose()
@@ -105,7 +105,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     fn walk_range<'cursor>(
         &'cursor mut self,
         range: impl RangeBounds<T::Key>,
-    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -116,7 +116,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
             }
             Bound::Unbounded => self.inner.first(),
         }
-        .map_err(|e| Error::Read(e.into()))?
+        .map_err(|e| DatabaseError::Read(e.into()))?
         .map(decoder::<T>);
 
         Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
@@ -125,7 +125,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     fn walk_back<'cursor>(
         &'cursor mut self,
         start_key: Option<T::Key>,
-    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -153,7 +153,11 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
 
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
-        self.inner.next_dup().map_err(|e| Error::Read(e.into()))?.map(decode_value::<T>).transpose()
+        self.inner
+            .next_dup()
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(decode_value::<T>)
+            .transpose()
     }
 
     fn seek_by_key_subkey(
@@ -163,7 +167,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
     ) -> ValueOnlyResult<T> {
         self.inner
             .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
-            .map_err(|e| Error::Read(e.into()))?
+            .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_one::<T>)
             .transpose()
     }
@@ -178,7 +182,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
         &'cursor mut self,
         key: Option<T::Key>,
         subkey: Option<T::SubKey>,
-    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error> {
+    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, DatabaseError> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
                 // encode key and decode it after.
@@ -186,7 +190,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
 
                 self.inner
                     .get_both_range(key.as_ref(), subkey.encode().as_ref())
-                    .map_err(|e| Error::Read(e.into()))?
+                    .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Owned(key), val)))
             }
             (Some(key), None) => {
@@ -194,7 +198,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
 
                 self.inner
                     .set(key.as_ref())
-                    .map_err(|e| Error::Read(e.into()))?
+                    .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Owned(key), val)))
             }
             (None, Some(subkey)) => {
@@ -203,11 +207,11 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
 
                     self.inner
                         .get_both_range(key.as_ref(), subkey.encode().as_ref())
-                        .map_err(|e| Error::Read(e.into()))?
+                        .map_err(|e| DatabaseError::Read(e.into()))?
                         .map(|val| decoder::<T>((Cow::Owned(key), val)))
                 } else {
                     let err_code = MDBXError::to_err_code(&MDBXError::NotFound);
-                    Some(Err(Error::Read(err_code)))
+                    Some(Err(DatabaseError::Read(err_code)))
                 }
             }
             (None, None) => self.first().transpose(),
@@ -225,40 +229,40 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     /// it will append the value to the subkey, even if the subkeys are the same. So if you want
     /// to properly upsert, you'll need to `seek_exact` & `delete_current` if the key+subkey was
     /// found, before calling `upsert`.
-    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         // Default `WriteFlags` is UPSERT
         self.inner
             .put(key.encode().as_ref(), compress_or_ref!(self, value), WriteFlags::UPSERT)
-            .map_err(|e| Error::Write(e.into()))
+            .map_err(|e| DatabaseError::Write(e.into()))
     }
 
-    fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+    fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         self.inner
             .put(key.encode().as_ref(), compress_or_ref!(self, value), WriteFlags::NO_OVERWRITE)
-            .map_err(|e| Error::Write(e.into()))
+            .map_err(|e| DatabaseError::Write(e.into()))
     }
 
     /// Appends the data to the end of the table. Consequently, the append operation
     /// will fail if the inserted key is less than the last table key
-    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         self.inner
             .put(key.encode().as_ref(), compress_or_ref!(self, value), WriteFlags::APPEND)
-            .map_err(|e| Error::Write(e.into()))
+            .map_err(|e| DatabaseError::Write(e.into()))
     }
 
-    fn delete_current(&mut self) -> Result<(), Error> {
-        self.inner.del(WriteFlags::CURRENT).map_err(|e| Error::Delete(e.into()))
+    fn delete_current(&mut self) -> Result<(), DatabaseError> {
+        self.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
     }
 }
 
 impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
-    fn delete_current_duplicates(&mut self) -> Result<(), Error> {
-        self.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| Error::Delete(e.into()))
+    fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
+        self.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
     }
 
-    fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
+    fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         self.inner
             .put(key.encode().as_ref(), compress_or_ref!(self, value), WriteFlags::APPEND_DUP)
-            .map_err(|e| Error::Write(e.into()))
+            .map_err(|e| DatabaseError::Write(e.into()))
     }
 }

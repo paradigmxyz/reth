@@ -6,7 +6,7 @@ use std::{
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
     table::{DupSort, Table},
-    Error,
+    DatabaseError,
 };
 
 /// A read-only cursor over table `T`.
@@ -40,7 +40,7 @@ pub trait DbCursorRO<'tx, T: Table> {
     fn walk<'cursor>(
         &'cursor mut self,
         start_key: Option<T::Key>,
-    ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<Walker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized;
 
@@ -48,7 +48,7 @@ pub trait DbCursorRO<'tx, T: Table> {
     fn walk_range<'cursor>(
         &'cursor mut self,
         range: impl RangeBounds<T::Key>,
-    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized;
 
@@ -59,7 +59,7 @@ pub trait DbCursorRO<'tx, T: Table> {
     fn walk_back<'cursor>(
         &'cursor mut self,
         start_key: Option<T::Key>,
-    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized;
 }
@@ -98,7 +98,7 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
         &'cursor mut self,
         key: Option<T::Key>,
         subkey: Option<T::SubKey>,
-    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized;
 }
@@ -107,31 +107,31 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
 pub trait DbCursorRW<'tx, T: Table> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
-    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
+    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
 
     /// Database operation that will insert a row at a given key. If the key is already
     /// present, the operation will result in an error.
-    fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
+    fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
 
     /// Append value to next cursor item.
     ///
     /// This is efficient for pre-sorted data. If the data is not pre-sorted, use
     /// [`DbCursorRW::insert`].
-    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
+    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
 
     /// Delete current value that cursor points to
-    fn delete_current(&mut self) -> Result<(), Error>;
+    fn delete_current(&mut self) -> Result<(), DatabaseError>;
 }
 
 /// Read Write Cursor over DupSorted table.
 pub trait DbDupCursorRW<'tx, T: DupSort> {
     /// Delete all duplicate entries for current key.
-    fn delete_current_duplicates(&mut self) -> Result<(), Error>;
+    fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError>;
 
     /// Append duplicate value.
     ///
     /// This is efficient for pre-sorted data. If the data is not pre-sorted, use `insert`.
-    fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
+    fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
 }
 
 /// Provides an iterator to `Cursor` when handling `Table`.
@@ -151,7 +151,7 @@ pub struct Walker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for Walker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<(T::Key, T::Value), Error>;
+    type Item = Result<(T::Key, T::Value), DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
@@ -179,7 +179,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
     Walker<'cursor, 'tx, T, CURSOR>
 {
     /// Delete current item that walker points to.
-    pub fn delete_current(&mut self) -> Result<(), Error> {
+    pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.cursor.delete_current()
     }
 }
@@ -212,7 +212,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
     ReverseWalker<'cursor, 'tx, T, CURSOR>
 {
     /// Delete current item that walker points to.
-    pub fn delete_current(&mut self) -> Result<(), Error> {
+    pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.cursor.delete_current()
     }
 }
@@ -220,7 +220,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for ReverseWalker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<(T::Key, T::Value), Error>;
+    type Item = Result<(T::Key, T::Value), DatabaseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
@@ -250,7 +250,7 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     for RangeWalker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<(T::Key, T::Value), Error>;
+    type Item = Result<(T::Key, T::Value), DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_done {
             return None
@@ -303,7 +303,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
     RangeWalker<'cursor, 'tx, T, CURSOR>
 {
     /// Delete current item that walker points to.
-    pub fn delete_current(&mut self) -> Result<(), Error> {
+    pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.cursor.delete_current()
     }
 }
@@ -326,7 +326,7 @@ impl<'cursor, 'tx, T: DupSort, CURSOR: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T
     DupWalker<'cursor, 'tx, T, CURSOR>
 {
     /// Delete current item that walker points to.
-    pub fn delete_current(&mut self) -> Result<(), Error> {
+    pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.cursor.delete_current()
     }
 }
@@ -334,7 +334,7 @@ impl<'cursor, 'tx, T: DupSort, CURSOR: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T
 impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> std::iter::Iterator
     for DupWalker<'cursor, 'tx, T, CURSOR>
 {
-    type Item = Result<(T::Key, T::Value), Error>;
+    type Item = Result<(T::Key, T::Value), DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {

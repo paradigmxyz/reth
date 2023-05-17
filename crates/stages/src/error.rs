@@ -1,6 +1,7 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{
-    consensus, db::Error as DbError, executor, p2p::error::DownloadError, provider::ProviderError,
+    consensus, db::DatabaseError as DbError, executor, p2p::error::DownloadError,
+    provider::ProviderError,
 };
 use reth_primitives::BlockNumber;
 use reth_provider::TransactionError;

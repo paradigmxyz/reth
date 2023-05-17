@@ -101,7 +101,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             // closure that would recover signer. Used as utility to wrap result
             let recover = |entry: Result<
                 (RawKey<TxNumber>, RawValue<TransactionSignedNoHash>),
-                reth_db::Error,
+                reth_db::DatabaseError,
             >,
                            rlp_buf: &mut Vec<u8>|
              -> Result<(u64, H160), Box<StageError>> {

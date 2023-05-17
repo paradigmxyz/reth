@@ -3,7 +3,7 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     updates::TrieUpdates,
 };
-use reth_db::{table::Key, Error};
+use reth_db::{table::Key, DatabaseError};
 use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles},
     H256,
@@ -103,7 +103,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     /// # Returns
     ///
     /// * `Result<Option<Nibbles>, Error>` - The next key in the trie or an error.
-    pub fn advance(&mut self) -> Result<Option<Nibbles>, Error> {
+    pub fn advance(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 // If we can't skip the current node and the children are in the trie,
@@ -126,7 +126,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     }
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
-    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, Error> {
+    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let key = self.key().expect("key must exist");
         let entry = if exact {
             self.cursor.seek_exact(key.hex_data.into())?
@@ -142,7 +142,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     }
 
     /// Consumes the next node in the trie, updating the stack.
-    fn consume_node(&mut self) -> Result<(), Error> {
+    fn consume_node(&mut self) -> Result<(), DatabaseError> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
@@ -174,7 +174,10 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     }
 
     /// Moves to the next sibling node in the trie, updating the stack.
-    fn move_to_next_sibling(&mut self, allow_root_to_child_nibble: bool) -> Result<(), Error> {
+    fn move_to_next_sibling(
+        &mut self,
+        allow_root_to_child_nibble: bool,
+    ) -> Result<(), DatabaseError> {
         let Some(subnode) = self.stack.last_mut() else {
             return Ok(());
         };

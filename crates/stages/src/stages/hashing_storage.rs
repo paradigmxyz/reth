@@ -420,7 +420,7 @@ mod tests {
                 let block_number = progress.number;
                 self.tx.commit(|tx| {
                     progress.body.iter().try_for_each(
-                        |transaction| -> Result<(), reth_db::Error> {
+                        |transaction| -> Result<(), reth_db::DatabaseError> {
                             tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
                             tx.put::<tables::Transactions>(
                                 next_tx_num,
@@ -543,7 +543,7 @@ mod tests {
             tid_address: BlockNumberAddress,
             entry: StorageEntry,
             hash: bool,
-        ) -> Result<(), reth_db::Error> {
+        ) -> Result<(), reth_db::DatabaseError> {
             let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
             let prev_entry =
                 match storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)? {

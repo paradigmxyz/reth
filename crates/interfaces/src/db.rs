@@ -1,6 +1,6 @@
 /// Database error type. They are using u32 to represent error code.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
-pub enum Error {
+pub enum DatabaseError {
     /// Failed to open database.
     #[error("Failed to open database: {0:?}")]
     FailedToOpen(i32),

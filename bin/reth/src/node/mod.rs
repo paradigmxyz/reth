@@ -514,7 +514,10 @@ impl Command {
         Ok(handle)
     }
 
-    fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
+    fn lookup_head(
+        &self,
+        db: Arc<Env<WriteMap>>,
+    ) -> Result<Head, reth_interfaces::db::DatabaseError> {
         db.view(|tx| {
             let head = FINISH.get_progress(tx)?.unwrap_or_default();
             let header = tx
@@ -526,7 +529,7 @@ impl Command {
             let hash = tx
                 .get::<tables::CanonicalHeaders>(head)?
                 .expect("the hash for the latest block is missing, database is corrupt");
-            Ok::<Head, reth_interfaces::db::Error>(Head {
+            Ok::<Head, reth_interfaces::db::DatabaseError>(Head {
                 number: head,
                 hash,
                 difficulty: header.difficulty,
@@ -567,7 +570,7 @@ impl Command {
         DB: Database,
         Client: HeadersClient,
     {
-        let header = db.view(|tx| -> Result<Option<Header>, reth_db::Error> {
+        let header = db.view(|tx| -> Result<Option<Header>, reth_db::DatabaseError> {
             let number = match tip {
                 BlockHashOrNumber::Hash(hash) => tx.get::<tables::HeaderNumbers>(hash)?,
                 BlockHashOrNumber::Number(number) => Some(number),

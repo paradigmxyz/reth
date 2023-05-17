@@ -17,7 +17,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     BlockNumberList,
 };
-use reth_interfaces::{db::Error as DbError, provider::ProviderError};
+use reth_interfaces::{db::DatabaseError as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
     SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered,

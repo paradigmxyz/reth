@@ -12,7 +12,7 @@ pub enum Error {
     Consensus(#[from] crate::consensus::ConsensusError),
 
     #[error(transparent)]
-    Database(#[from] crate::db::Error),
+    Database(#[from] crate::db::DatabaseError),
 
     #[error(transparent)]
     Provider(#[from] crate::provider::ProviderError),

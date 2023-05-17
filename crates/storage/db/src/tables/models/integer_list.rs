@@ -2,7 +2,7 @@
 
 use crate::{
     table::{Compress, Decompress},
-    Error,
+    DatabaseError,
 };
 use reth_primitives::IntegerList;
 
@@ -18,7 +18,7 @@ impl Compress for IntegerList {
 }
 
 impl Decompress for IntegerList {
-    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
-        IntegerList::from_bytes(value.as_ref()).map_err(|_| Error::DecodeError)
+    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
+        IntegerList::from_bytes(value.as_ref()).map_err(|_| DatabaseError::DecodeError)
     }
 }
