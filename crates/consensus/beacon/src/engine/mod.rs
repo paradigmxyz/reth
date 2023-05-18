@@ -805,9 +805,14 @@ where
                             return Some(Ok(()))
                         }
 
-                        let Some(current_state) = self.forkchoice_state else {
-                            warn!(target: "consensus::engine", "No forkchoice state available");
-                            return None
+                        let current_state = match self.forkchoice_state {
+                            Some(state) => state,
+                            None => {
+                                // This is only possible if the node was run with `debug.tip`
+                                // argument and without CL.
+                                warn!(target: "consensus::engine", "No forkchoice state available");
+                                return None
+                            }
                         };
 
                         if ctrl.is_unwind() {
