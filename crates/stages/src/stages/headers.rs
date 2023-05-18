@@ -228,10 +228,7 @@ where
                     .map(|(num, _)| num)
                     .unwrap_or_default(),
             );
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new_with_block_number(stage_progress),
-                done: true,
-            })
+            Ok(ExecOutput { checkpoint: StageCheckpoint::new(stage_progress), done: true })
         } else {
             Ok(ExecOutput { checkpoint: current_progress, done: false })
         }
@@ -251,7 +248,7 @@ where
         tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         info!(target: "sync::stages::headers", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 
@@ -464,11 +461,8 @@ mod tests {
         let mut runner = HeadersTestRunner::with_linear_downloader();
         let (stage_progress, previous_stage) = (1000, 1200);
         let input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
@@ -546,11 +540,8 @@ mod tests {
         // pick range that's larger than the configured headers batch size
         let (stage_progress, previous_stage) = (600, 1200);
         let input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);

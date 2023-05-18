@@ -45,7 +45,7 @@ async fn unwind_and_copy<DB: Database>(
             &mut unwind_tx,
             UnwindInput {
                 unwind_to: from,
-                checkpoint: StageCheckpoint::new_with_block_number(tip_block_number),
+                checkpoint: StageCheckpoint::new(tip_block_number),
                 bad_block: None,
             },
         )
@@ -79,11 +79,8 @@ async fn dry_run(
             .execute(
                 &mut tx,
                 reth_stages::ExecInput {
-                    previous_stage: Some((
-                        StageId("Another"),
-                        StageCheckpoint::new_with_block_number(to),
-                    )),
-                    checkpoint: Some(StageCheckpoint::new_with_block_number(from)),
+                    previous_stage: Some((StageId("Another"), StageCheckpoint::new(to))),
+                    checkpoint: Some(StageCheckpoint::new(from)),
                 },
             )
             .await?

@@ -4,7 +4,11 @@
 //! blocks, as well as a list of the blocks the chain is composed of.
 use crate::{post_state::PostState, PostStateDataRef};
 use reth_db::database::Database;
-use reth_interfaces::{consensus::Consensus, executor::BlockExecutionError, Error};
+use reth_interfaces::{
+    blockchain_tree::error::{BlockchainTreeError, InsertBlockError},
+    consensus::Consensus,
+    Error,
+};
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
 };
@@ -55,12 +59,12 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of the canonical chain.
     pub fn new_canonical_fork<DB, C, EF>(
-        block: &SealedBlockWithSenders,
+        block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, InsertBlockError>
     where
         DB: Database,
         C: Consensus,
@@ -77,29 +81,33 @@ impl AppendableChain {
         };
 
         let changeset =
-            Self::validate_and_execute(block.clone(), parent_header, state_provider, externals)?;
+            Self::validate_and_execute(block.clone(), parent_header, state_provider, externals)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
-        Ok(Self { chain: Chain::new(vec![(block.clone(), changeset)]) })
+        Ok(Self { chain: Chain::new(vec![(block, changeset)]) })
     }
 
     /// Create a new chain that forks off of an existing sidechain.
-    pub fn new_chain_fork<DB, C, EF>(
+    pub(crate) fn new_chain_fork<DB, C, EF>(
         &self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, InsertBlockError>
     where
         DB: Database,
         C: Consensus,
         EF: ExecutorFactory,
     {
         let parent_number = block.number - 1;
-        let parent = self.blocks().get(&parent_number).ok_or(
-            BlockExecutionError::BlockNumberNotFoundInChain { block_number: parent_number },
-        )?;
+        let parent = self.blocks().get(&parent_number).ok_or_else(|| {
+            InsertBlockError::tree_error(
+                BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
+                block.block.clone(),
+            )
+        })?;
 
         let mut state = self.state.clone();
 
@@ -114,7 +122,8 @@ impl AppendableChain {
             canonical_fork,
         };
         let block_state =
-            Self::validate_and_execute(block.clone(), parent, post_state_data, externals)?;
+            Self::validate_and_execute(block.clone(), parent, post_state_data, externals)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         state.extend(block_state);
 
         let chain =
@@ -144,7 +153,7 @@ impl AppendableChain {
         let unseal = unseal.unseal();
 
         //get state provider.
-        let db = externals.shareable_db();
+        let db = externals.database();
         // TODO, small perf can check if caonical fork is the latest state.
         let canonical_fork = post_state_data_provider.canonical_fork();
         let history_provider = db.history_by_block_number(canonical_fork.number)?;
@@ -164,7 +173,7 @@ impl AppendableChain {
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<(), Error>
+    ) -> Result<(), InsertBlockError>
     where
         DB: Database,
         C: Consensus,
@@ -180,7 +189,8 @@ impl AppendableChain {
         };
 
         let block_state =
-            Self::validate_and_execute(block.clone(), parent_block, post_state_data, externals)?;
+            Self::validate_and_execute(block.clone(), parent_block, post_state_data, externals)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         self.state.extend(block_state);
         self.blocks.insert(block.number, block);
         Ok(())

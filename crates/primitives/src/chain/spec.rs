@@ -397,6 +397,16 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable the Paris hardfork at the given TTD.
+    ///
+    /// Does not set the merge netsplit block.
+    pub fn paris_at_ttd(self, ttd: U256) -> Self {
+        self.with_fork(
+            Hardfork::Paris,
+            ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
+        )
+    }
+
     /// Enable Frontier at genesis.
     pub fn frontier_activated(mut self) -> Self {
         self.hardforks.insert(Hardfork::Frontier, ForkCondition::Block(0));

@@ -1,8 +1,10 @@
-use crate::{executor::BlockExecutionError, Error};
+use crate::{blockchain_tree::error::InsertBlockError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use std::collections::{BTreeMap, HashSet};
+
+pub mod error;
 
 /// * [BlockchainTreeEngine::insert_block]: Connect block to chain, execute it and if valid insert
 ///   block inside tree.
@@ -13,22 +15,29 @@ use std::collections::{BTreeMap, HashSet};
 ///   blocks from p2p. Do reorg in tables if canonical chain if needed.
 pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Recover senders and call [`BlockchainTreeEngine::insert_block`].
-    fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
-        let block = block.seal_with_senders().ok_or(BlockExecutionError::SenderRecoveryError)?;
-        self.insert_block(block)
+    fn insert_block_without_senders(
+        &self,
+        block: SealedBlock,
+    ) -> Result<BlockStatus, InsertBlockError> {
+        match block.try_seal_with_senders() {
+            Ok(block) => self.insert_block(block),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
+        }
     }
 
     /// Recover senders and call [`BlockchainTreeEngine::buffer_block`].
-    fn buffer_block_without_sender(&self, block: SealedBlock) -> Result<(), Error> {
-        let block = block.seal_with_senders().ok_or(BlockExecutionError::SenderRecoveryError)?;
-        self.buffer_block(block)
+    fn buffer_block_without_sender(&self, block: SealedBlock) -> Result<(), InsertBlockError> {
+        match block.try_seal_with_senders() {
+            Ok(block) => self.buffer_block(block),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
+        }
     }
 
-    /// buffer block with senders
-    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), Error>;
+    /// Buffer block with senders
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError>;
 
     /// Insert block with senders
-    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, Error>;
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     fn finalize_block(&self, finalized_block: BlockNumber);
@@ -101,6 +110,11 @@ pub trait BlockchainTreeViewer: Send + Sync {
     ///
     /// Caution: This will not return blocks from the canonical chain.
     fn block_by_hash(&self, hash: BlockHash) -> Option<SealedBlock>;
+
+    /// Returns true if the tree contains the block with matching hash.
+    fn contains(&self, hash: BlockHash) -> bool {
+        self.block_by_hash(hash).is_some()
+    }
 
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;

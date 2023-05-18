@@ -76,7 +76,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         if range.is_empty() {
             let (from, to) = range.into_inner();
             info!(target: "sync::stages::bodies", from, "Target block already reached");
-            return Ok(ExecOutput::done(StageCheckpoint::new_with_block_number(to)))
+            return Ok(ExecOutput::done(StageCheckpoint::new(to)))
         }
 
         // Update the header range on the downloader
@@ -157,7 +157,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // - We reached our target and the target was not limited by the batch size of the stage
         let done = highest_block == to_block;
         info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, is_final_range = done, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new_with_block_number(highest_block), done })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(highest_block), done })
     }
 
     /// Unwind the stage.
@@ -210,7 +210,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         }
 
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 
@@ -234,11 +234,8 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -267,11 +264,8 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -302,11 +296,8 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -325,10 +316,7 @@ mod tests {
 
         // Execute again on top of the previous run
         let input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(first_run_checkpoint),
         };
         let rx = runner.execute(input);
@@ -354,11 +342,8 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 

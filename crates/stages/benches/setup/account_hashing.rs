@@ -36,12 +36,12 @@ fn find_stage_range(db: &Path) -> StageRange {
         .view(|tx| {
             let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let from = cursor.first()?.unwrap().0;
-            let to = StageCheckpoint::new_with_block_number(cursor.last()?.unwrap().0);
+            let to = StageCheckpoint::new(cursor.last()?.unwrap().0);
 
             stage_range = Some((
                 ExecInput {
                     previous_stage: Some((StageId("Another"), to)),
-                    checkpoint: Some(StageCheckpoint::new_with_block_number(from)),
+                    checkpoint: Some(StageCheckpoint::new(from)),
                 },
                 UnwindInput { unwind_to: from, checkpoint: to, bad_block: None },
             ));
@@ -70,10 +70,7 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         path,
         (
             ExecInput {
-                previous_stage: Some((
-                    StageId("Another"),
-                    StageCheckpoint::new_with_block_number(num_blocks),
-                )),
+                previous_stage: Some((StageId("Another"), StageCheckpoint::new(num_blocks))),
                 ..Default::default()
             },
             UnwindInput::default(),
