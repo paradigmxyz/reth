@@ -434,6 +434,7 @@ pub fn commit_state_changes<DB>(
                     entry.account_state = AccountState::NotExisting; // we will promote account state down the road
                     let new_account = to_reth_acc(&entry.info);
 
+                    #[allow(clippy::nonminimal_bool)]
                     // If account was touched before state clear EIP, create it.
                     if !has_state_clear_eip ||
                         // If account was touched after state clear EIP, create it only if it is not empty.
