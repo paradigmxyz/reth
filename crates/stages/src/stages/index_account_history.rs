@@ -1,5 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
+use reth_primitives::StageCheckpoint;
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use tracing::*;
@@ -39,7 +40,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
-            return Ok(ExecOutput::done(*range.end()))
+            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
         }
 
         let indices = tx.get_account_transition_ids_from_changeset(range.clone())?;
@@ -47,7 +48,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { stage_progress: *range.end(), done: is_final_range })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
     }
 
     /// Unwind the stage.
@@ -63,7 +64,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         // from HistoryIndex higher than that number.
-        Ok(UnwindOutput { stage_progress: unwind_progress })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
 }
 
@@ -136,21 +137,27 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let input =
-            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(run_to))),
+            ..Default::default()
+        };
         let mut stage = IndexAccountHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
-        assert_eq!(out, ExecOutput { stage_progress: 5, done: true });
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
         tx.commit().unwrap();
     }
 
     async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
-        let input = UnwindInput { stage_progress: unwind_from, unwind_to, ..Default::default() };
+        let input = UnwindInput {
+            checkpoint: StageCheckpoint::new(unwind_from),
+            unwind_to,
+            ..Default::default()
+        };
         let mut stage = IndexAccountHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.unwind(&mut tx, input).await.unwrap();
-        assert_eq!(out, UnwindOutput { stage_progress: unwind_to });
+        assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
         tx.commit().unwrap();
     }
 

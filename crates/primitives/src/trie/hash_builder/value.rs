@@ -42,7 +42,7 @@ impl Compact for HashBuilderValue {
                 let (bytes, buf) = Vec::from_compact(&buf[1..], 0);
                 (Self::Bytes(bytes), buf)
             }
-            _ => panic!("Invalid hash builder value"),
+            _ => unreachable!("Junk data in database: unknown HashBuilderValue variant"),
         }
     }
 }
