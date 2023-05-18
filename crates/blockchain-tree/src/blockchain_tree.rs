@@ -283,7 +283,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // if not found, check if the parent can be found inside canonical chain.
-        if self.is_block_hash_canonical(&parent.hash)? {
+        if self
+            .is_block_hash_canonical(&parent.hash)
+            .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
+        {
             return self.try_append_canonical_chain(block, parent)
         }
 
@@ -763,7 +766,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // the db, then it is not canonical.
         if !self.block_indices.is_block_hash_canonical(hash) &&
             (self.block_by_hash(*hash).is_some() ||
-                self.externals.shareable_db().header(hash)?.is_none())
+                self.externals.database().header(hash)?.is_none())
         {
             return Ok(false)
         }
