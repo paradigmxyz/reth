@@ -875,7 +875,8 @@ where
                                 Ok(Some(block)) => block,
                                 Ok(None) => {
                                     return Some(Err(BeaconConsensusEngineError::Common(
-                                        ProviderError::CanonicalHeader { block_number: max_block }.into(),
+                                        ProviderError::CanonicalHeader { block_number: max_block }
+                                            .into(),
                                     )))
                                 }
                                 Err(error) => return Some(Err(error.into())),
