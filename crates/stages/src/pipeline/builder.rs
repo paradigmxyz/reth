@@ -1,6 +1,5 @@
 use crate::{pipeline::BoxedStage, Pipeline, Stage, StageId, StageSet};
 use reth_db::database::Database;
-use reth_interfaces::sync::{NoopSyncStateUpdate, SyncStateUpdater};
 use reth_primitives::{BlockNumber, H256};
 use tokio::sync::watch;
 
@@ -14,8 +13,6 @@ where
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    /// Used for emitting updates about whether the pipeline is running or not.
-    sync_state_updater: Box<dyn SyncStateUpdater>,
     /// A receiver for the current chain tip to sync to
     ///
     /// Note: this is only used for debugging purposes.
@@ -63,22 +60,15 @@ where
         self
     }
 
-    /// Set a [SyncStateUpdater].
-    pub fn with_sync_state_updater<U: SyncStateUpdater>(mut self, updater: U) -> Self {
-        self.sync_state_updater = Box::new(updater);
-        self
-    }
-
     /// Builds the final [`Pipeline`] using the given database.
     ///
     /// Note: it's expected that this is either an [Arc](std::sync::Arc) or an Arc wrapper type.
     pub fn build(self, db: DB) -> Pipeline<DB> {
-        let Self { stages, max_block, sync_state_updater, tip_tx } = self;
+        let Self { stages, max_block, tip_tx } = self;
         Pipeline {
             db,
             stages,
             max_block,
-            sync_state_updater,
             tip_tx,
             listeners: Default::default(),
             progress: Default::default(),
@@ -89,12 +79,7 @@ where
 
 impl<DB: Database> Default for PipelineBuilder<DB> {
     fn default() -> Self {
-        Self {
-            stages: Vec::new(),
-            max_block: None,
-            sync_state_updater: Box::<NoopSyncStateUpdate>::default(),
-            tip_tx: None,
-        }
+        Self { stages: Vec::new(), max_block: None, tip_tx: None }
     }
 }
 
@@ -103,7 +88,6 @@ impl<DB: Database> std::fmt::Debug for PipelineBuilder<DB> {
         f.debug_struct("PipelineBuilder")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
-            .field("sync_state_updater", &self.sync_state_updater)
             .finish()
     }
 }

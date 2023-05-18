@@ -19,7 +19,7 @@ tokio-util = { version = "0.7.4", features = ["codec"] }
 pin-project = "1.0"
 
 educe = "0.4.19"
-tracing = "0.1.37"
+tracing = { workspace = true }
 
 # HeaderBytes
 generic-array = "0.14.6"

@@ -4,11 +4,11 @@ use super::*;
 use convert_case::{Case, Casing};
 
 /// Generates code to implement the `Compact` trait for a data type.
-pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
+pub fn generate_from_to(ident: &Ident, fields: &FieldList, is_zstd: bool) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
-    let to_compact = generate_to_compact(fields, ident);
-    let from_compact = generate_from_compact(fields, ident);
+    let to_compact = generate_to_compact(fields, ident, is_zstd);
+    let from_compact = generate_from_compact(fields, ident, is_zstd);
 
     let snake_case_ident = ident.to_string().to_case(Case::Snake);
 
@@ -43,15 +43,14 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
 
             fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
                 let (flags, mut buf) = #flags::from(buf);
-                #(#from_compact)*
-                (obj, buf)
+                #from_compact
             }
         }
     }
 }
 
 /// Generates code to implement the `Compact` trait method `to_compact`.
-fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
+fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> TokenStream2 {
     let mut lines = vec![];
     let mut known_types = vec!["H256", "H160", "Address", "Bloom", "Vec", "TxHash"];
 
@@ -102,11 +101,48 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
         }
     }
 
-    lines
+    // If the type has compression support, then check the `__zstd` flag. Otherwise, use the default
+    // code branch. However, even if it's a type with compression support, not all values are
+    // to be compressed (thus the zstd flag). Ideally only the bigger ones.
+    is_zstd
+        .then(|| {
+            let decompressor = format_ident!("{}_DECOMPRESSOR", ident.to_string().to_uppercase());
+            quote! {
+                if flags.__zstd() != 0 {
+                    #decompressor.with(|decompressor| {
+                        let mut decompressor = decompressor.borrow_mut();
+
+                        let mut tmp: Vec<u8> = Vec::with_capacity(300);
+
+                        while let Err(err) = decompressor.decompress_to_buffer(&buf[..], &mut tmp) {
+                            let err = err.to_string();
+                            if !err.contains("Destination buffer is too small") {
+                                panic!("Failed to decompress: {}", err);
+                            }
+                            tmp.reserve(tmp.capacity() + 10_000);
+                        }
+                        let mut original_buf = buf;
+
+                        let mut buf: &[u8] = tmp.as_slice();
+                        #(#lines)*
+                        (obj, original_buf)
+                    })
+                } else {
+                    #(#lines)*
+                    (obj, buf)
+                }
+            }
+        })
+        .unwrap_or_else(|| {
+            quote! {
+                #(#lines)*
+                (obj, buf)
+            }
+        })
 }
 
 /// Generates code to implement the `Compact` trait method `from_compact`.
-fn generate_to_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
+fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<TokenStream2> {
     let mut lines = vec![quote! {
         let mut buffer = bytes::BytesMut::new();
     }];
@@ -125,13 +161,45 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
         lines.append(&mut StructHandler::new(fields).generate_to());
     }
 
+    // Just because a type supports compression, doesn't mean all its values are to be compressed.
+    // We skip the smaller ones, and thus require a flag `__zstd` to specify if this value is
+    // compressed or not.
+    if is_zstd {
+        lines.push(quote! {
+            let mut zstd = buffer.len() > 7;
+            if zstd {
+                flags.set___zstd(1);
+            }
+        });
+    }
+
     // Places the flag bits.
     lines.push(quote! {
         let flags = flags.into_bytes();
         total_len += flags.len() + buffer.len();
         buf.put_slice(&flags);
-        buf.put(buffer);
     });
+
+    if is_zstd {
+        let compressor = format_ident!("{}_COMPRESSOR", ident.to_string().to_uppercase());
+
+        lines.push(quote! {
+            if zstd {
+                #compressor.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+
+                    let compressed = compressor.compress(&buffer).expect("Failed to compress.");
+                    buf.put(compressed.as_slice());
+                });
+            } else {
+                buf.put(buffer);
+            }
+        });
+    } else {
+        lines.push(quote! {
+            buf.put(buffer);
+        })
+    }
 
     lines
 }

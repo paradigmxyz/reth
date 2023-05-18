@@ -1,10 +1,10 @@
 use crate::{EngineApiError, EngineApiMessageVersion, EngineApiResult};
 use async_trait::async_trait;
-use jsonrpsee_core::RpcResult as Result;
+use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
-use reth_primitives::{BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, U64};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, U64};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
@@ -167,10 +167,12 @@ where
         }
 
         let mut result = Vec::with_capacity(count as usize);
-        for num in start..start + count {
+
+        let end = start.saturating_add(count);
+        for num in start..end {
             let block = self
                 .client
-                .block(BlockId::Number(num.into()))
+                .block(BlockHashOrNumber::Number(num))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
             result.push(block.map(Into::into));
         }
@@ -192,7 +194,7 @@ where
         for hash in hashes {
             let block = self
                 .client
-                .block(BlockId::Hash(hash.into()))
+                .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
             result.push(block.map(Into::into));
         }
@@ -296,14 +298,14 @@ where
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
-    async fn new_payload_v1(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
+    async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::eth", "Serving engine_newPayloadV1");
         Ok(EngineApi::new_payload_v1(self, payload).await?)
     }
 
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
-    async fn new_payload_v2(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
+    async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::eth", "Serving engine_newPayloadV1");
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
@@ -316,7 +318,7 @@ where
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated> {
+    ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::eth", "Serving engine_forkchoiceUpdatedV1");
         Ok(EngineApi::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await?)
     }
@@ -327,7 +329,7 @@ where
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated> {
+    ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::eth", "Serving engine_forkchoiceUpdatedV2");
         Ok(EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await?)
     }
@@ -343,7 +345,7 @@ where
     ///
     /// Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> Result<ExecutionPayload> {
+    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayload> {
         trace!(target: "rpc::eth", "Serving engine_getPayloadV1");
         Ok(EngineApi::get_payload_v1(self, payload_id).await?)
     }
@@ -357,7 +359,7 @@ where
     ///
     /// Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> Result<ExecutionPayloadEnvelope> {
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
         trace!(target: "rpc::eth", "Serving engine_getPayloadV2");
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
     }
@@ -367,7 +369,7 @@ where
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
-    ) -> Result<ExecutionPayloadBodies> {
+    ) -> RpcResult<ExecutionPayloadBodies> {
         trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
         Ok(EngineApi::get_payload_bodies_by_hash(self, block_hashes)?)
     }
@@ -378,7 +380,7 @@ where
         &self,
         start: U64,
         count: U64,
-    ) -> Result<ExecutionPayloadBodies> {
+    ) -> RpcResult<ExecutionPayloadBodies> {
         trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
         Ok(EngineApi::get_payload_bodies_by_range(self, start.as_u64(), count.as_u64())?)
     }
@@ -388,14 +390,14 @@ where
     async fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
-    ) -> Result<TransitionConfiguration> {
+    ) -> RpcResult<TransitionConfiguration> {
         trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
         Ok(EngineApi::exchange_transition_configuration(self, config)?)
     }
 
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
-    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> Result<Vec<String>> {
+    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
         Ok(CAPABILITIES.into_iter().map(str::to_owned).collect())
     }
 }

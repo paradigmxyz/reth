@@ -43,8 +43,11 @@ members = [
     "crates/transaction-pool",
     "crates/trie",
 ]
-exclude = ["crate-template"]
 default-members = ["bin/reth"]
+
+# Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
+# https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
+resolver = "2"
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
@@ -60,3 +63,7 @@ incremental = false
 [patch.crates-io]
 # patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
 ruint = { git = "https://github.com/paradigmxyz/uint" }
+
+
+[workspace.dependencies]
+tracing = "^0.1.0"

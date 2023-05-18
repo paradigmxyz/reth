@@ -36,7 +36,7 @@ reth-metrics-derive = { path = "../metrics/metrics-derive" }
 # misc
 aquamarine = "0.3.0"
 thiserror = "1.0"
-tracing = "0.1"
+tracing = { workspace = true }
 serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags = "1.3"

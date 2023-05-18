@@ -72,12 +72,12 @@ where
     type AccountCursor = HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>> where Self: 'a ;
     type StorageCursor = HashedPostStateStorageCursor<'b, <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>> where Self: 'a;
 
-    fn hashed_account_cursor(&'a self) -> Result<Self::AccountCursor, reth_db::Error> {
+    fn hashed_account_cursor(&'a self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         let cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
         Ok(HashedPostStateAccountCursor { post_state: self.post_state, cursor, last_account: None })
     }
 
-    fn hashed_storage_cursor(&'a self) -> Result<Self::StorageCursor, reth_db::Error> {
+    fn hashed_storage_cursor(&'a self) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
         let cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
         Ok(HashedPostStateStorageCursor {
             post_state: self.post_state,
@@ -109,7 +109,7 @@ where
         &self,
         post_state_item: Option<(H256, Account)>,
         db_item: Option<(H256, Account)>,
-    ) -> Result<Option<(H256, Account)>, reth_db::Error> {
+    ) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
         let result = match (post_state_item, db_item) {
             // If both are not empty, return the smallest of the two
             // Post state is given precedence if keys are equal
@@ -137,7 +137,7 @@ impl<'b, 'tx, C> HashedAccountCursor for HashedPostStateAccountCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedAccount>,
 {
-    fn seek(&mut self, key: H256) -> Result<Option<(H256, Account)>, reth_db::Error> {
+    fn seek(&mut self, key: H256) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
         self.last_account = None;
 
         // Attempt to find the account in poststate.
@@ -171,7 +171,7 @@ where
         Ok(result)
     }
 
-    fn next(&mut self) -> Result<Option<(H256, Account)>, reth_db::Error> {
+    fn next(&mut self) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
         let last_account = match self.last_account.as_ref() {
             Some(account) => account,
             None => return Ok(None), // no previous entry was found
@@ -221,7 +221,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
         &self,
         post_state_item: Option<(&H256, &U256)>,
         db_item: Option<StorageEntry>,
-    ) -> Result<Option<StorageEntry>, reth_db::Error> {
+    ) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
         let result = match (post_state_item, db_item) {
             // If both are not empty, return the smallest of the two
             // Post state is given precedence if keys are equal
@@ -249,7 +249,7 @@ impl<'b, 'tx, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedStorage> + DbDupCursorRO<'tx, tables::HashedStorage>,
 {
-    fn is_empty(&mut self, key: H256) -> Result<bool, reth_db::Error> {
+    fn is_empty(&mut self, key: H256) -> Result<bool, reth_db::DatabaseError> {
         let is_empty = match self.post_state.storages.get(&key) {
             Some(storage) => storage.wiped && storage.storage.is_empty(),
             None => self.cursor.seek_exact(key)?.is_none(),
@@ -257,7 +257,11 @@ where
         Ok(is_empty)
     }
 
-    fn seek(&mut self, key: H256, subkey: H256) -> Result<Option<StorageEntry>, reth_db::Error> {
+    fn seek(
+        &mut self,
+        key: H256,
+        subkey: H256,
+    ) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
         self.last_slot = None;
         self.account = Some(key);
 
@@ -289,7 +293,7 @@ where
         Ok(result)
     }
 
-    fn next(&mut self) -> Result<Option<StorageEntry>, reth_db::Error> {
+    fn next(&mut self) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
         let account = self.account.expect("`seek` must be called first");
 
         let last_slot = match self.last_slot.as_ref() {

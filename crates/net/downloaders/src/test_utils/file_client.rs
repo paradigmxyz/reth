@@ -8,7 +8,7 @@ use reth_interfaces::{
         headers::client::{HeadersClient, HeadersFut, HeadersRequest},
         priority::Priority,
     },
-    sync::{SyncState, SyncStateProvider, SyncStateUpdater},
+    sync::{NetworkSyncUpdater, SyncState, SyncStateProvider},
 };
 use reth_primitives::{
     Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
@@ -54,9 +54,6 @@ pub struct FileClient {
 
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, BlockBody>,
-
-    /// Represents if we are currently syncing.
-    is_syncing: Arc<AtomicBool>,
 }
 
 /// An error that can occur when constructing and using a [`FileClient`](FileClient).
@@ -114,7 +111,7 @@ impl FileClient {
 
         trace!(blocks = headers.len(), "Initialized file client");
 
-        Ok(Self { headers, hash_to_number, bodies, is_syncing: Arc::new(Default::default()) })
+        Ok(Self { headers, hash_to_number, bodies })
     }
 
     /// Get the tip hash of the chain.
@@ -244,19 +241,6 @@ impl DownloadClient for FileClient {
     fn num_connected_peers(&self) -> usize {
         // no such thing as connected peers when we are just using a file
         1
-    }
-}
-
-impl SyncStateProvider for FileClient {
-    fn is_syncing(&self) -> bool {
-        self.is_syncing.load(Ordering::Relaxed)
-    }
-}
-
-impl SyncStateUpdater for FileClient {
-    fn update_sync_state(&self, state: SyncState) {
-        let is_syncing = state.is_syncing();
-        self.is_syncing.store(is_syncing, Ordering::Relaxed)
     }
 }
 

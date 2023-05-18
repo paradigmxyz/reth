@@ -5,7 +5,7 @@ use crate::{
         download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
-            client::{HeadersClient, HeadersRequest, StatusUpdater},
+            client::{HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
@@ -278,29 +278,6 @@ impl TestConsensus {
     /// Update the validation flag.
     pub fn set_fail_validation(&self, val: bool) {
         self.fail_validation.store(val, Ordering::SeqCst)
-    }
-}
-
-/// Status updater for testing.
-///
-/// [`TestStatusUpdater::new()`] creates a new [`TestStatusUpdater`] that is **not** shareable. This
-/// struct wraps the sender side of a [`tokio::sync::watch`] channel. The receiving side of the
-/// channel (which is shareable by cloning it) is also returned.
-#[derive(Debug)]
-pub struct TestStatusUpdater(tokio::sync::watch::Sender<Head>);
-
-impl TestStatusUpdater {
-    /// Create a new test status updater and a receiver to listen to status updates on.
-    pub fn new() -> (Self, tokio::sync::watch::Receiver<Head>) {
-        let (tx, rx) = tokio::sync::watch::channel(Head::default());
-
-        (Self(tx), rx)
-    }
-}
-
-impl StatusUpdater for TestStatusUpdater {
-    fn update_status(&self, head: Head) {
-        self.0.send(head).expect("could not send status update");
     }
 }
 

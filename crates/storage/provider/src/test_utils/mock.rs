@@ -1,15 +1,15 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, PostState, PostStateDataProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider,
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
+    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use parking_lot::Mutex;
-use reth_interfaces::Result;
+use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
-    keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, StorageKey, StorageValue,
-    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
+    keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey,
+    StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -177,7 +177,10 @@ impl TransactionsProvider for MockEthProvider {
         unimplemented!()
     }
 
-    fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+    fn transactions_by_block(
+        &self,
+        id: BlockHashOrNumber,
+    ) -> Result<Option<Vec<TransactionSigned>>> {
         Ok(self.block(id)?.map(|b| b.body))
     }
 
@@ -206,7 +209,7 @@ impl ReceiptProvider for MockEthProvider {
         Ok(None)
     }
 
-    fn receipts_by_block(&self, _block: BlockId) -> Result<Option<Vec<Receipt>>> {
+    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
         Ok(None)
     }
 }
@@ -231,7 +234,7 @@ impl BlockHashProvider for MockEthProvider {
     }
 }
 
-impl BlockIdProvider for MockEthProvider {
+impl BlockNumProvider for MockEthProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
         let best_block_number = self.best_block_number()?;
         let lock = self.headers.lock();
@@ -239,13 +242,8 @@ impl BlockIdProvider for MockEthProvider {
         Ok(lock
             .iter()
             .find(|(_, header)| header.number == best_block_number)
-            .map(|(hash, header)| ChainInfo {
-                best_hash: *hash,
-                best_number: header.number,
-                last_finalized: None,
-                safe_finalized: None,
-            })
-            .expect("provider is empty"))
+            .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
+            .unwrap_or_default())
     }
 
     fn best_block_number(&self) -> Result<BlockNumber> {
@@ -254,7 +252,7 @@ impl BlockIdProvider for MockEthProvider {
             .iter()
             .max_by_key(|h| h.1.number)
             .map(|(_, header)| header.number)
-            .expect("provider is empty"))
+            .ok_or(ProviderError::BestBlockNotFound)?)
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
@@ -264,21 +262,30 @@ impl BlockIdProvider for MockEthProvider {
     }
 }
 
+impl BlockIdProvider for MockEthProvider {
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(None)
+    }
+
+    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(None)
+    }
+
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(None)
+    }
+}
+
 impl BlockProvider for MockEthProvider {
     fn find_block_by_hash(&self, hash: H256, _source: BlockSource) -> Result<Option<Block>> {
         self.block(hash.into())
     }
 
-    fn block(&self, id: BlockId) -> Result<Option<Block>> {
+    fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
         let lock = self.blocks.lock();
         match id {
-            BlockId::Hash(hash) => Ok(lock.get(hash.as_ref()).cloned()),
-            BlockId::Number(BlockNumberOrTag::Number(num)) => {
-                Ok(lock.values().find(|b| b.number == num).cloned())
-            }
-            _ => {
-                unreachable!("unused in network tests")
-            }
+            BlockHashOrNumber::Hash(hash) => Ok(lock.get(&hash).cloned()),
+            BlockHashOrNumber::Number(num) => Ok(lock.values().find(|b| b.number == num).cloned()),
         }
     }
 
@@ -286,8 +293,35 @@ impl BlockProvider for MockEthProvider {
         Ok(None)
     }
 
-    fn ommers(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         Ok(None)
+    }
+}
+
+impl BlockProviderIdExt for MockEthProvider {
+    fn block_by_id(&self, id: BlockId) -> Result<Option<Block>> {
+        match id {
+            BlockId::Number(num) => self.block_by_number_or_tag(num),
+            BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+        }
+    }
+
+    fn sealed_header_by_id(&self, id: BlockId) -> Result<Option<SealedHeader>> {
+        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+    }
+
+    fn header_by_id(&self, id: BlockId) -> Result<Option<Header>> {
+        match self.block_by_id(id)? {
+            None => Ok(None),
+            Some(block) => Ok(Some(block.header)),
+        }
+    }
+
+    fn ommers_by_id(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
+        match id {
+            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
+            BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),
+        }
     }
 }
 
@@ -335,7 +369,7 @@ impl EvmEnvProvider for MockEthProvider {
         &self,
         _cfg: &mut CfgEnv,
         _block_env: &mut BlockEnv,
-        _at: BlockId,
+        _at: BlockHashOrNumber,
     ) -> Result<()> {
         unimplemented!()
     }
@@ -349,7 +383,7 @@ impl EvmEnvProvider for MockEthProvider {
         unimplemented!()
     }
 
-    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockId) -> Result<()> {
+    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockHashOrNumber) -> Result<()> {
         unimplemented!()
     }
 
@@ -361,7 +395,7 @@ impl EvmEnvProvider for MockEthProvider {
         unimplemented!()
     }
 
-    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockId) -> Result<()> {
+    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockHashOrNumber) -> Result<()> {
         unimplemented!()
     }
 

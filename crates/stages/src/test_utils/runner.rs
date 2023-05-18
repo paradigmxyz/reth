@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {
     #[error("Database error occurred.")]
-    Database(#[from] reth_interfaces::db::Error),
+    Database(#[from] reth_interfaces::db::DatabaseError),
     #[error("Internal runner error occurred.")]
     Internal(#[from] Box<dyn std::error::Error>),
 }

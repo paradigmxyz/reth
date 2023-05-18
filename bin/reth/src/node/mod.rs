@@ -33,9 +33,9 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
-        headers::{client::StatusUpdater, downloader::HeaderDownloader},
+        either::EitherDownloader,
+        headers::downloader::HeaderDownloader,
     },
-    sync::SyncStateUpdater,
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
@@ -190,7 +190,7 @@ impl Command {
 
         // setup the blockchain provider
         let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
-        let blockchain_db = BlockchainProvider::new(shareable_db, blockchain_tree.clone());
+        let blockchain_db = BlockchainProvider::new(shareable_db, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             EthTransactionValidator::new(blockchain_db.clone(), Arc::clone(&self.chain)),
@@ -240,6 +240,7 @@ impl Command {
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
+        let network_client = network.fetch_client().await?;
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
@@ -281,47 +282,6 @@ impl Command {
             None => None,
         };
 
-        // Configure the pipeline
-        let mut pipeline = if self.auto_mine {
-            let (_, client, mut task) = AutoSealBuilder::new(
-                Arc::clone(&self.chain),
-                blockchain_db.clone(),
-                transaction_pool.clone(),
-                consensus_engine_tx.clone(),
-                canon_state_notification_sender,
-            )
-            .build();
-
-            let mut pipeline = self
-                .build_networked_pipeline(
-                    &mut config,
-                    network.clone(),
-                    client,
-                    Arc::clone(&consensus),
-                    db.clone(),
-                    &ctx.task_executor,
-                )
-                .await?;
-
-            let pipeline_events = pipeline.events();
-            task.set_pipeline_events(pipeline_events);
-            debug!(target: "reth::cli", "Spawning auto mine task");
-            ctx.task_executor.spawn(Box::pin(task));
-
-            pipeline
-        } else {
-            let client = network.fetch_client().await?;
-            self.build_networked_pipeline(
-                &mut config,
-                network.clone(),
-                client,
-                Arc::clone(&consensus),
-                db.clone(),
-                &ctx.task_executor,
-            )
-            .await?
-        };
-
         // configure the payload builder
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
@@ -336,12 +296,56 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
+        // Configure the pipeline
+        let (mut pipeline, client) = if self.auto_mine {
+            let (_, client, mut task) = AutoSealBuilder::new(
+                Arc::clone(&self.chain),
+                blockchain_db.clone(),
+                transaction_pool.clone(),
+                consensus_engine_tx.clone(),
+                canon_state_notification_sender,
+            )
+            .build();
+
+            let mut pipeline = self
+                .build_networked_pipeline(
+                    &mut config,
+                    client.clone(),
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            let pipeline_events = pipeline.events();
+            task.set_pipeline_events(pipeline_events);
+            debug!(target: "reth::cli", "Spawning auto mine task");
+            ctx.task_executor.spawn(Box::pin(task));
+
+            (pipeline, EitherDownloader::Left(client))
+        } else {
+            let pipeline = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network_client.clone(),
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            (pipeline, EitherDownloader::Right(network_client))
+        };
+
         let pipeline_events = pipeline.events();
+
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
-            ctx.task_executor.clone(),
+            client,
             pipeline,
-            blockchain_tree.clone(),
+            blockchain_db.clone(),
+            Box::new(ctx.task_executor.clone()),
+            Box::new(network.clone()),
             self.debug.max_block,
             self.debug.continuous,
             payload_builder.clone(),
@@ -411,7 +415,6 @@ impl Command {
     async fn build_networked_pipeline<DB, Client>(
         &self,
         config: &mut Config,
-        network: NetworkHandle,
         client: Client,
         consensus: Arc<dyn Consensus>,
         db: DB,
@@ -444,7 +447,6 @@ impl Command {
                 config,
                 header_downloader,
                 body_downloader,
-                network.clone(),
                 consensus,
                 max_block,
                 self.debug.continuous,
@@ -512,7 +514,10 @@ impl Command {
         Ok(handle)
     }
 
-    fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
+    fn lookup_head(
+        &self,
+        db: Arc<Env<WriteMap>>,
+    ) -> Result<Head, reth_interfaces::db::DatabaseError> {
         db.view(|tx| {
             let head = FINISH.get_progress(tx)?.unwrap_or_default();
             let header = tx
@@ -524,7 +529,7 @@ impl Command {
             let hash = tx
                 .get::<tables::CanonicalHeaders>(head)?
                 .expect("the hash for the latest block is missing, database is corrupt");
-            Ok::<Head, reth_interfaces::db::Error>(Head {
+            Ok::<Head, reth_interfaces::db::DatabaseError>(Head {
                 number: head,
                 hash,
                 difficulty: header.difficulty,
@@ -565,7 +570,7 @@ impl Command {
         DB: Database,
         Client: HeadersClient,
     {
-        let header = db.view(|tx| -> Result<Option<Header>, reth_db::Error> {
+        let header = db.view(|tx| -> Result<Option<Header>, reth_db::DatabaseError> {
             let number = match tip {
                 BlockHashOrNumber::Hash(hash) => tx.get::<tables::HeaderNumbers>(hash)?,
                 BlockHashOrNumber::Number(number) => Some(number),
@@ -619,13 +624,12 @@ impl Command {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn build_pipeline<DB, H, B, U>(
+    async fn build_pipeline<DB, H, B>(
         &self,
         db: DB,
         config: &Config,
         header_downloader: H,
         body_downloader: B,
-        updater: U,
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
@@ -634,7 +638,6 @@ impl Command {
         DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
-        U: SyncStateUpdater + StatusUpdater + Clone + 'static,
     {
         let stage_conf = &config.stages;
 
@@ -667,7 +670,6 @@ impl Command {
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
-            .with_sync_state_updater(updater.clone())
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
@@ -675,7 +677,6 @@ impl Command {
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
-                    updater,
                     factory.clone(),
                 )
                 .set(

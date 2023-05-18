@@ -148,8 +148,7 @@ impl ChainSpec {
     /// Get the header for the genesis block.
     pub fn genesis_header(&self) -> Header {
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        let base_fee_per_gas =
-            (self.fork(Hardfork::London).active_at_block(0)).then_some(EIP1559_INITIAL_BASE_FEE);
+        let base_fee_per_gas = self.initial_base_fee();
 
         // If shanghai is activated, initialize the header with an empty withdrawals hash, and
         // empty withdrawals list.
@@ -170,6 +169,12 @@ impl ChainSpec {
             withdrawals_root,
             ..Default::default()
         }
+    }
+
+    /// Get the initial base fee of the genesis block.
+    pub fn initial_base_fee(&self) -> Option<u64> {
+        // If London is activated at genesis, we set the initial base fee as per EIP-1559.
+        (self.fork(Hardfork::London).active_at_block(0)).then_some(EIP1559_INITIAL_BASE_FEE)
     }
 
     /// Get the hash of the genesis block.
@@ -390,6 +395,16 @@ impl ChainSpecBuilder {
     pub fn with_fork(mut self, fork: Hardfork, condition: ForkCondition) -> Self {
         self.hardforks.insert(fork, condition);
         self
+    }
+
+    /// Enable the Paris hardfork at the given TTD.
+    ///
+    /// Does not set the merge netsplit block.
+    pub fn paris_at_ttd(self, ttd: U256) -> Self {
+        self.with_fork(
+            Hardfork::Paris,
+            ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
+        )
     }
 
     /// Enable Frontier at genesis.

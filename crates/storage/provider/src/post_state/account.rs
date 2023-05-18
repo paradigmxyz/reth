@@ -18,10 +18,26 @@ pub struct AccountChanges {
 impl AccountChanges {
     /// Insert account change at specified block number. The value is **not** updated if it already
     /// exists.
-    pub fn insert(&mut self, block: BlockNumber, address: Address, account: Option<Account>) {
-        if let Entry::Vacant(entry) = self.inner.entry(block).or_default().entry(address) {
-            self.size += 1;
-            entry.insert(account);
+    pub fn insert(
+        &mut self,
+        block: BlockNumber,
+        address: Address,
+        old: Option<Account>,
+        new: Option<Account>,
+    ) {
+        match self.inner.entry(block).or_default().entry(address) {
+            Entry::Vacant(entry) => {
+                self.size += 1;
+                entry.insert(old);
+            }
+            Entry::Occupied(entry) => {
+                // If the account state is the same before and after this block, collapse the state
+                // changes.
+                if entry.get() == &new {
+                    entry.remove();
+                    self.size -= 1;
+                }
+            }
         }
     }
 

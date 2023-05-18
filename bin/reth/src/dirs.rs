@@ -190,6 +190,16 @@ impl<D: XdgPath> MaybePlatformPath<D> {
         )
     }
 
+    /// Returns true if a custom path is set
+    pub fn is_some(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Returns the path if it is set, otherwise returns `None`.
+    pub fn as_ref(&self) -> Option<&Path> {
+        self.0.as_ref().map(|p| p.as_ref())
+    }
+
     /// Returns the path if it is set, otherwise returns the default path, without any chain
     /// directory.
     pub fn unwrap_or_default(&self) -> PlatformPath<D> {

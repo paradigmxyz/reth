@@ -25,13 +25,13 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockProviderIdExt, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Client, Pool, Network, Events>(client: Client, pool: Pool, network: Network, events: Events)
 //! where
-//!     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -58,7 +58,7 @@
 //! ```
 //! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockProviderIdExt, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider};
 //! use reth_rpc::JwtSecret;
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
@@ -67,7 +67,7 @@
 //! use reth_rpc_builder::auth::AuthServerConfig;
 //! pub async fn launch<Client, Pool, Network, Events, EngineApi>(client: Client, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
 //! where
-//!     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -100,16 +100,19 @@
 use constants::*;
 use error::{RpcError, ServerKind};
 use jsonrpsee::{
-    core::server::rpc_module::Methods,
     server::{IdProvider, Server, ServerHandle},
-    RpcModule,
+    Methods, RpcModule,
 };
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{
+    BlockProvider, BlockProviderIdExt, CanonStateSubscriptions, EvmEnvProvider,
+    StateProviderFactory,
+};
 use reth_rpc::{
-    eth::cache::EthStateCache, AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
-    EthSubscriptionIdProvider, NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
+    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
+    NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -159,7 +162,7 @@ pub async fn launch<Client, Pool, Network, Tasks, Events>(
     events: Events,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -252,7 +255,7 @@ impl<Client, Pool, Network, Tasks, Events> RpcModuleBuilder<Client, Pool, Networ
 
 impl<Client, Pool, Network, Tasks, Events> RpcModuleBuilder<Client, Pool, Network, Tasks, Events>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -345,6 +348,10 @@ impl RpcModuleConfig {
     /// Convenience method to create a new [RpcModuleConfigBuilder]
     pub fn builder() -> RpcModuleConfigBuilder {
         RpcModuleConfigBuilder::default()
+    }
+    /// Returns a new RPC module config given the eth namespace config
+    pub fn new(eth: EthConfig) -> Self {
+        Self { eth }
     }
 }
 
@@ -450,7 +457,8 @@ impl RpcModuleSelection {
         config: RpcModuleConfig,
     ) -> RpcModule<()>
     where
-        Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+        Client:
+            BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
@@ -511,6 +519,16 @@ impl FromStr for RpcModuleSelection {
         let modules = s.split(',');
 
         RpcModuleSelection::try_from_selection(modules)
+    }
+}
+
+impl fmt::Display for RpcModuleSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.iter_selection().map(|s| s.to_string()).collect::<Vec<_>>().join(", ")
+        )
     }
 }
 
@@ -641,7 +659,7 @@ where
 
 impl<Client, Pool, Network, Tasks, Events> RethModuleRegistry<Client, Pool, Network, Tasks, Events>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -659,9 +677,32 @@ where
         let eth_api = self.eth_api();
         self.modules.insert(
             RethRpcModule::Debug,
-            DebugApi::new(self.client.clone(), eth_api, self.tracing_call_guard.clone())
-                .into_rpc()
-                .into(),
+            DebugApi::new(
+                self.client.clone(),
+                eth_api,
+                Box::new(self.executor.clone()),
+                self.tracing_call_guard.clone(),
+            )
+            .into_rpc()
+            .into(),
+        );
+        self
+    }
+
+    /// Register Trace Namespace
+    pub fn register_trace(&mut self) -> &mut Self {
+        let eth = self.eth_handlers();
+        self.modules.insert(
+            RethRpcModule::Trace,
+            TraceApi::new(
+                self.client.clone(),
+                eth.api.clone(),
+                eth.cache,
+                Box::new(self.executor.clone()),
+                self.tracing_call_guard.clone(),
+            )
+            .into_rpc()
+            .into(),
         );
         self
     }
@@ -736,6 +777,7 @@ where
                         RethRpcModule::Debug => DebugApi::new(
                             self.client.clone(),
                             eth_api.clone(),
+                            Box::new(self.executor.clone()),
                             self.tracing_call_guard.clone(),
                         )
                         .into_rpc()
@@ -755,6 +797,7 @@ where
                             self.client.clone(),
                             eth_api.clone(),
                             eth_cache.clone(),
+                            Box::new(self.executor.clone()),
                             self.tracing_call_guard.clone(),
                         )
                         .into_rpc()
@@ -788,6 +831,11 @@ where
                 self.config.eth.cache.clone(),
                 self.executor.clone(),
             );
+            let gas_oracle = GasPriceOracle::new(
+                self.client.clone(),
+                self.config.eth.gas_oracle.clone(),
+                cache.clone(),
+            );
             let new_canonical_blocks = self.events.canonical_state_stream();
             let c = cache.clone();
             self.executor.spawn_critical(
@@ -797,25 +845,29 @@ where
                 }),
             );
 
-            let api = EthApi::new(
+            let executor = Box::new(self.executor.clone());
+            let api = EthApi::with_spawner(
                 self.client.clone(),
                 self.pool.clone(),
                 self.network.clone(),
                 cache.clone(),
+                gas_oracle,
+                executor.clone(),
             );
             let filter = EthFilter::new(
                 self.client.clone(),
                 self.pool.clone(),
                 cache.clone(),
                 self.config.eth.max_logs_per_response,
+                executor.clone(),
             );
 
-            let pubsub = EthPubSub::new(
+            let pubsub = EthPubSub::with_spawner(
                 self.client.clone(),
                 self.pool.clone(),
                 self.events.clone(),
                 self.network.clone(),
-                cache.clone(),
+                executor,
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub };
@@ -1248,6 +1300,11 @@ pub struct TransportRpcModules<Context> {
 // === impl TransportRpcModules ===
 
 impl TransportRpcModules<()> {
+    /// Returns the [TransportRpcModuleConfig] used to configure this instance.
+    pub fn module_config(&self) -> &TransportRpcModuleConfig {
+        &self.config
+    }
+
     /// Convenience function for starting a server
     pub async fn start_server(self, builder: RpcServerConfig) -> Result<RpcServerHandle, RpcError> {
         builder.start(self).await

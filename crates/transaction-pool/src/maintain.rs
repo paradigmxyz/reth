@@ -6,7 +6,7 @@ use crate::{
 };
 use futures_util::{Stream, StreamExt};
 use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
-use reth_provider::{BlockProvider, CanonStateNotification, PostState, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, CanonStateNotification, PostState, StateProviderFactory};
 use std::{
     borrow::Borrow,
     collections::HashSet,
@@ -27,13 +27,13 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
     pool: Pool<V, T>,
     mut events: St,
 ) where
-    Client: StateProviderFactory + BlockProvider,
+    Client: StateProviderFactory + BlockProviderIdExt,
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     St: Stream<Item = CanonStateNotification> + Unpin,
 {
     // ensure the pool points to latest state
-    if let Ok(Some(latest)) = client.block(BlockNumberOrTag::Latest.into()) {
+    if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = latest.seal_slow();
         let info = BlockInfo {
             last_seen_block_hash: latest.hash,

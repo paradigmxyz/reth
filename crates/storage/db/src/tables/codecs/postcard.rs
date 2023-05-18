@@ -2,7 +2,7 @@
 
 use crate::{
     table::{Decode, Encode},
-    Error,
+    DatabaseError,
 };
 use postcard::{from_bytes, to_allocvec, to_vec};
 use reth_primitives::*;

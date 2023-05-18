@@ -95,7 +95,7 @@ impl TrieUpdates {
     }
 
     /// Flush updates all aggregated updates to the database.
-    pub fn flush<'a, 'tx, TX>(self, tx: &'a TX) -> Result<(), reth_db::Error>
+    pub fn flush<'a, 'tx, TX>(self, tx: &'a TX) -> Result<(), reth_db::DatabaseError>
     where
         TX: DbTx<'tx> + DbTxMut<'tx>,
     {

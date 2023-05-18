@@ -123,6 +123,12 @@ pub struct SealedBlock {
 }
 
 impl SealedBlock {
+    /// Create a new sealed block instance using the sealed header and block body.
+    pub fn new(header: SealedHeader, body: BlockBody) -> Self {
+        let BlockBody { transactions, ommers, withdrawals } = body;
+        Self { header, body: transactions, ommers, withdrawals }
+    }
+
     /// Header hash.
     pub fn hash(&self) -> H256 {
         self.header.hash()
@@ -180,7 +186,7 @@ impl std::ops::DerefMut for SealedBlock {
 pub struct SealedBlockWithSenders {
     /// Sealed block
     pub block: SealedBlock,
-    /// List of senders that match trasanctions from block.
+    /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
 }
 

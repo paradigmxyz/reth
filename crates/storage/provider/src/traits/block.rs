@@ -1,6 +1,10 @@
-use crate::{BlockIdProvider, HeaderProvider, ReceiptProvider, TransactionsProvider};
+use crate::{
+    BlockIdProvider, BlockNumProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
+};
 use reth_interfaces::Result;
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, Header, SealedBlock, H256};
+use reth_primitives::{
+    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, Header, SealedBlock, SealedHeader, H256,
+};
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -39,7 +43,7 @@ impl BlockSource {
 /// the database.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockProvider:
-    BlockIdProvider + HeaderProvider + TransactionsProvider + ReceiptProvider + Send + Sync
+    BlockNumProvider + HeaderProvider + TransactionsProvider + ReceiptProvider + Send + Sync
 {
     /// Tries to find in the given block source.
     ///
@@ -51,7 +55,7 @@ pub trait BlockProvider:
     /// Returns the block with given id from the database.
     ///
     /// Returns `None` if block is not found.
-    fn block(&self, id: BlockId) -> Result<Option<Block>>;
+    fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>>;
 
     /// Returns the pending block if available
     ///
@@ -62,7 +66,7 @@ pub trait BlockProvider:
     /// Returns the ommers/uncle headers of the given block from the database.
     ///
     /// Returns `None` if block is not found.
-    fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>>;
+    fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>>;
 
     /// Returns the block with matching hash from the database.
     ///
@@ -71,17 +75,72 @@ pub trait BlockProvider:
         self.block(hash.into())
     }
 
-    /// Returns the block with matching tag from the database
-    ///
-    /// Returns `None` if block is not found.
-    fn block_by_number_or_tag(&self, num: BlockNumberOrTag) -> Result<Option<Block>> {
-        self.block(num.into())
-    }
-
     /// Returns the block with matching number from database.
     ///
     /// Returns `None` if block is not found.
     fn block_by_number(&self, num: u64) -> Result<Option<Block>> {
         self.block(num.into())
     }
+}
+
+/// Trait extension for `BlockProvider`, for types that implement `BlockId` conversion.
+///
+/// The `BlockProvider` trait should be implemented on types that can retrieve a block from either
+/// a block number or hash. However, it might be desirable to fetch a block from a `BlockId` type,
+/// which can be a number, hash, or tag such as `BlockNumberOrTag::Safe`.
+///
+/// Resolving tags requires keeping track of block hashes or block numbers associated with the tag,
+/// so this trait can only be implemented for types that implement `BlockIdProvider`. The
+/// `BlockIdProvider` methods should be used to resolve `BlockId`s to block numbers or hashes, and
+/// retrieving the block should be done using the type's `BlockProvider` methods.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BlockProviderIdExt: BlockProvider + BlockIdProvider {
+    /// Returns the block with matching tag from the database
+    ///
+    /// Returns `None` if block is not found.
+    fn block_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Block>> {
+        self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.block(num.into()))
+    }
+
+    /// Returns the block with the matching `BlockId` from the database.
+    ///
+    /// Returns `None` if block is not found.
+    fn block_by_id(&self, id: BlockId) -> Result<Option<Block>>;
+
+    /// Returns the header with matching tag from the database
+    ///
+    /// Returns `None` if header is not found.
+    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Header>> {
+        self.convert_block_number(id)?
+            .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))
+    }
+
+    /// Returns the header with matching tag from the database
+    ///
+    /// Returns `None` if header is not found.
+    fn sealed_header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<SealedHeader>> {
+        self.convert_block_number(id)?
+            .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
+            .map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+    }
+
+    /// Returns the sealed header with the matching `BlockId` from the database.
+    ///
+    /// Returns `None` if header is not found.
+    fn sealed_header_by_id(&self, id: BlockId) -> Result<Option<SealedHeader>>;
+
+    /// Returns the header with the matching `BlockId` from the database.
+    ///
+    /// Returns `None` if header is not found.
+    fn header_by_id(&self, id: BlockId) -> Result<Option<Header>>;
+
+    /// Returns the ommers with the matching tag from the database.
+    fn ommers_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Vec<Header>>> {
+        self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.ommers(num.into()))
+    }
+
+    /// Returns the ommers with the matching `BlockId` from the database.
+    ///
+    /// Returns `None` if block is not found.
+    fn ommers_by_id(&self, id: BlockId) -> Result<Option<Vec<Header>>>;
 }

@@ -16,7 +16,7 @@ use reth_primitives::{
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, H256, U128, U256, U64,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
@@ -181,7 +181,7 @@ pub trait EthTransactions: Send + Sync {
 impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
@@ -249,22 +249,25 @@ where
             return Ok(Some(TransactionSource::Pool(tx)))
         }
 
-        match self.client().transaction_by_hash_with_meta(hash)? {
-            None => Ok(None),
-            Some((tx, meta)) => {
-                let transaction =
-                    tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+        self.on_blocking_task(|this| async move {
+            match this.client().transaction_by_hash_with_meta(hash)? {
+                None => Ok(None),
+                Some((tx, meta)) => {
+                    let transaction =
+                        tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-                let tx = TransactionSource::Block {
-                    transaction,
-                    index: meta.index,
-                    block_hash: meta.block_hash,
-                    block_number: meta.block_number,
-                    base_fee: meta.base_fee,
-                };
-                Ok(Some(tx))
+                    let tx = TransactionSource::Block {
+                        transaction,
+                        index: meta.index,
+                        block_hash: meta.block_hash,
+                        block_number: meta.block_number,
+                        base_fee: meta.base_fee,
+                    };
+                    Ok(Some(tx))
+                }
             }
-        }
+        })
+        .await
     }
 
     async fn transaction_by_hash_at(
@@ -312,17 +315,20 @@ where
     }
 
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
-        let (tx, meta) = match self.client().transaction_by_hash_with_meta(hash)? {
-            Some((tx, meta)) => (tx, meta),
-            None => return Ok(None),
-        };
+        self.on_blocking_task(|this| async move {
+            let (tx, meta) = match this.client().transaction_by_hash_with_meta(hash)? {
+                Some((tx, meta)) => (tx, meta),
+                None => return Ok(None),
+            };
 
-        let receipt = match self.client().receipt_by_hash(hash)? {
-            Some(recpt) => recpt,
-            None => return Ok(None),
-        };
+            let receipt = match this.client().receipt_by_hash(hash)? {
+                Some(recpt) => recpt,
+                None => return Ok(None),
+            };
 
-        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+            this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+        })
+        .await
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
@@ -534,7 +540,7 @@ where
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
     pub(crate) fn sign_request(
@@ -756,7 +762,10 @@ impl From<TransactionSource> for Transaction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::cache::EthStateCache, EthApi};
+    use crate::{
+        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        EthApi,
+    };
     use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
@@ -769,11 +778,13 @@ mod tests {
 
         let pool = testing_pool();
 
+        let cache = EthStateCache::spawn(noop_provider, Default::default());
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),
             noop_network_provider,
-            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(noop_provider, Default::default(), cache),
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

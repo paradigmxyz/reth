@@ -19,7 +19,7 @@ igd = { git = "https://github.com/stevefan1999-personal/rust-igd", features = [
 ] }
 
 # misc
-tracing = "0.1"
+tracing = { workspace = true }
 pin-project-lite = "0.2.9"
 tokio = { version = "1", features = ["time"] }
 thiserror = "1.0"

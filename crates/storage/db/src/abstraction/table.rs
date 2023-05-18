@@ -1,7 +1,7 @@
 use crate::{
     abstraction::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
-    Error,
+    DatabaseError,
 };
 
 use serde::Serialize;
@@ -34,7 +34,7 @@ pub trait Compress: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decompress: Send + Sync + Sized + Debug {
     /// Decompresses data coming from the database.
-    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, Error>;
+    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError>;
 }
 
 /// Trait that will transform the data to be saved in the DB.
@@ -49,7 +49,7 @@ pub trait Encode: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized + Debug {
     /// Decodes data coming from the database.
-    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, Error>;
+    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, DatabaseError>;
 }
 
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
@@ -96,7 +96,7 @@ pub trait DupSort: Table {
 /// Allows duplicating tables across databases
 pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
     /// Imports all table data from another transaction.
-    fn import_table<T: Table, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), Error> {
+    fn import_table<T: Table, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), DatabaseError> {
         let mut destination_cursor = self.cursor_write::<T>()?;
 
         for kv in source_tx.cursor_read::<T>()?.walk(None)? {
@@ -113,7 +113,7 @@ pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
         source_tx: &R,
         from: Option<<T as Table>::Key>,
         to: <T as Table>::Key,
-    ) -> Result<(), Error>
+    ) -> Result<(), DatabaseError>
     where
         T::Key: Default,
     {
@@ -133,7 +133,7 @@ pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
     }
 
     /// Imports all dupsort data from another transaction.
-    fn import_dupsort<T: DupSort, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), Error> {
+    fn import_dupsort<T: DupSort, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), DatabaseError> {
         let mut destination_cursor = self.cursor_dup_write::<T>()?;
         let mut cursor = source_tx.cursor_dup_read::<T>()?;
 

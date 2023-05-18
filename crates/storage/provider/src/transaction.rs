@@ -17,7 +17,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     BlockNumberList,
 };
-use reth_interfaces::{db::Error as DbError, provider::ProviderError};
+use reth_interfaces::{db::DatabaseError as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
     SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered,
@@ -140,7 +140,7 @@ where
     pub fn get_block_hash(&self, block_number: BlockNumber) -> Result<BlockHash, TransactionError> {
         let hash = self
             .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or(ProviderError::CanonicalHeader { block_number })?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
         Ok(hash)
     }
 
@@ -151,7 +151,7 @@ where
     ) -> Result<StoredBlockBodyIndices, TransactionError> {
         let body = self
             .get::<tables::BlockBodyIndices>(number)?
-            .ok_or(ProviderError::BlockBodyIndices { number })?;
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
         Ok(body)
     }
 
@@ -169,8 +169,9 @@ where
 
     /// Query the block header by number
     pub fn get_header(&self, number: BlockNumber) -> Result<Header, TransactionError> {
-        let header =
-            self.get::<tables::Headers>(number)?.ok_or(ProviderError::Header { number })?;
+        let header = self
+            .get::<tables::Headers>(number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
         Ok(header)
     }
 
@@ -178,7 +179,7 @@ where
     pub fn get_td(&self, block: BlockNumber) -> Result<U256, TransactionError> {
         let td = self
             .get::<tables::HeaderTD>(block)?
-            .ok_or(ProviderError::TotalDifficulty { number: block })?;
+            .ok_or(ProviderError::TotalDifficultyNotFound { number: block })?;
         Ok(td.into())
     }
 
@@ -496,9 +497,6 @@ where
         let new_tip = blocks.last().unwrap();
         let new_tip_number = new_tip.number;
 
-        // Write state and changesets to the database
-        state.write_to_db(self.deref_mut())?;
-
         let first_number = blocks.first().unwrap().number;
 
         let last = blocks.last().unwrap();
@@ -510,6 +508,10 @@ where
         for block in blocks {
             self.insert_block(block)?;
         }
+
+        // Write state and changesets to the database.
+        // Must be written after blocks because of the receipt lookup.
+        state.write_to_db(self.deref_mut())?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 
@@ -953,7 +955,10 @@ where
         for (block_number, block_body) in block_bodies.into_iter() {
             for _ in block_body.tx_num_range() {
                 if let Some((_, receipt)) = receipt_iter.next() {
-                    block_states.entry(block_number).or_default().add_receipt(receipt);
+                    block_states
+                        .entry(block_number)
+                        .or_default()
+                        .add_receipt(block_number, receipt);
                 }
             }
         }

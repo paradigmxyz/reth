@@ -21,7 +21,7 @@ reth-transaction-pool = { path = "../../transaction-pool" }
 futures-util = "0.3"
 tokio = { version = "1", features = ["sync", "time"] }
 tokio-stream = "0.1"
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }

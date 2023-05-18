@@ -155,7 +155,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
         let done = highest_block == to_block;
-        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, done, "Sync iteration finished");
+        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, is_final_range = done, "Stage iteration finished");
         Ok(ExecOutput { stage_progress: highest_block, done })
     }
 
@@ -165,7 +165,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
@@ -209,6 +208,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             tx.delete::<tables::BlockBodyIndices>(number, None)?;
         }
 
+        info!(target: "sync::stages::bodies", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }

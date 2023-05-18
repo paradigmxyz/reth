@@ -5,13 +5,13 @@ use thiserror::Error;
 pub enum StateRootError {
     /// Internal database error.
     #[error(transparent)]
-    DB(#[from] reth_db::Error),
+    DB(#[from] reth_db::DatabaseError),
     /// Storage root error.
     #[error(transparent)]
     StorageRootError(#[from] StorageRootError),
 }
 
-impl From<StateRootError> for reth_db::Error {
+impl From<StateRootError> for reth_db::DatabaseError {
     fn from(err: StateRootError) -> Self {
         match err {
             StateRootError::DB(err) => err,
@@ -25,5 +25,5 @@ impl From<StateRootError> for reth_db::Error {
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
-    DB(#[from] reth_db::Error),
+    DB(#[from] reth_db::DatabaseError),
 }

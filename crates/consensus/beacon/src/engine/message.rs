@@ -1,4 +1,4 @@
-use crate::{BeaconConsensusEngineEvent, BeaconEngineResult};
+use crate::{engine::error::BeaconOnNewPayloadError, BeaconConsensusEngineEvent};
 use futures::{future::Either, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::error::PayloadBuilderError;
@@ -19,6 +19,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[derive(Debug)]
 pub struct OnForkChoiceUpdated {
+    /// Tracks if this update was valid.
     is_valid_update: bool,
     /// Returns the result of the forkchoice update.
     fut: Either<futures::future::Ready<ForkChoiceUpdateResult>, PendingPayloadId>,
@@ -120,7 +121,7 @@ pub enum BeaconEngineMessage {
         /// The execution payload received by Engine API.
         payload: ExecutionPayload,
         /// The sender for returning payload status result.
-        tx: oneshot::Sender<BeaconEngineResult<PayloadStatus>>,
+        tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
@@ -129,7 +130,7 @@ pub enum BeaconEngineMessage {
         /// The payload attributes for block building.
         payload_attrs: Option<PayloadAttributes>,
         /// The sender for returning forkchoice updated result.
-        tx: oneshot::Sender<OnForkChoiceUpdated>,
+        tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
     },
     /// Add a new listener for [`BeaconEngineMessage`].
     EventListener(UnboundedSender<BeaconConsensusEngineEvent>),

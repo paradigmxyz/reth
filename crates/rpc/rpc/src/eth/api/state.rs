@@ -9,15 +9,16 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    AccountProvider, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
+    AccountProvider, BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
+    Network: Send + Sync + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
         let state = self.state_at_block_id_or_latest(block_id)?;
@@ -81,6 +82,7 @@ where
         Ok(H256(value.to_be_bytes()))
     }
 
+    #[allow(unused)]
     pub(crate) fn get_proof(
         &self,
         address: Address,
@@ -144,7 +146,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eth::cache::EthStateCache;
+    use crate::eth::{cache::EthStateCache, gas_oracle::GasPriceOracle};
     use reth_primitives::{StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_transaction_pool::test_utils::testing_pool;
@@ -155,11 +157,13 @@ mod tests {
         // === Noop ===
         let pool = testing_pool();
 
+        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
         let eth_api = EthApi::new(
             NoopProvider::default(),
             pool.clone(),
             (),
-            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -173,11 +177,13 @@ mod tests {
         let account = ExtendedAccount::new(0, U256::ZERO).extend_storage(storage);
         mock_provider.add_account(address, account);
 
+        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
         let eth_api = EthApi::new(
             mock_provider.clone(),
             pool,
             (),
-            EthStateCache::spawn(mock_provider, Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(mock_provider, Default::default(), cache),
         );
 
         let storage_key: U256 = storage_key.into();

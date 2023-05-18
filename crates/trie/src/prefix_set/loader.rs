@@ -5,7 +5,7 @@ use reth_db::{
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::DbTx,
-    Error,
+    DatabaseError,
 };
 use reth_primitives::{keccak256, trie::Nibbles, BlockNumber, StorageEntry, H256};
 use std::{collections::HashMap, ops::RangeInclusive};
@@ -29,7 +29,7 @@ where
     pub fn load(
         self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(PrefixSet, HashMap<H256, PrefixSet>), Error> {
+    ) -> Result<(PrefixSet, HashMap<H256, PrefixSet>), DatabaseError> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSet::default();
         let mut storage_prefix_set: HashMap<H256, PrefixSet> = HashMap::default();

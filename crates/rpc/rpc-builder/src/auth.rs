@@ -10,10 +10,12 @@ use jsonrpsee::{
     server::{RpcModule, ServerHandle},
 };
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
+};
 use reth_rpc::{
-    eth::cache::EthStateCache, AuthLayer, Claims, EngineEthApi, EthApi, EthFilter,
-    JwtAuthValidator, JwtSecret,
+    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -35,7 +37,8 @@ pub async fn launch<Client, Pool, Network, Tasks, EngineApi>(
     secret: JwtSecret,
 ) -> Result<AuthServerHandle, RpcError>
 where
-    Client: BlockProvider
+    Client: BlockProviderIdExt
+        + ReceiptProviderIdExt
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
@@ -48,9 +51,23 @@ where
     EngineApi: EngineApiServer,
 {
     // spawn a new cache task
-    let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor);
-    let eth_api = EthApi::new(client.clone(), pool.clone(), network, eth_cache.clone());
-    let eth_filter = EthFilter::new(client, pool, eth_cache.clone(), DEFAULT_MAX_LOGS_IN_RESPONSE);
+    let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor.clone());
+    let gas_oracle = GasPriceOracle::new(client.clone(), Default::default(), eth_cache.clone());
+    let eth_api = EthApi::with_spawner(
+        client.clone(),
+        pool.clone(),
+        network,
+        eth_cache.clone(),
+        gas_oracle,
+        Box::new(executor.clone()),
+    );
+    let eth_filter = EthFilter::new(
+        client,
+        pool,
+        eth_cache.clone(),
+        DEFAULT_MAX_LOGS_IN_RESPONSE,
+        Box::new(executor.clone()),
+    );
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 
@@ -63,7 +80,7 @@ pub async fn launch_with_eth_api<Client, Pool, Network, EngineApi>(
     secret: JwtSecret,
 ) -> Result<AuthServerHandle, RpcError>
 where
-    Client: BlockProvider
+    Client: BlockProviderIdExt
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider

@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::PostState;
-use reth_interfaces::{executor::Error as ExecError, Error};
+use reth_interfaces::{executor::BlockExecutionError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TxHash,
@@ -131,15 +131,15 @@ impl Chain {
     /// Attachment includes block number, block hash, transaction hash and transaction index.
     pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts> {
         let mut receipt_attch = Vec::new();
-        let mut receipts = self.state().receipts().iter();
         for (block_num, block) in self.blocks().iter() {
-            let block_num_hash = BlockNumHash::new(*block_num, block.hash());
+            let mut receipts = self.state.receipts(*block_num).iter();
             let mut tx_receipts = Vec::new();
             for tx in block.body.iter() {
                 if let Some(receipt) = receipts.next() {
                     tx_receipts.push((tx.hash(), receipt.clone()));
                 }
             }
+            let block_num_hash = BlockNumHash::new(*block_num, block.hash());
             receipt_attch.push(BlockReceipts { block: block_num_hash, tx_receipts });
         }
         receipt_attch
@@ -151,7 +151,7 @@ impl Chain {
     pub fn append_chain(&mut self, chain: Chain) -> Result<(), Error> {
         let chain_tip = self.tip();
         if chain_tip.hash != chain.fork_block_hash() {
-            return Err(ExecError::AppendChainDoesntConnect {
+            return Err(BlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: chain_tip.num_hash(),
                 other_chain_fork: chain.fork_block(),
             }

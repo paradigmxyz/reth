@@ -41,7 +41,17 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let decoded = super::#type_ident::decode(b).unwrap();
                     assert_eq!(field, decoded);
                     // ensure buffer is fully consumed by decode
-                    assert!(b.is_empty());
+                    assert!(b.is_empty(), "buffer was not consumed entirely");
+
+                    // malformed header check
+                    let mut decode_buf = &mut buf.as_slice();
+                    let mut header = reth_rlp::Header::decode(decode_buf).unwrap();
+                    header.payload_length+=1;
+                    let mut b = Vec::with_capacity(decode_buf.len());
+                    header.encode(&mut b);
+                    b.extend_from_slice(decode_buf);
+                    let res = super::#type_ident::decode(&mut b.as_ref());
+                    assert!(res.is_err(), "malformed header was decoded");
                 }
             });
         } else if let Ok(num) = arg.to_string().parse() {

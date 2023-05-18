@@ -52,7 +52,7 @@ reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 # misc
 auto_impl = "1"
 aquamarine = "0.3.0"
-tracing = "0.1"
+tracing = { workspace = true }
 fnv = "1.0"
 thiserror = "1.0"
 parking_lot = "0.12"

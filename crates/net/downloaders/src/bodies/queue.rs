@@ -7,7 +7,6 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
         error::DownloadResult,
-        priority::Priority,
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
@@ -55,13 +54,12 @@ where
     }
 
     /// Add new request to the queue.
-    /// Expects sorted collection of headers.
+    /// Expects a sorted list of headers.
     pub(crate) fn push_new_request(
         &mut self,
         client: Arc<B>,
         consensus: Arc<dyn Consensus>,
         request: Vec<SealedHeader>,
-        priority: Priority,
     ) {
         // Set last max requested block number
         self.last_requested_block_number = request
@@ -73,8 +71,7 @@ where
             .or(self.last_requested_block_number);
         // Create request and push into the queue.
         self.inner.push(
-            BodiesRequestFuture::new(client, consensus, priority, self.metrics.clone())
-                .with_headers(request),
+            BodiesRequestFuture::new(client, consensus, self.metrics.clone()).with_headers(request),
         )
     }
 }

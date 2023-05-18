@@ -14,14 +14,18 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio_util::sync::PollSender;
+
+/// The maximum number of [BodyDownloaderResult]s to hold in the buffer.
+pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
 #[derive(Debug)]
 #[pin_project]
 pub struct TaskDownloader {
     #[pin]
-    from_downloader: UnboundedReceiverStream<BodyDownloaderResult>,
+    from_downloader: ReceiverStream<BodyDownloaderResult>,
     to_downloader: UnboundedSender<RangeInclusive<BlockNumber>>,
 }
 
@@ -67,18 +71,18 @@ impl TaskDownloader {
         T: BodyDownloader + 'static,
         S: TaskSpawner,
     {
-        let (bodies_tx, bodies_rx) = mpsc::unbounded_channel();
+        let (bodies_tx, bodies_rx) = mpsc::channel(BODIES_TASK_BUFFER_SIZE);
         let (to_downloader, updates_rx) = mpsc::unbounded_channel();
 
         let downloader = SpawnedDownloader {
-            bodies_tx,
+            bodies_tx: PollSender::new(bodies_tx),
             updates: UnboundedReceiverStream::new(updates_rx),
             downloader,
         };
 
         spawner.spawn(downloader.boxed());
 
-        Self { from_downloader: UnboundedReceiverStream::new(bodies_rx), to_downloader }
+        Self { from_downloader: ReceiverStream::new(bodies_rx), to_downloader }
     }
 }
 
@@ -100,7 +104,7 @@ impl Stream for TaskDownloader {
 /// A [BodyDownloader] that runs on its own task
 struct SpawnedDownloader<T> {
     updates: UnboundedReceiverStream<RangeInclusive<BlockNumber>>,
-    bodies_tx: UnboundedSender<BodyDownloaderResult>,
+    bodies_tx: PollSender<BodyDownloaderResult>,
     downloader: T,
 }
 
@@ -122,21 +126,43 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                     Poll::Ready(Some(range)) => {
                         if let Err(err) = this.downloader.set_download_range(range) {
                             tracing::error!(target: "downloaders::bodies", ?err, "Failed to set download range");
-                            let _ = this.bodies_tx.send(Err(err));
+
+                            match ready!(this.bodies_tx.poll_reserve(cx)) {
+                                Ok(()) => {
+                                    if this.bodies_tx.send_item(Err(err)).is_err() {
+                                        // channel closed, this means [TaskDownloader] was dropped,
+                                        // so we can also
+                                        // exit
+                                        return Poll::Ready(())
+                                    }
+                                }
+                                Err(_) => {
+                                    // channel closed, this means [TaskDownloader] was dropped, so
+                                    // we can also exit
+                                    return Poll::Ready(())
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            match ready!(this.downloader.poll_next_unpin(cx)) {
-                Some(bodies) => {
-                    if this.bodies_tx.send(bodies).is_err() {
-                        // channel closed, this means [TaskDownloader] was dropped, so we can also
-                        // exit
-                        return Poll::Ready(())
+            match ready!(this.bodies_tx.poll_reserve(cx)) {
+                Ok(()) => match ready!(this.downloader.poll_next_unpin(cx)) {
+                    Some(bodies) => {
+                        if this.bodies_tx.send_item(bodies).is_err() {
+                            // channel closed, this means [TaskDownloader] was dropped, so we can
+                            // also exit
+                            return Poll::Ready(())
+                        }
                     }
+                    None => return Poll::Pending,
+                },
+                Err(_) => {
+                    // channel closed, this means [TaskDownloader] was dropped, so we can also
+                    // exit
+                    return Poll::Ready(())
                 }
-                None => return Poll::Pending,
             }
         }
     }

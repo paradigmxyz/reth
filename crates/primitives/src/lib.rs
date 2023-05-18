@@ -9,6 +9,7 @@
 //!
 //! This crate contains Ethereum primitive types and helper functions.
 
+pub mod abi;
 mod account;
 pub mod basefee;
 mod bits;
@@ -16,10 +17,9 @@ mod block;
 pub mod bloom;
 mod chain;
 mod checkpoints;
+mod compression;
 pub mod constants;
 pub mod contract;
-mod error;
-pub mod filter;
 mod forkid;
 mod genesis;
 mod hardfork;
@@ -51,6 +51,7 @@ pub use chain::{
     MAINNET, SEPOLIA,
 };
 pub use checkpoints::{AccountHashingCheckpoint, MerkleCheckpoint, StorageHashingCheckpoint};
+pub use compression::*;
 pub use constants::{
     EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
 };

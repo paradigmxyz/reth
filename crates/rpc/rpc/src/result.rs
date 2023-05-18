@@ -1,7 +1,7 @@
 //! Additional helpers for converting errors.
 
 use crate::eth::error::EthApiError;
-use jsonrpsee::core::{Error as RpcError, RpcResult};
+use jsonrpsee::core::RpcResult;
 use reth_interfaces::Result as RethResult;
 use reth_primitives::Block;
 use std::fmt::Display;
@@ -126,12 +126,16 @@ impl ToRpcResultExt for RethResult<Option<Block>> {
 }
 
 /// Constructs an invalid params JSON-RPC error.
-pub(crate) fn invalid_params_rpc_err(msg: impl Into<String>) -> jsonrpsee::core::Error {
+pub(crate) fn invalid_params_rpc_err(
+    msg: impl Into<String>,
+) -> jsonrpsee::types::error::ErrorObject<'static> {
     rpc_err(jsonrpsee::types::error::INVALID_PARAMS_CODE, msg, None)
 }
 
 /// Constructs an internal JSON-RPC error.
-pub(crate) fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee::core::Error {
+pub(crate) fn internal_rpc_err(
+    msg: impl Into<String>,
+) -> jsonrpsee::types::error::ErrorObject<'static> {
     rpc_err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, msg, None)
 }
 
@@ -139,42 +143,42 @@ pub(crate) fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee::core::Error
 pub(crate) fn internal_rpc_err_with_data(
     msg: impl Into<String>,
     data: &[u8],
-) -> jsonrpsee::core::Error {
+) -> jsonrpsee::types::error::ErrorObject<'static> {
     rpc_err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, msg, Some(data))
 }
 
 /// Constructs an internal JSON-RPC error with code and message
-pub(crate) fn rpc_error_with_code(code: i32, msg: impl Into<String>) -> jsonrpsee::core::Error {
+pub(crate) fn rpc_error_with_code(
+    code: i32,
+    msg: impl Into<String>,
+) -> jsonrpsee::types::error::ErrorObject<'static> {
     rpc_err(code, msg, None)
 }
 
 /// Constructs a JSON-RPC error, consisting of `code`, `message` and optional `data`.
-pub(crate) fn rpc_err(code: i32, msg: impl Into<String>, data: Option<&[u8]>) -> RpcError {
-    RpcError::Call(jsonrpsee::types::error::CallError::Custom(
-        jsonrpsee::types::error::ErrorObject::owned(
-            code,
-            msg.into(),
-            data.map(|data| {
-                jsonrpsee::core::to_json_raw_value(&format!("0x{}", hex::encode(data)))
-                    .expect("serializing String does fail")
-            }),
-        ),
-    ))
+pub(crate) fn rpc_err(
+    code: i32,
+    msg: impl Into<String>,
+    data: Option<&[u8]>,
+) -> jsonrpsee::types::error::ErrorObject<'static> {
+    jsonrpsee::types::error::ErrorObject::owned(
+        code,
+        msg.into(),
+        data.map(|data| {
+            jsonrpsee::core::to_json_raw_value(&format!("0x{}", hex::encode(data)))
+                .expect("serializing String does fail")
+        }),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     fn assert_rpc_result<Ok, Err, T: ToRpcResult<Ok, Err>>() {}
 
     fn to_reth_err<Ok>(o: Ok) -> reth_interfaces::Result<Ok> {
         Ok(o)
-    }
-
-    fn to_optional_reth_err<Ok>(o: Ok) -> reth_interfaces::Result<Option<Ok>> {
-        Ok(Some(o))
     }
 
     #[test]

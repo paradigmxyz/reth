@@ -3,10 +3,7 @@
 
 use super::EthApiSpec;
 use crate::{
-    eth::{
-        api::{EthApi, EthTransactions},
-        error::ensure_success,
-    },
+    eth::api::{EthApi, EthTransactions},
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
@@ -15,7 +12,10 @@ use reth_primitives::{
     serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
     H256, H64, U256, U64,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    BlockIdProvider, BlockProvider, BlockProviderIdExt, EvmEnvProvider, HeaderProvider,
+    StateProviderFactory,
+};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock,
@@ -30,7 +30,13 @@ impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Client: BlockProvider
+        + BlockIdProvider
+        + BlockProviderIdExt
+        + HeaderProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`
@@ -168,7 +174,7 @@ where
     /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
-        Ok(EthApi::balance(self, address, block_number)?)
+        Ok(self.on_blocking_task(|this| async move { this.balance(address, block_number) }).await?)
     }
 
     /// Handler for: `eth_getStorageAt`
@@ -179,7 +185,9 @@ where
         block_number: Option<BlockId>,
     ) -> Result<H256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        Ok(EthApi::storage_at(self, address, index, block_number)?)
+        Ok(self
+            .on_blocking_task(|this| async move { this.storage_at(address, index, block_number) })
+            .await?)
     }
 
     /// Handler for: `eth_getTransactionCount`
@@ -189,13 +197,19 @@ where
         block_number: Option<BlockId>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
-        Ok(EthApi::get_transaction_count(self, address, block_number)?)
+        Ok(self
+            .on_blocking_task(
+                |this| async move { this.get_transaction_count(address, block_number) },
+            )
+            .await?)
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
-        Ok(EthApi::get_code(self, address, block_number)?)
+        Ok(self
+            .on_blocking_task(|this| async move { this.get_code(address, block_number) })
+            .await?)
     }
 
     /// Handler for: `eth_call`
@@ -206,15 +220,11 @@ where
         state_overrides: Option<StateOverride>,
     ) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, "Serving eth_call");
-        let (res, _env) = self
-            .transact_call_at(
-                request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                state_overrides,
-            )
-            .await?;
-
-        Ok(ensure_success(res.result)?)
+        Ok(self
+            .on_blocking_task(|this| async move {
+                this.call(request, block_number, state_overrides).await
+            })
+            .await?)
     }
 
     /// Handler for: `eth_createAccessList`
@@ -224,11 +234,15 @@ where
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let access_list = self.create_access_list_at(request.clone(), block_number).await?;
-        request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_at(request, block_id).await?;
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        Ok(self
+            .on_blocking_task(|this| async move {
+                let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+                let access_list = this.create_access_list_at(request.clone(), block_number).await?;
+                request.access_list = Some(access_list.clone());
+                let gas_used = this.estimate_gas_at(request, block_id).await?;
+                Ok(AccessListWithGasUsed { access_list, gas_used })
+            })
+            .await?)
     }
 
     /// Handler for: `eth_estimateGas`
@@ -238,12 +252,15 @@ where
         block_number: Option<BlockId>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
-        Ok(EthApi::estimate_gas_at(
-            self,
-            request,
-            block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-        )
-        .await?)
+        Ok(self
+            .on_blocking_task(|this| async move {
+                this.estimate_gas_at(
+                    request,
+                    block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+                )
+                .await
+            })
+            .await?)
     }
 
     /// Handler for: `eth_gasPrice`
@@ -355,11 +372,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{eth::cache::EthStateCache, EthApi};
-    use jsonrpsee::{
-        core::{error::Error as RpcError, RpcResult},
-        types::error::{CallError, INVALID_PARAMS_CODE},
+    use crate::{
+        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        EthApi,
     };
+    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use rand::random;
     use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256};
@@ -370,11 +387,13 @@ mod tests {
     #[tokio::test]
     /// Handler for: `eth_test_fee_history`
     async fn test_fee_history() {
+        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
         let eth_api = EthApi::new(
             NoopProvider::default(),
             testing_pool(),
             NoopNetwork,
-            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
         );
 
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
@@ -384,8 +403,8 @@ mod tests {
             None,
         )
         .await;
-        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
-        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         let block_count = 10;
@@ -454,11 +473,13 @@ mod tests {
 
         gas_used_ratios.pop();
 
+        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
         let eth_api = EthApi::new(
-            mock_provider,
+            mock_provider.clone(),
             testing_pool(),
             NoopNetwork,
-            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+            cache.clone(),
+            GasPriceOracle::new(mock_provider, Default::default(), cache.clone()),
         );
 
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
@@ -468,8 +489,8 @@ mod tests {
             Some(vec![10.0]),
         )
         .await;
-        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
-        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         // newest_block is finalized
