@@ -434,11 +434,10 @@ pub fn commit_state_changes<DB>(
                     entry.account_state = AccountState::NotExisting; // we will promote account state down the road
                     let new_account = to_reth_acc(&entry.info);
 
-                    if !has_state_clear_eip {
-                        post_state.create_account(block_number, address, new_account);
-                    } else if has_state_clear_eip &&
-                        entry.info.is_empty() &&
-                        !new_account.is_empty()
+                    // If account was touched before state clear EIP, create it.
+                    if !has_state_clear_eip ||
+                        // If account was touched after state clear EIP, create it only if it is not empty.
+                        (has_state_clear_eip && !new_account.is_empty())
                     {
                         post_state.create_account(block_number, address, new_account);
                     }
