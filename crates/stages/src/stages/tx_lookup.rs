@@ -89,7 +89,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
             // closure that will calculate the TxHash
             let calculate_hash =
-                |entry: Result<(TxNumber, TransactionSignedNoHash), reth_db::Error>,
+                |entry: Result<(TxNumber, TransactionSignedNoHash), reth_db::DatabaseError>,
                  rlp_buf: &mut Vec<u8>|
                  -> Result<(H256, u64), Box<StageError>> {
                     let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;

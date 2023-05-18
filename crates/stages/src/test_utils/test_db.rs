@@ -10,7 +10,7 @@ use reth_db::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    Error as DbError,
+    DatabaseError as DbError,
 };
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
