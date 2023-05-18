@@ -20,11 +20,7 @@ use reth_downloaders::{
 };
 use reth_interfaces::{
     consensus::Consensus,
-    p2p::{
-        bodies::client::BodiesClient,
-        headers::client::{HeadersClient, NoopStatusUpdater},
-    },
-    sync::NoopSyncStateUpdate,
+    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
 };
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
@@ -136,7 +132,6 @@ impl Command {
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
-            .with_sync_state_updater(NoopSyncStateUpdate::default())
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
@@ -144,7 +139,6 @@ impl Command {
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
-                    NoopStatusUpdater::default(),
                     factory.clone(),
                 )
                 .set(
