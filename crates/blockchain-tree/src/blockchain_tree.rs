@@ -167,7 +167,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // check if block is part of canonical chain
-        if self.block_indices.canonical_hash(&block.number) == Some(block.hash) {
+        if self.is_block_hash_canonical(&block.hash)? {
             return Ok(Some(BlockStatus::Valid))
         }
 
@@ -275,7 +275,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // if not found, check if the parent can be found inside canonical chain.
-        if Some(parent.hash) == self.block_indices.canonical_hash(&parent.number) {
+        if self.is_block_hash_canonical(&parent.hash)? {
             return self.try_append_canonical_chain(block, parent)
         }
 
@@ -701,6 +701,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
+    /// Determines whether or not a block is canonical, checking the db if necessary.
+    pub fn is_block_hash_canonical(&self, hash: &BlockHash) -> Result<bool, Error> {
+        // if the indices show that the block hash is not canonical, it's either in a sidechain or
+        // canonical, but in the db. If it is in a sidechain, it is not canonical. If it is not in
+        // the db, then it is not canonical.
+        if !self.block_indices.is_block_hash_canonical(hash) &&
+            (self.block_by_hash(*hash).is_some() ||
+                self.externals.shareable_db().header(hash)?.is_none())
+        {
+            return Ok(false)
+        }
+
+        Ok(true)
+    }
+
     /// Make a block and its parent(s) part of the canonical chain.
     ///
     /// # Note
@@ -718,7 +733,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let old_buffered_blocks = self.buffered_blocks.parent_to_child.clone();
 
         // If block is already canonical don't return error.
-        if self.block_indices.is_block_hash_canonical(block_hash) {
+        if self.is_block_hash_canonical(block_hash)? {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
             let td = self
                 .externals
@@ -1038,6 +1053,9 @@ mod tests {
         // genesis block 10 is already canonical
         assert_eq!(tree.make_canonical(&H256::zero()), Ok(()));
 
+        // make sure is_block_hash_canonical returns true for genesis block
+        assert!(tree.is_block_hash_canonical(&H256::zero()).unwrap());
+
         // make genesis block 10 as finalized
         tree.finalize_block(10);
 
@@ -1218,6 +1236,13 @@ mod tests {
             if *old.blocks() == BTreeMap::from([(block1.number,block1.clone()),(block2a.number,block2a.clone())])
                 && *new.blocks() == BTreeMap::from([(block1a.number,block1a.clone())]));
 
+        // check that b2 and b1 are not canonical
+        assert!(!tree.is_block_hash_canonical(&block2.hash).unwrap());
+        assert!(!tree.is_block_hash_canonical(&block1.hash).unwrap());
+
+        // ensure that b1a is canonical
+        assert!(tree.is_block_hash_canonical(&block1a.hash).unwrap());
+
         // make b2 canonical
         assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
 
@@ -1245,6 +1270,9 @@ mod tests {
             Ok(CanonStateNotification::Reorg{ old, new})
             if *old.blocks() == BTreeMap::from([(block1a.number,block1a.clone())])
                 && *new.blocks() == BTreeMap::from([(block1.number,block1.clone()),(block2.number,block2.clone())]));
+
+        // check that b2 is now canonical
+        assert!(tree.is_block_hash_canonical(&block2.hash).unwrap());
 
         // finalize b1 that would make b1a removed from tree
         tree.finalize_block(11);

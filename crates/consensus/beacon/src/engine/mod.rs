@@ -1253,11 +1253,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let rx_invalid = env.send_forkchoice_updated(forkchoice);
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(rx_invalid.await, Ok(result) => assert_eq!(result, expected_result));
-
-            let result = env.send_forkchoice_retry_on_syncing(forkchoice).await.unwrap();
+            let result = env.send_forkchoice_updated(forkchoice).await.unwrap();
             let expected_result = ForkchoiceUpdated::new(PayloadStatus::new(
                 PayloadStatusEnum::Valid,
                 Some(block1.hash),
@@ -1297,13 +1293,15 @@ mod tests {
                 ..Default::default()
             };
 
-            let invalid_rx = env.send_forkchoice_updated(next_forkchoice_state);
+            // if we `await` in the assert, the forkchoice will poll after we've inserted the block,
+            // and it will return VALID instead of SYNCING
+            let invalid_rx = env.send_forkchoice_updated(next_forkchoice_state).await;
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(env.db.as_ref(), [&next_head].into_iter());
 
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(invalid_rx.await, Ok(result) => assert_eq!(result, expected_result));
+            assert_matches!(invalid_rx, Ok(result) => assert_eq!(result, expected_result));
 
             let result = env.send_forkchoice_retry_on_syncing(next_forkchoice_state).await.unwrap();
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
@@ -1347,6 +1345,56 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn forkchoice_updated_pre_merge() {
+            let chain_spec = Arc::new(
+                ChainSpecBuilder::default()
+                    .chain(MAINNET.chain)
+                    .genesis(MAINNET.genesis.clone())
+                    .london_activated()
+                    .paris_at_ttd(U256::from(3))
+                    .build(),
+            );
+            let (consensus_engine, env) = setup_consensus_engine(
+                chain_spec,
+                VecDeque::from([
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                ]),
+                Vec::default(),
+            );
+
+            let genesis = random_block(0, None, None, Some(0));
+            let mut block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            block1.header.difficulty = U256::from(1);
+
+            // a second pre-merge block
+            let mut block2 = random_block(1, Some(genesis.hash), None, Some(0));
+            block2.header.difficulty = U256::from(1);
+
+            // a transition block
+            let mut block3 = random_block(1, Some(genesis.hash), None, Some(0));
+            block3.header.difficulty = U256::from(1);
+
+            insert_blocks(env.db.as_ref(), [&genesis, &block1, &block2, &block3].into_iter());
+
+            let _engine = spawn_consensus_engine(consensus_engine);
+
+            let res = env
+                .send_forkchoice_updated(ForkchoiceState {
+                    head_block_hash: block1.hash,
+                    finalized_block_hash: block1.hash,
+                    ..Default::default()
+                })
+                .await;
+
+            assert_matches!(res, Ok(result) => {
+                let ForkchoiceUpdated { payload_status, .. } = result;
+                assert_matches!(payload_status.status, PayloadStatusEnum::Invalid { .. });
+                assert_eq!(payload_status.latest_valid_hash, Some(H256::zero()));
+            });
+        }
+
+        #[tokio::test]
         async fn forkchoice_updated_invalid_pow() {
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
@@ -1378,24 +1426,12 @@ mod tests {
                     ..Default::default()
                 })
                 .await;
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
-
-            let result = env
-                .send_forkchoice_retry_on_syncing(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
-                    ..Default::default()
-                })
-                .await
-                .unwrap();
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
                 validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
                     .to_string(),
             })
             .with_latest_valid_hash(H256::zero());
-
-            assert_eq!(result, expected_result);
+            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
         }
     }
 
@@ -1467,9 +1503,9 @@ mod tests {
                     ..Default::default()
                 })
                 .await;
-            let expected_result =
-                ForkchoiceUpdated::new(PayloadStatus::from_status(PayloadStatusEnum::Syncing));
-            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
+            let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
+                .with_latest_valid_hash(block1.hash);
+            assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
             let result =
@@ -1509,9 +1545,9 @@ mod tests {
                     ..Default::default()
                 })
                 .await;
-            let expected_result =
-                ForkchoiceUpdated::new(PayloadStatus::from_status(PayloadStatusEnum::Syncing));
-            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
+            let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
+                .with_latest_valid_hash(genesis.hash);
+            assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
             let block = random_block(2, Some(H256::random()), None, Some(0));
@@ -1561,9 +1597,13 @@ mod tests {
                     ..Default::default()
                 })
                 .await;
-            let expected_result =
-                ForkchoiceUpdated::new(PayloadStatus::from_status(PayloadStatusEnum::Syncing));
-            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
+
+            let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
+                    .to_string(),
+            })
+            .with_latest_valid_hash(H256::zero());
+            assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
             let result =
