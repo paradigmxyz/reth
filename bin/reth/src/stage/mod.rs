@@ -200,15 +200,12 @@ impl Command {
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
         let mut input = ExecInput {
-            previous_stage: Some((
-                StageId("No Previous Stage"),
-                StageCheckpoint::new_with_block_number(self.to),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(self.from)),
+            previous_stage: Some((StageId("No Previous Stage"), StageCheckpoint::new(self.to))),
+            checkpoint: Some(StageCheckpoint::new(self.from)),
         };
 
         let mut unwind = UnwindInput {
-            checkpoint: StageCheckpoint::new_with_block_number(self.to),
+            checkpoint: StageCheckpoint::new(self.to),
             unwind_to: self.from,
             bad_block: None,
         };

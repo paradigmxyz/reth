@@ -190,10 +190,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let is_final_range = stage_progress == max_block;
         info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new_with_block_number(stage_progress),
-            done: is_final_range,
-        })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(stage_progress), done: is_final_range })
     }
 }
 
@@ -252,9 +249,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
         if range.is_empty() {
-            return Ok(UnwindOutput {
-                checkpoint: StageCheckpoint::new_with_block_number(input.unwind_to),
-            })
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
 
         // get all batches for account change
@@ -311,7 +306,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
     }
 }
 
@@ -401,7 +396,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new_with_block_number(1))),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(1))),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };
@@ -438,10 +433,7 @@ mod tests {
         let mut execution_stage = stage();
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
-        assert_eq!(
-            output,
-            ExecOutput { checkpoint: StageCheckpoint::new_with_block_number(1), done: true }
-        );
+        assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(1), done: true });
         let tx = tx.deref_mut();
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
@@ -493,7 +485,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new_with_block_number(1))),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(1))),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };
@@ -530,16 +522,12 @@ mod tests {
         let o = stage
             .unwind(
                 &mut tx,
-                UnwindInput {
-                    checkpoint: StageCheckpoint::new_with_block_number(1),
-                    unwind_to: 0,
-                    bad_block: None,
-                },
+                UnwindInput { checkpoint: StageCheckpoint::new(1), unwind_to: 0, bad_block: None },
             )
             .await
             .unwrap();
 
-        assert_eq!(o, UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(0) });
+        assert_eq!(o, UnwindOutput { checkpoint: StageCheckpoint::new(0) });
 
         // assert unwind stage
         let db_tx = tx.deref();
@@ -567,7 +555,7 @@ mod tests {
         let test_tx = TestTransaction::default();
         let mut tx = test_tx.inner();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new_with_block_number(1))),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(1))),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };

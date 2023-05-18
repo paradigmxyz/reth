@@ -82,10 +82,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             cursor_td.append(block_number, td.into())?;
         }
         info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new_with_block_number(end_block),
-            done: is_final_range,
-        })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(end_block), done: is_final_range })
     }
 
     /// Unwind the stage.
@@ -100,7 +97,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
         info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
     }
 }
 
@@ -130,11 +127,8 @@ mod tests {
         runner.set_threshold(threshold);
 
         let first_input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         // Seed only once with full input range
@@ -151,11 +145,8 @@ mod tests {
 
         // Execute second time
         let second_input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(expected_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(expected_progress)),
         };
         let result = runner.execute(second_input).await.unwrap();
         assert!(matches!(

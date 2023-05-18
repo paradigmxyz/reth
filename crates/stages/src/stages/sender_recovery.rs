@@ -52,7 +52,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     ) -> Result<ExecOutput, StageError> {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
         if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::new_with_block_number(*range.end())))
+            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
         }
         let (start_block, end_block) = range.clone().into_inner();
 
@@ -66,7 +66,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         if first_tx_num > last_tx_num {
             info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Target transaction already reached");
             return Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new_with_block_number(end_block),
+                checkpoint: StageCheckpoint::new(end_block),
                 done: is_final_range,
             })
         }
@@ -140,10 +140,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         }
 
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new_with_block_number(end_block),
-            done: is_final_range,
-        })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(end_block), done: is_final_range })
     }
 
     /// Unwind the stage.
@@ -160,7 +157,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
     }
 }
 
@@ -199,11 +196,8 @@ mod tests {
         // Set up the runner
         let runner = SenderRecoveryTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
@@ -237,11 +231,8 @@ mod tests {
         runner.set_threshold(threshold);
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
         let first_input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(stage_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         // Seed only once with full input range
@@ -258,11 +249,8 @@ mod tests {
 
         // Execute second time
         let second_input = ExecInput {
-            previous_stage: Some((
-                PREV_STAGE_ID,
-                StageCheckpoint::new_with_block_number(previous_stage),
-            )),
-            checkpoint: Some(StageCheckpoint::new_with_block_number(expected_progress)),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(expected_progress)),
         };
         let result = runner.execute(second_input).await.unwrap();
         assert_matches!(

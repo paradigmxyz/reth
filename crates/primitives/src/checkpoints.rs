@@ -135,7 +135,7 @@ pub struct StageCheckpoint {
 
 impl StageCheckpoint {
     /// Creates a new [`StageCheckpoint`] with only `block_number` set.
-    pub fn new_with_block_number(block_number: BlockNumber) -> Self {
+    pub fn new(block_number: BlockNumber) -> Self {
         Self { block_number, ..Default::default() }
     }
 }

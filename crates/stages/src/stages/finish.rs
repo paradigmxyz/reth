@@ -32,7 +32,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         _tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new_with_block_number(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 

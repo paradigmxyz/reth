@@ -1139,10 +1139,7 @@ mod tests {
         let (consensus_engine, env) = setup_consensus_engine(
             chain_spec,
             VecDeque::from([
-                Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new_with_block_number(1),
-                    done: true,
-                }),
+                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true }),
                 Err(StageError::ChannelClosed),
             ]),
             Vec::default(),
@@ -1175,7 +1172,7 @@ mod tests {
         let (mut consensus_engine, env) = setup_consensus_engine(
             chain_spec,
             VecDeque::from([Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new_with_block_number(max_block),
+                checkpoint: StageCheckpoint::new(max_block),
                 done: true,
             })]),
             Vec::default(),
@@ -1221,7 +1218,7 @@ mod tests {
                 chain_spec,
                 VecDeque::from([Ok(ExecOutput {
                     done: true,
-                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                    checkpoint: StageCheckpoint::new(0),
                 })]),
                 Vec::default(),
             );
@@ -1252,7 +1249,7 @@ mod tests {
                 chain_spec,
                 VecDeque::from([Ok(ExecOutput {
                     done: true,
-                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                    checkpoint: StageCheckpoint::new(0),
                 })]),
                 Vec::default(),
             );
@@ -1261,10 +1258,7 @@ mod tests {
             let block1 = random_block(1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
             env.db
-                .update(|tx| {
-                    FINISH
-                        .save_checkpoint(tx, StageCheckpoint::new_with_block_number(block1.number))
-                })
+                .update(|tx| FINISH.save_checkpoint(tx, StageCheckpoint::new(block1.number)))
                 .unwrap()
                 .unwrap();
 
@@ -1301,14 +1295,8 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
                 VecDeque::from([
-                    Ok(ExecOutput {
-                        done: true,
-                        checkpoint: StageCheckpoint::new_with_block_number(0),
-                    }),
-                    Ok(ExecOutput {
-                        done: true,
-                        checkpoint: StageCheckpoint::new_with_block_number(0),
-                    }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
                 ]),
                 Vec::default(),
             );
@@ -1355,7 +1343,7 @@ mod tests {
                 chain_spec,
                 VecDeque::from([Ok(ExecOutput {
                     done: true,
-                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                    checkpoint: StageCheckpoint::new(0),
                 })]),
                 Vec::default(),
             );
@@ -1390,14 +1378,8 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
                 VecDeque::from([
-                    Ok(ExecOutput {
-                        done: true,
-                        checkpoint: StageCheckpoint::new_with_block_number(0),
-                    }),
-                    Ok(ExecOutput {
-                        done: true,
-                        checkpoint: StageCheckpoint::new_with_block_number(0),
-                    }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
                 ]),
                 Vec::default(),
             );
@@ -1458,7 +1440,7 @@ mod tests {
                 chain_spec,
                 VecDeque::from([Ok(ExecOutput {
                     done: true,
-                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                    checkpoint: StageCheckpoint::new(0),
                 })]),
                 Vec::default(),
             );
@@ -1491,7 +1473,7 @@ mod tests {
                 chain_spec,
                 VecDeque::from([Ok(ExecOutput {
                     done: true,
-                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                    checkpoint: StageCheckpoint::new(0),
                 })]),
                 Vec::default(),
             );
@@ -1537,7 +1519,7 @@ mod tests {
                 chain_spec,
                 VecDeque::from([Ok(ExecOutput {
                     done: true,
-                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                    checkpoint: StageCheckpoint::new(0),
                 })]),
                 Vec::default(),
             );
@@ -1594,7 +1576,7 @@ mod tests {
                 chain_spec,
                 VecDeque::from([Ok(ExecOutput {
                     done: true,
-                    checkpoint: StageCheckpoint::new_with_block_number(0),
+                    checkpoint: StageCheckpoint::new(0),
                 })]),
                 Vec::from([exec_result2]),
             );
