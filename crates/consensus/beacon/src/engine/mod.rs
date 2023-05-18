@@ -875,7 +875,7 @@ where
                                 Ok(Some(block)) => block,
                                 Ok(None) => {
                                     return Some(Err(Error::Provider(
-                                        ProviderError::CanonicalHeader { block_number: max_block },
+                                        ProviderError::HeaderNotFound(max_block.into()),
                                     )
                                     .into()))
                                 }
@@ -884,9 +884,9 @@ where
                             let max_header = match self.blockchain.block_by_number(max_block) {
                                 Ok(Some(block)) => block,
                                 Ok(None) => {
-                                    return Some(Err(Error::Provider(ProviderError::Header {
-                                        number: max_block,
-                                    })
+                                    return Some(Err(Error::Provider(
+                                        ProviderError::HeaderNotFound(max_block.into()),
+                                    )
                                     .into()))
                                 }
                                 Err(error) => return Some(Err(error.into())),
