@@ -65,19 +65,21 @@ async fn test_session_established_with_different_capability() {
     handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
 
     let mut events = handle0.event_listener().take(2);
+    let mut latest = None;
     while let Some(event) = events.next().await {
-        match event {
+        match &event {
             NetworkEvent::PeerAdded(peer_id) => {
-                assert_eq!(handle1.peer_id(), &peer_id);
+                assert_eq!(handle1.peer_id(), peer_id);
             }
             NetworkEvent::SessionEstablished { peer_id, status, .. } => {
-                assert_eq!(handle1.peer_id(), &peer_id);
+                assert_eq!(handle1.peer_id(), peer_id);
                 assert_eq!(status.version, EthVersion::Eth66 as u8);
             }
             ev => {
-                panic!("unexpected event: {ev:?}")
+                panic!("unexpected event: {ev:?}; previously received {latest:?}")
             }
         }
+        latest = Some(event);
     }
 
     handle.terminate().await;
