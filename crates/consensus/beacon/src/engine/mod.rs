@@ -874,19 +874,20 @@ where
                             let max_hash = match self.blockchain.block_hash(max_block) {
                                 Ok(Some(block)) => block,
                                 Ok(None) => {
-                                    return Some(Err(BeaconConsensusEngineError::Common(
-                                        ProviderError::CanonicalHeader { block_number: max_block }
-                                            .into(),
-                                    )))
+                                    return Some(Err(Error::Provider(
+                                        ProviderError::CanonicalHeader { block_number: max_block },
+                                    )
+                                    .into()))
                                 }
                                 Err(error) => return Some(Err(error.into())),
                             };
                             let max_header = match self.blockchain.block_by_number(max_block) {
                                 Ok(Some(block)) => block,
                                 Ok(None) => {
-                                    return Some(Err(BeaconConsensusEngineError::Common(
-                                        ProviderError::Header { number: max_block }.into(),
-                                    )))
+                                    return Some(Err(Error::Provider(ProviderError::Header {
+                                        number: max_block,
+                                    })
+                                    .into()))
                                 }
                                 Err(error) => return Some(Err(error.into())),
                             };
