@@ -9,7 +9,7 @@ use crate::{
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, StageCheckpoint};
 use reth_provider::{ShareableDatabase, Transaction};
 use reth_staged_sync::{
     utils::{chainspec::chain_spec_value_parser, init::init_db},
@@ -200,24 +200,27 @@ impl Command {
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
         let mut input = ExecInput {
-            previous_stage: Some((StageId("No Previous Stage"), self.to)),
-            stage_progress: Some(self.from),
+            previous_stage: Some((StageId("No Previous Stage"), StageCheckpoint::new(self.to))),
+            checkpoint: Some(StageCheckpoint::new(self.from)),
         };
 
-        let mut unwind =
-            UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
+        let mut unwind = UnwindInput {
+            checkpoint: StageCheckpoint::new(self.to),
+            unwind_to: self.from,
+            bad_block: None,
+        };
 
         if !self.skip_unwind {
-            while unwind.stage_progress > self.from {
+            while unwind.checkpoint.block_number > self.from {
                 let unwind_output = unwind_stage.unwind(&mut tx, unwind).await?;
-                unwind.stage_progress = unwind_output.stage_progress;
+                unwind.checkpoint = unwind_output.checkpoint;
             }
         }
 
-        while let ExecOutput { stage_progress, done: false } =
+        while let ExecOutput { checkpoint: stage_progress, done: false } =
             exec_stage.execute(&mut tx, input).await?
         {
-            input.stage_progress = Some(stage_progress)
+            input.checkpoint = Some(stage_progress)
         }
 
         Ok(())

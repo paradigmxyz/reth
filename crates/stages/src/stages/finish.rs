@@ -1,5 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
+use reth_primitives::StageCheckpoint;
 use reth_provider::Transaction;
 
 /// The [`StageId`] of the finish stage.
@@ -23,7 +24,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         _tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput { done: true, stage_progress: input.previous_stage_progress() })
+        Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
     }
 
     async fn unwind(
@@ -31,7 +32,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         _tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 
@@ -68,12 +69,12 @@ mod tests {
         type Seed = Vec<SealedHeader>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let start = input.stage_progress.unwrap_or_default();
+            let start = input.checkpoint.unwrap_or_default().block_number;
             let head = random_header(start, None);
             self.tx.insert_headers_with_td(std::iter::once(&head))?;
 
             // use previous progress as seed size
-            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
+            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default().block_number + 1;
 
             if start + 1 >= end {
                 return Ok(Vec::default())
@@ -93,8 +94,8 @@ mod tests {
             if let Some(output) = output {
                 assert!(output.done, "stage should always be done");
                 assert_eq!(
-                    output.stage_progress,
-                    input.previous_stage_progress(),
+                    output.checkpoint,
+                    input.previous_stage_checkpoint(),
                     "stage progress should always match progress of previous stage"
                 );
             }

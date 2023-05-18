@@ -10,7 +10,7 @@ use reth_interfaces::{
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
     provider::ProviderError,
 };
-use reth_primitives::{BlockHashOrNumber, BlockNumber, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, SealedHeader, StageCheckpoint, H256};
 use reth_provider::Transaction;
 use tokio::sync::watch;
 use tracing::*;
@@ -193,16 +193,16 @@ where
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let current_progress = input.stage_progress.unwrap_or_default();
+        let current_progress = input.checkpoint.unwrap_or_default();
 
         // Lookup the head and tip of the sync range
-        let gap = self.get_sync_gap(tx, current_progress).await?;
+        let gap = self.get_sync_gap(tx, current_progress.block_number).await?;
         let tip = gap.target.tip();
 
         // Nothing to sync
         if gap.is_closed() {
-            info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput { stage_progress: current_progress, done: true })
+            info!(target: "sync::stages::headers", stage_progress = %current_progress, target = ?tip, "Target block already reached");
+            return Ok(ExecOutput { checkpoint: current_progress, done: true })
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -221,16 +221,16 @@ where
         // Write the headers to db
         self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
 
-        if self.is_stage_done(tx, current_progress)? {
-            let stage_progress = current_progress.max(
+        if self.is_stage_done(tx, current_progress.block_number)? {
+            let stage_progress = current_progress.block_number.max(
                 tx.cursor_read::<tables::CanonicalHeaders>()?
                     .last()?
                     .map(|(num, _)| num)
                     .unwrap_or_default(),
             );
-            Ok(ExecOutput { stage_progress, done: true })
+            Ok(ExecOutput { checkpoint: StageCheckpoint::new(stage_progress), done: true })
         } else {
-            Ok(ExecOutput { stage_progress: current_progress, done: false })
+            Ok(ExecOutput { checkpoint: current_progress, done: false })
         }
     }
 
@@ -248,7 +248,7 @@ where
         tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         info!(target: "sync::stages::headers", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 
@@ -345,14 +345,15 @@ mod tests {
             type Seed = Vec<SealedHeader>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let start = input.stage_progress.unwrap_or_default();
+                let start = input.checkpoint.unwrap_or_default().block_number;
                 let head = random_header(start, None);
                 self.tx.insert_headers(std::iter::once(&head))?;
                 // patch td table for `update_head` call
                 self.tx.commit(|tx| tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into()))?;
 
                 // use previous progress as seed size
-                let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
+                let end =
+                    input.previous_stage.map(|(_, num)| num).unwrap_or_default().block_number + 1;
 
                 if start + 1 >= end {
                     return Ok(Vec::default())
@@ -369,11 +370,13 @@ mod tests {
                 input: ExecInput,
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
-                let initial_stage_progress = input.stage_progress.unwrap_or_default();
+                let initial_stage_progress = input.checkpoint.unwrap_or_default().block_number;
                 match output {
-                    Some(output) if output.stage_progress > initial_stage_progress => {
+                    Some(output) if output.checkpoint.block_number > initial_stage_progress => {
                         self.tx.query(|tx| {
-                            for block_num in (initial_stage_progress..output.stage_progress).rev() {
+                            for block_num in
+                                (initial_stage_progress..output.checkpoint.block_number).rev()
+                            {
                                 // look up the header hash
                                 let hash = tx
                                     .get::<tables::CanonicalHeaders>(block_num)?
@@ -458,8 +461,8 @@ mod tests {
         let mut runner = HeadersTestRunner::with_linear_downloader();
         let (stage_progress, previous_stage) = (1000, 1200);
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
@@ -471,7 +474,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true }) if block_number == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -537,8 +540,8 @@ mod tests {
         // pick range that's larger than the configured headers batch size
         let (stage_progress, previous_stage) = (600, 1200);
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
@@ -550,7 +553,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: progress }) if progress == stage_progress);
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false }) if block_number == stage_progress);
 
         runner.client.clear().await;
         runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
@@ -558,7 +561,7 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true }) if block_number == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 }
