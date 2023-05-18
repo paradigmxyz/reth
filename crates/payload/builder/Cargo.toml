@@ -31,6 +31,7 @@ futures-util = "0.3"
 thiserror = "1.0"
 sha2 = { version = "0.10", default-features = false }
 tracing = { workspace = true }
+hashbrown = "0.13"
 
 
 [features]

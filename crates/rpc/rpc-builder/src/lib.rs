@@ -845,19 +845,21 @@ where
                 }),
             );
 
+            let executor = Box::new(self.executor.clone());
             let api = EthApi::with_spawner(
                 self.client.clone(),
                 self.pool.clone(),
                 self.network.clone(),
                 cache.clone(),
                 gas_oracle,
-                Box::new(self.executor.clone()),
+                executor.clone(),
             );
             let filter = EthFilter::new(
                 self.client.clone(),
                 self.pool.clone(),
                 cache.clone(),
                 self.config.eth.max_logs_per_response,
+                executor.clone(),
             );
 
             let pubsub = EthPubSub::with_spawner(
@@ -865,7 +867,7 @@ where
                 self.pool.clone(),
                 self.events.clone(),
                 self.network.clone(),
-                Box::new(self.executor.clone()),
+                executor,
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub };

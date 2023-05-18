@@ -1,6 +1,6 @@
 use crate::{post_state::PostState, BlockExecutor, ExecutorFactory, StateProvider};
 use parking_lot::Mutex;
-use reth_interfaces::executor::Error as ExecutionError;
+use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{Address, Block, ChainSpec, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
@@ -12,8 +12,8 @@ impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
         _block: &Block,
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
-    ) -> Result<PostState, ExecutionError> {
-        self.0.clone().ok_or(ExecutionError::VerificationFailed)
+    ) -> Result<PostState, BlockExecutionError> {
+        self.0.clone().ok_or(BlockExecutionError::UnavailableForTest)
     }
 
     fn execute_and_verify_receipt(
@@ -21,8 +21,8 @@ impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
         _block: &Block,
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
-    ) -> Result<PostState, ExecutionError> {
-        self.0.clone().ok_or(ExecutionError::VerificationFailed)
+    ) -> Result<PostState, BlockExecutionError> {
+        self.0.clone().ok_or(BlockExecutionError::UnavailableForTest)
     }
 }
 

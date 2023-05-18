@@ -1,7 +1,7 @@
 //! Small database table utilities and helper functions
 use crate::{
     table::{Decode, Decompress, Table},
-    Error,
+    DatabaseError,
 };
 
 use std::borrow::Cow;
@@ -43,7 +43,7 @@ macro_rules! impl_fixed_arbitrary {
 /// Helper function to decode a `(key, value)` pair.
 pub(crate) fn decoder<'a, T>(
     kv: (Cow<'a, [u8]>, Cow<'a, [u8]>),
-) -> Result<(T::Key, T::Value), Error>
+) -> Result<(T::Key, T::Value), DatabaseError>
 where
     T: Table,
     T::Key: Decode,
@@ -61,7 +61,9 @@ where
 }
 
 /// Helper function to decode only a value from a `(key, value)` pair.
-pub(crate) fn decode_value<'a, T>(kv: (Cow<'a, [u8]>, Cow<'a, [u8]>)) -> Result<T::Value, Error>
+pub(crate) fn decode_value<'a, T>(
+    kv: (Cow<'a, [u8]>, Cow<'a, [u8]>),
+) -> Result<T::Value, DatabaseError>
 where
     T: Table,
 {
@@ -72,7 +74,7 @@ where
 }
 
 /// Helper function to decode a value. It can be a key or subkey.
-pub(crate) fn decode_one<T>(value: Cow<'_, [u8]>) -> Result<T::Value, Error>
+pub(crate) fn decode_one<T>(value: Cow<'_, [u8]>) -> Result<T::Value, DatabaseError>
 where
     T: Table,
 {

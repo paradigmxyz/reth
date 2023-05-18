@@ -999,11 +999,13 @@ pub struct ReverseHeadersDownloaderBuilder {
 impl Default for ReverseHeadersDownloaderBuilder {
     fn default() -> Self {
         Self {
-            request_limit: 1_000,
             stream_batch_size: 10_000,
-            max_concurrent_requests: 150,
+            // This is just below the max number of headers commonly in a headers response (1024), see also <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L38-L40>
+            // with ~500bytes per header this around 0.5MB per request max
+            request_limit: 1_000,
+            max_concurrent_requests: 100,
             min_concurrent_requests: 5,
-            max_buffered_responses: 750,
+            max_buffered_responses: 100,
         }
     }
 }

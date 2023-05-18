@@ -13,3 +13,8 @@ crates/payload/             @mattsse @Rjected
 crates/consensus/auto-seal  @mattsse
 crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
 crates/trie                 @rkrasiuk
+crates/blockchain-tree      @rakita @rkrasiuk
+crates/metrics              @onbjerg
+crates/tracing              @onbjerg
+crates/tasks                @mattsse
+.github/                    @onbjerg @gakonst

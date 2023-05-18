@@ -66,7 +66,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let last_header_number = input.stage_progress.unwrap_or_default();
         let last_entry = cursor_td
             .seek_exact(last_header_number)?
-            .ok_or(ProviderError::TotalDifficulty { number: last_header_number })?;
+            .ok_or(ProviderError::TotalDifficultyNotFound { number: last_header_number })?;
 
         let mut td: U256 = last_entry.1.into();
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");

@@ -35,7 +35,7 @@ impl<DB, C, EF> TreeExternals<DB, C, EF> {
 
 impl<DB: Database, C, EF> TreeExternals<DB, C, EF> {
     /// Return shareable database helper structure.
-    pub fn shareable_db(&self) -> ShareableDatabase<&DB> {
+    pub fn database(&self) -> ShareableDatabase<&DB> {
         ShareableDatabase::new(&self.db, self.chain_spec.clone())
     }
 }

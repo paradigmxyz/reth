@@ -7,13 +7,14 @@ use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
     consensus::ForkchoiceState,
-    executor::Error as ExecutorError,
+    executor::BlockExecutionError,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
+    sync::{NetworkSyncUpdater, SyncState},
     Error,
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    listener::EventListeners, BlockNumber, Header, SealedBlock, SealedHeader, H256, U256,
+    listener::EventListeners, BlockNumber, Head, Header, SealedBlock, SealedHeader, H256, U256,
 };
 use reth_provider::{BlockProvider, BlockSource, CanonChainTracker, ProviderError};
 use reth_rpc_types::engine::{
@@ -50,6 +51,7 @@ mod event;
 pub(crate) mod sync;
 
 pub use event::BeaconConsensusEngineEvent;
+use reth_interfaces::blockchain_tree::error::InsertBlockError;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
@@ -151,6 +153,8 @@ where
     sync: EngineSyncController<DB, Client>,
     /// The type we can use to query both the database and the blockchain tree.
     blockchain: BT,
+    /// Used for emitting updates about whether the engine is syncing or not.
+    sync_state_updater: Box<dyn NetworkSyncUpdater>,
     /// The Engine API message receiver.
     engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
     /// A clone of the handle
@@ -183,6 +187,7 @@ where
         pipeline: Pipeline<DB>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
+        sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
@@ -194,6 +199,7 @@ where
             pipeline,
             blockchain,
             task_spawner,
+            sync_state_updater,
             max_block,
             run_pipeline_continuously,
             payload_builder,
@@ -211,6 +217,7 @@ where
         pipeline: Pipeline<DB>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
+        sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
@@ -229,6 +236,7 @@ where
             db,
             sync,
             blockchain,
+            sync_state_updater,
             engine_message_rx: UnboundedReceiverStream::new(rx),
             handle: handle.clone(),
             forkchoice_state: None,
@@ -262,18 +270,20 @@ where
     fn latest_valid_hash_for_invalid_payload(
         &self,
         parent_hash: H256,
-        tree_error: Option<&Error>,
+        tree_error: Option<&InsertBlockError>,
     ) -> Option<H256> {
         // check pre merge block error
-        if let Some(Error::Execution(ExecutorError::BlockPreMerge { .. })) = tree_error {
+        if tree_error.map(|err| err.kind().is_block_pre_merge()).unwrap_or_default() {
             return Some(H256::zero())
         }
 
-        // TODO(mattsse): This could be invoked on new payload which does not make tree canonical,
-        //  which would make this inaccurate, e.g. if an invalid payload is received in this
-        //  scenario: FUC (unknown head) -> valid payload  -> invalid payload
-
-        self.blockchain.find_canonical_ancestor(parent_hash)
+        // If this is sent from new payload then the parent hash could be in a side chain, and is
+        // not necessarily canonical
+        if self.blockchain.header_by_hash(parent_hash).is_some() {
+            Some(parent_hash)
+        } else {
+            self.blockchain.find_canonical_ancestor(parent_hash)
+        }
     }
 
     /// Loads the header for the given `block_number` from the database.
@@ -398,6 +408,8 @@ where
                             // properly updated
                             self.update_canon_chain(&state)?;
                         }
+                        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
+                        trace!(target: "consensus::engine", ?state, status = ?payload_response, "Returning forkchoice status");
                         return Ok(payload_response)
                     }
 
@@ -428,6 +440,7 @@ where
     }
 
     /// Sets the state of the canon chain tracker based on the given forkchoice update.
+    /// Additionally, updates the head used for p2p handshakes.
     ///
     /// This should be called before issuing a VALID forkchoice update.
     fn update_canon_chain(&self, update: &ForkchoiceState) -> Result<(), reth_interfaces::Error> {
@@ -458,8 +471,19 @@ where
             .ok_or_else(|| {
                 Error::Provider(ProviderError::UnknownBlockHash(update.head_block_hash))
             })?;
+        let head = head.header.seal(update.head_block_hash);
+        let head_td = self.blockchain.header_td_by_number(head.number)?.ok_or_else(|| {
+            Error::Provider(ProviderError::TotalDifficultyNotFound { number: head.number })
+        })?;
 
-        self.blockchain.set_canonical_head(head.header.seal(update.head_block_hash));
+        self.sync_state_updater.update_status(Head {
+            number: head.number,
+            hash: head.hash,
+            difficulty: head.difficulty,
+            timestamp: head.timestamp,
+            total_difficulty: head_td,
+        });
+        self.blockchain.set_canonical_head(head);
         self.blockchain.on_forkchoice_update_received(update);
         Ok(())
     }
@@ -489,7 +513,7 @@ where
 
         #[allow(clippy::single_match)]
         match &error {
-            Error::Execution(error @ ExecutorError::BlockPreMerge { .. }) => {
+            Error::Execution(error @ BlockExecutionError::BlockPreMerge { .. }) => {
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
@@ -649,7 +673,7 @@ where
             // received a new payload while we're still syncing to the target
             let latest_valid_hash =
                 self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-            let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+            let status = PayloadStatusEnum::Invalid { validation_error: error.kind().to_string() };
             PayloadStatus::new(status, latest_valid_hash)
         } else {
             // successfully buffered the block
@@ -678,6 +702,7 @@ where
                             block_number,
                             block_hash,
                         ));
+
                         PayloadStatusEnum::Valid
                     }
                     BlockStatus::Accepted => {
@@ -697,7 +722,8 @@ where
 
                 let latest_valid_hash =
                     self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-                let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+                let status =
+                    PayloadStatusEnum::Invalid { validation_error: error.kind().to_string() };
                 PayloadStatus::new(status, latest_valid_hash)
             }
         }
@@ -753,11 +779,14 @@ where
                 if !self.try_insert_new_payload(block).is_valid() {
                     // if the payload is invalid, we run the pipeline
                     self.sync.set_pipeline_sync_target(hash);
+                } else {
+                    self.sync_state_updater.update_sync_state(SyncState::Idle);
                 }
             }
             EngineSyncEvent::PipelineStarted(target) => {
                 trace!(target: "consensus::engine", ?target, continuous = target.is_none(), "Started the pipeline");
                 self.metrics.pipeline_runs.increment(1);
+                self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
             EngineSyncEvent::PipelineTaskDropped => {
                 error!(target: "consensus::engine", "Failed to receive spawned pipeline");
@@ -774,11 +803,14 @@ where
                             return Some(Ok(()))
                         }
 
-                        // Update the state and hashes of the blockchain tree if possible
-                        if let Err(error) = self.restore_tree_if_possible(*current_state) {
-                            error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
-                            return Some(Err(error.into()))
-                        }
+                        // Update the state and hashes of the blockchain tree if possible.
+                        match self.restore_tree_if_possible(*current_state) {
+                            Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
+                            Err(error) => {
+                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
+                                return Some(Err(error.into()))
+                            }
+                        };
                     }
                     // Any pipeline error at this point is fatal.
                     Err(error) => return Some(Err(error.into())),
@@ -877,7 +909,10 @@ mod tests {
         BlockchainTree, ShareableBlockchainTree,
     };
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
-    use reth_interfaces::test_utils::{NoopFullBlockClient, TestConsensus};
+    use reth_interfaces::{
+        sync::NoopSyncStateUpdater,
+        test_utils::{NoopFullBlockClient, TestConsensus},
+    };
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::{
@@ -999,6 +1034,7 @@ mod tests {
             pipeline,
             blockchain_provider,
             Box::<TokioTaskExecutor>::default(),
+            Box::<NoopSyncStateUpdater>::default(),
             None,
             false,
             payload_builder,
@@ -1219,11 +1255,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let rx_invalid = env.send_forkchoice_updated(forkchoice);
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(rx_invalid.await, Ok(result) => assert_eq!(result, expected_result));
-
-            let result = env.send_forkchoice_retry_on_syncing(forkchoice).await.unwrap();
+            let result = env.send_forkchoice_updated(forkchoice).await.unwrap();
             let expected_result = ForkchoiceUpdated::new(PayloadStatus::new(
                 PayloadStatusEnum::Valid,
                 Some(block1.hash),
@@ -1263,13 +1295,15 @@ mod tests {
                 ..Default::default()
             };
 
-            let invalid_rx = env.send_forkchoice_updated(next_forkchoice_state);
+            // if we `await` in the assert, the forkchoice will poll after we've inserted the block,
+            // and it will return VALID instead of SYNCING
+            let invalid_rx = env.send_forkchoice_updated(next_forkchoice_state).await;
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(env.db.as_ref(), [&next_head].into_iter());
 
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(invalid_rx.await, Ok(result) => assert_eq!(result, expected_result));
+            assert_matches!(invalid_rx, Ok(result) => assert_eq!(result, expected_result));
 
             let result = env.send_forkchoice_retry_on_syncing(next_forkchoice_state).await.unwrap();
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
@@ -1313,6 +1347,56 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn forkchoice_updated_pre_merge() {
+            let chain_spec = Arc::new(
+                ChainSpecBuilder::default()
+                    .chain(MAINNET.chain)
+                    .genesis(MAINNET.genesis.clone())
+                    .london_activated()
+                    .paris_at_ttd(U256::from(3))
+                    .build(),
+            );
+            let (consensus_engine, env) = setup_consensus_engine(
+                chain_spec,
+                VecDeque::from([
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                ]),
+                Vec::default(),
+            );
+
+            let genesis = random_block(0, None, None, Some(0));
+            let mut block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            block1.header.difficulty = U256::from(1);
+
+            // a second pre-merge block
+            let mut block2 = random_block(1, Some(genesis.hash), None, Some(0));
+            block2.header.difficulty = U256::from(1);
+
+            // a transition block
+            let mut block3 = random_block(1, Some(genesis.hash), None, Some(0));
+            block3.header.difficulty = U256::from(1);
+
+            insert_blocks(env.db.as_ref(), [&genesis, &block1, &block2, &block3].into_iter());
+
+            let _engine = spawn_consensus_engine(consensus_engine);
+
+            let res = env
+                .send_forkchoice_updated(ForkchoiceState {
+                    head_block_hash: block1.hash,
+                    finalized_block_hash: block1.hash,
+                    ..Default::default()
+                })
+                .await;
+
+            assert_matches!(res, Ok(result) => {
+                let ForkchoiceUpdated { payload_status, .. } = result;
+                assert_matches!(payload_status.status, PayloadStatusEnum::Invalid { .. });
+                assert_eq!(payload_status.latest_valid_hash, Some(H256::zero()));
+            });
+        }
+
+        #[tokio::test]
         async fn forkchoice_updated_invalid_pow() {
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
@@ -1344,30 +1428,19 @@ mod tests {
                     ..Default::default()
                 })
                 .await;
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
-
-            let result = env
-                .send_forkchoice_retry_on_syncing(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
-                    ..Default::default()
-                })
-                .await
-                .unwrap();
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
-                validation_error: ExecutorError::BlockPreMerge { hash: block1.hash }.to_string(),
+                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
+                    .to_string(),
             })
             .with_latest_valid_hash(H256::zero());
-
-            assert_eq!(result, expected_result);
+            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
         }
     }
 
     mod new_payload {
         use super::*;
         use reth_interfaces::{
-            executor::Error as ExecutorError, test_utils::generators::random_block,
+            executor::BlockExecutionError, test_utils::generators::random_block,
         };
         use reth_primitives::{Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
@@ -1432,9 +1505,9 @@ mod tests {
                     ..Default::default()
                 })
                 .await;
-            let expected_result =
-                ForkchoiceUpdated::new(PayloadStatus::from_status(PayloadStatusEnum::Syncing));
-            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
+            let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
+                .with_latest_valid_hash(block1.hash);
+            assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
             let result =
@@ -1474,9 +1547,9 @@ mod tests {
                     ..Default::default()
                 })
                 .await;
-            let expected_result =
-                ForkchoiceUpdated::new(PayloadStatus::from_status(PayloadStatusEnum::Syncing));
-            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
+            let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
+                .with_latest_valid_hash(genesis.hash);
+            assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
             let block = random_block(2, Some(H256::random()), None, Some(0));
@@ -1526,16 +1599,21 @@ mod tests {
                     ..Default::default()
                 })
                 .await;
-            let expected_result =
-                ForkchoiceUpdated::new(PayloadStatus::from_status(PayloadStatusEnum::Syncing));
-            assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
+
+            let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
+                    .to_string(),
+            })
+            .with_latest_valid_hash(H256::zero());
+            assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
             let result =
                 env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: ExecutorError::BlockPreMerge { hash: block2.hash }.to_string(),
+                validation_error: BlockExecutionError::BlockPreMerge { hash: block2.hash }
+                    .to_string(),
             })
             .with_latest_valid_hash(H256::zero());
             assert_eq!(result, expected_result);

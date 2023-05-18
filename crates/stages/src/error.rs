@@ -1,6 +1,7 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{
-    consensus, db::Error as DbError, executor, p2p::error::DownloadError, provider::ProviderError,
+    consensus, db::DatabaseError as DbError, executor, p2p::error::DownloadError,
+    provider::ProviderError,
 };
 use reth_primitives::BlockNumber;
 use reth_provider::TransactionError;
@@ -30,7 +31,7 @@ pub enum StageError {
         block: BlockNumber,
         /// The underlying execution error.
         #[source]
-        error: executor::Error,
+        error: executor::BlockExecutionError,
     },
     /// Invalid checkpoint passed to the stage
     #[error("Invalid stage progress: {0}")]

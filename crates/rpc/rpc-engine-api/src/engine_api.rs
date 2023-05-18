@@ -167,7 +167,9 @@ where
         }
 
         let mut result = Vec::with_capacity(count as usize);
-        for num in start..start + count {
+
+        let end = start.saturating_add(count);
+        for num in start..end {
             let block = self
                 .client
                 .block(BlockHashOrNumber::Number(num))

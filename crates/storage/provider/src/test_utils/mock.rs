@@ -252,7 +252,7 @@ impl BlockNumProvider for MockEthProvider {
             .iter()
             .max_by_key(|h| h.1.number)
             .map(|(_, header)| header.number)
-            .ok_or(ProviderError::HeaderNotFound)?)
+            .ok_or(ProviderError::BestBlockNotFound)?)
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {

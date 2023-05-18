@@ -2,7 +2,7 @@
 
 use crate::{
     table::{Decode, Encode},
-    Error,
+    DatabaseError,
 };
 use reth_primitives::BlockNumber;
 use serde::Serialize;
@@ -49,13 +49,14 @@ impl<T> Decode for ShardedKey<T>
 where
     T: Decode,
 {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let value = value.as_ref();
 
         let tx_num_index = value.len() - 8;
 
-        let highest_tx_number =
-            u64::from_be_bytes(value[tx_num_index..].try_into().map_err(|_| Error::DecodeError)?);
+        let highest_tx_number = u64::from_be_bytes(
+            value[tx_num_index..].try_into().map_err(|_| DatabaseError::DecodeError)?,
+        );
         let key = T::decode(&value[..tx_num_index])?;
 
         Ok(ShardedKey::new(key, highest_tx_number))

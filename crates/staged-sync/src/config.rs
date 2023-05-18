@@ -63,22 +63,42 @@ pub struct StageConfig {
 /// Header stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct HeadersConfig {
+    /// The maximum number of requests to send concurrently.
+    ///
+    /// Default: 100
+    pub downloader_max_concurrent_requests: usize,
+    /// The minimum number of requests to send concurrently.
+    ///
+    /// Default: 5
+    pub downloader_min_concurrent_requests: usize,
+    /// Maximum amount of responses to buffer internally.
+    /// The response contains multiple headers.
+    pub downloader_max_buffered_responses: usize,
+    /// The maximum number of headers to request from a peer at a time.
+    pub downloader_request_limit: u64,
     /// The maximum number of headers to download before committing progress to the database.
     pub commit_threshold: u64,
-    /// The maximum number of headers to request from a peer at a time.
-    pub downloader_batch_size: u64,
 }
 
 impl Default for HeadersConfig {
     fn default() -> Self {
-        Self { commit_threshold: 10_000, downloader_batch_size: 1000 }
+        Self {
+            commit_threshold: 10_000,
+            downloader_request_limit: 1_000,
+            downloader_max_concurrent_requests: 100,
+            downloader_min_concurrent_requests: 5,
+            downloader_max_buffered_responses: 100,
+        }
     }
 }
 
 impl From<HeadersConfig> for ReverseHeadersDownloaderBuilder {
     fn from(config: HeadersConfig) -> Self {
         ReverseHeadersDownloaderBuilder::default()
-            .request_limit(config.downloader_batch_size)
+            .request_limit(config.downloader_request_limit)
+            .min_concurrent_requests(config.downloader_min_concurrent_requests)
+            .max_concurrent_requests(config.downloader_max_concurrent_requests)
+            .max_buffered_responses(config.downloader_max_buffered_responses)
             .stream_batch_size(config.commit_threshold as usize)
     }
 }

@@ -1,7 +1,7 @@
 //! Implements data structures specific to the database
 use crate::{
     table::{Decode, Encode},
-    Error,
+    DatabaseError,
 };
 use reth_codecs::Compact;
 use reth_primitives::{
@@ -34,10 +34,10 @@ macro_rules! impl_uints {
 
             impl Decode for $name
             {
-                fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+                fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, $crate::DatabaseError> {
                     Ok(
                         $name::from_be_bytes(
-                            value.as_ref().try_into().map_err(|_| Error::DecodeError)?
+                            value.as_ref().try_into().map_err(|_| $crate::DatabaseError::DecodeError)?
                         )
                     )
                 }
@@ -56,7 +56,7 @@ impl Encode for Vec<u8> {
 }
 
 impl Decode for Vec<u8> {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         Ok(value.as_ref().to_vec())
     }
 }
@@ -69,7 +69,7 @@ impl Encode for Address {
 }
 
 impl Decode for Address {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         Ok(Address::from_slice(value.as_ref()))
     }
 }
@@ -81,7 +81,7 @@ impl Encode for H256 {
 }
 
 impl Decode for H256 {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         Ok(H256::from_slice(value.as_ref()))
     }
 }
@@ -94,8 +94,8 @@ impl Encode for String {
 }
 
 impl Decode for String {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
-        String::from_utf8(value.as_ref().to_vec()).map_err(|_| Error::DecodeError)
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
+        String::from_utf8(value.as_ref().to_vec()).map_err(|_| DatabaseError::DecodeError)
     }
 }
 
@@ -111,7 +111,7 @@ impl Encode for StoredNibbles {
 }
 
 impl Decode for StoredNibbles {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let buf = value.as_ref();
         Ok(Self::from_compact(buf, buf.len()).0)
     }
@@ -129,7 +129,7 @@ impl Encode for StoredNibblesSubKey {
 }
 
 impl Decode for StoredNibblesSubKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let buf = value.as_ref();
         Ok(Self::from_compact(buf, buf.len()).0)
     }

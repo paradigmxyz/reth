@@ -1,6 +1,6 @@
 use crate::{
     table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value},
-    Error,
+    DatabaseError,
 };
 use serde::Serialize;
 
@@ -51,7 +51,7 @@ impl<K: Key> RawKey<K> {
         Self { key: K::encode(key).as_ref().to_vec(), _phantom: std::marker::PhantomData }
     }
     /// Returns the raw key.
-    pub fn key(&self) -> Result<K, Error> {
+    pub fn key(&self) -> Result<K, DatabaseError> {
         K::decode(&self.key)
     }
 }
@@ -79,7 +79,7 @@ impl<K: Key> Encode for RawKey<K> {
 
 // Decode
 impl<K: Key> Decode for RawKey<K> {
-    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, Error> {
+    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, DatabaseError> {
         Ok(Self { key: key.as_ref().to_vec(), _phantom: std::marker::PhantomData })
     }
 }
@@ -97,7 +97,7 @@ impl<V: Value> RawValue<V> {
         Self { value: V::compress(value).as_ref().to_vec(), _phantom: std::marker::PhantomData }
     }
     /// Returns the raw value.
-    pub fn value(&self) -> Result<V, Error> {
+    pub fn value(&self) -> Result<V, DatabaseError> {
         V::decompress(&self.value)
     }
 }
@@ -126,7 +126,7 @@ impl<V: Value> Compress for RawValue<V> {
 }
 
 impl<V: Value> Decompress for RawValue<V> {
-    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         Ok(Self { value: value.as_ref().to_vec(), _phantom: std::marker::PhantomData })
     }
 }

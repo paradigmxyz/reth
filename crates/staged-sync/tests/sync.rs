@@ -4,7 +4,7 @@ use ethers_core::{
 };
 use ethers_providers::Middleware;
 use reth_network::{
-    test_utils::{unused_port, unused_tcp_udp, NetworkEventStream},
+    test_utils::{unused_tcp_and_udp_port, unused_tcp_udp, NetworkEventStream},
     NetworkConfig, NetworkManager,
 };
 use reth_network_api::Peers;
@@ -69,8 +69,10 @@ async fn init_geth() -> (CliqueGethInstance, Arc<ChainSpec>) {
     );
 
     // this creates a funded geth
-    let clique_geth =
-        Geth::new().chain_id(chain_id).p2p_port(unused_port()).data_dir(dir_path.to_str().unwrap());
+    let clique_geth = Geth::new()
+        .chain_id(chain_id)
+        .p2p_port(unused_tcp_and_udp_port())
+        .data_dir(dir_path.to_str().unwrap());
 
     // build the funded geth
     let mut clique = CliqueGethInstance::new(clique_geth, None).await;

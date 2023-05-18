@@ -611,8 +611,6 @@ fn build_payload<Pool, Client>(
                 }
             };
 
-            // let ResultAndState { result, state } =
-            evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
             let gas_used = result.gas_used();
 
             // commit changes

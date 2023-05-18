@@ -405,6 +405,14 @@ pub enum PayloadValidationError {
     /// Thrown when a new payload contains a wrong block number.
     #[error("invalid block number")]
     InvalidBlockNumber,
+    /// Thrown when a new payload contains a wrong state root
+    #[error("invalid merkle root (remote: {remote:?} local: {local:?})")]
+    InvalidStateRoot {
+        /// The state root of the payload we received from remote (CL)
+        remote: H256,
+        /// The state root of the payload that we computed locally.
+        local: H256,
+    },
 }
 
 #[cfg(test)]
