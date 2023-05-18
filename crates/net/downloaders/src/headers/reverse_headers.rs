@@ -999,7 +999,7 @@ pub struct ReverseHeadersDownloaderBuilder {
 impl Default for ReverseHeadersDownloaderBuilder {
     fn default() -> Self {
         Self {
-            request_limit: 1_000,
+            request_limit: 200,
             stream_batch_size: 10_000,
             max_concurrent_requests: 100,
             min_concurrent_requests: 5,
