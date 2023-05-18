@@ -139,6 +139,14 @@ impl StageCheckpoint {
         Self { block_number, ..Default::default() }
     }
 
+    /// Returns the account hashing stage checkpoint, if any.
+    pub fn account_hashing_stage_checkpoint(&self) -> Option<AccountHashingCheckpoint> {
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::Account(checkpoint)) => Some(checkpoint),
+            _ => None,
+        }
+    }
+
     /// Sets the stage checkpoint to account hashing.
     pub fn with_account_hashing_stage_checkpoint(
         mut self,
