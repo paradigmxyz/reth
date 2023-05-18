@@ -276,11 +276,13 @@ where
             return Some(H256::zero())
         }
 
-        // TODO(mattsse): This could be invoked on new payload which does not make tree canonical,
-        //  which would make this inaccurate, e.g. if an invalid payload is received in this
-        //  scenario: FUC (unknown head) -> valid payload  -> invalid payload
-
-        self.blockchain.find_canonical_ancestor(parent_hash)
+        // If this is sent from new payload then the parent hash could be in a side chain, and is
+        // not necessarily canonical
+        if self.blockchain.header_by_hash(parent_hash).is_some() {
+            Some(parent_hash)
+        } else {
+            self.blockchain.find_canonical_ancestor(parent_hash)
+        }
     }
 
     /// Loads the header for the given `block_number` from the database.
