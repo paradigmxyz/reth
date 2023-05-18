@@ -190,6 +190,7 @@ where
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
+        target: Option<H256>,
     ) -> (Self, BeaconConsensusEngineHandle) {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -202,6 +203,7 @@ where
             max_block,
             run_pipeline_continuously,
             payload_builder,
+            target,
             to_engine,
             rx,
         )
@@ -220,6 +222,7 @@ where
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
+        target: Option<H256>,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
     ) -> (Self, BeaconConsensusEngineHandle) {
@@ -231,7 +234,7 @@ where
             run_pipeline_continuously,
             max_block,
         );
-        let this = Self {
+        let mut this = Self {
             db,
             sync,
             blockchain,
@@ -244,6 +247,10 @@ where
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: Metrics::default(),
         };
+
+        if let Some(target) = target {
+            this.sync.set_pipeline_sync_target(target);
+        }
 
         (this, handle)
     }
@@ -1036,6 +1043,7 @@ mod tests {
             None,
             false,
             payload_builder,
+            None,
         );
 
         (engine, TestEnv::new(db, tip_rx, handle))
