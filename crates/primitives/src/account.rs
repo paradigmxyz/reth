@@ -135,7 +135,7 @@ impl Compact for Bytecode {
                     jump_map: JumpMap::from_slice(buf),
                 },
             }),
-            _ => unreachable!(),
+            _ => unreachable!("Junk data in database: unknown BytecodeState variant"),
         };
         (decoded, &[])
     }
