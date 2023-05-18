@@ -3,7 +3,9 @@ use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
-    blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
+    blockchain_tree::{
+        error::InsertBlockError, BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer,
+    },
     consensus::Consensus,
     Error,
 };
@@ -28,7 +30,7 @@ pub struct ShareableBlockchainTree<DB: Database, C: Consensus, EF: ExecutorFacto
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB, C, EF> {
-    /// Create New sharable database.
+    /// Create a new sharable database.
     pub fn new(tree: BlockchainTree<DB, C, EF>) -> Self {
         Self { tree: Arc::new(RwLock::new(tree)) }
     }
@@ -37,23 +39,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn insert_block_without_senders(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
-        let mut tree = self.tree.write();
-        // check if block is known before recovering all senders.
-        if let Some(status) = tree.is_block_known(block.num_hash())? {
-            return Ok(status)
+    fn insert_block_without_senders(
+        &self,
+        block: SealedBlock,
+    ) -> Result<BlockStatus, InsertBlockError> {
+        match block.try_seal_with_senders() {
+            Ok(block) => self.tree.write().insert_block_inner(block, true),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
-        let block = block
-            .seal_with_senders()
-            .ok_or(reth_interfaces::executor::BlockExecutionError::SenderRecoveryError)?;
-        tree.insert_block_inner(block, true)
     }
 
-    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), Error> {
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         self.tree.write().buffer_block(block)
     }
 
-    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, Error> {
+    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError> {
         trace!(target: "blockchain_tree", ?block, "Inserting block");
         self.tree.write().insert_block(block)
     }
