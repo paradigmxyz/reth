@@ -147,12 +147,29 @@ impl StageCheckpoint {
         }
     }
 
+    /// Returns the storage hashing stage checkpoint, if any.
+    pub fn storage_hashing_stage_checkpoint(&self) -> Option<StorageHashingCheckpoint> {
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::Storage(checkpoint)) => Some(checkpoint),
+            _ => None,
+        }
+    }
+
     /// Sets the stage checkpoint to account hashing.
     pub fn with_account_hashing_stage_checkpoint(
         mut self,
         checkpoint: AccountHashingCheckpoint,
     ) -> Self {
         self.stage_checkpoint = Some(StageUnitCheckpoint::Account(checkpoint));
+        self
+    }
+
+    /// Sets the stage checkpoint to storage hashing.
+    pub fn with_storage_hashing_stage_checkpoint(
+        mut self,
+        checkpoint: StorageHashingCheckpoint,
+    ) -> Self {
+        self.stage_checkpoint = Some(StageUnitCheckpoint::Storage(checkpoint));
         self
     }
 }

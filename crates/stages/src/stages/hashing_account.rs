@@ -144,7 +144,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         if to_block - from_block > self.clean_threshold || from_block == 1 {
             let start_address = match stage_checkpoint {
                 Some(AccountHashingCheckpoint { address: address @ Some(_), from, to })
-                    // Checkpoint is only valid if the range of transitions didn't changed.
+                    // Checkpoint is only valid if the range of transitions didn't change.
                     // An already hashed account may have been changed with the new range,
                     // and therefore should be hashed again. 
                     if from == from_block && to == to_block =>
@@ -217,8 +217,6 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             };
 
             if let Some((next_address, _)) = &next_address {
-                // from block is correct here as were are iteration over state for this
-                // particular block
                 let checkpoint = input.checkpoint().with_account_hashing_stage_checkpoint(
                     AccountHashingCheckpoint {
                         address: Some(next_address.key().unwrap()),

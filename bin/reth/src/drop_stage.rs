@@ -86,7 +86,6 @@ impl Command {
 
                     // Clear hashed storages
                     tx.clear::<tables::HashedStorage>()?;
-                    tx.put::<tables::SyncStageProgress>(STORAGE_HASHING.0.into(), Vec::new())?;
                     tx.put::<tables::SyncStage>(STORAGE_HASHING.0.to_string(), Default::default())?;
 
                     Ok::<_, eyre::Error>(())
