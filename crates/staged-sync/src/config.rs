@@ -64,7 +64,6 @@ pub struct StageConfig {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct HeadersConfig {
     /// The maximum number of requests to send concurrently.
-    /// This is upper bounded by the max number of peers.
     ///
     /// Default: 100
     pub downloader_max_concurrent_requests: usize,
