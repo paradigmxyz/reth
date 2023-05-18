@@ -14,7 +14,7 @@ use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
+use reth_beacon_consensus::{sync::PipelineState, BeaconConsensus, BeaconConsensusEngine};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -30,7 +30,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
-    consensus::{Consensus, ForkchoiceState},
+    consensus::Consensus,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
@@ -157,9 +157,8 @@ impl Command {
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
 
-        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-
-        let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
+        debug!(target: "reth::cli", chain = %self.chain.chain, genesis = ?self.chain.genesis_hash(), "Initializing genesis");
+        init_genesis(db.clone(), self.chain.clone())?;
 
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
@@ -244,44 +243,6 @@ impl Command {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        // Forward genesis as forkchoice state to the consensus engine.
-        // This will allow the downloader to start
-        if self.debug.continuous {
-            info!(target: "reth::cli", "Continuous sync mode enabled");
-            let (tip_tx, _tip_rx) = oneshot::channel();
-            let state = ForkchoiceState {
-                head_block_hash: genesis_hash,
-                finalized_block_hash: genesis_hash,
-                safe_block_hash: genesis_hash,
-            };
-            consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
-                state,
-                payload_attrs: None,
-                tx: tip_tx,
-            })?;
-        }
-
-        // Forward the `debug.tip` as forkchoice state to the consensus engine.
-        // This will initiate the sync up to the provided tip.
-        let _tip_rx = match self.debug.tip {
-            Some(tip) => {
-                let (tip_tx, tip_rx) = oneshot::channel();
-                let state = ForkchoiceState {
-                    head_block_hash: tip,
-                    finalized_block_hash: tip,
-                    safe_block_hash: tip,
-                };
-                consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
-                    state,
-                    payload_attrs: None,
-                    tx: tip_tx,
-                })?;
-                debug!(target: "reth::cli", %tip, "Tip manually set");
-                Some(tip_rx)
-            }
-            None => None,
-        };
-
         // configure the payload builder
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
@@ -339,10 +300,27 @@ impl Command {
 
         let pipeline_events = pipeline.events();
 
+        // Run the pipeline if the debug arguments were provided
+        let pipeline_state = if self.debug.tip.is_some() || self.debug.continuous {
+            let tip = self.debug.tip.filter(|_| !self.debug.continuous);
+            debug!(target: "reth::cli", ?tip, continuous = self.debug.continuous, "Pipeline manually launched");
+            let (tx, rx) = oneshot::channel();
+            ctx.task_executor.spawn_critical_blocking(
+                "pipeline task",
+                Box::pin(async move {
+                    let result = pipeline.run_as_fut(tip).await;
+                    let _ = tx.send(result);
+                }),
+            );
+            PipelineState::Running(rx)
+        } else {
+            PipelineState::Idle(Some(pipeline))
+        };
+
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
             client,
-            pipeline,
+            pipeline_state,
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
             Box::new(network.clone()),

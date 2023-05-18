@@ -56,7 +56,7 @@ where
 {
     /// Create a new instance
     pub(crate) fn new(
-        pipeline: Pipeline<DB>,
+        pipeline_state: PipelineState<DB>,
         client: Client,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         run_pipeline_continuously: bool,
@@ -65,7 +65,7 @@ where
         Self {
             full_block_client: FullBlockClient::new(client),
             pipeline_task_spawner,
-            pipeline_state: PipelineState::Idle(Some(pipeline)),
+            pipeline_state,
             pending_pipeline_target: None,
             inflight_full_block_requests: Vec::new(),
             queued_events: VecDeque::new(),
@@ -251,7 +251,7 @@ pub(crate) enum EngineSyncEvent {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PipelineState<DB: Database> {
+pub enum PipelineState<DB: Database> {
     /// Pipeline is idle.
     Idle(Option<Pipeline<DB>>),
     /// Pipeline is running and waiting for a response

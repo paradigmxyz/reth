@@ -21,7 +21,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
-use reth_stages::{stages::FINISH, Pipeline};
+use reth_stages::stages::FINISH;
 use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{
@@ -48,9 +48,10 @@ pub use error::{
 mod metrics;
 
 mod event;
-pub(crate) mod sync;
-
 pub use event::BeaconConsensusEngineEvent;
+
+pub mod sync;
+use sync::PipelineState;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
@@ -183,7 +184,7 @@ where
     pub fn new(
         db: DB,
         client: Client,
-        pipeline: Pipeline<DB>,
+        pipeline_state: PipelineState<DB>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
@@ -195,7 +196,7 @@ where
         Self::with_channel(
             db,
             client,
-            pipeline,
+            pipeline_state,
             blockchain,
             task_spawner,
             sync_state_updater,
@@ -213,7 +214,7 @@ where
     pub fn with_channel(
         db: DB,
         client: Client,
-        pipeline: Pipeline<DB>,
+        pipeline_state: PipelineState<DB>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
@@ -225,7 +226,7 @@ where
     ) -> (Self, BeaconConsensusEngineHandle) {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
-            pipeline,
+            pipeline_state,
             client,
             task_spawner,
             run_pipeline_continuously,
@@ -917,7 +918,7 @@ mod tests {
         providers::BlockchainProvider, test_utils::TestExecutorFactory, ShareableDatabase,
         Transaction,
     };
-    use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
+    use reth_stages::{test_utils::TestStages, ExecOutput, Pipeline, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, sync::Arc, time::Duration};
     use tokio::sync::{
@@ -1029,7 +1030,7 @@ mod tests {
         let (engine, handle) = BeaconConsensusEngine::new(
             db.clone(),
             NoopFullBlockClient::default(),
-            pipeline,
+            PipelineState::Idle(Some(pipeline)),
             blockchain_provider,
             Box::<TokioTaskExecutor>::default(),
             Box::<NoopSyncStateUpdater>::default(),
