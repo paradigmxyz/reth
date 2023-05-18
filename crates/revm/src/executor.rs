@@ -400,8 +400,8 @@ pub fn commit_state_changes<DB>(
                 }
             };
 
-            let old = to_reth_acc(&db_account.info);
-            if !old.is_empty() {
+            let account_exists = !matches!(db_account.account_state, AccountState::NotExisting);
+            if account_exists {
                 // Insert into `change` a old account and None for new account
                 // and mark storage to be wiped
                 post_state.destroy_account(block_number, address, to_reth_acc(&db_account.info));
@@ -431,35 +431,49 @@ pub fn commit_state_changes<DB>(
                 Entry::Vacant(entry) => {
                     let entry = entry.insert(Default::default());
                     entry.info = account.info.clone();
+                    let new_account = to_reth_acc(&entry.info);
 
-                    let account = to_reth_acc(&entry.info);
-                    if !(has_state_clear_eip && account.is_empty()) {
-                        post_state.create_account(block_number, address, account);
+                    if !has_state_clear_eip {
+                        post_state.create_account(block_number, address, new_account);
+                    } else if has_state_clear_eip &&
+                        entry.info.is_empty() &&
+                        !new_account.is_empty()
+                    {
+                        post_state.create_account(block_number, address, new_account);
                     }
+
                     entry
                 }
                 Entry::Occupied(entry) => {
                     let entry = entry.into_mut();
 
-                    if entry.info.is_empty() {
-                        let account = to_reth_acc(&account.info);
-                        if !(has_state_clear_eip && account.is_empty()) {
-                            post_state.create_account(block_number, address, account);
-                        }
-                    } else if entry.info != account.info {
+                    let old_account = to_reth_acc(&entry.info);
+                    let new_account = to_reth_acc(&account.info);
+
+                    if !has_state_clear_eip &&
+                        matches!(entry.account_state, AccountState::NotExisting)
+                    {
+                        // Before state clear EIP, create account if it doesn't exist
+                        post_state.create_account(block_number, address, new_account);
+                    } else if has_state_clear_eip &&
+                        entry.info.is_empty() &&
+                        !new_account.is_empty()
+                    {
+                        // After state clear EIP, create account only if it is not empty
+                        post_state.create_account(block_number, address, new_account);
+                    }
+                    if old_account != new_account {
                         post_state.change_account(
                             block_number,
                             address,
                             to_reth_acc(&entry.info),
-                            to_reth_acc(&account.info),
+                            new_account,
                         );
-                    } else if has_state_clear_eip && account.is_empty() {
+                    } else if has_state_clear_eip && new_account.is_empty() {
                         // The account was touched, but it is empty, so it should be deleted.
-                        post_state.destroy_account(
-                            block_number,
-                            address,
-                            to_reth_acc(&account.info),
-                        );
+                        // This also deletes empty accounts which were created before state clear
+                        // EIP.
+                        post_state.destroy_account(block_number, address, new_account);
                     }
 
                     entry.info = account.info.clone();
