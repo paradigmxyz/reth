@@ -16,7 +16,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
 use reth_provider::insert_canonical_block;
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, path::Path, time::Duration};
 use tracing::info;
 
 /// Get a single header from network
@@ -121,7 +121,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 }
 
 /// Helper to parse a [Duration] from seconds
-pub fn parse_duration_from_secs(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
+pub fn parse_duration_from_secs(arg: &str) -> Result<Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
-    Ok(std::time::Duration::from_secs(seconds))
+    Ok(Duration::from_secs(seconds))
 }
