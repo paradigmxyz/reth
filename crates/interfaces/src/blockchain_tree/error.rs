@@ -69,10 +69,17 @@ impl InsertBlockError {
         &self.inner.kind
     }
 
-    /// Returns the invalid block.
+    /// Returns the block that resulted in the error
     #[inline]
     pub fn block(&self) -> &SealedBlock {
         &self.inner.block
+    }
+
+    /// Consumes the type and returns the block and error kind.
+    #[inline]
+    pub fn split(self) -> (SealedBlock, InsertBlockErrorKind) {
+        let inner = *self.inner;
+        (inner.block, inner.kind)
     }
 }
 
@@ -143,6 +150,11 @@ impl InsertBlockErrorKind {
     /// Returns true if the error is an execution error
     pub fn is_execution_error(&self) -> bool {
         matches!(self, InsertBlockErrorKind::Execution(_))
+    }
+
+    /// Returns true if the error is an internal error
+    pub fn is_internal(&self) -> bool {
+        matches!(self, InsertBlockErrorKind::Internal(_))
     }
 
     /// Returns the error if it is a tree error

@@ -90,10 +90,11 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
                 BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => return (*err).into(),
-                BeaconForkChoiceUpdateError::EngineUnavailable => INTERNAL_ERROR_CODE,
+                BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => INTERNAL_ERROR_CODE,
             },
             EngineApiError::NewPayload(ref err) => match err {
+                BeaconOnNewPayloadError::Internal(_) |
                 BeaconOnNewPayloadError::EngineUnavailable => INTERNAL_ERROR_CODE,
             },
             // Any other server error
