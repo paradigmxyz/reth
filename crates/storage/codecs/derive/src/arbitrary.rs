@@ -16,6 +16,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
     let mut traits = vec![];
     let mut roundtrips = vec![];
+    let mut malformed_checks = vec![];
 
     for arg in args {
         if arg.to_string() == "compact" {
@@ -43,6 +44,10 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     // ensure buffer is fully consumed by decode
                     assert!(b.is_empty(), "buffer was not consumed entirely");
 
+                }
+            });
+            malformed_checks.push(quote! {
+                {
                     // malformed header check
                     let mut decode_buf = &mut buf.as_slice();
                     let mut header = reth_rlp::Header::decode(decode_buf).unwrap();
@@ -75,6 +80,15 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
                     proptest::proptest!(config, |(field: super::#type_ident)| {
                         #(#roundtrips)*
+                    });
+                }
+
+                #[test]
+                fn malformed_header_check() {
+                    let mut config = proptest::prelude::ProptestConfig::with_cases(#default_cases as u32);
+
+                    proptest::proptest!(config, |(field: super::#type_ident)| {
+                        #(#malformed_checks)*
                     });
                 }
             }
