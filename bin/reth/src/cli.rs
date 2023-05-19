@@ -32,11 +32,7 @@ pub fn run() -> eyre::Result<()> {
         Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::DumpStage(command) => {
-            // TODO: This should be run_blocking_until_ctrl_c as well, but fails to compile due to
-            // weird compiler GAT issues.
-            runner.run_until_ctrl_c(command.execute())
-        }
+        Commands::DumpStage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::DropStage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
