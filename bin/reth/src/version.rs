@@ -2,7 +2,7 @@
 
 /// The short version information for reth.
 ///
-/// - The latest version from Cargo.tom
+/// - The latest version from Cargo.toml
 /// - The short SHA of the latest commit.
 ///
 /// # Example
@@ -15,9 +15,7 @@ pub(crate) const SHORT_VERSION: &str =
 
 /// The long version information for reth.
 ///
-/// Expands to the short version information for reth.
-///
-/// - The latest version from Cargo.tom
+/// - The latest version from Cargo.toml
 /// - The long SHA of the latest commit.
 /// - The build datetime
 /// - The build features
