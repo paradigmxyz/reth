@@ -10,7 +10,7 @@ FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 
 # Set the build profile to be release
-ARG BUILD_PROFILE=release
+ARG BUILD_PROFILE=maxperf
 ENV BUILD_PROFILE $BUILD_PROFILE
 
 # Install system dependencies

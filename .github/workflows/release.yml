@@ -1,0 +1,244 @@
+# This workflow is borrowed from Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/.github/workflows/release.yml
+
+name: release
+
+on:
+  push:
+    tags:
+      - v*
+
+env:
+  REPO_NAME: ${{ github.repository_owner }}/reth
+  IMAGE_NAME: ${{ github.repository_owner }}/reth
+
+jobs:
+  extract-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract version
+        run: echo "VERSION=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
+        id: extract_version
+    outputs:
+      VERSION: ${{ steps.extract_version.outputs.VERSION }}
+  build:
+    name: build release
+    strategy:
+      matrix:
+        arch: [aarch64-unknown-linux-gnu,
+               x86_64-unknown-linux-gnu,
+               x86_64-apple-darwin,
+               x86_64-windows]
+        include:
+          -   arch: aarch64-unknown-linux-gnu
+              platform: ubuntu-latest
+              profile: maxperf
+          -   arch: x86_64-unknown-linux-gnu
+              platform: ubuntu-latest
+              profile: maxperf
+          -   arch: x86_64-apple-darwin
+              platform: macos-latest
+              profile: maxperf
+          -   arch: x86_64-windows
+              platform: windows-2019
+              profile: maxperf
+
+    runs-on: ${{ matrix.platform }}
+    needs: extract-version
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+      - name: Get latest version of stable Rust
+        run: rustup update stable
+
+      # ==============================
+      # Windows dependencies
+      # ==============================
+
+      - uses: KyleMayes/install-llvm-action@v1
+        if: startsWith(matrix.arch, 'x86_64-windows')
+        with:
+          version: "13.0"
+          directory: ${{ runner.temp }}/llvm
+      - name: Set LIBCLANG_PATH
+        if: startsWith(matrix.arch, 'x86_64-windows')
+        run: echo "LIBCLANG_PATH=$((gcm clang).source -replace "clang.exe")" >> $env:GITHUB_ENV
+
+      # ==============================
+      #       Builds
+      # ==============================
+
+      - name: Build reth for aarch64-unknown-linux-gnu
+        if:   matrix.arch == 'aarch64-unknown-linux-gnu'
+        run:  |
+          cargo install cross
+          env CROSS_PROFILE=${{ matrix.profile }} make build-aarch64
+
+      - name: Build reth for x86_64-unknown-linux-gnu
+        if:   matrix.arch == 'x86_64-unknown-linux-gnu'
+        run:  |
+          cargo install cross
+          env CROSS_PROFILE=${{ matrix.profile }} make build-x86_64
+
+      - name: Move cross-compiled binary
+        if:  startsWith(matrix.arch, 'aarch64')
+        run: mv target/aarch64-unknown-linux-gnu/${{ matrix.profile }}/reth ~/.cargo/bin/reth
+
+      - name: Move cross-compiled binary
+        if:  startsWith(matrix.arch, 'x86_64-unknown-linux-gnu')
+        run: mv target/x86_64-unknown-linux-gnu/${{ matrix.profile }}/reth ~/.cargo/bin/reth
+
+      - name: Build reth for x86_64-apple-darwin modern
+        if:   matrix.arch == 'x86_64-apple-darwin'
+        run:  cargo install --path reth --force --locked --profile ${{ matrix.profile }}
+
+      - name: Build reth for Windows modern
+        if:   matrix.arch == 'x86_64-windows'
+        # NOTE: profile set to release (see above)
+        run:  cargo install --path reth --force --locked --profile release
+
+      - name: Configure GPG and create artifacts
+        if: startsWith(matrix.arch, 'x86_64-windows') != true
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          export GPG_TTY=$(tty)
+          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --import
+          mkdir artifacts
+          mv ~/.cargo/bin/reth ./artifacts
+          cd artifacts
+          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
+          mv *tar.gz* ..
+
+      - name: Configure GPG and create artifacts Windows
+        if: startsWith(matrix.arch, 'x86_64-windows')
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo $env:GPG_SIGNING_KEY | base64 --decode | gpg --batch --import
+          mkdir artifacts
+          move $env:USERPROFILE/.cargo/bin/reth.exe ./artifacts
+          cd artifacts
+          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth.exe
+          gpg --passphrase "$env:GPG_PASSPHRASE" --batch --pinentry-mode loopback -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
+          move *tar.gz* ..
+
+      # =======================================================================
+      # Upload artifacts
+      # This is required to share artifacts between different jobs
+      # =======================================================================
+      - name:  Upload artifact
+        uses:  actions/upload-artifact@v3
+        with:
+          name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
+          path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
+
+      - name: Upload signature
+        uses: actions/upload-artifact@v3
+        with:
+          name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz.asc
+          path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz.asc
+
+  draft-release:
+    name:   Draft Release
+    needs:  [build, extract-version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION:  ${{ needs.extract-version.outputs.VERSION }}
+    steps:
+      # This is necessary for generating the changelog. It has to come before "Download Artifacts" or else it deletes the artifacts.
+      - name: Checkout sources
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      # ==============================
+      #       Download artifacts
+      # ==============================
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+
+      # ==============================
+      #       Create release draft
+      # ==============================
+      - name: Generate Full Changelog
+        id: changelog
+        run: |
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 ${{ env.VERSION }}^)..${{ env.VERSION }})" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release Draft
+        env:
+          GITHUB_USER: ${{ github.repository_owner }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        # The formatting here is borrowed from Lighthouse (which is borrowed from OpenEthereum): https://github.com/openethereum/openethereum/blob/main/.github/workflows/build.yml
+        run: |
+          body=$(cat <<- "ENDBODY"
+          <Release Name>
+          
+          ## Testing Checklist (DELETE ME)
+          
+          - [ ] Run on testnet for 1-3 days.
+          - [ ] Resync a mainnet node.
+          - [ ] Ensure all CI checks pass.
+          
+          ## Release Checklist (DELETE ME)
+          
+          - [ ] Ensure all crates have had their versions bumped.
+          - [ ] Write the summary.
+          - [ ] Fill out the update priority.
+          - [ ] Ensure all binaries have been added.
+          - [ ] Prepare release posts (Twitter, ...).
+          
+          ## Summary
+          
+          Add a summary, including:
+          
+          - Critical bug fixes
+          - New features
+          - Any breaking changes (and what to expect)
+          
+          ## Update Priority
+          
+          This table provides priorities for which classes of users should update particular components.
+  
+          | User Class           | Priority        |
+          |----------------------|-----------------|
+          | Payload Builders     | <TODO> |
+          | Non-Payload Builders | <TODO>    |
+          
+          *See [Update
+          Priorities](https://paradigmxyz.github.io/reth/installation-priorities.html)
+          more information about this table.*
+          
+          ## All Changes
+          
+          ${{ steps.changelog.outputs.CHANGELOG }}
+          
+          ## Binaries
+          
+          [See pre-built binaries documentation.](https://https://paradigmxyz.github.io/reth/installation/binaries.html)
+          
+          The binaries are signed with the PGP key: `A3AE 097C 8909 3A12 4049  DF1F 5391 A3C4 1005 30B4`
+          
+          | System | Architecture | Binary | PGP Signature |
+          |:---:|:---:|:---:|:---|
+          | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/raspberrypi.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/windows.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-windows.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-windows.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-windows.tar.gz.asc) |
+          | | | | |
+          | **System** | **Option** | - | **Resource** |
+          | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | [${{ env.VERSION }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}/tags?page=1&ordering=last_updated&name=${{ env.VERSION }}) | [${{ env.IMAGE_NAME }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}) |
+          ENDBODY
+          )
+          assets=()
+          for asset in ./reth-*.tar.gz*; do
+              assets+=("-a" "$asset/$asset")
+          done
+          tag_name="${{ env.VERSION }}"
+          echo "$body" | hub release create --draft "${assets[@]}" -F "-" "$tag_name"
