@@ -4,8 +4,8 @@ use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
-use reth_primitives::BlockNumber;
-use reth_stages::{PipelineEvent, StageId};
+use reth_primitives::{BlockNumber, StageCheckpoint};
+use reth_stages::{ExecOutput, PipelineEvent, StageId};
 use std::{
     future::Future,
     pin::Pin,
@@ -46,14 +46,17 @@ impl NodeState {
                     info!(target: "reth::cli", stage = %stage_id, from = stage_progress, "Executing stage");
                 }
             }
-            PipelineEvent::Ran { stage_id, result } => {
-                let notable = result.stage_progress > self.current_checkpoint;
-                self.current_checkpoint = result.stage_progress;
-                if result.done {
+            PipelineEvent::Ran {
+                stage_id,
+                result: ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done },
+            } => {
+                let notable = block_number > self.current_checkpoint;
+                self.current_checkpoint = block_number;
+                if done {
                     self.current_stage = None;
-                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage finished executing");
+                    info!(target: "reth::cli", stage = %stage_id, checkpoint = block_number, "Stage finished executing");
                 } else if notable {
-                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage committed progress");
+                    info!(target: "reth::cli", stage = %stage_id, checkpoint = block_number, "Stage committed progress");
                 }
             }
             _ => (),

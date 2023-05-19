@@ -159,7 +159,7 @@ where
 
 impl<T> Compact for Option<T>
 where
-    T: Compact + Default,
+    T: Compact,
 {
     /// Returns 0 for `None` and 1 for `Some(_)`.
     fn to_compact<B>(self, buf: &mut B) -> usize

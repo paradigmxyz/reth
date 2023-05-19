@@ -525,6 +525,7 @@ where
     TX: DbTx<'a> + Send + Sync,
 {
     tx.get::<tables::SyncStage>("Finish".to_string())
+        .map(|result| result.map(|checkpoint| checkpoint.block_number))
 }
 
 /// Fetches the last canonical header from the database.

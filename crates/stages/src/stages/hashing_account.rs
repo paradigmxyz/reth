@@ -9,7 +9,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_primitives::{keccak256, AccountHashingCheckpoint};
+use reth_primitives::{keccak256, AccountHashingCheckpoint, StageCheckpoint};
 use reth_provider::Transaction;
 use std::{
     cmp::max,
@@ -164,7 +164,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     ) -> Result<ExecOutput, StageError> {
         let range = input.next_block_range();
         if range.is_empty() {
-            return Ok(ExecOutput::done(*range.end()))
+            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
         }
         let (from_block, to_block) = range.into_inner();
 
@@ -255,8 +255,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             if next_address.is_some() {
                 // from block is correct here as were are iteration over state for this
                 // particular block
-                info!(target: "sync::stages::hashing_account", stage_progress = input.stage_progress(), is_final_range = false, "Stage iteration finished");
-                return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
+                info!(target: "sync::stages::hashing_account", stage_progress = %input.checkpoint(), is_final_range = false, "Stage iteration finished");
+                return Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
             }
         } else {
             // Aggregate all transition changesets and and make list of account that have been
@@ -270,8 +270,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             tx.insert_account_for_hashing(accounts.into_iter())?;
         }
 
-        info!(target: "sync::stages::hashing_account", stage_progress = input.previous_stage_progress(), is_final_range = true, "Stage iteration finished");
-        Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
+        info!(target: "sync::stages::hashing_account", stage_progress = %input.previous_stage_checkpoint(), is_final_range = true, "Stage iteration finished");
+        Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
     }
 
     /// Unwind the stage.
@@ -287,7 +287,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx.unwind_account_hashing(range)?;
 
         info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: unwind_progress })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
 }
 
@@ -312,8 +312,8 @@ mod tests {
         runner.set_clean_threshold(1);
 
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -321,7 +321,7 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done && stage_progress == previous_stage);
+        assert_matches!(result, Ok(ExecOutput {checkpoint: StageCheckpoint { block_number, ..}, done: true}) if block_number == previous_stage);
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -336,8 +336,8 @@ mod tests {
         runner.set_commit_threshold(5);
 
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -346,7 +346,10 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if !done && stage_progress == 10);
+        assert_matches!(
+            result,
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number: 10, .. }, done: false })
+        );
         assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 5);
         let fifth_address = runner
             .tx
@@ -368,11 +371,14 @@ mod tests {
         );
 
         // second run, hash next five account.
-        input.stage_progress = Some(result.unwrap().stage_progress);
+        input.checkpoint = Some(result.unwrap().checkpoint);
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {done, stage_progress}) if done && stage_progress == 20);
+        assert_matches!(
+            result,
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number: 20, .. }, done: true })
+        );
         assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 10);
 
         // Validate the stage execution
@@ -483,7 +489,7 @@ mod tests {
                 Ok(AccountHashingStage::seed(
                     &mut self.tx.inner(),
                     SeedOpts {
-                        blocks: 1..=input.previous_stage_progress(),
+                        blocks: 1..=input.previous_stage_checkpoint().block_number,
                         accounts: 0..10,
                         txs: 0..3,
                     },
@@ -497,8 +503,8 @@ mod tests {
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
                 if let Some(output) = output {
-                    let start_block = input.stage_progress.unwrap_or_default() + 1;
-                    let end_block = output.stage_progress;
+                    let start_block = input.checkpoint.unwrap_or_default().block_number + 1;
+                    let end_block = output.checkpoint.block_number;
                     if start_block > end_block {
                         return Ok(())
                     }

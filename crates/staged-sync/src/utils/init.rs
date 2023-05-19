@@ -82,7 +82,7 @@ pub fn init_genesis<DB: Database>(
 
     // insert sync stage
     for stage in StageKind::ALL.iter() {
-        tx.put::<tables::SyncStage>(stage.to_string(), 0)?;
+        tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
     }
 
     tx.commit()?;

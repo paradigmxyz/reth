@@ -11,7 +11,7 @@ use reth_db::{
 };
 use reth_primitives::{
     keccak256, Account as RethAccount, Address, Bytecode, ChainSpec, JsonU256, SealedBlock,
-    SealedHeader, StorageEntry, H256, U256,
+    SealedHeader, StageCheckpoint, StorageEntry, H256, U256,
 };
 use reth_provider::Transaction;
 use reth_rlp::Decodable;
@@ -197,8 +197,8 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         // Call execution stage
         let input = ExecInput {
-            previous_stage: last_block.map(|b| (StageId(""), b)),
-            stage_progress: None,
+            previous_stage: last_block.map(|b| (StageId(""), StageCheckpoint::new(b))),
+            checkpoint: None,
         };
         {
             let mut transaction = Transaction::new(db.as_ref())?;
