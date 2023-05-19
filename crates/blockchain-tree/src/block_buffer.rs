@@ -28,6 +28,8 @@ pub struct BlockBuffer {
     /// Needed for removal of the blocks. and to connect the potential unconnected block
     /// to the connected one.
     pub(crate) parent_to_child: HashMap<BlockHash, HashSet<BlockNumHash>>,
+    /// Helper map for fetching the block num from the block hash.
+    pub(crate) hash_to_num: HashMap<BlockHash, BlockNumber>,
     /// LRU used for tracing oldest inserted blocks that are going to be
     /// first in line for evicting if `max_blocks` limit is hit.
     ///
@@ -41,6 +43,7 @@ impl BlockBuffer {
         Self {
             blocks: Default::default(),
             parent_to_child: Default::default(),
+            hash_to_num: Default::default(),
             lru: LruCache::new(NonZeroUsize::new(limit).unwrap()),
         }
     }
@@ -50,6 +53,7 @@ impl BlockBuffer {
         let num_hash = block.num_hash();
 
         self.parent_to_child.entry(block.parent_hash).or_default().insert(block.num_hash());
+        self.hash_to_num.entry(block.hash).or_insert(block.number);
         self.blocks.entry(block.number).or_default().insert(block.hash, block);
 
         if let Some((evicted_num_hash, _)) =
@@ -59,6 +63,7 @@ impl BlockBuffer {
             if let Some(evicted_block) = self.remove_from_blocks(&evicted_num_hash) {
                 // evict the block if limit is hit
                 self.remove_from_parent(evicted_block.parent_hash, &evicted_num_hash);
+                self.remove_from_hash_to_num(evicted_block.hash);
             }
         }
     }
@@ -73,6 +78,7 @@ impl BlockBuffer {
         // remove parent block if present
         let mut taken = Vec::new();
         if let Some(block) = self.remove_from_blocks(&parent) {
+            self.remove_from_hash_to_num(parent.hash);
             taken.push(block);
         }
 
@@ -113,6 +119,12 @@ impl BlockBuffer {
         self.blocks.get(&block.number)?.get(&block.hash)
     }
 
+    /// Return reference to the asked block by hash.
+    pub fn block_by_hash(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
+        let num = self.hash_to_num.get(hash)?;
+        self.blocks.get(num)?.get(hash)
+    }
+
     /// Return number of blocks inside buffer.
     pub fn len(&self) -> usize {
         self.lru.len()
@@ -121,6 +133,13 @@ impl BlockBuffer {
     /// Return if buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.lru.is_empty()
+    }
+
+    /// Remove from the hash to num map.
+    fn remove_from_hash_to_num(&mut self, hash: BlockHash) {
+        if let hash_map::Entry::Occupied(entry) = self.hash_to_num.entry(hash) {
+            entry.remove();
+        }
     }
 
     /// Remove from parent child connection. Dont touch childrens.
@@ -163,6 +182,7 @@ impl BlockBuffer {
                 // remove child from buffer
                 for child in parent_childrens.iter() {
                     if let Some(block) = self.remove_from_blocks(child) {
+                        self.remove_from_hash_to_num(child.hash);
                         removed_blocks.push(block);
                     }
                 }
@@ -195,6 +215,7 @@ mod tests {
         buffer.insert_block(block1.clone());
         assert_eq!(buffer.len(), 1);
         assert_eq!(buffer.block(block1.num_hash()), Some(&block1));
+        assert_eq!(buffer.block_by_hash(&block1.hash), Some(&block1));
     }
 
     #[test]
@@ -354,6 +375,7 @@ mod tests {
             .get(&block.parent_hash)
             .and_then(|p| p.get(&block.num_hash()))
             .is_none());
+        assert!(buffer.hash_to_num.get(&block.hash).is_none());
     }
 
     #[test]
