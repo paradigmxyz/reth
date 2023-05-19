@@ -41,3 +41,16 @@ pub(crate) const LONG_VERSION: &str = concat!(
     "Build Features: ",
     env!("VERGEN_CARGO_FEATURES")
 );
+
+/// The version information for reth formatted for P2P.
+///
+/// - The latest version from Cargo.toml
+/// - The target triple
+///
+/// # Example
+///
+/// ```text
+/// reth/v{major}.{minor}.{patch}/{target}
+/// ```
+pub(crate) const P2P_VERSION: &str =
+    concat!("reth/v", env!("CARGO_PKG_VERSION"), "/", env!("VERGEN_CARGO_TARGET_TRIPLE"));
