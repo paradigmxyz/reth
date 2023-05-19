@@ -53,6 +53,6 @@ mod tests {
             &format!("{}", num_cpus),
         ])
         .args;
-        assert!(args.num_threads.is_some())
+        assert!(args.max_payload_tasks > 0)
     }
 }
