@@ -84,7 +84,7 @@ impl HelloMessageBuilder {
         self
     }
 
-    /// Sets client version.
+    /// Sets protocol version.
     pub fn protocol_version(mut self, protocol_version: ProtocolVersion) -> Self {
         self.protocol_version = Some(protocol_version);
         self
