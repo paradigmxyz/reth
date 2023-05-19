@@ -6,8 +6,8 @@ use crate::{
     dirs::DataDirPath,
     prometheus_exporter,
     runner::CliContext,
-    short_version,
     utils::get_single_header,
+    version::SHORT_VERSION,
 };
 use clap::Parser;
 use eyre::Context;
@@ -136,7 +136,7 @@ pub struct Command {
 impl Command {
     /// Execute `node` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth {} starting", short_version!());
+        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.

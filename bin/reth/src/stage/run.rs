@@ -4,7 +4,8 @@
 use crate::{
     args::{get_secret_key, NetworkArgs, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
-    prometheus_exporter, short_version,
+    prometheus_exporter,
+    version::SHORT_VERSION,
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
@@ -105,7 +106,7 @@ impl Command {
         let config_path = self.config.clone().unwrap_or(data_dir.config_path());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();
-        info!(target: "reth::cli", "reth {} starting stage {:?}", short_version!(), self.stage);
+        info!(target: "reth::cli", "reth {} starting stage {:?}", SHORT_VERSION, self.stage);
 
         // use the overridden db path if specified
         let db_path = data_dir.db_path();
