@@ -400,8 +400,8 @@ pub fn commit_state_changes<DB>(
                 }
             };
 
-            let old = to_reth_acc(&db_account.info);
-            if !old.is_empty() {
+            let account_exists = !matches!(db_account.account_state, AccountState::NotExisting);
+            if account_exists {
                 // Insert into `change` a old account and None for new account
                 // and mark storage to be wiped
                 post_state.destroy_account(block_number, address, to_reth_acc(&db_account.info));
@@ -431,35 +431,48 @@ pub fn commit_state_changes<DB>(
                 Entry::Vacant(entry) => {
                     let entry = entry.insert(Default::default());
                     entry.info = account.info.clone();
+                    entry.account_state = AccountState::NotExisting; // we will promote account state down the road
+                    let new_account = to_reth_acc(&entry.info);
 
-                    let account = to_reth_acc(&entry.info);
-                    if !(has_state_clear_eip && account.is_empty()) {
-                        post_state.create_account(block_number, address, account);
+                    #[allow(clippy::nonminimal_bool)]
+                    // If account was touched before state clear EIP, create it.
+                    if !has_state_clear_eip ||
+                        // If account was touched after state clear EIP, create it only if it is not empty.
+                        (has_state_clear_eip && !new_account.is_empty())
+                    {
+                        post_state.create_account(block_number, address, new_account);
                     }
+
                     entry
                 }
                 Entry::Occupied(entry) => {
                     let entry = entry.into_mut();
 
-                    if entry.info.is_empty() {
-                        let account = to_reth_acc(&account.info);
-                        if !(has_state_clear_eip && account.is_empty()) {
-                            post_state.create_account(block_number, address, account);
-                        }
-                    } else if entry.info != account.info {
+                    let old_account = to_reth_acc(&entry.info);
+                    let new_account = to_reth_acc(&account.info);
+
+                    let account_non_existent =
+                        matches!(entry.account_state, AccountState::NotExisting);
+
+                    // Before state clear EIP, create account if it doesn't exist
+                    if (!has_state_clear_eip && account_non_existent)
+                        // After state clear EIP, create account only if it is not empty
+                        || (has_state_clear_eip && entry.info.is_empty() && !new_account.is_empty())
+                    {
+                        post_state.create_account(block_number, address, new_account);
+                    } else if old_account != new_account {
                         post_state.change_account(
                             block_number,
                             address,
                             to_reth_acc(&entry.info),
-                            to_reth_acc(&account.info),
+                            new_account,
                         );
-                    } else if has_state_clear_eip && account.is_empty() {
+                    } else if has_state_clear_eip && new_account.is_empty() && !account_non_existent
+                    {
                         // The account was touched, but it is empty, so it should be deleted.
-                        post_state.destroy_account(
-                            block_number,
-                            address,
-                            to_reth_acc(&account.info),
-                        );
+                        // This also deletes empty accounts which were created before state clear
+                        // EIP.
+                        post_state.destroy_account(block_number, address, new_account);
                     }
 
                     entry.info = account.info.clone();
@@ -474,6 +487,11 @@ pub fn commit_state_changes<DB>(
                 // the account already exists and its storage was cleared, preserve its previous
                 // state
                 AccountState::StorageCleared
+            } else if has_state_clear_eip &&
+                matches!(cached_account.account_state, AccountState::NotExisting) &&
+                cached_account.info.is_empty()
+            {
+                AccountState::NotExisting
             } else {
                 AccountState::Touched
             };
@@ -618,7 +636,7 @@ mod tests {
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
-        post_state::{Storage, StorageTransition, StorageWipe},
+        post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
         AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
@@ -1169,8 +1187,7 @@ mod tests {
     fn test_touched_unchanged_account() {
         let address = Address::random();
 
-        let mut db = SubState::new(State::new(StateProviderTest::default()));
-        db.load_account(address).unwrap(); // hot load the non-existing account
+        let db = SubState::new(State::new(StateProviderTest::default()));
 
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
         let mut executor = Executor::new(chain_spec, db);
@@ -1196,6 +1213,107 @@ mod tests {
             true,
             &mut post_state,
         );
-        assert!(post_state.account_changes().is_empty());
+        assert_eq!(post_state.account_changes(), &AccountChanges::default());
+    }
+
+    #[test]
+    fn test_state_clear_eip_touch_account() {
+        let address = Address::random();
+
+        let mut state_provider = StateProviderTest::default();
+        state_provider.insert_account(address, Account::default(), None, HashMap::default());
+        let mut db = SubState::new(State::new(state_provider));
+        db.load_account(address).unwrap(); // hot load the account
+
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
+        let mut executor = Executor::new(chain_spec, db);
+        let mut post_state = PostState::default();
+
+        // Touch an empty account before state clearing EIP. Nothing should happen.
+        executor.commit_changes(
+            1,
+            hash_map::HashMap::from([(
+                address,
+                RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() },
+            )]),
+            false,
+            &mut post_state,
+        );
+        assert_eq!(post_state.accounts(), &BTreeMap::default());
+        assert_eq!(post_state.account_changes(), &AccountChanges::default());
+
+        // Touch an empty account after state clearing EIP. The account should be destroyed.
+        executor.commit_changes(
+            2,
+            hash_map::HashMap::from([(
+                address,
+                RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() },
+            )]),
+            true,
+            &mut post_state,
+        );
+        assert_eq!(post_state.accounts(), &BTreeMap::from([(address, None)]));
+        assert_eq!(
+            post_state.account_changes(),
+            &AccountChanges {
+                size: 1,
+                inner: BTreeMap::from([(2, BTreeMap::from([(address, Some(Account::default()))]))])
+            }
+        );
+    }
+
+    #[test]
+    fn test_state_clear_eip_create_account() {
+        let address1 = Address::random();
+        let address2 = Address::random();
+        let address3 = Address::random();
+        let address4 = Address::random();
+
+        let state_provider = StateProviderTest::default();
+        let mut db = SubState::new(State::new(state_provider));
+        db.load_account(address1).unwrap(); // hot load account 1
+
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
+        let mut executor = Executor::new(chain_spec, db);
+
+        // Create empty accounts before state clearing EIP.
+        let mut post_state_before_state_clear = PostState::default();
+        executor.commit_changes(
+            1,
+            hash_map::HashMap::from([
+                (address1, RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() }),
+                (address2, RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() }),
+            ]),
+            false,
+            &mut post_state_before_state_clear,
+        );
+        assert_eq!(
+            post_state_before_state_clear.accounts(),
+            &BTreeMap::from([
+                (address1, Some(Account::default())),
+                (address2, Some(Account::default()))
+            ])
+        );
+        assert_eq!(
+            post_state_before_state_clear.account_changes(),
+            &AccountChanges {
+                size: 2,
+                inner: BTreeMap::from([(1, BTreeMap::from([(address1, None), (address2, None)]))])
+            }
+        );
+
+        // Empty accounts should not be created after state clearing EIP.
+        let mut post_state_after_state_clear = PostState::default();
+        executor.commit_changes(
+            2,
+            hash_map::HashMap::from([
+                (address3, RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() }),
+                (address4, RevmAccount { is_touched: true, ..DEFAULT_REVM_ACCOUNT.clone() }),
+            ]),
+            true,
+            &mut post_state_after_state_clear,
+        );
+        assert_eq!(post_state_after_state_clear.accounts(), &BTreeMap::default());
+        assert_eq!(post_state_after_state_clear.account_changes(), &AccountChanges::default());
     }
 }
