@@ -314,11 +314,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 .map_err(|err| InsertBlockError::consensus_error(err, block.block.clone()))?;
         }
 
-        // insert block inside unconnected block buffer. Delaying it execution.
+        // insert block inside unconnected block buffer. Delaying its execution.
         self.buffered_blocks.insert_block(block);
         Ok(BlockStatus::Disconnected)
     }
 
+    /// This tries to append the given block to the canonical chain.
+    ///
+    /// WARNING: this expects that the block is part of the canonical chain, see
+    /// [Self::is_block_hash_canonical]. Hence, it is expected that the block can be traced back
+    /// to the current canonical block.
     #[instrument(skip_all, target = "blockchain_tree")]
     fn try_append_canonical_chain(
         &mut self,
@@ -392,6 +397,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Try inserting a block into the given side chain.
+    ///
+    /// WARNING: This expects a valid side chain id, see [BlockIndices::get_blocks_chain_id]
     #[instrument(skip_all, target = "blockchain_tree")]
     fn try_insert_block_into_side_chain(
         &mut self,

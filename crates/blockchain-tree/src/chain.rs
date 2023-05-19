@@ -129,6 +129,8 @@ impl AppendableChain {
     }
 
     /// Create a new chain that forks off of an existing sidechain.
+    ///
+    /// This differs from [AppendableChain::new_canonical_fork] in that this starts a new fork.
     pub(crate) fn new_chain_fork<DB, C, EF>(
         &self,
         block: SealedBlockWithSenders,
