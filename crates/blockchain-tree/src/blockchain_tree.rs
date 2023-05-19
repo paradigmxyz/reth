@@ -443,7 +443,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             )?;
 
             self.block_indices.insert_non_fork_block(block_number, block_hash, chain_id);
-            Ok(BlockStatus::Accepted)
+            Ok(BlockStatus::Valid)
         } else {
             debug!(target: "blockchain_tree", ?canonical_fork, "Starting new fork from side chain");
             // the block starts a new fork
