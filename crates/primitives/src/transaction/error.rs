@@ -9,6 +9,8 @@ pub enum InvalidTransactionError {
     #[error("Sender does not have enough funds ({available_funds:?}) to cover transaction fees: {cost:?}.")]
     InsufficientFunds { cost: U256, available_funds: U256 },
     /// The nonce is lower than the account's nonce, or there is a nonce gap present.
+    ///
+    /// This is a consensus error.
     #[error("Transaction nonce is not consistent.")]
     NonceNotConsistent,
     /// The transaction is before Spurious Dragon and has a chain ID
