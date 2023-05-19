@@ -354,13 +354,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             ))
         }
 
-        let canonical_chain = self.canonical_chain();
-        let block_status = if block.parent_hash == canonical_chain.tip().hash {
-            BlockStatus::Valid
-        } else {
-            BlockStatus::Accepted
-        };
-
         let parent_header = db
             .header(&block.parent_hash)
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
@@ -372,13 +365,28 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             })?
             .seal(block.parent_hash);
 
-        let chain = AppendableChain::new_canonical_fork(
-            block,
-            &parent_header,
-            canonical_chain.inner(),
-            parent,
-            &self.externals,
-        )?;
+        let canonical_chain = self.canonical_chain();
+
+        let (block_status, chain) = if block.parent_hash == canonical_chain.tip().hash {
+            let chain = AppendableChain::new_canonical_fork_extend(
+                block,
+                &parent_header,
+                canonical_chain.inner(),
+                parent,
+                &self.externals,
+            )?;
+            (BlockStatus::Valid, chain)
+        } else {
+            let chain = AppendableChain::new_canonical_fork(
+                block,
+                &parent_header,
+                canonical_chain.inner(),
+                parent,
+                &self.externals,
+            )?;
+            (BlockStatus::Accepted, chain)
+        };
+
         self.insert_chain(chain);
         self.try_connect_buffered_blocks(block_num_hash);
         Ok(block_status)
@@ -436,7 +444,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             )?;
 
             self.block_indices.insert_non_fork_block(block_number, block_hash, chain_id);
-            Ok(BlockStatus::Valid)
+            Ok(BlockStatus::Accepted)
         } else {
             debug!(target: "blockchain_tree", ?canonical_fork, "Starting new fork from side chain");
             // the block starts a new fork
