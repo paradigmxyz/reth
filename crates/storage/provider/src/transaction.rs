@@ -990,7 +990,7 @@ where
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
                 let parent_hash = self.get_block_hash(parent_number)?;
-                return Err(TransactionError::UnwindStateRootMismatch {
+                return Err(TransactionError::StateRootMismatch {
                     got: new_state_root,
                     expected: parent_state_root,
                     block_number: parent_number,
@@ -1405,29 +1405,17 @@ pub enum TransactionError {
     /// The transaction encountered a database integrity error.
     #[error(transparent)]
     DatabaseIntegrity(#[from] ProviderError),
-    /// The trie error.
+    /// The trie encountered an internal error.
     #[error(transparent)]
     TrieError(#[from] StateRootError),
-    /// Root mismatch
-    #[error("Merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
+    /// The state root mismatched.
+    #[error("Merkle trie root mismatch at #{block_number} ({block_hash:?}). Got {got:?}, expected: {expected:?}")]
     StateRootMismatch {
         /// Expected root
         expected: H256,
         /// Calculated root
         got: H256,
         /// Block number
-        block_number: BlockNumber,
-        /// Block hash
-        block_hash: BlockHash,
-    },
-    /// Root mismatch during unwind
-    #[error("Unwind merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
-    UnwindStateRootMismatch {
-        /// Expected root
-        expected: H256,
-        /// Calculated root
-        got: H256,
-        /// Target block number
         block_number: BlockNumber,
         /// Block hash
         block_hash: BlockHash,
