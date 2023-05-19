@@ -201,7 +201,8 @@ where
                             header.gas_used = gas_used;
 
                             // calculate the state root
-                            let state_root =  executor.db().db.0.state_root(post_state.clone()).unwrap();
+                            let state_root =
+                                executor.db().db.0.state_root(post_state.clone()).unwrap();
                             header.state_root = state_root;
 
                             storage.insert_new_block(header.clone(), body);
