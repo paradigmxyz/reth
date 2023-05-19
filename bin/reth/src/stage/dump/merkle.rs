@@ -1,4 +1,5 @@
-use crate::{dump_stage::setup, utils::DbTool};
+use super::setup;
+use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
 use reth_primitives::{BlockNumber, StageCheckpoint, MAINNET};

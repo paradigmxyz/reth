@@ -14,7 +14,7 @@ use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
+use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -30,7 +30,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
-    consensus::{Consensus, ForkchoiceState},
+    consensus::Consensus,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
@@ -244,44 +244,6 @@ impl Command {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        // Forward genesis as forkchoice state to the consensus engine.
-        // This will allow the downloader to start
-        if self.debug.continuous {
-            info!(target: "reth::cli", "Continuous sync mode enabled");
-            let (tip_tx, _tip_rx) = oneshot::channel();
-            let state = ForkchoiceState {
-                head_block_hash: genesis_hash,
-                finalized_block_hash: genesis_hash,
-                safe_block_hash: genesis_hash,
-            };
-            consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
-                state,
-                payload_attrs: None,
-                tx: tip_tx,
-            })?;
-        }
-
-        // Forward the `debug.tip` as forkchoice state to the consensus engine.
-        // This will initiate the sync up to the provided tip.
-        let _tip_rx = match self.debug.tip {
-            Some(tip) => {
-                let (tip_tx, tip_rx) = oneshot::channel();
-                let state = ForkchoiceState {
-                    head_block_hash: tip,
-                    finalized_block_hash: tip,
-                    safe_block_hash: tip,
-                };
-                consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
-                    state,
-                    payload_attrs: None,
-                    tx: tip_tx,
-                })?;
-                debug!(target: "reth::cli", %tip, "Tip manually set");
-                Some(tip_rx)
-            }
-            None => None,
-        };
-
         // configure the payload builder
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
@@ -339,6 +301,20 @@ impl Command {
 
         let pipeline_events = pipeline.events();
 
+        let initial_target = if let Some(tip) = self.debug.tip {
+            // Set the provided tip as the initial pipeline target.
+            debug!(target: "reth::cli", %tip, "Tip manually set");
+            Some(tip)
+        } else if self.debug.continuous {
+            // Set genesis as the initial pipeline target.
+            // This will allow the downloader to start
+            debug!(target: "reth::cli", "Continuous sync mode enabled");
+            Some(genesis_hash)
+        } else {
+            None
+        };
+
+        // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
             client,
@@ -349,6 +325,7 @@ impl Command {
             self.debug.max_block,
             self.debug.continuous,
             payload_builder.clone(),
+            initial_target,
             consensus_engine_tx,
             consensus_engine_rx,
         );

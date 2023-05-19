@@ -149,15 +149,13 @@ impl InvalidPoolTransactionError {
                         // transaction could just have arrived late/early
                         false
                     }
-                    InvalidTransactionError::PriorityFeeMoreThenMaxFee |
                     InvalidTransactionError::GasTooLow |
                     InvalidTransactionError::GasTooHigh |
                     InvalidTransactionError::TipAboveFeeCap => {
                         // these are technically not invalid
                         false
                     }
-                    InvalidTransactionError::FeeCapTooLow |
-                    InvalidTransactionError::MaxFeeLessThenBaseFee => {
+                    InvalidTransactionError::FeeCapTooLow => {
                         // dynamic, but not used during validation
                         false
                     }
