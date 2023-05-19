@@ -289,10 +289,33 @@ where
 
         // If this is sent from new payload then the parent hash could be in a side chain, and is
         // not necessarily canonical
-        if self.blockchain.header_by_hash(parent_hash).is_some() {
+        if self.blockchain.header_by_hash(parent_hash).is_some() ||
+            self.blockchain.find_canonical_ancestor(parent_hash).is_some()
+        {
             Some(parent_hash)
         } else {
-            self.blockchain.find_canonical_ancestor(parent_hash)
+            // because the is_block_pre_merge check above did not return, the invalid payload should
+            // be post-merge, so if its parent is pre-merge, it is the transition block,
+            // and we should return zero
+            //
+            // only the database has pre-merge blocks
+            //
+            // check if the parent is pre-merge (zero should be returned for an invalid transition
+            // block, with a PoW parent / ancestor)
+            //
+            // TODO: get rid of this unwrap_or_default if possible - however this means we have to
+            // bubble it up to at least on_new_payload
+            let parent_header = self
+                .blockchain
+                .find_block_by_hash(parent_hash, BlockSource::Database)
+                .unwrap_or_default();
+            parent_header.map(|header| {
+                if header.difficulty > U256::ZERO {
+                    H256::zero()
+                } else {
+                    parent_hash
+                }
+            })
         }
     }
 
