@@ -21,7 +21,7 @@ use reth_interfaces::{db::DatabaseError as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
     SealedBlockWithSenders, StageCheckpoint, StorageEntry, TransactionSigned,
-    TransactionSignedEcRecovered, TxNumber, H256, U256,
+    TransactionSignedEcRecovered, H256, U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{
@@ -76,6 +76,8 @@ impl<'a, DB: Database> DerefMut for Transaction<'a, DB> {
     }
 }
 
+// === Core impl ===
+
 impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
@@ -95,23 +97,6 @@ where
     /// Accessor to the internal Database
     pub fn inner(&self) -> &'this DB {
         self.db
-    }
-
-    /// Get lastest block number.
-    pub fn tip_number(&self) -> Result<u64, DbError> {
-        Ok(self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
-    }
-
-    /// Commit the current inner transaction and open a new one.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an inner transaction does not exist. This should never be the case unless
-    /// [Transaction::close] was called without following up with a call to [Transaction::open].
-    pub fn commit(&mut self) -> Result<bool, DbError> {
-        let success = if let Some(tx) = self.tx.take() { tx.commit()? } else { false };
-        self.tx = Some(self.db.tx_mut()?);
-        Ok(success)
     }
 
     /// Drops the current inner transaction and open a new one.
@@ -136,6 +121,30 @@ where
         self.tx.take();
     }
 
+    /// Commit the current inner transaction and open a new one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an inner transaction does not exist. This should never be the case unless
+    /// [Transaction::close] was called without following up with a call to [Transaction::open].
+    pub fn commit(&mut self) -> Result<bool, DbError> {
+        let success = if let Some(tx) = self.tx.take() { tx.commit()? } else { false };
+        self.tx = Some(self.db.tx_mut()?);
+        Ok(success)
+    }
+}
+
+// === Misc helpers ===
+
+impl<'this, DB> Transaction<'this, DB>
+where
+    DB: Database,
+{
+    /// Get lastest block number.
+    pub fn tip_number(&self) -> Result<u64, DbError> {
+        Ok(self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
+    }
+
     /// Query [tables::CanonicalHeaders] table for block hash by block number
     pub fn get_block_hash(&self, block_number: BlockNumber) -> Result<BlockHash, TransactionError> {
         let hash = self
@@ -153,18 +162,6 @@ where
             .get::<tables::BlockBodyIndices>(number)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
         Ok(body)
-    }
-
-    /// Get the next start transaction id and transition for the `block` by looking at the previous
-    /// block. Returns Zero/Zero for Genesis.
-    pub fn first_block_number(&self, block: BlockNumber) -> Result<TxNumber, TransactionError> {
-        if block == 0 {
-            return Ok(0)
-        }
-
-        let prev_number = block - 1;
-        let prev_body = self.block_body_indices(prev_number)?;
-        Ok(prev_body.first_tx_num + prev_body.tx_count)
     }
 
     /// Query the block header by number
@@ -262,45 +259,12 @@ where
     }
 }
 
-/// Stages impl
+// === Stages impl ===
+
 impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
-    /// Get requested blocks transaction with signer
-    pub fn get_block_transaction_range(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
-        self.get_take_block_transaction_range::<false>(range)
-    }
-
-    /// Take requested blocks transaction with signer
-    pub fn take_block_transaction_range(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
-        self.get_take_block_transaction_range::<true>(range)
-    }
-
-    /// Return range of blocks and its execution result
-    pub fn get_block_range(
-        &self,
-        chain_spec: &ChainSpec,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<SealedBlockWithSenders>, TransactionError> {
-        self.get_take_block_range::<false>(chain_spec, range)
-    }
-
-    /// Return range of blocks and its execution result
-    pub fn take_block_range(
-        &self,
-        chain_spec: &ChainSpec,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<SealedBlockWithSenders>, TransactionError> {
-        self.get_take_block_range::<true>(chain_spec, range)
-    }
-
     /// Get range of blocks and its execution result
     pub fn get_block_and_execution_range(
         &self,
