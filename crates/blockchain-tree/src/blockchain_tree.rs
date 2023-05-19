@@ -986,7 +986,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_interfaces::test_utils::TestConsensus;
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET, StageCheckpoint};
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, StageCheckpoint, H256, MAINNET};
     use reth_provider::{
         insert_block,
         post_state::PostState,
