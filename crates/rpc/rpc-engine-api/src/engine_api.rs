@@ -152,7 +152,16 @@ where
             .map(|payload| (*payload).clone().into_v2_payload())?)
     }
 
-    /// Called to retrieve execution payload bodies by range.
+    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
+    /// blocks.
+    ///
+    /// WARNING: This method is associated with the BeaconBlocksByRange message in the consensus
+    /// layer p2p specification, meaning the input should be treated as untrusted or potentially
+    /// adversarial.
+    ///
+    /// Implementors should take care when acting on the input to this method, specifically
+    /// ensuring that the range is limited properly, and that the range boundaries are computed
+    /// correctly and without panics.
     pub fn get_payload_bodies_by_range(
         &self,
         start: BlockNumber,
@@ -376,6 +385,17 @@ where
 
     /// Handler for `engine_getPayloadBodiesByRangeV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
+    ///
+    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
+    /// blocks.
+    ///
+    /// WARNING: This method is associated with the BeaconBlocksByRange message in the consensus
+    /// layer p2p specification, meaning the input should be treated as untrusted or potentially
+    /// adversarial.
+    ///
+    /// Implementors should take care when acting on the input to this method, specifically
+    /// ensuring that the range is limited properly, and that the range boundaries are computed
+    /// correctly and without panics.
     async fn get_payload_bodies_by_range_v1(
         &self,
         start: U64,
