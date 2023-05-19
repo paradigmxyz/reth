@@ -94,7 +94,7 @@ pub fn validate_transaction_regarding_header(
             // EIP-1559: add more constraints to the tx validation
             // https://github.com/ethereum/EIPs/pull/3594
             if max_priority_fee_per_gas > max_fee_per_gas {
-                return Err(InvalidTransactionError::PriorityFeeMoreThenMaxFee.into())
+                return Err(InvalidTransactionError::TipAboveFeeCap.into())
             }
 
             Some(*chain_id)
@@ -109,7 +109,7 @@ pub fn validate_transaction_regarding_header(
     // https://github.com/ethereum/EIPs/pull/3594
     if let Some(base_fee_per_gas) = base_fee {
         if transaction.max_fee_per_gas() < base_fee_per_gas as u128 {
-            return Err(InvalidTransactionError::MaxFeeLessThenBaseFee.into())
+            return Err(InvalidTransactionError::FeeCapTooLow.into())
         }
     }
 
