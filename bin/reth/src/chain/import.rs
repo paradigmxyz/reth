@@ -1,8 +1,9 @@
 use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
     node::events::{handle_events, NodeEvent},
+    version::SHORT_VERSION,
 };
-use clap::{crate_version, Parser};
+use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
@@ -77,7 +78,7 @@ pub struct ImportCommand {
 impl ImportCommand {
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth {} starting", crate_version!());
+        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);

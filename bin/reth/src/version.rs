@@ -1,13 +1,56 @@
-//! This module contains the version message for the program.
-include!(concat!(env!("OUT_DIR"), "/built.rs"));
+//! Version information for reth.
 
-const VERSION: &str = PKG_VERSION;
-const NAME: &str = PKG_NAME;
-const SHA: Option<&str> = GIT_COMMIT_HASH_SHORT;
-const OS: &str = std::env::consts::OS;
+/// The short version information for reth.
+///
+/// - The latest version from Cargo.toml
+/// - The short SHA of the latest commit.
+///
+/// # Example
+///
+/// ```text
+/// 0.1.0 (defa64b2)
+/// ```
+pub(crate) const SHORT_VERSION: &str =
+    concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")");
 
-/// The version message for the current program, like
-/// `reth/v0.1.0/macos-6fc95a5/`
-pub fn version_message() -> String {
-    format!("{}/v{}/{}-{}", NAME, VERSION, OS, SHA.unwrap())
-}
+/// The long version information for reth.
+///
+/// - The latest version from Cargo.toml
+/// - The long SHA of the latest commit.
+/// - The build datetime
+/// - The build features
+///
+/// # Example:
+///
+/// ```text
+/// Version: 0.1.0
+/// Commit SHA: defa64b2
+/// Build Timestamp: 2023-05-19T01:47:19.815651705Z
+/// Build Features: jemalloc
+/// ```
+pub(crate) const LONG_VERSION: &str = concat!(
+    "Version: ",
+    env!("CARGO_PKG_VERSION"),
+    "\n",
+    "Commit SHA: ",
+    env!("VERGEN_GIT_SHA"),
+    "\n",
+    "Build Timestamp: ",
+    env!("VERGEN_BUILD_TIMESTAMP"),
+    "\n",
+    "Build Features: ",
+    env!("VERGEN_CARGO_FEATURES")
+);
+
+/// The version information for reth formatted for P2P.
+///
+/// - The latest version from Cargo.toml
+/// - The target triple
+///
+/// # Example
+///
+/// ```text
+/// reth/v{major}.{minor}.{patch}/{target}
+/// ```
+pub(crate) const P2P_VERSION: &str =
+    concat!("reth/v", env!("CARGO_PKG_VERSION"), "/", env!("VERGEN_CARGO_TARGET_TRIPLE"));

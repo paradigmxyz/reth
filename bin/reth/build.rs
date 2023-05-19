@@ -1,6 +1,8 @@
-fn main() {
-    let mut opts = built::Options::default();
-    opts.set_dependencies(true);
+use std::error::Error;
+use vergen::EmitBuilder;
 
-    built::write_built_file().expect("Failed to acquire build-time information");
+fn main() -> Result<(), Box<dyn Error>> {
+    // Emit the instructions
+    EmitBuilder::builder().git_sha(true).build_timestamp().cargo_features().emit()?;
+    Ok(())
 }
