@@ -2,7 +2,7 @@
 //! previous blocks.
 use crate::eth::{
     cache::EthStateCache,
-    error::{EthApiError, EthResult, InvalidTransactionError},
+    error::{EthApiError, EthResult, RpcInvalidTransactionError},
 };
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, H256, U256};
 use reth_provider::BlockProviderIdExt;
@@ -236,7 +236,7 @@ where
         for tx in txs.iter().take(limit) {
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
             // less than the base fee
-            let effective_tip = tx.ok_or(InvalidTransactionError::FeeCapTooLow)?;
+            let effective_tip = tx.ok_or(RpcInvalidTransactionError::FeeCapTooLow)?;
             final_result.push(U256::from(effective_tip));
         }
 
