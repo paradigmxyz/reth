@@ -27,7 +27,7 @@ pub struct PayloadBuilderArgs {
     pub deadline: Duration,
 
     /// Maximum number of tasks to spawn for building a payload.
-    #[arg(long = "builder.max-tasks", help_heading = "Builder", default_value = "3", value_parser = RangedU64ValueParser::<usize>::new().range(1..=num_cpus::get() as u64))]
+    #[arg(long = "builder.max-tasks", help_heading = "Builder", default_value = "3", value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     pub max_payload_tasks: usize,
 }
 
