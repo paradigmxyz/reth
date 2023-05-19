@@ -52,5 +52,6 @@ pub(crate) const LONG_VERSION: &str = concat!(
 /// ```text
 /// reth/v{major}.{minor}.{patch}/{target}
 /// ```
+#[allow(dead_code)]
 pub(crate) const P2P_VERSION: &str =
     concat!("reth/v", env!("CARGO_PKG_VERSION"), "/", env!("VERGEN_CARGO_TARGET_TRIPLE"));
