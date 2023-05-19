@@ -1,4 +1,5 @@
-use crate::{dump_stage::setup, utils::DbTool};
+use super::setup;
+use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,

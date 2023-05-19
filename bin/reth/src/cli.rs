@@ -2,7 +2,7 @@
 use crate::{
     chain, config, db,
     dirs::{LogsDir, PlatformPath},
-    drop_stage, dump_stage, merkle_debug, node, p2p,
+    merkle_debug, node, p2p,
     runner::CliRunner,
     stage, test_eth_chain, test_vectors,
 };
@@ -32,8 +32,6 @@ pub fn run() -> eyre::Result<()> {
         Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::DumpStage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::DropStage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
@@ -57,20 +55,9 @@ pub enum Commands {
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
-    /// Run a single stage.
-    ///
-    /// Note that this won't use the Pipeline and as a result runs stages
-    /// assuming that all the data can be held in memory. It is not recommended
-    /// to run a stage for really large block ranges if your computer does not have
-    /// a lot of memory to store all the data.
+    /// Manipulate individual stages.
     #[command(name = "stage")]
     Stage(stage::Command),
-    /// Dumps a stage from a range into a new database.
-    #[command(name = "dump-stage")]
-    DumpStage(dump_stage::Command),
-    /// Drops a stage's tables from the database.
-    #[command(name = "drop-stage")]
-    DropStage(drop_stage::Command),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
     P2P(p2p::Command),
