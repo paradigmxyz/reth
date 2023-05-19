@@ -89,7 +89,7 @@ pub enum ConsensusError {
     GasLimitInvalidDecrease { parent_gas_limit: u64, child_gas_limit: u64 },
     #[error("Base fee missing.")]
     BaseFeeMissing,
-    #[error("Block base fee ({got}) is different then expected: ({expected}).")]
+    #[error("Block base fee ({got}) is different than expected: ({expected}).")]
     BaseFeeDiff { expected: u64, got: u64 },
     #[error("Transaction signer recovery error.")]
     TransactionSignerRecoveryError,
