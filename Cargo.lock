@@ -502,17 +502,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "built"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96f9cdd34d6eb553f9ea20e5bf84abb7b13c729f113fc1d8e49dc00ad9fa8738"
-dependencies = [
- "cargo-lock",
- "chrono",
- "semver 1.0.17",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -552,18 +541,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6031a462f977dd38968b6f23378356512feeace69cef817e1a4475108093cec3"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "cargo-lock"
-version = "8.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "031718ddb8f78aa5def78a09e90defe30151d1f6c672f937af4dd916429ed996"
-dependencies = [
- "semver 1.0.17",
- "serde",
- "toml 0.5.11",
- "url",
 ]
 
 [[package]]
@@ -4556,7 +4533,6 @@ name = "reth"
 version = "0.1.0"
 dependencies = [
  "backon",
- "built",
  "clap 4.1.8",
  "comfy-table",
  "confy",
