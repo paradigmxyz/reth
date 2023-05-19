@@ -2,9 +2,9 @@
 use crate::{
     chain, config, db,
     dirs::{LogsDir, PlatformPath},
-    merkle_debug, node, p2p,
+    long_version, merkle_debug, node, p2p,
     runner::CliRunner,
-    stage, test_eth_chain, test_vectors,
+    short_version, stage, test_eth_chain, test_vectors,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
 use reth_tracing::{
@@ -76,7 +76,7 @@ pub enum Commands {
 }
 
 #[derive(Debug, Parser)]
-#[command(author, version = "0.1", about = "Reth", long_about = None)]
+#[command(author, version = short_version!(), long_version = long_version!(), about = "Reth", long_about = None)]
 struct Cli {
     /// The command to run
     #[clap(subcommand)]
