@@ -4548,7 +4548,6 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
- "num_cpus",
  "pin-project",
  "pretty_assertions",
  "proptest",

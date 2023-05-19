@@ -45,14 +45,20 @@ mod tests {
     }
 
     #[test]
-    fn test_args_with_valid_num_threads() {
-        let num_cpus = num_cpus::get();
-        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
+    fn test_args_with_valid_max_tasks() {
+        let args =
+            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.max-tasks", "1"])
+                .args;
+        assert_eq!(args.max_payload_tasks, 1)
+    }
+
+    #[test]
+    fn test_args_with_invalid_max_tasks() {
+        assert!(CommandParser::<PayloadBuilderArgs>::try_parse_from([
             "reth",
             "--builder.max-tasks",
-            &format!("{}", num_cpus),
+            "0"
         ])
-        .args;
-        assert!(args.max_payload_tasks > 0)
+        .is_err());
     }
 }
