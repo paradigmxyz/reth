@@ -5,7 +5,11 @@
 /// - The latest version from Cargo.tom
 /// - The short SHA of the latest commit.
 ///
-/// Example: "1.2.3 (defa64b2)"
+/// # Example
+///
+/// ```text
+/// 0.1.0 (defa64b2)
+/// ```
 pub(crate) const SHORT_VERSION: &str =
     concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")");
 
@@ -18,7 +22,14 @@ pub(crate) const SHORT_VERSION: &str =
 /// - The build datetime
 /// - The build features
 ///
-/// Example: "1.2.3 (defa64b2)"
+/// # Example:
+///
+/// ```text
+/// Version: 0.1.0
+/// Commit SHA: defa64b2
+/// Build Timestamp: 2023-05-19T01:47:19.815651705Z
+/// Build Features: jemalloc
+/// ```
 pub(crate) const LONG_VERSION: &str = concat!(
     "Version: ",
     env!("CARGO_PKG_VERSION"),
