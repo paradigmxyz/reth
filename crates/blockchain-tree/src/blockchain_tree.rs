@@ -158,11 +158,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // check db if block is finalized.
         if block.number <= last_finalized_block {
             // check if block is canonical
-            if let Some(hash) = self.canonical_chain().canonical_hash(&block.number) {
-                if hash == block.hash {
-                    return Ok(Some(BlockStatus::Valid))
-                }
+            if self.is_block_hash_canonical(&block.hash)? {
+                return Ok(Some(BlockStatus::Valid))
             }
+
             // check if block is inside database
             if self.externals.database().block_number(block.hash)?.is_some() {
                 return Ok(Some(BlockStatus::Valid))
@@ -987,7 +986,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_interfaces::test_utils::TestConsensus;
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET, StageCheckpoint};
     use reth_provider::{
         insert_block,
         post_state::PostState,
@@ -1026,7 +1025,7 @@ mod tests {
         for i in 0..10 {
             tx_mut.put::<tables::CanonicalHeaders>(i, H256([100 + i as u8; 32])).unwrap();
         }
-        tx_mut.put::<tables::SyncStage>("Finish".to_string(), 10).unwrap();
+        tx_mut.put::<tables::SyncStage>("Finish".to_string(), StageCheckpoint::new(10)).unwrap();
         tx_mut.commit().unwrap();
     }
 
