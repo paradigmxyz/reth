@@ -119,3 +119,9 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         Ok(())
     }
 }
+
+/// Helper to parse a [Duration] from seconds
+pub fn parse_duration_from_secs(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
+    let seconds = arg.parse()?;
+    Ok(std::time::Duration::from_secs(seconds))
+}
