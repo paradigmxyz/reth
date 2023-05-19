@@ -14,7 +14,7 @@ pub enum BlockExecutionError {
     #[error("Header bloom filter {got:?} is different than expected {expected:?}.")]
     BloomLogDiff { got: Box<Bloom>, expected: Box<Bloom> },
     #[error("Transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
-    TransactionGasLimitMoreThenAvailableBlockGas {
+    TransactionGasLimitMoreThanAvailableBlockGas {
         transaction_gas_limit: u64,
         block_available_gas: u64,
     },

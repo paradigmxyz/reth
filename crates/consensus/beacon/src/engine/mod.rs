@@ -191,6 +191,7 @@ where
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
+        target: Option<H256>,
     ) -> (Self, BeaconConsensusEngineHandle) {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -203,6 +204,7 @@ where
             max_block,
             run_pipeline_continuously,
             payload_builder,
+            target,
             to_engine,
             rx,
         )
@@ -221,6 +223,7 @@ where
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
+        target: Option<H256>,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
     ) -> (Self, BeaconConsensusEngineHandle) {
@@ -232,7 +235,7 @@ where
             run_pipeline_continuously,
             max_block,
         );
-        let this = Self {
+        let mut this = Self {
             db,
             sync,
             blockchain,
@@ -245,6 +248,10 @@ where
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: Metrics::default(),
         };
+
+        if let Some(target) = target {
+            this.sync.set_pipeline_sync_target(target);
+        }
 
         (this, handle)
     }
@@ -765,7 +772,6 @@ where
     fn on_sync_event(
         &mut self,
         ev: EngineSyncEvent,
-        current_state: &ForkchoiceState,
     ) -> Option<Result<(), BeaconConsensusEngineError>> {
         match ev {
             EngineSyncEvent::FetchedFullBlock(block) => {
@@ -795,16 +801,30 @@ where
             EngineSyncEvent::PipelineFinished { result, reached_max_block } => {
                 match result {
                     Ok(ctrl) => {
-                        if ctrl.is_unwind() {
-                            self.sync.set_pipeline_sync_target(current_state.head_block_hash);
-                        } else if reached_max_block {
+                        if reached_max_block {
                             // Terminate the sync early if it's reached the maximum user
                             // configured block.
                             return Some(Ok(()))
                         }
 
+                        let current_state = match self.forkchoice_state {
+                            Some(state) => state,
+                            None => {
+                                // This is only possible if the node was run with `debug.tip`
+                                // argument and without CL.
+                                warn!(target: "consensus::engine", "No forkchoice state available");
+                                return None
+                            }
+                        };
+
+                        if ctrl.is_unwind() {
+                            // Attempt to sync to the head block after unwind.
+                            self.sync.set_pipeline_sync_target(current_state.head_block_hash);
+                            return None
+                        }
+
                         // Update the state and hashes of the blockchain tree if possible.
-                        match self.restore_tree_if_possible(*current_state) {
+                        match self.restore_tree_if_possible(current_state) {
                             Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
                             Err(error) => {
                                 error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
@@ -859,15 +879,9 @@ where
             }
         }
 
-        // Lookup the forkchoice state. We can't launch the pipeline without the tip.
-        let forkchoice_state = match &this.forkchoice_state {
-            Some(state) => *state,
-            None => return Poll::Pending,
-        };
-
         // poll sync controller
         while let Poll::Ready(sync_event) = this.sync.poll(cx) {
-            if let Some(res) = this.on_sync_event(sync_event, &forkchoice_state) {
+            if let Some(res) = this.on_sync_event(sync_event) {
                 return Poll::Ready(res)
             }
         }
@@ -1040,6 +1054,7 @@ mod tests {
             None,
             false,
             payload_builder,
+            None,
         );
 
         (engine, TestEnv::new(db, tip_rx, handle))
