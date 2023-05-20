@@ -93,9 +93,17 @@ impl BlockIndices {
         (canonical_tip.number + 1, pending_blocks)
     }
 
+    /// Returns the block number of the canonical block with the given hash.
+    ///
+    /// Returns `None` if no block could be found in the canonical chain.
+    #[inline]
+    pub(crate) fn get_canonical_block_number(&self, block_hash: &BlockHash) -> Option<BlockNumber> {
+        self.canonical_chain.get_canonical_block_number(self.last_finalized_block, block_hash)
+    }
+
     /// Check if block hash belongs to canonical chain.
-    pub fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
-        self.canonical_chain.is_block_hash_canonical(self.last_finalized_block, block_hash)
+    pub(crate) fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
+        self.get_canonical_block_number(block_hash).is_some()
     }
 
     /// Last finalized block
