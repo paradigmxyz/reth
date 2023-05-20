@@ -81,10 +81,10 @@ impl NodeState {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state) => {
                 info!(target: "reth::cli", ?state, "Forkchoice updated");
             }
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(number, hash) => {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(number, hash, _) => {
                 info!(target: "reth::cli", number, ?hash, "Block added to canonical chain");
             }
-            BeaconConsensusEngineEvent::ForkBlockAdded(number, hash) => {
+            BeaconConsensusEngineEvent::ForkBlockAdded(number, hash, _) => {
                 info!(target: "reth::cli", number, ?hash, "Block added to fork chain");
             }
         }

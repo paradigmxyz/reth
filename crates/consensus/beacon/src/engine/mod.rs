@@ -709,7 +709,7 @@ where
 
         let block_hash = block.hash;
         let block_number = block.number;
-        let status = self.blockchain.insert_block_without_senders(block)?;
+        let status = self.blockchain.insert_block_without_senders(block.clone())?;
         let mut latest_valid_hash = None;
         let status = match status {
             BlockStatus::Valid => {
@@ -717,13 +717,17 @@ where
                 self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(
                     block_number,
                     block_hash,
+                    block,
                 ));
 
                 PayloadStatusEnum::Valid
             }
             BlockStatus::Accepted => {
-                self.listeners
-                    .notify(BeaconConsensusEngineEvent::ForkBlockAdded(block_number, block_hash));
+                self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(
+                    block_number,
+                    block_hash,
+                    block,
+                ));
                 PayloadStatusEnum::Accepted
             }
             BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
