@@ -7,8 +7,9 @@ use crate::{
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
+    version::SHORT_VERSION,
 };
-use clap::{crate_version, Parser};
+use clap::Parser;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, StreamExt};
@@ -70,10 +71,12 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::dirs::MaybePlatformPath;
+use crate::{args::PayloadBuilderArgs, dirs::MaybePlatformPath};
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::bytes::BytesMut;
 use reth_provider::providers::BlockchainProvider;
+use reth_rlp::Encodable;
 use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
@@ -104,11 +107,11 @@ pub struct Command {
     /// - goerli
     /// - sepolia
     #[arg(
-    long,
-    value_name = "CHAIN_OR_PATH",
-    verbatim_doc_comment,
-    default_value = "mainnet",
-    value_parser = genesis_value_parser
+        long,
+        value_name = "CHAIN_OR_PATH",
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
 
@@ -125,6 +128,9 @@ pub struct Command {
     rpc: RpcServerArgs,
 
     #[clap(flatten)]
+    builder: PayloadBuilderArgs,
+
+    #[clap(flatten)]
     debug: DebugArgs,
 
     /// Automatically mine blocks for new transactions
@@ -135,7 +141,7 @@ pub struct Command {
 impl Command {
     /// Execute `node` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth {} starting", crate_version!());
+        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -245,12 +251,18 @@ impl Command {
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         // configure the payload builder
+        let mut extradata = BytesMut::new();
+        self.builder.extradata.as_bytes().encode(&mut extradata);
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
             transaction_pool.clone(),
             ctx.task_executor.clone(),
-            // TODO use extradata from args
-            BasicPayloadJobGeneratorConfig::default(),
+            BasicPayloadJobGeneratorConfig::default()
+                .interval(self.builder.interval)
+                .deadline(self.builder.deadline)
+                .max_payload_tasks(self.builder.max_payload_tasks)
+                .extradata(extradata.freeze())
+                .max_gas_limit(self.builder.max_gas_limit),
             Arc::clone(&self.chain),
         );
         let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);

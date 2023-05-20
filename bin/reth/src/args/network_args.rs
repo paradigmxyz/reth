@@ -1,8 +1,9 @@
 //! clap [Args](clap::Args) for network related arguments.
 
+use crate::version::P2P_VERSION;
 use clap::Args;
 use reth_net_nat::NatResolver;
-use reth_network::NetworkConfigBuilder;
+use reth_network::{HelloMessage, NetworkConfigBuilder};
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
 use secp256k1::SecretKey;
@@ -35,6 +36,10 @@ pub struct NetworkArgs {
     /// shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, conflicts_with = "no_persist_peers")]
     pub peers_file: Option<PathBuf>,
+
+    /// Custom node identity
+    #[arg(long, value_name = "IDENTITY", default_value = P2P_VERSION)]
+    pub identity: String,
 
     /// Secret key to use for this node.
     ///
@@ -71,13 +76,18 @@ impl NetworkArgs {
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
-
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
-        let network_config_builder = config
+        // Configure basic network stack.
+        let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec);
+
+        // Configure node identity
+        let peer_id = network_config_builder.get_peer_id();
+        network_config_builder = network_config_builder
+            .hello_message(HelloMessage::builder(peer_id).client_version(&self.identity).build());
 
         self.discovery.apply_to_builder(network_config_builder)
     }
