@@ -1,6 +1,6 @@
 //! utilities for working with revm
 
-use crate::eth::error::{EthApiError, EthResult, InvalidTransactionError};
+use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
     AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
@@ -224,9 +224,9 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
     let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
 
     let env = TxEnv {
-        gas_limit: gas_limit.try_into().map_err(|_| InvalidTransactionError::GasUintOverflow)?,
+        gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
         nonce: nonce
-            .map(|n| n.try_into().map_err(|_| InvalidTransactionError::NonceTooHigh))
+            .map(|n| n.try_into().map_err(|_| RpcInvalidTransactionError::NonceTooHigh))
             .transpose()?,
         caller: from.unwrap_or_default(),
         gas_price,
@@ -257,7 +257,7 @@ where
     // subtract transferred value
     allowance = allowance
         .checked_sub(env.value)
-        .ok_or_else(|| InvalidTransactionError::InsufficientFunds)?;
+        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?;
 
     // cap the gas limit
     if let Ok(gas_limit) = allowance.checked_div(env.gas_price).unwrap_or_default().try_into() {
@@ -313,7 +313,7 @@ impl CallFees {
                         // Fail early
                         return Err(
                             // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
-                            InvalidTransactionError::TipAboveFeeCap.into(),
+                            RpcInvalidTransactionError::TipAboveFeeCap.into(),
                         )
                     }
                 }

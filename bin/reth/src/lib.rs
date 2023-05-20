@@ -23,5 +23,6 @@ pub mod test_eth_chain;
 pub mod test_vectors;
 pub mod utils;
 pub mod version;
-use built as _;
+
+#[cfg(feature = "jemalloc")]
 use jemallocator as _;

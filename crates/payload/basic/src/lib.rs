@@ -174,11 +174,11 @@ impl PayloadTaskGuard {
 pub struct BasicPayloadJobGeneratorConfig {
     /// Data to include in the block's extra data field.
     extradata: Bytes,
-    /// Target gas ceiling for mined blocks, defaults to 30_000_000 gas.
+    /// Target gas ceiling for built blocks, defaults to 30_000_000 gas.
     max_gas_limit: u64,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
-    /// The deadline when this job should resolve.
+    /// The deadline for when the payload builder job should resolve.
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,

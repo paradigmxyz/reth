@@ -158,11 +158,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // check db if block is finalized.
         if block.number <= last_finalized_block {
             // check if block is canonical
-            if let Some(hash) = self.canonical_chain().canonical_hash(&block.number) {
-                if hash == block.hash {
-                    return Ok(Some(BlockStatus::Valid))
-                }
+            if self.is_block_hash_canonical(&block.hash)? {
+                return Ok(Some(BlockStatus::Valid))
             }
+
             // check if block is inside database
             if self.externals.database().block_number(block.hash)?.is_some() {
                 return Ok(Some(BlockStatus::Valid))
@@ -315,11 +314,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 .map_err(|err| InsertBlockError::consensus_error(err, block.block.clone()))?;
         }
 
-        // insert block inside unconnected block buffer. Delaying it execution.
+        // insert block inside unconnected block buffer. Delaying its execution.
         self.buffered_blocks.insert_block(block);
         Ok(BlockStatus::Disconnected)
     }
 
+    /// This tries to append the given block to the canonical chain.
+    ///
+    /// WARNING: this expects that the block is part of the canonical chain, see
+    /// [Self::is_block_hash_canonical]. Hence, it is expected that the block can be traced back
+    /// to the current canonical block.
     #[instrument(skip_all, target = "blockchain_tree")]
     fn try_append_canonical_chain(
         &mut self,
@@ -354,13 +358,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             ))
         }
 
-        let canonical_chain = self.canonical_chain();
-        let block_status = if block.parent_hash == canonical_chain.tip().hash {
-            BlockStatus::Valid
-        } else {
-            BlockStatus::Accepted
-        };
-
         let parent_header = db
             .header(&block.parent_hash)
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
@@ -372,19 +369,36 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             })?
             .seal(block.parent_hash);
 
-        let chain = AppendableChain::new_canonical_fork(
-            block,
-            &parent_header,
-            canonical_chain.inner(),
-            parent,
-            &self.externals,
-        )?;
+        let canonical_chain = self.canonical_chain();
+
+        let (block_status, chain) = if block.parent_hash == canonical_chain.tip().hash {
+            let chain = AppendableChain::new_canonical_fork_extend(
+                block,
+                &parent_header,
+                canonical_chain.inner(),
+                parent,
+                &self.externals,
+            )?;
+            (BlockStatus::Valid, chain)
+        } else {
+            let chain = AppendableChain::new_canonical_fork(
+                block,
+                &parent_header,
+                canonical_chain.inner(),
+                parent,
+                &self.externals,
+            )?;
+            (BlockStatus::Accepted, chain)
+        };
+
         self.insert_chain(chain);
         self.try_connect_buffered_blocks(block_num_hash);
         Ok(block_status)
     }
 
     /// Try inserting a block into the given side chain.
+    ///
+    /// WARNING: This expects a valid side chain id, see [BlockIndices::get_blocks_chain_id]
     #[instrument(skip_all, target = "blockchain_tree")]
     fn try_insert_block_into_side_chain(
         &mut self,
@@ -979,7 +993,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_interfaces::test_utils::TestConsensus;
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, StageCheckpoint, H256, MAINNET};
     use reth_provider::{
         insert_block,
         post_state::PostState,
@@ -1018,6 +1032,7 @@ mod tests {
         for i in 0..10 {
             tx_mut.put::<tables::CanonicalHeaders>(i, H256([100 + i as u8; 32])).unwrap();
         }
+        tx_mut.put::<tables::SyncStage>("Finish".to_string(), StageCheckpoint::new(10)).unwrap();
         tx_mut.commit().unwrap();
     }
 

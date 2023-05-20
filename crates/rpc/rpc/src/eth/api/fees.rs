@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations for fee history.
 
 use crate::{
-    eth::error::{EthApiError, EthResult, InvalidTransactionError},
+    eth::error::{EthApiError, EthResult, RpcInvalidTransactionError},
     EthApi,
 };
 use reth_network_api::NetworkInfo;
@@ -129,7 +129,7 @@ where
                 for transaction in transactions.iter() {
                     let reward = transaction
                         .effective_gas_tip(header.base_fee_per_gas)
-                        .ok_or(InvalidTransactionError::FeeCapTooLow)?;
+                        .ok_or(RpcInvalidTransactionError::FeeCapTooLow)?;
 
                     sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward })
                 }
