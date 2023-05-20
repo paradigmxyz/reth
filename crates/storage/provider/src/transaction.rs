@@ -327,7 +327,8 @@ where
         Ok(changesets_walked)
     }
 
-    /// Unwind and clear storage hashing
+    /// Unwind and clear storage hashing.
+    /// Returns the number of storage changesets walked.
     pub fn unwind_storage_hashing(
         &self,
         range: Range<BlockNumberAddress>,
