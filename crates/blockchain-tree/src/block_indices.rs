@@ -22,7 +22,7 @@ pub struct BlockIndices {
     canonical_chain: CanonicalChain,
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
     /// NOTE: It contains just blocks that are forks as a key and not all blocks.
-    fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
+    fork_to_child: HashMap<BlockHash, Vec<BlockHash>>,
     /// Utility index for Block number to block hash(s).
     ///
     /// This maps all blocks with same block number to their hash.
@@ -60,7 +60,7 @@ impl BlockIndices {
     }
 
     /// Return fork to child indices
-    pub fn fork_to_child(&self) -> &HashMap<BlockHash, HashSet<BlockHash>> {
+    pub fn fork_to_child(&self) -> &HashMap<BlockHash, Vec<BlockHash>> {
         &self.fork_to_child
     }
 
@@ -73,7 +73,7 @@ impl BlockIndices {
     /// [Self::pending_blocks]) set.
     pub(crate) fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         let canonical_tip = self.canonical_tip();
-        let hash = self.fork_to_child.get(&canonical_tip.hash)?.iter().next().copied()?;
+        let hash = *self.fork_to_child.get(&canonical_tip.hash)?.get(0)?;
         Some(BlockNumHash { number: canonical_tip.number + 1, hash })
     }
 
@@ -124,7 +124,7 @@ impl BlockIndices {
         }
         let first = chain.first();
         // add parent block -> block index
-        self.fork_to_child.entry(first.parent_hash).or_default().insert(first.hash());
+        self.fork_to_child.entry(first.parent_hash).or_default().push(first.hash());
     }
 
     /// Get the chain ID the block belongs to
@@ -284,7 +284,7 @@ impl BlockIndices {
                 if let hash_map::Entry::Occupied(mut entry) = self.fork_to_child.entry(parent_hash)
                 {
                     let set = entry.get_mut();
-                    set.remove(&hash);
+                    set.retain(|&h| h != hash);
                     // remove set if empty
                     if set.is_empty() {
                         entry.remove();

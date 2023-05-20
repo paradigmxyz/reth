@@ -1092,7 +1092,11 @@ mod tests {
                 assert_eq!(*tree.block_indices.blocks_to_chain(), block_to_chain);
             }
             if let Some(fork_to_child) = self.fork_to_child {
-                assert_eq!(*tree.block_indices.fork_to_child(), fork_to_child);
+                let mut x: HashMap<BlockHash, Vec<BlockHash>> = HashMap::new();
+                for (key, hash_set) in fork_to_child.into_iter() {
+                    x.insert(key, hash_set.into_iter().collect());
+                }
+                assert_eq!(*tree.block_indices.fork_to_child(), x);
             }
             if let Some(pending_blocks) = self.pending_blocks {
                 let (num, hashes) = tree.block_indices.pending_blocks();
