@@ -157,7 +157,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // - We reached our target and the target was not limited by the batch size of the stage
         let done = highest_block == to_block;
         info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, is_final_range = done, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(highest_block), done })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(highest_block), progress: None, done })
     }
 
     /// Unwind the stage.
@@ -210,7 +210,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         }
 
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to), progress: None })
     }
 }
 
@@ -236,6 +236,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -251,7 +252,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false }) if block_number < 200
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false, progress: None }) if block_number < 200
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -266,6 +267,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -282,7 +284,8 @@ mod tests {
             output,
             Ok(ExecOutput {
                 checkpoint: StageCheckpoint { block_number: 20, stage_checkpoint: None },
-                done: true
+                done: true,
+                progress: None
             })
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
@@ -298,6 +301,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -310,7 +314,7 @@ mod tests {
         let first_run = rx.await.unwrap();
         assert_matches!(
             first_run,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false }) if block_number >= 10
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false, progress: None }) if block_number >= 10
         );
         let first_run_checkpoint = first_run.unwrap().checkpoint;
 
@@ -318,6 +322,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(first_run_checkpoint),
+            progress: None,
         };
         let rx = runner.execute(input);
 
@@ -325,7 +330,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true }) if block_number > first_run_checkpoint.block_number
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true, progress: None }) if block_number > first_run_checkpoint.block_number
         );
         assert_matches!(
             runner.validate_execution(input, output.ok()),
@@ -344,6 +349,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -358,7 +364,7 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true }) if block_number == previous_stage
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true, progress: None }) if block_number == previous_stage
         );
         let checkpoint = output.unwrap().checkpoint;
         runner
@@ -381,11 +387,14 @@ mod tests {
 
         // Unwind all of it
         let unwind_to = 1;
-        let input = UnwindInput { bad_block: None, checkpoint, unwind_to };
+        let input = UnwindInput { bad_block: None, checkpoint, unwind_to, progress: None };
         let res = runner.unwind(input).await;
         assert_matches!(
             res,
-            Ok(UnwindOutput { checkpoint: StageCheckpoint { block_number: 1, .. } })
+            Ok(UnwindOutput {
+                checkpoint: StageCheckpoint { block_number: 1, .. },
+                progress: None
+            })
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");

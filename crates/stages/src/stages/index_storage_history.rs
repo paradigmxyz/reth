@@ -48,7 +48,11 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(*range.end()),
+            progress: None,
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -63,7 +67,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
 
         info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress), progress: None })
     }
 }
 
@@ -154,7 +158,10 @@ mod tests {
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+        assert_eq!(
+            out,
+            ExecOutput { checkpoint: StageCheckpoint::new(5), done: true, progress: None }
+        );
         tx.commit().unwrap();
     }
 
@@ -167,7 +174,10 @@ mod tests {
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.unwind(&mut tx, input).await.unwrap();
-        assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
+        assert_eq!(
+            out,
+            UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to), progress: None }
+        );
         tx.commit().unwrap();
     }
 

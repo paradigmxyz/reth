@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{
+    ExecInput, ExecOutput, HashingStageProgress, Stage, StageError, StageId, StageProgress,
+    UnwindInput, UnwindOutput,
+};
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
@@ -8,12 +11,13 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_primitives::{keccak256, AccountHashingCheckpoint, StageCheckpoint};
+use reth_primitives::{keccak256, AccountHashingCheckpoint, StageCheckpoint, StageUnitCheckpoint};
 use reth_provider::Transaction;
 use std::{
     cmp::max,
     fmt::Debug,
     ops::{Range, RangeInclusive},
+    time::Duration,
 };
 use tokio::sync::mpsc;
 use tracing::*;
@@ -32,9 +36,16 @@ pub struct AccountHashingStage {
     pub commit_threshold: u64,
 }
 
+impl AccountHashingStage {
+    /// Create new instance of [AccountHashingStage].
+    pub fn new(clean_threshold: u64, commit_threshold: u64) -> Self {
+        Self { clean_threshold, commit_threshold }
+    }
+}
+
 impl Default for AccountHashingStage {
     fn default() -> Self {
-        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+        Self { clean_threshold: 500_000, commit_threshold: 10 }
     }
 }
 
@@ -137,114 +148,167 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner account hashing checkpoint");
         }
 
-        // if there are more blocks then threshold it is faster to go over Plain state and hash all
-        // account otherwise take changesets aggregate the sets and apply hashing to
-        // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
-        // genesis accounts are not in changeset.
-        if to_block - from_block > self.clean_threshold || from_block == 1 {
-            let start_address = match stage_checkpoint {
-                Some(AccountHashingCheckpoint { address: address @ Some(_), from, to })
+        let accounts_walked =
+            // if there are more blocks then threshold it is faster to go over Plain state and hash
+            // all account otherwise take changesets aggregate the sets and apply
+            // hashing to AccountHashing table. Also, if we start from genesis, we need
+            // to hash from scratch, as genesis accounts are not in changeset.
+            if to_block - from_block > self.clean_threshold || from_block == 1 {
+                let start_address = match stage_checkpoint {
+                    Some(AccountHashingCheckpoint { address: address @ Some(_), from, to, .. })
                     // Checkpoint is only valid if the range of transitions didn't change.
                     // An already hashed account may have been changed with the new range,
-                    // and therefore should be hashed again. 
+                    // and therefore should be hashed again.
                     if from == from_block && to == to_block =>
-                {
-                    address
-                }
-                _ => {
-                    // clear table, load all accounts and hash it
-                    tx.clear::<tables::HashedAccount>()?;
-
-                    None
-                }
-            }
-            .take()
-            .map(RawKey::new);
-
-            let next_address = {
-                let mut accounts_cursor =
-                    tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
-
-                // channels used to return result of account hashing
-                let mut channels = Vec::new();
-                for chunk in &accounts_cursor
-                    .walk(start_address.clone())?
-                    .take(self.commit_threshold as usize)
-                    .chunks(
-                        max(self.commit_threshold as usize, rayon::current_num_threads()) /
-                            rayon::current_num_threads(),
-                    )
-                {
-                    // An _unordered_ channel to receive results from a rayon job
-                    let (tx, rx) = mpsc::unbounded_channel();
-                    channels.push(rx);
-
-                    let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
-                    // Spawn the hashing task onto the global rayon pool
-                    rayon::spawn(move || {
-                        for (address, account) in chunk.into_iter() {
-                            let address = address.key().unwrap();
-                            let _ = tx.send((RawKey::new(keccak256(address)), account));
+                        {
+                            address
                         }
-                    });
-                }
-                let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
+                    _ => {
+                        // clear table, load all accounts and hash it
+                        tx.clear::<tables::HashedAccount>()?;
 
-                // Iterate over channels and append the hashed accounts.
-                for mut channel in channels {
-                    while let Some(hashed) = channel.recv().await {
-                        hashed_batch.push(hashed);
+                        None
                     }
                 }
-                // sort it all in parallel
-                hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                .take()
+                .map(RawKey::new);
 
-                let mut hashed_account_cursor =
-                    tx.cursor_write::<RawTable<tables::HashedAccount>>()?;
+                let (next_address, accounts_walked) = {
+                    let mut accounts_cursor =
+                        tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
 
-                // iterate and put presorted hashed accounts
-                if start_address.is_none() {
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
-                } else {
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
+                    // channels used to return result of account hashing
+                    let mut channels = Vec::new();
+                    for chunk in &accounts_cursor
+                        .walk(start_address.clone())?
+                        .take(self.commit_threshold as usize)
+                        .chunks(
+                            max(self.commit_threshold as usize, rayon::current_num_threads()) /
+                                rayon::current_num_threads(),
+                        )
+                    {
+                        // An _unordered_ channel to receive results from a rayon job
+                        let (tx, rx) = mpsc::unbounded_channel();
+                        channels.push(rx);
+
+                        let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+                        // Spawn the hashing task onto the global rayon pool
+                        rayon::spawn(move || {
+                            for (address, account) in chunk.into_iter() {
+                                let address = address.key().unwrap();
+                                let _ = tx.send((RawKey::new(keccak256(address)), account));
+                            }
+                        });
+                    }
+                    let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
+
+                    // Iterate over channels and append the hashed accounts.
+                    for mut channel in channels {
+                        while let Some(hashed) = channel.recv().await {
+                            hashed_batch.push(hashed);
+                        }
+                    }
+                    // sort it all in parallel
+                    hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+                    let mut hashed_account_cursor =
+                        tx.cursor_write::<RawTable<tables::HashedAccount>>()?;
+
+                    let accounts_walked = hashed_batch.len() as u64;
+
+                    // iterate and put presorted hashed accounts
+                    if start_address.is_none() {
+                        hashed_batch
+                            .into_iter()
+                            .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
+                    } else {
+                        hashed_batch
+                            .into_iter()
+                            .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
+                    }
+
+                    (
+                        accounts_cursor.next()?, // next key of iterator
+                        accounts_walked,
+                    )
+                };
+
+                if let Some((next_address, _)) = &next_address {
+                    let checkpoint = input.checkpoint().with_account_hashing_stage_checkpoint(
+                        AccountHashingCheckpoint {
+                            address: Some(next_address.key().unwrap()),
+                            from: from_block,
+                            to: to_block,
+                        },
+                    );
+
+                    let progress = StageProgress::Hashing(
+                        if let Some(StageProgress::Hashing( HashingStageProgress { entries_processed, entries_total })) =
+                            input.progress
+                        {
+                            HashingStageProgress {
+                                entries_processed: entries_processed + accounts_walked,
+                                entries_total,
+                            }
+                        } else {
+                            HashingStageProgress {
+                                entries_processed: accounts_walked,
+                                entries_total: tx
+                                    .cursor_read::<tables::PlainAccountState>()?
+                                    .walk(start_address.map(|address| address.key().unwrap()))?
+                                    .count() as u64,
+                            }
+                        });
+
+                    info!(target: "sync::stages::hashing_account", stage_progress = %progress, is_final_range = false, "Stage iteration finished");
+                    return Ok(ExecOutput { checkpoint, progress: Some(progress), done: false })
                 }
-                // next key of iterator
-                accounts_cursor.next()?
+
+                accounts_walked
+            } else {
+                // Aggregate all transition changesets and make a list of accounts that have been
+                // changed.
+                let lists = tx.get_addresses_of_changed_accounts(from_block..=to_block)?;
+                // Iterate over plain state and get newest value.
+                // Assumption we are okay to make is that plainstate represent
+                // `previous_stage_progress` state.
+                let accounts = tx.get_plainstate_accounts(lists.into_iter())?;
+
+                let accounts_walked = accounts.len() as u64;
+
+                // Insert and hash accounts to hashing table
+                tx.insert_account_for_hashing(accounts.into_iter())?;
+
+                accounts_walked
             };
 
-            if let Some((next_address, _)) = &next_address {
-                let checkpoint = input.checkpoint().with_account_hashing_stage_checkpoint(
-                    AccountHashingCheckpoint {
-                        address: Some(next_address.key().unwrap()),
-                        from: from_block,
-                        to: to_block,
-                    },
-                );
-                info!(target: "sync::stages::hashing_account", stage_progress = %checkpoint, is_final_range = false, "Stage iteration finished");
-                return Ok(ExecOutput { checkpoint, done: false })
-            }
+        let checkpoint = StageCheckpoint {
+            stage_checkpoint: Some(StageUnitCheckpoint::Account(
+                stage_checkpoint.unwrap_or_default(),
+            )),
+            ..input.previous_stage_checkpoint()
+        };
+
+        let progress = if let Some(StageProgress::Hashing(HashingStageProgress {
+            entries_processed,
+            entries_total,
+        })) = input.progress
+        {
+            StageProgress::Hashing(HashingStageProgress {
+                entries_processed: entries_processed + accounts_walked,
+                entries_total,
+            })
         } else {
-            // Aggregate all transition changesets and and make list of account that have been
-            // changed.
-            let lists = tx.get_addresses_of_changed_accounts(from_block..=to_block)?;
-            // iterate over plain state and get newest value.
-            // Assumption we are okay to make is that plainstate represent
-            // `previous_stage_progress` state.
-            let accounts = tx.get_plainstate_accounts(lists.into_iter())?;
-            // insert and hash accounts to hashing table
-            tx.insert_account_for_hashing(accounts.into_iter())?;
-        }
+            StageProgress::Hashing(HashingStageProgress {
+                entries_processed: accounts_walked,
+                entries_total: accounts_walked,
+            })
+        };
 
-        // We finished the hashing stage, no future iterations is expected for the same block range,
-        // so no checkpoint is needed.
-        let checkpoint = input.previous_stage_checkpoint();
+        info!(target: "sync::stages::hashing_account", stage_progress = %progress, is_final_range = true, "Stage iteration finished");
 
-        info!(target: "sync::stages::hashing_account", stage_progress = %checkpoint, is_final_range = true, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint, done: true })
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        Ok(ExecOutput { checkpoint, progress: Some(progress), done: true })
     }
 
     /// Unwind the stage.
@@ -256,11 +320,33 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         let (range, unwind_progress, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        // Aggregate all transition changesets and and make list of account that have been changed.
-        tx.unwind_account_hashing(range)?;
+        // Aggregate all transition changesets and make a list of accounts that have been changed.
+        let changesets_walked = tx.unwind_account_hashing(range)?;
 
-        info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        let progress = if let Some(StageProgress::Hashing(HashingStageProgress {
+            entries_processed,
+            entries_total,
+        })) = input.progress
+        {
+            StageProgress::Hashing(HashingStageProgress {
+                entries_processed: entries_processed + changesets_walked as u64,
+                entries_total,
+            })
+        } else {
+            StageProgress::Hashing(HashingStageProgress {
+                entries_processed: changesets_walked as u64,
+                entries_total: tx
+                    .cursor_read::<tables::AccountChangeSet>()?
+                    .walk_range((input.unwind_to + 1)..=input.checkpoint.block_number)?
+                    .count() as u64,
+            })
+        };
+
+        info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, unwind_progress = %progress, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_progress),
+            progress: Some(progress),
+        })
     }
 }
 
@@ -287,6 +373,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -294,7 +381,24 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {checkpoint: StageCheckpoint { block_number, ..}, done: true}) if block_number == previous_stage);
+        assert_matches!(
+            result,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Account(AccountHashingCheckpoint {
+                        ..
+                    })),
+                },
+                progress: Some(StageProgress::Hashing (HashingStageProgress{
+                    entries_processed,
+                    entries_total,
+                })),
+                done: true,
+            }) if block_number == previous_stage &&
+                entries_processed == entries_total &&
+                entries_total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
+        );
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -311,6 +415,7 @@ mod tests {
         let mut input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -341,22 +446,44 @@ mod tests {
                         AccountHashingCheckpoint { address: Some(address), from: 11, to: 20 }
                     ))
                 },
+                progress: Some(StageProgress::Hashing (HashingStageProgress{
+                    entries_processed: 5,
+                    entries_total,
+                })),
                 done: false
-            }) if address == fifth_address
+            }) if address == fifth_address &&
+                entries_total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
         assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 5);
 
         // second run, hash next five accounts.
-        input.checkpoint = Some(result.unwrap().checkpoint);
+        let result = result.unwrap();
+        input.checkpoint = Some(result.checkpoint);
+        input.progress = result.progress;
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
         assert_matches!(
             result,
             Ok(ExecOutput {
-                checkpoint: StageCheckpoint { block_number: 20, stage_checkpoint: None },
+                checkpoint: StageCheckpoint {
+                    block_number: 20,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Account(
+                        AccountHashingCheckpoint {
+                            address: Some(address),
+                            from: 11,
+                            to: 20,
+                        }
+                    ))
+                },
+                progress: Some(StageProgress::Hashing (HashingStageProgress{
+                    entries_processed,
+                    entries_total,
+                })),
                 done: true
-            })
+            }) if address == fifth_address &&
+                entries_processed == entries_total &&
+                entries_total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
         assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 10);
 

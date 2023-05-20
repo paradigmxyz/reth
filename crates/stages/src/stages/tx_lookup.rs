@@ -146,7 +146,11 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { done: is_final_range, checkpoint: StageCheckpoint::new(end_block) })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(end_block),
+            progress: None,
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -180,7 +184,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to), progress: None })
     }
 }
 
@@ -219,6 +223,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
@@ -236,7 +241,7 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true, progress: None })
                 if block_number == previous_stage
         );
 
@@ -254,6 +259,7 @@ mod tests {
         let first_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
 
         // Seed only once with full input range
@@ -264,7 +270,7 @@ mod tests {
         let expected_progress = stage_progress + threshold;
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false })
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false, progress: None })
                 if block_number == expected_progress
         );
 
@@ -272,11 +278,12 @@ mod tests {
         let second_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(expected_progress)),
+            progress: None,
         };
         let result = runner.execute(second_input).await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true, progress: None })
                 if block_number == previous_stage
         );
 

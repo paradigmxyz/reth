@@ -106,6 +106,7 @@ impl Command {
                     ExecInput {
                         previous_stage: Some((SENDER_RECOVERY, StageCheckpoint::new(block))),
                         checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
+                        progress: None,
                     },
                 )
                 .await?;
@@ -118,6 +119,7 @@ impl Command {
                         ExecInput {
                             previous_stage: Some((EXECUTION, StageCheckpoint::new(block))),
                             checkpoint: progress.map(StageCheckpoint::new),
+                            progress: None,
                         },
                     )
                     .await?;
@@ -132,6 +134,7 @@ impl Command {
                         ExecInput {
                             previous_stage: Some((ACCOUNT_HASHING, StageCheckpoint::new(block))),
                             checkpoint: progress.map(StageCheckpoint::new),
+                            progress: None,
                         },
                     )
                     .await?;
@@ -144,6 +147,7 @@ impl Command {
                     ExecInput {
                         previous_stage: Some((STORAGE_HASHING, StageCheckpoint::new(block))),
                         checkpoint: progress.map(StageCheckpoint::new),
+                        progress: None,
                     },
                 )
                 .await;
@@ -162,6 +166,7 @@ impl Command {
                 let clean_input = ExecInput {
                     previous_stage: Some((STORAGE_HASHING, StageCheckpoint::new(block))),
                     checkpoint: None,
+                    progress: None,
                 };
                 loop {
                     let clean_result = merkle_stage.execute(&mut tx, clean_input).await;

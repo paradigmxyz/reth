@@ -24,7 +24,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         _tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
+        Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), progress: None, done: true })
     }
 
     async fn unwind(
@@ -32,7 +32,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         _tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to), progress: None })
     }
 }
 

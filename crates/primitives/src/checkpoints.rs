@@ -7,7 +7,7 @@ use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
-/// Saves the progress of Merkle stage.
+/// Checkpoint of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct MerkleCheckpoint {
     /// The target block number.
@@ -97,7 +97,7 @@ impl Compact for MerkleCheckpoint {
     }
 }
 
-/// Saves the progress of AccountHashing
+/// Checkpoint of AccountHashing stage.
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct AccountHashingCheckpoint {
@@ -109,7 +109,7 @@ pub struct AccountHashingCheckpoint {
     pub to: u64,
 }
 
-/// Saves the progress of StorageHashing
+/// Checkpoint of StorageHashing stage.
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct StorageHashingCheckpoint {
@@ -123,7 +123,7 @@ pub struct StorageHashingCheckpoint {
     pub to: u64,
 }
 
-/// Saves the progress of a stage.
+/// Checkpoint of a stage. Used for execution/unwinding resuming purposes.
 #[main_codec]
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct StageCheckpoint {
@@ -153,6 +153,12 @@ impl StageCheckpoint {
             Some(StageUnitCheckpoint::Storage(checkpoint)) => Some(checkpoint),
             _ => None,
         }
+    }
+
+    /// Sets the block number.
+    pub fn with_block_number(mut self, block_number: BlockNumber) -> Self {
+        self.block_number = block_number;
+        self
     }
 
     /// Sets the stage checkpoint to account hashing.
@@ -188,11 +194,11 @@ impl Display for StageCheckpoint {
 #[derive_arbitrary(compact)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum StageUnitCheckpoint {
-    /// Saves the progress of transaction-indexed stages.
+    /// Checkpoint of transaction-indexed stages.
     Transaction(TxNumber),
-    /// Saves the progress of AccountHashing stage.
+    /// Checkpoint of AccountHashing stage.
     Account(AccountHashingCheckpoint),
-    /// Saves the progress of StorageHashing stage.
+    /// Checkpoint of StorageHashing stage.
     Storage(StorageHashingCheckpoint),
 }
 

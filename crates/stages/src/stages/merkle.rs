@@ -148,7 +148,11 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let threshold = match self {
             MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
+                return Ok(ExecOutput {
+                    checkpoint: input.previous_stage_checkpoint(),
+                    progress: None,
+                    done: true,
+                })
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
@@ -205,7 +209,11 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         state.hash_builder.into(),
                     );
                     self.save_execution_checkpoint(tx, Some(checkpoint))?;
-                    return Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
+                    return Ok(ExecOutput {
+                        checkpoint: input.checkpoint(),
+                        progress: None,
+                        done: false,
+                    })
                 }
                 StateRootProgress::Complete(root, updates) => {
                     updates.flush(tx.deref_mut())?;
@@ -226,7 +234,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         self.validate_state_root(trie_root, block_root, to_block)?;
 
         info!(target: "sync::stages::merkle::exec", stage_progress = to_block, is_final_range = true, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(to_block), done: true })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(to_block), progress: None, done: true })
     }
 
     /// Unwind the stage.
@@ -238,14 +246,20 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let range = input.unwind_block_range();
         if matches!(self, MerkleStage::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput {
+                checkpoint: StageCheckpoint::new(input.unwind_to),
+                progress: None,
+            })
         }
 
         if input.unwind_to == 0 {
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
             info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput {
+                checkpoint: StageCheckpoint::new(input.unwind_to),
+                progress: None,
+            })
         }
 
         // Unwind trie only if there are transitions
@@ -265,7 +279,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to), progress: None })
     }
 }
 
@@ -302,6 +316,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -312,7 +327,7 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true, progress: None })
                 if block_number == previous_stage
         );
 
@@ -330,6 +345,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -340,7 +356,7 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true, progress: None })
                 if block_number == previous_stage
         );
 

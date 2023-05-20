@@ -47,6 +47,7 @@ async fn unwind_and_copy<DB: Database>(
             UnwindInput {
                 unwind_to: from,
                 checkpoint: StageCheckpoint::new(tip_block_number),
+                progress: None,
                 bad_block: None,
             },
         )
@@ -82,6 +83,7 @@ async fn dry_run(
                 reth_stages::ExecInput {
                     previous_stage: Some((StageId("Another"), StageCheckpoint::new(to))),
                     checkpoint: Some(StageCheckpoint::new(from)),
+                    progress: None,
                 },
             )
             .await?

@@ -190,7 +190,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let is_final_range = stage_progress == max_block;
         info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(stage_progress), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(stage_progress),
+            progress: None,
+            done: is_final_range,
+        })
     }
 }
 
@@ -249,7 +253,10 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
         if range.is_empty() {
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput {
+                checkpoint: StageCheckpoint::new(input.unwind_to),
+                progress: None,
+            })
         }
 
         // get all batches for account change
@@ -306,7 +313,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to), progress: None })
     }
 }
 
@@ -399,6 +406,7 @@ mod tests {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(1))),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
+            progress: None,
         };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
@@ -433,7 +441,10 @@ mod tests {
         let mut execution_stage = stage();
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
-        assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(1), done: true });
+        assert_eq!(
+            output,
+            ExecOutput { checkpoint: StageCheckpoint::new(1), done: true, progress: None }
+        );
         let tx = tx.deref_mut();
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
@@ -488,6 +499,7 @@ mod tests {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(1))),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
+            progress: None,
         };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
@@ -522,12 +534,17 @@ mod tests {
         let o = stage
             .unwind(
                 &mut tx,
-                UnwindInput { checkpoint: StageCheckpoint::new(1), unwind_to: 0, bad_block: None },
+                UnwindInput {
+                    checkpoint: StageCheckpoint::new(1),
+                    unwind_to: 0,
+                    bad_block: None,
+                    progress: None,
+                },
             )
             .await
             .unwrap();
 
-        assert_eq!(o, UnwindOutput { checkpoint: StageCheckpoint::new(0) });
+        assert_eq!(o, UnwindOutput { checkpoint: StageCheckpoint::new(0), progress: None });
 
         // assert unwind stage
         let db_tx = tx.deref();
@@ -558,6 +575,7 @@ mod tests {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(1))),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
+            progress: None,
         };
         let mut genesis_rlp = hex!("f901f8f901f3a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0c9ceb8372c88cb461724d8d3d87e8b933f6fc5f679d4841800e662f4428ffd0da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080830f4240808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();

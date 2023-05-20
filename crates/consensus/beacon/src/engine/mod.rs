@@ -1153,7 +1153,7 @@ mod tests {
         let (consensus_engine, env) = setup_consensus_engine(
             chain_spec,
             VecDeque::from([
-                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true }),
+                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true, progress: None }),
                 Err(StageError::ChannelClosed),
             ]),
             Vec::default(),

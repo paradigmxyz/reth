@@ -48,7 +48,11 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(*range.end()),
+            progress: None,
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -64,7 +68,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         // from HistoryIndex higher than that number.
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress), progress: None })
     }
 }
 
@@ -144,7 +148,10 @@ mod tests {
         let mut stage = IndexAccountHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+        assert_eq!(
+            out,
+            ExecOutput { checkpoint: StageCheckpoint::new(5), done: true, progress: None }
+        );
         tx.commit().unwrap();
     }
 
@@ -157,7 +164,10 @@ mod tests {
         let mut stage = IndexAccountHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.unwind(&mut tx, input).await.unwrap();
-        assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
+        assert_eq!(
+            out,
+            UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to), progress: None }
+        );
         tx.commit().unwrap();
     }
 

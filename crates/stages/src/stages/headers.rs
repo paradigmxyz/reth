@@ -202,7 +202,7 @@ where
         // Nothing to sync
         if gap.is_closed() {
             info!(target: "sync::stages::headers", stage_progress = %current_progress, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput { checkpoint: current_progress, done: true })
+            return Ok(ExecOutput { checkpoint: current_progress, progress: None, done: true })
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -228,9 +228,13 @@ where
                     .map(|(num, _)| num)
                     .unwrap_or_default(),
             );
-            Ok(ExecOutput { checkpoint: StageCheckpoint::new(stage_progress), done: true })
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint::new(stage_progress),
+                progress: None,
+                done: true,
+            })
         } else {
-            Ok(ExecOutput { checkpoint: current_progress, done: false })
+            Ok(ExecOutput { checkpoint: current_progress, progress: None, done: false })
         }
     }
 
@@ -248,7 +252,7 @@ where
         tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         info!(target: "sync::stages::headers", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to), progress: None })
     }
 }
 
@@ -463,6 +467,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
@@ -474,7 +479,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true }) if block_number == tip.number);
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true, progress: None }) if block_number == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -542,6 +547,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
@@ -553,7 +559,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false }) if block_number == stage_progress);
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false, progress: None, }) if block_number == stage_progress);
 
         runner.client.clear().await;
         runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
@@ -561,7 +567,7 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true }) if block_number == tip.number);
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true, progress: None }) if block_number == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 }

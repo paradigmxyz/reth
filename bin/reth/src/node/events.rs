@@ -48,7 +48,8 @@ impl NodeState {
             }
             PipelineEvent::Ran {
                 stage_id,
-                result: ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done },
+                result:
+                    ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, progress: _, done },
             } => {
                 let notable = block_number > self.current_checkpoint;
                 self.current_checkpoint = block_number;

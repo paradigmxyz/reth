@@ -27,6 +27,13 @@ pub struct SenderRecoveryStage {
     pub commit_threshold: u64,
 }
 
+impl SenderRecoveryStage {
+    /// Create new instance of [SenderRecoveryStage].
+    pub fn new(commit_threshold: u64) -> Self {
+        Self { commit_threshold }
+    }
+}
+
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
         Self { commit_threshold: 500_000 }
@@ -67,6 +74,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Target transaction already reached");
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block),
+                progress: None,
                 done: is_final_range,
             })
         }
@@ -140,7 +148,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         }
 
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(end_block), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(end_block),
+            progress: None,
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -157,7 +169,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to), progress: None })
     }
 }
 
@@ -198,6 +210,7 @@ mod tests {
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
@@ -215,7 +228,7 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true, progress: None })
                 if block_number == previous_stage
         );
 
@@ -233,6 +246,7 @@ mod tests {
         let first_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
+            progress: None,
         };
 
         // Seed only once with full input range
@@ -243,7 +257,7 @@ mod tests {
         let expected_progress = stage_progress + threshold;
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false })
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false, progress: None })
                 if block_number == expected_progress
         );
 
@@ -251,11 +265,12 @@ mod tests {
         let second_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(expected_progress)),
+            progress: None,
         };
         let result = runner.execute(second_input).await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true, progress: None })
                 if block_number == previous_stage
         );
 

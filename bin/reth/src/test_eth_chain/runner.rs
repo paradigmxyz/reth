@@ -199,6 +199,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
         let input = ExecInput {
             previous_stage: last_block.map(|b| (StageId(""), StageCheckpoint::new(b))),
             checkpoint: None,
+            progress: None,
         };
         {
             let mut transaction = Transaction::new(db.as_ref())?;

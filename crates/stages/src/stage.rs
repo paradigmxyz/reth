@@ -1,24 +1,85 @@
-use crate::{error::StageError, id::StageId};
+use crate::{
+    error::StageError,
+    id::StageId,
+    stages::{ACCOUNT_HASHING, STORAGE_HASHING},
+};
 use async_trait::async_trait;
 use reth_db::database::Database;
 use reth_primitives::{BlockNumber, StageCheckpoint};
 use reth_provider::Transaction;
 use std::{
     cmp::{max, min},
+    fmt::{Display, Formatter},
     ops::RangeInclusive,
 };
+
+/// Progress of a stage. Used for metrics/logging purposes.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum StageProgress {
+    /// Hashing stage progress.
+    Hashing(HashingStageProgress),
+}
+
+impl StageProgress {
+    /// Creates a new [`StageProgress`] from [`StageId`], if any stage-specific progress is known.
+    pub fn from_stage_id(stage_id: StageId) -> Option<Self> {
+        Some(match stage_id {
+            ACCOUNT_HASHING | STORAGE_HASHING => Self::Hashing(HashingStageProgress::default()),
+            _ => return None,
+        })
+    }
+
+    /// Returns the hashing stage progress, if any.
+    pub fn hashing(&self) -> Option<HashingStageProgress> {
+        #[allow(irrefutable_let_patterns)]
+        if let Self::Hashing(hashing) = self {
+            Some(*hashing)
+        } else {
+            None
+        }
+    }
+}
+
+impl Display for StageProgress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            StageProgress::Hashing(hashing) => {
+                write!(f, "{hashing}")
+            }
+        }
+    }
+}
+
+/// Hashing stage progress.
+/// For `execute`, it's measured in accounts or storage entries.
+/// For `unwind`, it's measured in changesets.
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub struct HashingStageProgress {
+    /// Entries already processed.
+    pub entries_processed: u64,
+    /// Entries left to process.
+    pub entries_total: u64,
+}
+
+impl Display for HashingStageProgress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.1}%", 100.0 * self.entries_processed as f64 / self.entries_total as f64)
+    }
+}
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
-    /// The stage that was run before the current stage and the progress it reached.
+    /// The stage that was run before the current stage and the checkpoint it reached.
     pub previous_stage: Option<(StageId, StageCheckpoint)>,
-    /// The progress of this stage the last time it was executed.
+    /// The checkpoint of this stage the last time it was executed.
     pub checkpoint: Option<StageCheckpoint>,
+    /// The progress of this stage the last time it was executed, if any.
+    pub progress: Option<StageProgress>,
 }
 
 impl ExecInput {
-    /// Return the progress of the stage or default.
+    /// Return the checkpoint of the stage or default.
     pub fn checkpoint(&self) -> StageCheckpoint {
         self.checkpoint.unwrap_or_default()
     }
@@ -60,8 +121,10 @@ impl ExecInput {
 /// Stage unwind input, see [Stage::unwind].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
-    /// The current highest progress of the stage.
+    /// The current highest checkpoint of the stage.
     pub checkpoint: StageCheckpoint,
+    /// The progress of this stage the last time it was unwound, if any.
+    pub progress: Option<StageProgress>,
     /// The block to unwind to.
     pub unwind_to: BlockNumber,
     /// The bad block that caused the unwind, if any.
@@ -97,6 +160,8 @@ impl UnwindInput {
 pub struct ExecOutput {
     /// How far the stage got.
     pub checkpoint: StageCheckpoint,
+    /// How far the stage got.
+    pub progress: Option<StageProgress>,
     /// Whether or not the stage is done.
     pub done: bool,
 }
@@ -104,15 +169,17 @@ pub struct ExecOutput {
 impl ExecOutput {
     /// Mark the stage as done, checkpointing at the given place.
     pub fn done(checkpoint: StageCheckpoint) -> Self {
-        Self { checkpoint, done: true }
+        Self { checkpoint, progress: None, done: true }
     }
 }
 
 /// The output of a stage unwinding.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwindOutput {
-    /// The block at which the stage has unwound to.
+    /// The checkpoint at which the stage has unwound to.
     pub checkpoint: StageCheckpoint,
+    /// The progress at which the stage has unwound to.
+    pub progress: Option<StageProgress>,
 }
 
 /// A stage is a segmented part of the syncing process of the node.
