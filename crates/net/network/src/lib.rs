@@ -147,4 +147,4 @@ pub use network::NetworkHandle;
 pub use peers::PeersConfig;
 pub use session::{PeerInfo, SessionsConfig};
 
-pub use reth_eth_wire::DisconnectReason;
+pub use reth_eth_wire::{DisconnectReason, HelloBuilder, HelloMessage};
