@@ -303,8 +303,6 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         };
 
         info!(target: "sync::stages::hashing_account", stage_progress = %progress, is_final_range = true, "Stage iteration finished");
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
         Ok(ExecOutput { checkpoint, progress: Some(progress), done: true })
     }
 
