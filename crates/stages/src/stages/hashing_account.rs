@@ -240,26 +240,19 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     },
                 );
 
-                let progress = StageProgress::Hashing(
-                    if let Some(StageProgress::Hashing(HashingStageProgress {
-                        entries_processed,
-                        entries_total,
-                    })) = input.progress
-                    {
-                        HashingStageProgress {
-                            entries_processed: entries_processed + accounts_walked,
-                            entries_total,
-                        }
-                    } else {
-                        HashingStageProgress {
-                            entries_processed: accounts_walked,
-                            entries_total: tx
-                                .cursor_read::<tables::PlainAccountState>()?
-                                .walk(start_address.map(|address| address.key().unwrap()))?
-                                .count() as u64,
-                        }
-                    },
-                );
+                let mut stage_progress = input
+                    .progress
+                    .and_then(|progress| progress.hashing())
+                    .unwrap_or(HashingStageProgress {
+                        entries_processed: 0,
+                        entries_total: tx
+                            .cursor_read::<tables::PlainAccountState>()?
+                            .walk(start_address.map(|address| address.key().unwrap()))?
+                            .count() as u64,
+                    });
+                stage_progress.entries_processed += accounts_walked;
+
+                let progress = StageProgress::Hashing(stage_progress);
 
                 info!(target: "sync::stages::hashing_account", stage_progress = %progress, is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput { checkpoint, progress: Some(progress), done: false })
@@ -286,21 +279,12 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             ..input.previous_stage_checkpoint()
         };
 
-        let progress = if let Some(StageProgress::Hashing(HashingStageProgress {
-            entries_processed,
-            entries_total,
-        })) = input.progress
-        {
-            StageProgress::Hashing(HashingStageProgress {
-                entries_processed: entries_processed + accounts_walked,
-                entries_total,
-            })
-        } else {
-            StageProgress::Hashing(HashingStageProgress {
-                entries_processed: accounts_walked,
-                entries_total: accounts_walked,
-            })
-        };
+        let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
+            HashingStageProgress { entries_processed: 0, entries_total: accounts_walked },
+        );
+        stage_progress.entries_processed += accounts_walked;
+
+        let progress = StageProgress::Hashing(stage_progress);
 
         info!(target: "sync::stages::hashing_account", stage_progress = %progress, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { checkpoint, progress: Some(progress), done: true })

@@ -166,24 +166,19 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     },
                 );
 
-                let progress = if let Some(StageProgress::Hashing(HashingStageProgress {
-                    entries_processed,
-                    entries_total,
-                })) = input.progress
-                {
-                    StageProgress::Hashing(HashingStageProgress {
-                        entries_processed: entries_processed + storage_entries_walked,
-                        entries_total,
-                    })
-                } else {
-                    StageProgress::Hashing(HashingStageProgress {
-                        entries_processed: storage_entries_walked,
+                let mut stage_progress = input
+                    .progress
+                    .and_then(|progress| progress.hashing())
+                    .unwrap_or(HashingStageProgress {
+                        entries_processed: 0,
                         entries_total: tx
                             .cursor_read::<tables::PlainStorageState>()?
                             .walk(start_key)?
                             .count() as u64,
-                    })
-                };
+                    });
+                stage_progress.entries_processed += storage_entries_walked;
+
+                let progress = StageProgress::Hashing(stage_progress);
 
                 info!(target: "sync::stages::hashing_storage", stage_progress = %progress, is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput { checkpoint, progress: Some(progress), done: false })
@@ -211,21 +206,12 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             ..input.previous_stage_checkpoint()
         };
 
-        let progress = if let Some(StageProgress::Hashing(HashingStageProgress {
-            entries_processed,
-            entries_total,
-        })) = input.progress
-        {
-            StageProgress::Hashing(HashingStageProgress {
-                entries_processed: entries_processed + storage_entries_walked,
-                entries_total,
-            })
-        } else {
-            StageProgress::Hashing(HashingStageProgress {
-                entries_processed: storage_entries_walked,
-                entries_total: storage_entries_walked,
-            })
-        };
+        let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
+            HashingStageProgress { entries_processed: 0, entries_total: storage_entries_walked },
+        );
+        stage_progress.entries_processed += storage_entries_walked;
+
+        let progress = StageProgress::Hashing(stage_progress);
 
         info!(target: "sync::stages::hashing_storage", stage_progress = %progress, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { checkpoint, progress: Some(progress), done: true })
