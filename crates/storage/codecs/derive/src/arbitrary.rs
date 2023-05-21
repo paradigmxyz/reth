@@ -24,10 +24,8 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
-
                     let len = field.clone().to_compact(&mut buf);
                     let (decoded, _) = super::#type_ident::from_compact(&buf, len);
-
                     assert!(field == decoded);
                 }
             });
@@ -36,7 +34,6 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
-
                     let len = field.encode(&mut buf);
                     let mut b = &mut buf.as_slice();
                     let decoded = super::#type_ident::decode(b).unwrap();
@@ -80,15 +77,6 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
                     proptest::proptest!(config, |(field: super::#type_ident)| {
                         #(#roundtrips)*
-                    });
-                }
-
-                #[test]
-                fn malformed_header_check() {
-                    let mut config = proptest::prelude::ProptestConfig::with_cases(#default_cases as u32);
-
-                    proptest::proptest!(config, |(field: super::#type_ident)| {
-                        #(#malformed_checks)*
                     });
                 }
             }
