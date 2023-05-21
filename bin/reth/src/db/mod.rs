@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
-use reth_db::{database::Database, tables};
+use reth_db::{database::Database, table::Table, tables};
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::sync::Arc;
@@ -60,6 +60,8 @@ pub enum Subcommands {
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
+    /// Gets the content of a table for the given key
+    Get(GetArgs),
     /// Seeds the database with random blocks on top of each other
     Seed {
         /// How many blocks to generate
@@ -84,6 +86,26 @@ pub struct ListArgs {
     /// Dump as JSON instead of using TUI.
     #[arg(long, short)]
     json: bool,
+}
+
+/// Parse the table key argument to json
+pub fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error> {
+    if serde_json::from_str::<serde::de::IgnoredAny>(value).is_ok() {
+        Ok(value.to_string())
+    } else {
+        // Upgrade the raw command line primitive argument to be a valid json object
+        Ok(format!(r#""{}""#, value))
+    }
+}
+
+#[derive(Parser, Debug)]
+/// The arguments for the `reth db get` command
+pub struct GetArgs {
+    /// The table name
+    table: String, // TODO: Convert to enum
+    /// The key to get content for
+    #[arg(value_parser = maybe_json_value_parser)]
+    key: String,
 }
 
 impl Command {
@@ -193,6 +215,58 @@ impl Command {
                 }
 
                 table_tui!(args.table.as_str(), args.start, args.len => [
+                    CanonicalHeaders,
+                    HeaderTD,
+                    HeaderNumbers,
+                    Headers,
+                    BlockBodyIndices,
+                    BlockOmmers,
+                    BlockWithdrawals,
+                    TransactionBlock,
+                    Transactions,
+                    TxHashNumber,
+                    Receipts,
+                    PlainStorageState,
+                    PlainAccountState,
+                    Bytecodes,
+                    AccountHistory,
+                    StorageHistory,
+                    AccountChangeSet,
+                    StorageChangeSet,
+                    HashedAccount,
+                    HashedStorage,
+                    AccountsTrie,
+                    StoragesTrie,
+                    TxSenders,
+                    SyncStage,
+                    SyncStageProgress
+                ]);
+            }
+            Subcommands::Get(args) => {
+                macro_rules! table_content {
+                    ($arg:expr, $key:expr => [$($table:ident),*]) => {
+                        match $arg {
+                            $(stringify!($table) => {
+                                let key: <tables::$table as Table>::Key = serde_json::from_str($key).wrap_err("Could not parse the given table key.")?;
+                                match tool.get::<tables::$table>(key)? {
+                                    Some(content) => {
+                                        println!("{}", serde_json::to_string_pretty(&content)?);
+                                    }
+                                    None => {
+                                        error!(target: "reth::cli", "No content for the given table key.");
+                                    },
+                                };
+                                return Ok(());
+                            },)*
+                            _ => {
+                                error!(target: "reth::cli", "Unknown table.");
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+
+                table_content!(args.table.as_str(), args.key.as_str() => [
                     CanonicalHeaders,
                     HeaderTD,
                     HeaderNumbers,
