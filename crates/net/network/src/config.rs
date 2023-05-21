@@ -179,6 +179,12 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets the [`NetworkMode`].
+    pub fn network_mode(mut self, network_mode: NetworkMode) -> Self {
+        self.network_mode = network_mode;
+        self
+    }
+
     /// Sets the highest synced block.
     ///
     /// This is used to construct the appropriate [`ForkFilter`] and [`Status`] message.
