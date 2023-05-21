@@ -1,4 +1,4 @@
-use reth_primitives::{BlockHash, BlockNumHash, BlockNumber};
+use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedHeader};
 use std::collections::BTreeMap;
 
 /// This keeps track of all blocks of the canonical chain.
@@ -8,12 +8,15 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CanonicalChain {
     /// All blocks of the canonical chain in order.
-    chain: BTreeMap<BlockNumber, BlockHash>,
+    chain: BTreeMap<BlockNumber, SealedHeader>,
 }
 
 impl CanonicalChain {
-    pub(crate) fn new(chain: BTreeMap<BlockNumber, BlockHash>) -> Self {
-        Self { chain }
+    /// Initializes the canonical chain with the given canonical headers
+    pub(crate) fn new(canonical_headers: Vec<SealedHeader>) -> Self {
+        Self {
+            chain: canonical_headers.into_iter().map(|header| (header.number, header)).collect(),
+        }
     }
 
     /// Replaces the current chain with the given one.
@@ -25,15 +28,15 @@ impl CanonicalChain {
     /// Returns the block hash of the canonical block with the given number.
     #[inline]
     pub(crate) fn canonical_hash(&self, number: &BlockNumber) -> Option<BlockHash> {
-        self.chain.get(number).cloned()
+        self.chain.get(number).map(|h| h.hash)
     }
 
     /// Returns the block number of the canonical block with the given hash.
     #[inline]
     pub(crate) fn canonical_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
         self.chain.iter().find_map(
-            |(number, hash)| {
-                if *hash == block_hash {
+            |(number, header)| {
+                if block_hash == header.hash {
                     Some(*number)
                 } else {
                     None
@@ -49,7 +52,7 @@ impl CanonicalChain {
         last_finalized_block: BlockNumber,
         block_hash: &BlockHash,
     ) -> bool {
-        self.chain.range(last_finalized_block..).any(|(_, &h)| h == *block_hash)
+        self.chain.range(last_finalized_block..).any(|(_, &h)| h.hash == *block_hash)
     }
 
     /// Extends all items from the given iterator to the chain.
@@ -76,17 +79,17 @@ impl CanonicalChain {
     pub(crate) fn tip(&self) -> BlockNumHash {
         self.chain
             .last_key_value()
-            .map(|(&number, &hash)| BlockNumHash { number, hash })
+            .map(|(&number, &header)| BlockNumHash { number, hash: header.hash })
             .unwrap_or_default()
     }
 
     #[inline]
     pub(crate) fn iter(&self) -> impl Iterator<Item = (BlockNumber, BlockHash)> + '_ {
-        self.chain.iter().map(|(&number, &hash)| (number, hash))
+        self.chain.iter().map(|(&number, &header)| (number, header.hash))
     }
 
     #[inline]
     pub(crate) fn into_iter(self) -> impl Iterator<Item = (BlockNumber, BlockHash)> {
-        self.chain.into_iter()
+        self.chain.into_iter().map(|(number, header)| (number, header.hash))
     }
 }

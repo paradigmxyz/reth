@@ -1,8 +1,8 @@
 //! Blockchain tree externals.
 
-use reth_db::database::Database;
-use reth_primitives::ChainSpec;
-use reth_provider::ShareableDatabase;
+use reth_db::{database::Database, tables, transaction::DbTx};
+use reth_primitives::{ChainSpec, SealedHeader};
+use reth_provider::{HeaderProvider, ShareableDatabase};
 use std::sync::Arc;
 
 /// A container for external components.
@@ -34,6 +34,20 @@ impl<DB, C, EF> TreeExternals<DB, C, EF> {
 }
 
 impl<DB: Database, C, EF> TreeExternals<DB, C, EF> {
+    /// Reads the last `max` canonical headers from the database.
+    ///
+    /// Note: This returns the headers in rising order, i.e. the highest header is the last entry in
+    /// the vec.
+    pub(crate) fn read_last_canonical_headers(
+        &self,
+        max: u64,
+    ) -> Result<Vec<SealedHeader>, reth_interfaces::Error> {
+        let (highest, _) = self.db.tx()?.cursor_read::<tables::CanonicalHeaders>()?.last()?;
+        let range = highest.saturating_sub(max)..=highest;
+
+        self.database().sealed_headers_range(range)
+    }
+
     /// Return shareable database helper structure.
     pub fn database(&self) -> ShareableDatabase<&DB> {
         ShareableDatabase::new(&self.db, self.chain_spec.clone())

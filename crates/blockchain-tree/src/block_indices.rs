@@ -38,13 +38,10 @@ pub struct BlockIndices {
 
 impl BlockIndices {
     /// Create new block indices structure
-    pub fn new(
-        last_finalized_block: BlockNumber,
-        canonical_chain: BTreeMap<BlockNumber, BlockHash>,
-    ) -> Self {
+    pub(crate) fn new(last_finalized_block: BlockNumber, canonical_chain: CanonicalChain) -> Self {
         Self {
             last_finalized_block,
-            canonical_chain: CanonicalChain::new(canonical_chain),
+            canonical_chain,
             fork_to_child: Default::default(),
             blocks_to_chain: Default::default(),
             block_number_to_block_hashes: Default::default(),
@@ -133,7 +130,7 @@ impl BlockIndices {
     }
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
-    /// them. Remove all missmatches, disconnect them and return all chains that needs to be
+    /// them. Remove all mismatches, disconnect them and return all chains that need to be
     /// removed.
     pub(crate) fn update_block_hashes(
         &mut self,

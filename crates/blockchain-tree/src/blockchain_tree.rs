@@ -87,15 +87,6 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     canon_state_notification_sender: CanonStateNotificationSender,
 }
 
-/// A container that wraps chains and block indices to allow searching for block hashes across all
-/// sidechains.
-pub struct BlockHashes<'a> {
-    /// The current tracked chains.
-    pub chains: &'a mut HashMap<BlockChainId, AppendableChain>,
-    /// The block indices for all chains.
-    pub indices: &'a BlockIndices,
-}
-
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> {
     /// Create a new blockchain tree.
     pub fn new(
@@ -105,24 +96,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ) -> Result<Self, Error> {
         let max_reorg_depth = config.max_reorg_depth();
 
-        let last_canonical_hashes = externals
-            .db
-            .tx()?
-            .cursor_read::<tables::CanonicalHeaders>()?
-            .walk_back(None)?
-            .take((max_reorg_depth + config.num_of_additional_canonical_block_hashes()) as usize)
-            .collect::<Result<Vec<(BlockNumber, BlockHash)>, _>>()?;
+        let last_canonical_headers = externals.read_last_canonical_headers(
+            max_reorg_depth + config.num_of_additional_canonical_block_hashes(),
+        )?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
         // tip-max_reorg_depth
         // task: https://github.com/paradigmxyz/reth/issues/1712
-        let (last_finalized_block_number, _) =
-            if last_canonical_hashes.len() > max_reorg_depth as usize {
-                last_canonical_hashes[max_reorg_depth as usize]
-            } else {
-                // it is in reverse order from tip to N
-                last_canonical_hashes.last().cloned().unwrap_or_default()
-            };
+        let last_finalized_block_number = if last_canonical_headers.len() > max_reorg_depth as usize
+        {
+            last_canonical_headers[max_reorg_depth as usize].number
+        } else {
+            // it is in reverse order from tip to N
+            last_canonical_headers.last().map(|h| h.number).unwrap_or_default()
+        };
 
         Ok(Self {
             externals,
@@ -131,7 +118,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             chains: Default::default(),
             block_indices: BlockIndices::new(
                 last_finalized_block_number,
-                BTreeMap::from_iter(last_canonical_hashes.into_iter()),
+                CanonicalChain::new(last_canonical_headers),
             ),
             config,
             canon_state_notification_sender,
@@ -980,6 +967,15 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             Ok(Some(Chain::new(blocks_and_execution)))
         }
     }
+}
+
+/// A container that wraps chains and block indices to allow searching for block hashes across all
+/// sidechains.
+pub struct BlockHashes<'a> {
+    /// The current tracked chains.
+    pub chains: &'a mut HashMap<BlockChainId, AppendableChain>,
+    /// The block indices for all chains.
+    pub indices: &'a BlockIndices,
 }
 
 #[cfg(test)]
