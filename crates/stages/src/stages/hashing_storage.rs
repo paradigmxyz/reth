@@ -226,18 +226,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         let changesets_walked = tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
-        let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
-            HashingStageProgress {
-                entries_processed: 0,
-                // TODO(alexey): expensive DB computation, any way to optimize?
-                entries_total: tx
-                    .cursor_read::<tables::StorageChangeSet>()?
-                    .walk_range(BlockNumberAddress::range(
-                        (input.unwind_to + 1)..=input.checkpoint.block_number,
-                    ))?
-                    .count() as u64,
-            },
-        );
+        let mut stage_progress =
+            input.progress.and_then(|progress| progress.hashing()).unwrap_or_default();
         stage_progress.entries_processed += changesets_walked as u64;
 
         let progress = StageProgress::Hashing(stage_progress);
