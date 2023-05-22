@@ -336,7 +336,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         parent: BlockNumHash,
     ) -> Result<BlockStatus, InsertBlockError> {
         let block_num_hash = block.num_hash();
-        debug!(target: "blockchain_tree", ?parent, "Appending block to canonical chain");
+        debug!(target: "blockchain_tree", head = ?block_num_hash.hash, ?parent, "Appending block to canonical chain");
         // create new chain that points to that block
         //return self.fork_canonical_chain(block.clone());
         // TODO save pending block to database
@@ -742,6 +742,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// Connect unconnected,buffered blocks if the new block closes a gap.
     fn try_connect_buffered_blocks(&mut self, new_block: BlockNumHash) {
+        trace!(target: "blockchain_tree", ?new_block, "try_connect_buffered_blocks");
+
         let include_blocks = self.buffered_blocks.take_all_children(new_block);
         // insert block children
         for block in include_blocks.into_iter() {
