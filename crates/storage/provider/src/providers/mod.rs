@@ -99,6 +99,13 @@ where
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
         self.database.headers_range(range)
     }
+
+    fn sealed_headers_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Vec<SealedHeader>> {
+        self.database.sealed_headers_range(range)
+    }
 }
 
 impl<DB, Tree> BlockHashProvider for BlockchainProvider<DB, Tree>
