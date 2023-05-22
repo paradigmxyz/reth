@@ -577,7 +577,7 @@ impl<B, L> Builder<B, L> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::client::IpcClientBuilder;

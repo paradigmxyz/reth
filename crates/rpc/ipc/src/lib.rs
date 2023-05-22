@@ -7,6 +7,7 @@
 
 //! Reth IPC implementation
 
+#[cfg(unix)]
 pub mod client;
 pub mod server;
 
