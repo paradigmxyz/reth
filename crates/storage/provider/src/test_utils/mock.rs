@@ -135,10 +135,7 @@ impl HeaderProvider for MockEthProvider {
         Ok(Some(sum))
     }
 
-    fn headers_range(
-        &self,
-        range: impl RangeBounds<reth_primitives::BlockNumber>,
-    ) -> Result<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
         let lock = self.headers.lock();
 
         let mut headers: Vec<_> =
@@ -146,6 +143,13 @@ impl HeaderProvider for MockEthProvider {
         headers.sort_by_key(|header| header.number);
 
         Ok(headers)
+    }
+
+    fn sealed_headers_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Vec<SealedHeader>> {
+        Ok(self.headers_range(range)?.into_iter().map(|h| h.seal_slow()).collect())
     }
 }
 

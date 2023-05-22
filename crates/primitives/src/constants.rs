@@ -10,6 +10,9 @@ pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"
 /// The first four bytes of the call data for a function call specifies the function to be called.
 pub const SELECTOR_LEN: usize = 4;
 
+/// Maximum extra data size in a block after genesis
+pub const MAXIMUM_EXTRA_DATA_SIZE: usize = 32;
+
 /// The duration of a slot in seconds.
 ///
 /// This is the time period of 12 seconds in which a randomly chosen validator has time to propose a

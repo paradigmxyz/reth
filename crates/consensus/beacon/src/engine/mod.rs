@@ -29,6 +29,7 @@ use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{
@@ -388,30 +389,23 @@ where
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             match self.blockchain.make_canonical(&state.head_block_hash) {
-                Ok(_) => {
-                    let head_block_number = self
-                        .get_block_number(state.head_block_hash)?
-                        .expect("was canonicalized, so it exists");
-                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=head_block_number, "canonicalized new head");
+                Ok(outcome) => {
+                    let header = outcome.into_header();
+                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=header.number, "canonicalized new head");
 
                     let pipeline_min_progress =
                         FINISH.get_checkpoint(&self.db.tx()?)?.unwrap_or_default().block_number;
 
-                    if pipeline_min_progress < head_block_number {
-                        debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=head_block_number, "pipeline run to head required");
+                    if pipeline_min_progress < header.number {
+                        debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=header.number, "pipeline run to head required");
 
                         // TODO(mattsse) ideally sync blockwise
                         self.sync.set_pipeline_sync_target(state.head_block_hash);
                     }
 
                     if let Some(attrs) = attrs {
-                        // get header for further validation
-                        let header = self
-                            .load_header(head_block_number)?
-                            .expect("was canonicalized, so it exists");
-
                         let payload_response =
-                            self.process_payload_attributes(attrs, header, state);
+                            self.process_payload_attributes(attrs, header.unseal(), state);
                         if payload_response.is_valid_update() {
                             // we will return VALID, so let's make sure the info tracker is
                             // properly updated
@@ -690,17 +684,19 @@ where
     ///
     /// This will return `SYNCING` if the block was buffered successfully, and an error if an error
     /// occurred while buffering the block.
+    #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_buffer_payload(
         &mut self,
         block: SealedBlock,
     ) -> Result<PayloadStatus, InsertBlockError> {
-        self.blockchain.buffer_block_without_sender(block)?;
+        self.blockchain.buffer_block_without_senders(block)?;
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
     }
 
     /// Attempts to insert a new payload into the tree.
     ///
     /// Caution: This expects that the pipeline is idle.
+    #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
         block: SealedBlock,
@@ -708,22 +704,17 @@ where
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
         let block_hash = block.hash;
-        let block_number = block.number;
-        let status = self.blockchain.insert_block_without_senders(block)?;
+        let status = self.blockchain.insert_block_without_senders(block.clone())?;
         let mut latest_valid_hash = None;
+        let block = Arc::new(block);
         let status = match status {
             BlockStatus::Valid => {
                 latest_valid_hash = Some(block_hash);
-                self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                    block_number,
-                    block_hash,
-                ));
-
+                self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(block));
                 PayloadStatusEnum::Valid
             }
             BlockStatus::Accepted => {
-                self.listeners
-                    .notify(BeaconConsensusEngineEvent::ForkBlockAdded(block_number, block_hash));
+                self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
                 PayloadStatusEnum::Accepted
             }
             BlockStatus::Disconnected => PayloadStatusEnum::Syncing,

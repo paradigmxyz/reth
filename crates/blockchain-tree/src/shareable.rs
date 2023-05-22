@@ -5,6 +5,7 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::InsertBlockError, BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer,
+        CanonicalOutcome,
     },
     consensus::Consensus,
     Error,
@@ -68,7 +69,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         self.tree.write().restore_canonical_hashes(last_finalized_block)
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<(), Error> {
+    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error> {
         trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
         self.tree.write().make_canonical(block_hash)
     }

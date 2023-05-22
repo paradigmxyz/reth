@@ -1,12 +1,16 @@
-use crate::{utils::parse_duration_from_secs, version::P2P_VERSION};
-use clap::{builder::RangedU64ValueParser, Args};
-use std::time::Duration;
+use crate::{utils::parse_duration_from_secs, version::default_extradata};
+use clap::{
+    builder::{RangedU64ValueParser, TypedValueParser},
+    Arg, Args, Command,
+};
+use reth_primitives::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use std::{ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
 #[derive(Debug, Args, PartialEq, Default)]
 pub struct PayloadBuilderArgs {
-    /// Extra block data set by the builder.
-    #[arg(long = "builder.extradata", help_heading = "Builder", default_value = P2P_VERSION)]
+    /// Block extra data set by the payload builder.
+    #[arg(long = "builder.extradata", help_heading = "Builder", value_parser=ExtradataValueParser::default(),  default_value_t = default_extradata())]
     pub extradata: String,
 
     /// Target gas ceiling for built blocks.
@@ -31,9 +35,35 @@ pub struct PayloadBuilderArgs {
     pub max_payload_tasks: usize,
 }
 
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+struct ExtradataValueParser;
+
+impl TypedValueParser for ExtradataValueParser {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        _cmd: &Command,
+        _arg: Option<&Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        let val =
+            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        if val.as_bytes().len() > MAXIMUM_EXTRA_DATA_SIZE {
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::InvalidValue,
+                format!(
+                    "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}bytes limit"
+                ),
+            ))
+        }
+        Ok(val.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use clap::{Args, Parser};
 
@@ -60,5 +90,28 @@ mod tests {
             "0"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn test_default_extradata() {
+        let extradata = default_extradata();
+        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
+            "reth",
+            "--builder.extradata",
+            extradata.as_str(),
+        ])
+        .args;
+        assert_eq!(args.extradata, extradata);
+    }
+
+    #[test]
+    fn test_invalid_extradata() {
+        let extradata = "x".repeat(MAXIMUM_EXTRA_DATA_SIZE + 1);
+        let args = CommandParser::<PayloadBuilderArgs>::try_parse_from([
+            "reth",
+            "--builder.extradata",
+            extradata.as_str(),
+        ]);
+        assert!(args.is_err());
     }
 }

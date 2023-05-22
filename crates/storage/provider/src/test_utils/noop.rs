@@ -166,6 +166,13 @@ impl HeaderProvider for NoopProvider {
     fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
         Ok(vec![])
     }
+
+    fn sealed_headers_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Vec<SealedHeader>> {
+        Ok(vec![])
+    }
 }
 
 impl AccountProvider for NoopProvider {

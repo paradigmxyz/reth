@@ -42,14 +42,18 @@ impl CanonicalChain {
         )
     }
 
-    /// Check if block hash belongs to canonical chain.
+    /// Returns the block number of the canonical block with the given hash.
+    ///
+    /// Returns `None` if no block could be found in the canonical chain.
     #[inline]
-    pub(crate) fn is_block_hash_canonical(
+    pub(crate) fn get_canonical_block_number(
         &self,
         last_finalized_block: BlockNumber,
         block_hash: &BlockHash,
-    ) -> bool {
-        self.chain.range(last_finalized_block..).any(|(_, &h)| h == *block_hash)
+    ) -> Option<BlockNumber> {
+        self.chain
+            .range(last_finalized_block..)
+            .find_map(|(num, &h)| (h == *block_hash).then_some(*num))
     }
 
     /// Extends all items from the given iterator to the chain.

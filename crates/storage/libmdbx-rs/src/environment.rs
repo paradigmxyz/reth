@@ -8,6 +8,10 @@ use crate::{
 use byteorder::{ByteOrder, NativeEndian};
 use libc::c_uint;
 use mem::size_of;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
 use std::{
     ffi::CString,
     fmt,
@@ -15,7 +19,6 @@ use std::{
     marker::PhantomData,
     mem,
     ops::{Bound, RangeBounds},
-    os::unix::ffi::OsStrExt,
     path::Path,
     ptr, result,
     sync::mpsc::{sync_channel, SyncSender},
