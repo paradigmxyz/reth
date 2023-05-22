@@ -72,9 +72,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 // and therefore should be hashed again. 
                 if from == from_block && to == to_block =>
                     {
-                        if stage_checkpoint.is_some() {
-                            debug!(target: "sync::stages::storage_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner storage hashing checkpoint");
-                        }
+                        debug!(target: "sync::stages::storage_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner storage hashing checkpoint");
 
                         (address, storage)
                     }

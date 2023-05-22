@@ -146,9 +146,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     // and therefore should be hashed again. 
                     if from == from_block && to == to_block =>
                 {
-                    if stage_checkpoint.is_some() {
-                        debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner account hashing checkpoint");
-                    }
+                    debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner account hashing checkpoint");
 
                     address
                 }
