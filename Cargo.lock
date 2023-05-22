@@ -107,6 +107,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aho-corasick"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67fc08ce920c31afb70f013dcce1bfc3a3195de6a228474e45e1f145b36f8d04"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1787,8 +1796,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-contract"
-version = "2.0.3"
-source = "git+https://github.com/gakonst/ethers-rs#6ebb1b2337fcc28f6cf3f453bd34deba66e98c1f"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfa43e2e69632492d7b38e59465d125a0066cf4c477390ece00d3acbd11b338b"
 dependencies = [
  "ethers-contract-abigen",
  "ethers-contract-derive",
@@ -1805,8 +1815,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-contract-abigen"
-version = "2.0.3"
-source = "git+https://github.com/gakonst/ethers-rs#6ebb1b2337fcc28f6cf3f453bd34deba66e98c1f"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2edb8fdbf77459819a443234b461171a024476bfc12f1853b889a62c6e1185ff"
 dependencies = [
  "Inflector",
  "dunce",
@@ -1831,8 +1842,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-contract-derive"
-version = "2.0.3"
-source = "git+https://github.com/gakonst/ethers-rs#6ebb1b2337fcc28f6cf3f453bd34deba66e98c1f"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "939b0c37746929f869285ee37d270b7c998d80cc7404c2e20dda8efe93e3b295"
 dependencies = [
  "Inflector",
  "ethers-contract-abigen",
@@ -1846,8 +1858,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-core"
-version = "2.0.3"
-source = "git+https://github.com/gakonst/ethers-rs#6ebb1b2337fcc28f6cf3f453bd34deba66e98c1f"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "198ea9efa8480fa69f73d31d41b1601dace13d053c6fe4be6f5878d9dfcf0108"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1876,8 +1889,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-etherscan"
-version = "2.0.3"
-source = "git+https://github.com/gakonst/ethers-rs#6ebb1b2337fcc28f6cf3f453bd34deba66e98c1f"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "196a21d6939ab78b7a1e4c45c2b33b0c2dd821a2e1af7c896f06721e1ba2a0c7"
 dependencies = [
  "ethers-core",
  "getrandom 0.2.9",
@@ -1891,8 +1905,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-middleware"
-version = "2.0.3"
-source = "git+https://github.com/gakonst/ethers-rs#6ebb1b2337fcc28f6cf3f453bd34deba66e98c1f"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75594cc450992fc7de701c9145de612325fd8a18be765b8ae78767ba2b74876f"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -1917,8 +1932,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-providers"
-version = "2.0.3"
-source = "git+https://github.com/gakonst/ethers-rs#6ebb1b2337fcc28f6cf3f453bd34deba66e98c1f"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1009041f40476b972b5d79346cc512e97c662b1a0a2f78285eabe9a122909783"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -1954,8 +1970,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-signers"
-version = "2.0.3"
-source = "git+https://github.com/gakonst/ethers-rs#6ebb1b2337fcc28f6cf3f453bd34deba66e98c1f"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3bd11ad6929f01f01be74bb00d02bbd6552f22de030865c898b340a3a592db1"
 dependencies = [
  "async-trait",
  "coins-bip32",
@@ -2281,7 +2298,7 @@ version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "029d74589adefde59de1a0c4f4732695c32805624aec7b68d91503d4dba79afc"
 dependencies = [
- "aho-corasick",
+ "aho-corasick 0.7.20",
  "bstr",
  "fnv",
  "log",
@@ -3388,7 +3405,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7d24dc2dbae22bff6f1f9326ffce828c9f07ef9cc1e8002e5279f845432a30a"
 dependencies = [
- "aho-corasick",
+ "aho-corasick 0.7.20",
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.12.3",
@@ -4203,7 +4220,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_xorshift",
- "regex-syntax",
+ "regex-syntax 0.6.29",
  "rusty-fork",
  "tempfile",
  "unarray",
@@ -4460,13 +4477,13 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.7.1"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48aaa5748ba571fb95cd2c85c09f629215d3a6ece942baa100950af03a34f733"
+checksum = "af83e617f331cc6ae2da5443c602dfa5af81e517212d9d611a5b3ba1777b5370"
 dependencies = [
- "aho-corasick",
+ "aho-corasick 1.0.1",
  "memchr",
- "regex-syntax",
+ "regex-syntax 0.7.1",
 ]
 
 [[package]]
@@ -4475,7 +4492,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c230d73fb8d8c1b9c0b3135c5142a8acee3a0558fb8db5cf1cb65f8d7862132"
 dependencies = [
- "regex-syntax",
+ "regex-syntax 0.6.29",
 ]
 
 [[package]]
@@ -4485,10 +4502,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
-name = "reqwest"
-version = "0.11.16"
+name = "regex-syntax"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27b71749df584b7f4cac2c426c127a7c785a5106cc98f7a8feb044115f0fa254"
+checksum = "a5996294f19bd3aae0453a862ad728f60e6600695733dd5df01da90c54363a3c"
+
+[[package]]
+name = "reqwest"
+version = "0.11.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde824a14b7c14f85caff81225f411faacc04a2013f41670f41443742b1c1c55"
 dependencies = [
  "base64 0.21.0",
  "bytes",
@@ -6647,9 +6670,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.27.0"
+version = "1.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0de47a4eecbe11f498978a9b29d792f0d2692d1dd003650c24c76510e3bc001"
+checksum = "0aa32867d44e6f2ce3385e89dceb990188b8bb0fb25b0cf576647a6f98ac5105"
 dependencies = [
  "autocfg",
  "bytes",
@@ -6661,14 +6684,14 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
- "windows-sys 0.45.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
 name = "tokio-macros"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61a573bdc87985e9d6ddeed1b3d864e8a302c847e40d647746df2f1de209d1ce"
+checksum = "630bdcf245f78637c13ec01ffae6187cca34625e8c63150d424b59e55af2675e"
 dependencies = [
  "proc-macro2 1.0.56",
  "quote 1.0.26",
