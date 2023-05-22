@@ -16,7 +16,7 @@ use reth_provider::Transaction;
 use std::{
     cmp::max,
     fmt::Debug,
-    ops::{Range, RangeInclusive},
+    ops::{Deref, Range, RangeInclusive},
 };
 use tokio::sync::mpsc;
 use tracing::*;
@@ -241,10 +241,9 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     .progress
                     .and_then(|progress| progress.hashing())
                     .unwrap_or(HashingStageProgress {
-                        // TODO(alexey): replace with cheap `tx.db_stat().entries()`
-                        entries_processed: tx.table::<tables::HashedAccount>()?.len() as u64 -
+                        entries_processed: tx.deref().entries::<tables::HashedAccount>()? as u64 -
                             accounts_walked,
-                        entries_total: tx.table::<tables::PlainAccountState>()?.len() as u64,
+                        entries_total: tx.deref().entries::<tables::PlainAccountState>()? as u64,
                     });
                 stage_progress.entries_processed += accounts_walked;
 
@@ -277,10 +276,9 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
             HashingStageProgress {
-                // TODO(alexey): replace with cheap `tx.db_stat().entries()`
-                entries_processed: tx.table::<tables::HashedAccount>()?.len() as u64 -
+                entries_processed: tx.deref().entries::<tables::HashedAccount>()? as u64 -
                     accounts_walked,
-                entries_total: tx.table::<tables::PlainAccountState>()?.len() as u64,
+                entries_total: tx.deref().entries::<tables::PlainAccountState>()? as u64,
             },
         );
         stage_progress.entries_processed += accounts_walked;
@@ -306,6 +304,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
             HashingStageProgress {
                 entries_processed: 0,
+                // TODO(alexey): expensive DB computation, any way to optimize?
                 entries_total: tx
                     .cursor_read::<tables::AccountChangeSet>()?
                     .walk_range((input.unwind_to + 1)..=input.checkpoint.block_number)?

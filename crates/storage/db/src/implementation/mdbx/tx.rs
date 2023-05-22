@@ -10,7 +10,7 @@ use crate::{
 use metrics::histogram;
 use parking_lot::RwLock;
 use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, DBI, RW};
-use std::{marker::PhantomData, sync::Arc, time::Instant};
+use std::{marker::PhantomData, ops::Deref, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -114,6 +114,11 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_one::<T>)
             .transpose()
+    }
+
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
+        let table_db = self.inner.open_db(Some(T::NAME)).expect("failed to open db");
+        Ok(self.inner.db_stat(&table_db).expect("failed to get db stat").entries())
     }
 }
 

@@ -14,7 +14,7 @@ use reth_primitives::{
     keccak256, StageCheckpoint, StageUnitCheckpoint, StorageEntry, StorageHashingCheckpoint,
 };
 use reth_provider::Transaction;
-use std::{collections::BTreeMap, fmt::Debug};
+use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
 use tracing::*;
 
 /// The [`StageId`] of the storage hashing stage.
@@ -93,8 +93,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 }
             };
 
-            let start_key = current_key;
-
             let mut keccak_address = None;
 
             let mut hashed_batch = BTreeMap::new();
@@ -170,10 +168,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     .progress
                     .and_then(|progress| progress.hashing())
                     .unwrap_or(HashingStageProgress {
-                        // TODO(alexey): replace with cheap `tx.db_stat().entries()`
-                        entries_processed: tx.table::<tables::HashedStorage>()?.len() as u64 -
+                        entries_processed: tx.deref().entries::<tables::HashedStorage>()? as u64 -
                             storage_entries_walked,
-                        entries_total: tx.table::<tables::PlainStorageState>()?.len() as u64,
+                        entries_total: tx.deref().entries::<tables::PlainStorageState>()? as u64,
                     });
                 stage_progress.entries_processed += storage_entries_walked;
 
@@ -207,10 +204,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
             HashingStageProgress {
-                // TODO(alexey): replace with cheap `tx.db_stat().entries()`
-                entries_processed: tx.table::<tables::HashedStorage>()?.len() as u64 -
+                entries_processed: tx.deref().entries::<tables::HashedStorage>()? as u64 -
                     storage_entries_walked,
-                entries_total: tx.table::<tables::PlainStorageState>()?.len() as u64,
+                entries_total: tx.deref().entries::<tables::PlainStorageState>()? as u64,
             },
         );
         stage_progress.entries_processed += storage_entries_walked;
@@ -235,6 +231,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
             HashingStageProgress {
                 entries_processed: 0,
+                // TODO(alexey): expensive DB computation, any way to optimize?
                 entries_total: tx
                     .cursor_read::<tables::StorageChangeSet>()?
                     .walk_range(BlockNumberAddress::range(

@@ -124,14 +124,6 @@ pub struct StorageHashingCheckpoint {
     pub to: u64,
 }
 
-// TODO(alexey): make it generic if stages other than hashing need to use this shared struct.
-#[main_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-pub struct StageUnit {
-    pub execute: Option<u64>,
-    pub unwind: Option<u64>,
-}
-
 /// Checkpoint of a stage. Used for execution/unwinding resuming purposes.
 #[main_codec]
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
