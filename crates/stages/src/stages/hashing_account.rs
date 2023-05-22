@@ -140,6 +140,9 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         }
         let (from_block, to_block) = range.into_inner();
 
+        let stage_checkpoint =
+            input.checkpoint.and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
+
         let accounts_walked;
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
@@ -147,10 +150,6 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
-            let stage_checkpoint = input
-                .checkpoint
-                .and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
-
             let start_address = match stage_checkpoint {
                 Some(AccountHashingCheckpoint { address: address @ Some(_), from, to, .. })
                 // Checkpoint is only valid if the range of transitions didn't change.
@@ -242,11 +241,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     .progress
                     .and_then(|progress| progress.hashing())
                     .unwrap_or(HashingStageProgress {
-                        entries_processed: 0,
-                        entries_total: tx
-                            .cursor_read::<tables::PlainAccountState>()?
-                            .walk(start_address.map(|address| address.key().unwrap()))?
-                            .count() as u64,
+                        // TODO(alexey): replace with cheap `tx.db_stat().entries()`
+                        entries_processed: tx.table::<tables::HashedAccount>()?.len() as u64 -
+                            accounts_walked,
+                        entries_total: tx.table::<tables::PlainAccountState>()?.len() as u64,
                     });
                 stage_progress.entries_processed += accounts_walked;
 
@@ -278,7 +276,12 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         };
 
         let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
-            HashingStageProgress { entries_processed: 0, entries_total: accounts_walked },
+            HashingStageProgress {
+                // TODO(alexey): replace with cheap `tx.db_stat().entries()`
+                entries_processed: tx.table::<tables::HashedAccount>()?.len() as u64 -
+                    accounts_walked,
+                entries_total: tx.table::<tables::PlainAccountState>()?.len() as u64,
+            },
         );
         stage_progress.entries_processed += accounts_walked;
 

@@ -63,7 +63,8 @@ pub struct HashingStageProgress {
 
 impl Display for HashingStageProgress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.1}%", 100.0 * self.entries_processed as f64 / self.entries_total as f64)
+        // write!(f, "{:.1}%", 100.0 * self.entries_processed as f64 / self.entries_total as f64)
+        write!(f, "{}/{}", self.entries_processed as f64, self.entries_total as f64)
     }
 }
 

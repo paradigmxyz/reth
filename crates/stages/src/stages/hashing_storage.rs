@@ -56,6 +56,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         }
         let (from_block, to_block) = range.into_inner();
 
+        let stage_checkpoint =
+            input.checkpoint.and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint());
+
         let storage_entries_walked;
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
@@ -63,10 +66,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset, along with their storages.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
-            let stage_checkpoint = input
-                .checkpoint
-                .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint());
-
             let (mut current_key, mut current_subkey) = match stage_checkpoint {
                 Some(StorageHashingCheckpoint {
                          address: address @ Some(_),
@@ -171,11 +170,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     .progress
                     .and_then(|progress| progress.hashing())
                     .unwrap_or(HashingStageProgress {
-                        entries_processed: 0,
-                        entries_total: tx
-                            .cursor_read::<tables::PlainStorageState>()?
-                            .walk(start_key)?
-                            .count() as u64,
+                        // TODO(alexey): replace with cheap `tx.db_stat().entries()`
+                        entries_processed: tx.table::<tables::HashedStorage>()?.len() as u64 -
+                            storage_entries_walked,
+                        entries_total: tx.table::<tables::PlainStorageState>()?.len() as u64,
                     });
                 stage_progress.entries_processed += storage_entries_walked;
 
@@ -208,7 +206,12 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         };
 
         let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
-            HashingStageProgress { entries_processed: 0, entries_total: storage_entries_walked },
+            HashingStageProgress {
+                // TODO(alexey): replace with cheap `tx.db_stat().entries()`
+                entries_processed: tx.table::<tables::HashedStorage>()?.len() as u64 -
+                    storage_entries_walked,
+                entries_total: tx.table::<tables::PlainStorageState>()?.len() as u64,
+            },
         );
         stage_progress.entries_processed += storage_entries_walked;
 

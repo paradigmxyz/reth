@@ -107,6 +107,7 @@ pub struct AccountHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
+    // pub entries_processed: StageUnit,
 }
 
 /// Checkpoint of StorageHashing stage.
@@ -121,6 +122,14 @@ pub struct StorageHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
+}
+
+// TODO(alexey): make it generic if stages other than hashing need to use this shared struct.
+#[main_codec]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct StageUnit {
+    pub execute: Option<u64>,
+    pub unwind: Option<u64>,
 }
 
 /// Checkpoint of a stage. Used for execution/unwinding resuming purposes.
