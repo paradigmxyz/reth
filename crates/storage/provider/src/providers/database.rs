@@ -8,8 +8,8 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header,
-    Receipt, SealedBlock, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256,
-    U256,
+    Receipt, SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber,
+    Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -126,6 +126,23 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
                     .walk_range(range)?
                     .map(|result| result.map(|(_, header)| header).map_err(Into::into))
                     .collect::<Result<Vec<_>>>()
+            })?
+            .map_err(Into::into)
+    }
+
+    fn sealed_headers_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Vec<SealedHeader>> {
+        self.db
+            .view(|tx| -> Result<_> {
+                let mut headers = vec![];
+                for entry in tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
+                    let (num, header) = entry?;
+                    let hash = read_header_hash(tx, num)?;
+                    headers.push(header.seal(hash));
+                }
+                Ok(headers)
             })?
             .map_err(Into::into)
     }
@@ -478,6 +495,23 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
+    }
+}
+
+/// Reads the hash for the given block number
+///
+/// Returns an error if no matching entry is found.
+#[inline]
+fn read_header_hash<'a, TX>(
+    tx: &TX,
+    number: u64,
+) -> std::result::Result<BlockHash, reth_interfaces::Error>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    match tx.get::<tables::CanonicalHeaders>(number)? {
+        Some(hash) => Ok(hash),
+        None => Err(ProviderError::HeaderNotFound(number.into()).into()),
     }
 }
 
