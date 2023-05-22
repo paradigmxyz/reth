@@ -10,7 +10,7 @@ use crate::{
 use metrics::histogram;
 use parking_lot::RwLock;
 use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, DBI, RW};
-use std::{marker::PhantomData, ops::Deref, sync::Arc, time::Instant};
+use std::{marker::PhantomData, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]

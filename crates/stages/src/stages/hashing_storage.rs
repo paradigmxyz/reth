@@ -4,7 +4,7 @@ use crate::{
 };
 use num_traits::Zero;
 use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
+    cursor::DbDupCursorRO,
     database::Database,
     models::BlockNumberAddress,
     tables,
