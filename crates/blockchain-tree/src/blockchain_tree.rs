@@ -268,7 +268,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// If blocks does not have parent [`BlockStatus::Disconnected`] would be returned, in which
     /// case it is buffered for future inclusion.
-    #[instrument(skip_all, fields(block = ?block.num_hash()), target = "blockchain-tree", ret)]
+    #[instrument(skip_all, fields(block = ?block.num_hash()), target = "blockchain_tree", ret)]
     pub fn try_insert_block(
         &mut self,
         block: SealedBlockWithSenders,
@@ -590,15 +590,17 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
-    /// Check if block is found inside chain and if the chain extends the canonical chain
-    /// if it does extends the canonical chain, return `BlockStatus::Valid`
-    /// if it does not extends the canonical chain, return `BlockStatus::Accepted`
+    /// Check if block is found inside chain and if the chain extends the canonical chain.
+    ///
+    /// if it does extend the canonical chain, return `BlockStatus::Valid`
+    /// if it does not extend the canonical chain, return `BlockStatus::Accepted`
     #[track_caller]
     fn is_block_inside_chain(&self, block: &BlockNumHash) -> Option<BlockStatus> {
-        // check if block known and is already inside Tree
+        // check if block known and is already in the tree
         if let Some(chain_id) = self.block_indices.get_blocks_chain_id(&block.hash) {
+            // find the canonical fork of this chain
             let canonical_fork = self.canonical_fork(chain_id).expect("Chain id is valid");
-            // if blockchain extends canonical chain
+            // if the block's chain extends canonical chain
             return if canonical_fork == self.block_indices.canonical_tip() {
                 Some(BlockStatus::Valid)
             } else {
