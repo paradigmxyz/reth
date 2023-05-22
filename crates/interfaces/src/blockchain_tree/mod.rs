@@ -15,6 +15,9 @@ pub mod error;
 ///   blocks from p2p. Do reorg in tables if canonical chain if needed.
 pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Recover senders and call [`BlockchainTreeEngine::insert_block`].
+    ///
+    /// This will recover all senders of the transactions in the block first, and then try to insert
+    /// the block.
     fn insert_block_without_senders(
         &self,
         block: SealedBlock,
@@ -26,7 +29,10 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     }
 
     /// Recover senders and call [`BlockchainTreeEngine::buffer_block`].
-    fn buffer_block_without_sender(&self, block: SealedBlock) -> Result<(), InsertBlockError> {
+    ///
+    /// This will recover all senders of the transactions in the block first, and then try to buffer
+    /// the block.
+    fn buffer_block_without_senders(&self, block: SealedBlock) -> Result<(), InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.buffer_block(block),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),

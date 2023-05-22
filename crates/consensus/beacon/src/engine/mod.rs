@@ -695,7 +695,7 @@ where
         &mut self,
         block: SealedBlock,
     ) -> Result<PayloadStatus, InsertBlockError> {
-        self.blockchain.buffer_block_without_sender(block)?;
+        self.blockchain.buffer_block_without_senders(block)?;
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
     }
 
