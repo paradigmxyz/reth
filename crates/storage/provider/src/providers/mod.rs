@@ -35,7 +35,7 @@ mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
-use reth_interfaces::blockchain_tree::error::InsertBlockError;
+use reth_interfaces::blockchain_tree::{error::InsertBlockError, CanonicalOutcome};
 
 /// The main type for interacting with the blockchain.
 ///
@@ -401,7 +401,7 @@ where
         self.tree.restore_canonical_hashes(last_finalized_block)
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<()> {
+    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome> {
         self.tree.make_canonical(block_hash)
     }
 

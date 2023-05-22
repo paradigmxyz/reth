@@ -1,6 +1,7 @@
 //! Canonical chain state notification trait and types.
 use crate::{chain::BlockReceipts, Chain};
 use auto_impl::auto_impl;
+use reth_primitives::SealedBlockWithSenders;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -98,12 +99,29 @@ impl CanonStateNotification {
         }
     }
 
-    /// Get new chain if any.
+    /// Get the new chain if any.
+    ///
+    /// Returns the new committed [Chain] for [Self::Reorg] and [Self::Commit] variants.
+    ///
+    /// Returns None for [Self::Revert] variant.
     pub fn committed(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Reorg { new, .. } => Some(new.clone()),
             Self::Revert { .. } => None,
             Self::Commit { new } => Some(new.clone()),
+        }
+    }
+
+    /// Returns the new tip of the chain.
+    ///
+    /// Returns the new tip for [Self::Reorg] and [Self::Commit] variants which commit at least 1
+    /// new block. Returns the first block of the chain for [Self::Revert] variant, which is the
+    /// block that the chain reverted to.
+    pub fn tip(&self) -> &SealedBlockWithSenders {
+        match self {
+            Self::Reorg { new, .. } => new.tip(),
+            Self::Revert { old } => old.first(),
+            Self::Commit { new } => new.tip(),
         }
     }
 
