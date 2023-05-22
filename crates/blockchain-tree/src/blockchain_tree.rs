@@ -7,7 +7,7 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, InsertBlockError, InsertBlockErrorKind},
-        BlockStatus,
+        BlockStatus, CanonicalOutcome,
     },
     consensus::{Consensus, ConsensusError},
     executor::BlockExecutionError,
@@ -15,7 +15,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, SealedBlock, SealedBlockWithSenders,
-    U256,
+    SealedHeader, U256,
 };
 use reth_provider::{
     chain::{ChainSplit, SplitAt},
@@ -209,6 +209,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let id = self.block_indices.get_blocks_chain_id(&block_hash)?;
         let chain = self.chains.get(&id)?;
         chain.block(block_hash)
+    }
+
+    /// Returns true if the block is included in a side-chain.
+    fn is_block_hash_inside_chain(&self, block_hash: BlockHash) -> bool {
+        self.block_by_hash(block_hash).is_some()
     }
 
     /// Returns the block that's considered the `Pending` block, if it exists.
@@ -775,19 +780,34 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Determines whether or not a block is canonical, checking the db if necessary.
-    pub fn is_block_hash_canonical(&self, hash: &BlockHash) -> Result<bool, Error> {
+    /// Attempts to find the header for the given block hash if it is canonical.
+    ///
+    /// Returns `Ok(None)` if the block hash is not canonical (block hash does not exist, or is
+    /// included in a sidechain).
+    pub fn find_canonical_header(&self, hash: &BlockHash) -> Result<Option<SealedHeader>, Error> {
         // if the indices show that the block hash is not canonical, it's either in a sidechain or
         // canonical, but in the db. If it is in a sidechain, it is not canonical. If it is not in
         // the db, then it is not canonical.
-        if !self.block_indices.is_block_hash_canonical(hash) &&
-            (self.block_by_hash(*hash).is_some() ||
-                self.externals.database().header(hash)?.is_none())
-        {
-            return Ok(false)
+
+        let mut header = None;
+        if let Some(num) = self.block_indices.get_canonical_block_number(hash) {
+            header = self.externals.database().header_by_number(num)?;
         }
 
-        Ok(true)
+        if header.is_none() && self.is_block_hash_inside_chain(*hash) {
+            return Ok(None)
+        }
+
+        if header.is_none() {
+            header = self.externals.database().header(hash)?
+        }
+
+        Ok(header.map(|header| header.seal(*hash)))
+    }
+
+    /// Determines whether or not a block is canonical, checking the db if necessary.
+    pub fn is_block_hash_canonical(&self, hash: &BlockHash) -> Result<bool, Error> {
+        self.find_canonical_header(hash).map(|header| header.is_some())
     }
 
     /// Make a block and its parent(s) part of the canonical chain.
@@ -802,12 +822,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
     #[track_caller]
     #[instrument(skip(self), target = "blockchain_tree")]
-    pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<(), Error> {
+    pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error> {
         let old_block_indices = self.block_indices.clone();
         let old_buffered_blocks = self.buffered_blocks.parent_to_child.clone();
 
         // If block is already canonical don't return error.
-        if self.is_block_hash_canonical(block_hash)? {
+        if let Some(header) = self.find_canonical_header(block_hash)? {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
             let td = self
                 .externals
@@ -817,7 +837,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
                 return Err(BlockExecutionError::BlockPreMerge { hash: *block_hash }.into())
             }
-            return Ok(())
+            return Ok(CanonicalOutcome::AlreadyCanonical { header })
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
@@ -912,10 +932,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
         }
 
+        //
+        let head = chain_notification.tip().header.clone();
+
         // send notification about new canonical chain.
         let _ = self.canon_state_notification_sender.send(chain_notification);
 
-        Ok(())
+        Ok(CanonicalOutcome::Committed { head })
     }
 
     /// Subscribe to new blocks events.
@@ -1127,7 +1150,7 @@ mod tests {
             BlockchainTree::new(externals, sender, config).expect("failed to create tree");
 
         // genesis block 10 is already canonical
-        assert_eq!(tree.make_canonical(&H256::zero()), Ok(()));
+        assert!(tree.make_canonical(&H256::zero()).is_ok());
 
         // make sure is_block_hash_canonical returns true for genesis block
         assert!(tree.is_block_hash_canonical(&H256::zero()).unwrap());
@@ -1189,12 +1212,12 @@ mod tests {
         assert_eq!(tree.insert_block(block2.clone()).unwrap(), BlockStatus::Valid);
 
         // make block1 canonical
-        assert_eq!(tree.make_canonical(&block1.hash()), Ok(()));
+        assert!(tree.make_canonical(&block1.hash()).is_ok());
         // check notification
         assert_matches!(canon_notif.try_recv(), Ok(CanonStateNotification::Commit{ new}) if *new.blocks() == BTreeMap::from([(block1.number,block1.clone())]));
 
         // make block2 canonicals
-        assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
+        assert!(tree.make_canonical(&block2.hash()).is_ok());
         // check notification.
         assert_matches!(canon_notif.try_recv(), Ok(CanonStateNotification::Commit{ new}) if *new.blocks() == BTreeMap::from([(block2.number,block2.clone())]));
 
@@ -1256,7 +1279,7 @@ mod tests {
             .assert(&tree);
 
         // make b2a canonical
-        assert_eq!(tree.make_canonical(&block2a_hash), Ok(()));
+        assert!(tree.make_canonical(&block2a_hash).is_ok());
         // check notification.
         assert_matches!(canon_notif.try_recv(),
             Ok(CanonStateNotification::Reorg{ old, new})
@@ -1282,7 +1305,7 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::new()))
             .assert(&tree);
 
-        assert_eq!(tree.make_canonical(&block1a_hash), Ok(()));
+        assert!(tree.make_canonical(&block1a_hash).is_ok());
         // Trie state:
         //       b2a   b2 (side chain)
         //       |   /
@@ -1320,7 +1343,7 @@ mod tests {
         assert!(tree.is_block_hash_canonical(&block1a.hash).unwrap());
 
         // make b2 canonical
-        assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
+        assert!(tree.make_canonical(&block2.hash()).is_ok());
 
         // Trie state:
         // b2   b2a (side chain)
@@ -1390,7 +1413,7 @@ mod tests {
             .assert(&tree);
 
         // commit b2a
-        assert_eq!(tree.make_canonical(&block2.hash), Ok(()));
+        assert!(tree.make_canonical(&block2.hash).is_ok());
 
         // Trie state:
         // b2   b2a (side chain)

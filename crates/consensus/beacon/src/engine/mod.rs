@@ -389,30 +389,23 @@ where
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             match self.blockchain.make_canonical(&state.head_block_hash) {
-                Ok(_) => {
-                    let head_block_number = self
-                        .get_block_number(state.head_block_hash)?
-                        .expect("was canonicalized, so it exists");
-                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=head_block_number, "canonicalized new head");
+                Ok(outcome) => {
+                    let header = outcome.into_header();
+                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=header.number, "canonicalized new head");
 
                     let pipeline_min_progress =
                         FINISH.get_checkpoint(&self.db.tx()?)?.unwrap_or_default().block_number;
 
-                    if pipeline_min_progress < head_block_number {
-                        debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=head_block_number, "pipeline run to head required");
+                    if pipeline_min_progress < header.number {
+                        debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=header.number, "pipeline run to head required");
 
                         // TODO(mattsse) ideally sync blockwise
                         self.sync.set_pipeline_sync_target(state.head_block_hash);
                     }
 
                     if let Some(attrs) = attrs {
-                        // get header for further validation
-                        let header = self
-                            .load_header(head_block_number)?
-                            .expect("was canonicalized, so it exists");
-
                         let payload_response =
-                            self.process_payload_attributes(attrs, header, state);
+                            self.process_payload_attributes(attrs, header.unseal(), state);
                         if payload_response.is_valid_update() {
                             // we will return VALID, so let's make sure the info tracker is
                             // properly updated
