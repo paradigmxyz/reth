@@ -336,7 +336,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         parent: BlockNumHash,
     ) -> Result<BlockStatus, InsertBlockError> {
         let block_num_hash = block.num_hash();
-        debug!(target: "blockchain_tree", head=?block_num_hash.hash, ?parent, "Appending block to canonical chain");
+        debug!(target: "blockchain_tree", head = ?block_num_hash.hash, ?parent, "Appending block to canonical chain");
         // create new chain that points to that block
         //return self.fork_canonical_chain(block.clone());
         // TODO save pending block to database
