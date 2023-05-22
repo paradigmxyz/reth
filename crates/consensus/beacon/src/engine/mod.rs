@@ -29,6 +29,7 @@ use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{
@@ -708,22 +709,17 @@ where
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
         let block_hash = block.hash;
-        let block_number = block.number;
-        let status = self.blockchain.insert_block_without_senders(block)?;
+        let status = self.blockchain.insert_block_without_senders(block.clone())?;
         let mut latest_valid_hash = None;
+        let block = Arc::new(block);
         let status = match status {
             BlockStatus::Valid => {
                 latest_valid_hash = Some(block_hash);
-                self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                    block_number,
-                    block_hash,
-                ));
-
+                self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(block));
                 PayloadStatusEnum::Valid
             }
             BlockStatus::Accepted => {
-                self.listeners
-                    .notify(BeaconConsensusEngineEvent::ForkBlockAdded(block_number, block_hash));
+                self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
                 PayloadStatusEnum::Accepted
             }
             BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
