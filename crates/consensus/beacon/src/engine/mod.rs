@@ -412,7 +412,7 @@ where
                             self.update_canon_chain(&state)?;
                         }
                         self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
-                        trace!(target: "consensus::engine", ?state, status = ?payload_response, "Returning forkchoice status");
+                        trace!(target: "consensus::engine", status = ?payload_response, ?state, "Returning forkchoice status ");
                         return Ok(payload_response)
                     }
 
@@ -438,7 +438,8 @@ where
         };
 
         self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
-        trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
+
+        trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
     }
 
