@@ -1,5 +1,5 @@
 use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE_U256,
+    constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
     Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
     H256, H64, U256, U64,
@@ -126,7 +126,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
     type Error = PayloadError;
 
     fn try_from(payload: ExecutionPayload) -> Result<Self, Self::Error> {
-        if payload.extra_data.len() > 32 {
+        if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
             return Err(PayloadError::ExtraData(payload.extra_data))
         }
 

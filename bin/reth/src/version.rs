@@ -52,6 +52,33 @@ pub(crate) const LONG_VERSION: &str = concat!(
 /// ```text
 /// reth/v{major}.{minor}.{patch}/{target}
 /// ```
-#[allow(dead_code)]
-pub(crate) const P2P_VERSION: &str =
+pub(crate) const P2P_CLIENT_VERSION: &str =
     concat!("reth/v", env!("CARGO_PKG_VERSION"), "/", env!("VERGEN_CARGO_TARGET_TRIPLE"));
+
+/// The default extradata used for payload building.
+///
+/// - The latest version from Cargo.toml
+/// - The OS identifier
+///
+/// # Example
+///
+/// ```text
+/// reth/v{major}.{minor}.{patch}/{OS}
+/// ```
+pub fn default_extradata() -> String {
+    format!("reth/v{}/{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assert_extradata_less_32bytes() {
+        let extradata = default_extradata();
+        assert!(
+            extradata.as_bytes().len() <= 32,
+            "extradata must be less than 32 bytes: {extradata}"
+        )
+    }
+}
