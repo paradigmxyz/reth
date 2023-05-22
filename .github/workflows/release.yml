@@ -26,8 +26,8 @@ jobs:
       matrix:
         arch: [aarch64-unknown-linux-gnu,
                x86_64-unknown-linux-gnu,
-               x86_64-apple-darwin,
-               x86_64-windows]
+               x86_64-apple-darwin]
+               #x86_64-windows]
         include:
           -   arch: aarch64-unknown-linux-gnu
               platform: ubuntu-latest
@@ -38,9 +38,9 @@ jobs:
           -   arch: x86_64-apple-darwin
               platform: macos-latest
               profile: maxperf
-          -   arch: x86_64-windows
-              platform: windows-2019
-              profile: maxperf
+          #-   arch: x86_64-windows
+          #    platform: windows-2019
+          #    profile: maxperf
 
     runs-on: ${{ matrix.platform }}
     needs: extract-version
@@ -229,8 +229,7 @@ jobs:
           |:---:|:---:|:---:|:---|
           | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
           | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
-          | <img src="https://simpleicons.org/icons/raspberrypi.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
-          | <img src="https://simpleicons.org/icons/windows.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-windows.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-windows.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-windows.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
           | | | | |
           | **System** | **Option** | - | **Resource** |
           | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | [${{ env.VERSION }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}/tags?page=1&ordering=last_updated&name=${{ env.VERSION }}) | [${{ env.IMAGE_NAME }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}) |
