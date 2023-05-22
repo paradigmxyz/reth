@@ -691,6 +691,7 @@ where
     ///
     /// This will return `SYNCING` if the block was buffered successfully, and an error if an error
     /// occurred while buffering the block.
+    #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_buffer_payload(
         &mut self,
         block: SealedBlock,
@@ -702,6 +703,7 @@ where
     /// Attempts to insert a new payload into the tree.
     ///
     /// Caution: This expects that the pipeline is idle.
+    #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
         block: SealedBlock,
