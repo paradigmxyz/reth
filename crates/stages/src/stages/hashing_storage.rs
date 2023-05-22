@@ -51,18 +51,15 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         }
         let (from_block, to_block) = range.into_inner();
 
-        let stage_checkpoint =
-            input.checkpoint.and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint());
-
-        if stage_checkpoint.is_some() {
-            debug!(target: "sync::stages::storage_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner storage hashing checkpoint");
-        }
-
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset, along with their storages.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
+            let stage_checkpoint = input
+                .checkpoint
+                .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint());
+
             let (mut current_key, mut current_subkey) = match stage_checkpoint {
                 Some(StorageHashingCheckpoint {
                          address: address @ Some(_),
@@ -75,6 +72,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 // and therefore should be hashed again. 
                 if from == from_block && to == to_block =>
                     {
+                        if stage_checkpoint.is_some() {
+                            debug!(target: "sync::stages::storage_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner storage hashing checkpoint");
+                        }
+
                         (address, storage)
                     }
                 _ => {

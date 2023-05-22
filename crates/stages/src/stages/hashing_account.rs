@@ -130,18 +130,15 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         }
         let (from_block, to_block) = range.into_inner();
 
-        let stage_checkpoint =
-            input.checkpoint.and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
-
-        if stage_checkpoint.is_some() {
-            debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner account hashing checkpoint");
-        }
-
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
+            let stage_checkpoint = input
+                .checkpoint
+                .and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
+
             let start_address = match stage_checkpoint {
                 Some(AccountHashingCheckpoint { address: address @ Some(_), from, to })
                     // Checkpoint is only valid if the range of transitions didn't change.
@@ -149,6 +146,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     // and therefore should be hashed again. 
                     if from == from_block && to == to_block =>
                 {
+                    if stage_checkpoint.is_some() {
+                        debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner account hashing checkpoint");
+                    }
+
                     address
                 }
                 _ => {
