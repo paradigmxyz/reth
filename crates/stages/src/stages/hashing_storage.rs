@@ -33,7 +33,7 @@ pub struct StorageHashingStage {
 
 impl Default for StorageHashingStage {
     fn default() -> Self {
-        Self { clean_threshold: 500_000, commit_threshold: 10 }
+        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
     }
 }
 

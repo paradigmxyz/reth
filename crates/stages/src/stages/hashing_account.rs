@@ -44,7 +44,7 @@ impl AccountHashingStage {
 
 impl Default for AccountHashingStage {
     fn default() -> Self {
-        Self { clean_threshold: 500_000, commit_threshold: 10 }
+        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
     }
 }
 
