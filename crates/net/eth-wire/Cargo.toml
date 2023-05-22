@@ -19,7 +19,7 @@ reth-ecies = { path = "../ecies" }
 reth-rlp = { path = "../../rlp", features = ["alloc", "derive", "std", "ethereum-types", "smol_str"] }
 
 # used for Chain and builders
-ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-core = { version = "2.0.4", default-features = false}
 
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-util = { version = "0.7.4", features = ["io", "codec"] }
@@ -40,7 +40,7 @@ proptest-derive = { version = "0.3", optional = true }
 [dev-dependencies]
 reth-primitives = { path = "../../primitives", features = ["arbitrary"] }
 reth-tracing = { path = "../../tracing" }
-ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-core = { version = "2.0.4", default-features = false}
 
 test-fuzz = "3.0.4"
 tokio-util = { version = "0.7.4", features = ["io", "codec"] }
