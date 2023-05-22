@@ -14,7 +14,7 @@ use reth_primitives::{
     keccak256, StageCheckpoint, StageUnitCheckpoint, StorageEntry, StorageHashingCheckpoint,
 };
 use reth_provider::Transaction;
-use std::{collections::BTreeMap, fmt::Debug, time::Duration};
+use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
 /// The [`StageId`] of the storage hashing stage.
@@ -228,26 +228,20 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         let changesets_walked = tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
-        let progress = if let Some(StageProgress::Hashing(HashingStageProgress {
-            entries_processed,
-            entries_total,
-        })) = input.progress
-        {
-            StageProgress::Hashing(HashingStageProgress {
-                entries_processed: entries_processed + changesets_walked as u64,
-                entries_total,
-            })
-        } else {
-            StageProgress::Hashing(HashingStageProgress {
-                entries_processed: changesets_walked as u64,
+        let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
+            HashingStageProgress {
+                entries_processed: 0,
                 entries_total: tx
                     .cursor_read::<tables::StorageChangeSet>()?
                     .walk_range(BlockNumberAddress::range(
                         (input.unwind_to + 1)..=input.checkpoint.block_number,
                     ))?
                     .count() as u64,
-            })
-        };
+            },
+        );
+        stage_progress.entries_processed += changesets_walked as u64;
+
+        let progress = StageProgress::Hashing(stage_progress);
 
         info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, unwind_progress = %progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {

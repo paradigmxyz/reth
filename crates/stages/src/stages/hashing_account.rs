@@ -17,7 +17,6 @@ use std::{
     cmp::max,
     fmt::Debug,
     ops::{Range, RangeInclusive},
-    time::Duration,
 };
 use tokio::sync::mpsc;
 use tracing::*;
@@ -302,24 +301,18 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // Aggregate all transition changesets and make a list of accounts that have been changed.
         let changesets_walked = tx.unwind_account_hashing(range)?;
 
-        let progress = if let Some(StageProgress::Hashing(HashingStageProgress {
-            entries_processed,
-            entries_total,
-        })) = input.progress
-        {
-            StageProgress::Hashing(HashingStageProgress {
-                entries_processed: entries_processed + changesets_walked as u64,
-                entries_total,
-            })
-        } else {
-            StageProgress::Hashing(HashingStageProgress {
-                entries_processed: changesets_walked as u64,
+        let mut stage_progress = input.progress.and_then(|progress| progress.hashing()).unwrap_or(
+            HashingStageProgress {
+                entries_processed: 0,
                 entries_total: tx
                     .cursor_read::<tables::AccountChangeSet>()?
                     .walk_range((input.unwind_to + 1)..=input.checkpoint.block_number)?
                     .count() as u64,
-            })
-        };
+            },
+        );
+        stage_progress.entries_processed += changesets_walked as u64;
+
+        let progress = StageProgress::Hashing(stage_progress);
 
         info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, unwind_progress = %progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
