@@ -16,7 +16,7 @@ pub type BufferedBlocks = BTreeMap<BlockNumber, HashMap<BlockHash, SealedBlockWi
 ///   inserted.
 /// * [BlockBuffer::clean_old_blocks] to clear old blocks that are below finalized line.
 ///
-/// Note: Buffer is limited by number of blocks that it can contains and eviction of the block
+/// Note: Buffer is limited by number of blocks that it can contain and eviction of the block
 /// is done by last recently used block.
 #[derive(Debug)]
 pub struct BlockBuffer {
