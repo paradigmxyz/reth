@@ -101,6 +101,7 @@ impl IpcTransportClientBuilder {
     /// ```
     pub async fn build(self, path: impl AsRef<Path>) -> Result<(Sender, Receiver), IpcError> {
         let path = path.as_ref();
+
         let stream = UnixStream::connect(path)
             .await
             .map_err(|err| IpcError::FailedToConnect { path: path.to_path_buf(), err })?;
