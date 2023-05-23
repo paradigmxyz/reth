@@ -199,6 +199,7 @@ where
 
         // Lookup the head and tip of the sync range
         let gap = self.get_sync_gap(tx, current_progress.block_number).await?;
+        let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
         // Nothing to sync
@@ -221,6 +222,7 @@ where
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
         let tip_block_number = match tip {
+            // If tip is hash, we can use first downloaded header as the tip we're moving towards.
             BlockHashOrNumber::Hash(hash) => downloaded_headers.first().and_then(|header| {
                 if header.hash == hash {
                     Some(header.number)
@@ -228,14 +230,36 @@ where
                     None
                 }
             }),
+            // If tip is number, we can just grab it and not resolve using downloaded headers.
             BlockHashOrNumber::Number(number) => Some(number),
+        };
+
+        // Since we're syncing headers in batches, gap tip will move in reverse direction towards
+        // our local head with every iteration. To get the actual target block number we're
+        // syncing towards, we need to take into account already synced headers from the database.
+        let target_block_number = if let Some(tip_block_number) = tip_block_number {
+            let local_max_block_number = tx
+                .cursor_read::<tables::CanonicalHeaders>()?
+                .last()?
+                .map(|(canonical_block, _)| canonical_block);
+
+            Some(tip_block_number.max(local_max_block_number.unwrap_or(tip_block_number)))
+        } else {
+            None
         };
 
         let mut stage_checkpoint =
             current_progress.headers_stage_checkpoint().unwrap_or(HeadersCheckpoint {
-                downloaded_headers: 0,
-                total_headers: tip_block_number.unwrap_or_default(),
+                // If for some reason (e.g. due to DB migration) we don't have `downloaded_headers`,
+                // set it to the local head block number. It is correct because on the first
+                // iteration of headers stage, local head block number equals to the total headers
+                // downloaded so far.
+                downloaded_headers: local_head,
+                total_headers: 0,
             });
+        if let Some(target_block_number) = target_block_number {
+            stage_checkpoint.total_headers = target_block_number;
+        }
         stage_checkpoint.downloaded_headers += downloaded_headers.len() as u64;
 
         // Write the headers to db
@@ -272,10 +296,23 @@ where
             input.unwind_to + 1,
         )?;
         tx.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+        let unwound_headers = tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+
+        let stage_checkpoint =
+            input.checkpoint.headers_stage_checkpoint().map(|checkpoint| HeadersCheckpoint {
+                downloaded_headers: checkpoint
+                    .downloaded_headers
+                    .saturating_sub(unwound_headers as u64),
+                ..checkpoint
+            });
+
+        let mut checkpoint = StageCheckpoint::new(input.unwind_to);
+        if let Some(stage_checkpoint) = stage_checkpoint {
+            checkpoint = checkpoint.with_headers_stage_checkpoint(stage_checkpoint);
+        }
 
         info!(target: "sync::stages::headers", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput { checkpoint })
     }
 }
 
@@ -509,7 +546,7 @@ mod tests {
             }))
         }, done: true }) if block_number == tip.number
             // -1 because we don't need to download the local head
-            && downloaded_headers == headers.len() as u64 - 1
+            && downloaded_headers == stage_progress + headers.len() as u64 - 1
             && total_headers == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
@@ -595,7 +632,8 @@ mod tests {
                 downloaded_headers,
                 total_headers,
             }))
-        }, done: false }) if block_number == stage_progress && downloaded_headers == 500 &&
+        }, done: false }) if block_number == stage_progress &&
+            downloaded_headers == stage_progress + 500 &&
             total_headers == tip.number);
 
         runner.client.clear().await;
@@ -613,7 +651,7 @@ mod tests {
             }))
         }, done: true }) if block_number == tip.number
             // -1 because we don't need to download the local head
-            && downloaded_headers == headers.len() as u64 - 1
+            && downloaded_headers == stage_progress + headers.len() as u64 - 1
             && total_headers == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
