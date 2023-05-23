@@ -474,6 +474,10 @@ mod tests {
         ) -> Result<Vec<SealedHeader>> {
             Ok(vec![])
         }
+
+        fn sealed_header(&self, _block_number: BlockNumber) -> Result<Option<SealedHeader>> {
+            Ok(None)
+        }
     }
 
     impl WithdrawalsProvider for Provider {

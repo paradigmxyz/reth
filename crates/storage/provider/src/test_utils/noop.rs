@@ -173,6 +173,10 @@ impl HeaderProvider for NoopProvider {
     ) -> Result<Vec<SealedHeader>> {
         Ok(vec![])
     }
+
+    fn sealed_header(&self, _number: BlockNumber) -> Result<Option<SealedHeader>> {
+        Ok(None)
+    }
 }
 
 impl AccountProvider for NoopProvider {

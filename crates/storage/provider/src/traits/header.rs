@@ -39,4 +39,7 @@ pub trait HeaderProvider: Send + Sync {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<SealedHeader>>;
+
+    /// Get a single sealed header by block number
+    fn sealed_header(&self, number: BlockNumber) -> Result<Option<SealedHeader>>;
 }

@@ -146,6 +146,19 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
             })?
             .map_err(Into::into)
     }
+
+    fn sealed_header(&self, number: BlockNumber) -> Result<Option<SealedHeader>> {
+        self.db
+            .view(|tx| -> Result<_> {
+                if let Some(header) = tx.get::<tables::Headers>(number)? {
+                    let hash = read_header_hash(tx, number)?;
+                    Ok(Some(header.seal(hash)))
+                } else {
+                    Ok(None)
+                }
+            })?
+            .map_err(Into::into)
+    }
 }
 
 impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
