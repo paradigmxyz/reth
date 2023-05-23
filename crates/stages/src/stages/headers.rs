@@ -222,7 +222,8 @@ where
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
         let tip_block_number = match tip {
-            // If tip is hash, we can use first downloaded header as the tip we're moving towards.
+            // If tip is hash and it equals to the first downloaded header's hash, we can use
+            // the block number of this header as tip.
             BlockHashOrNumber::Hash(hash) => downloaded_headers.first().and_then(|header| {
                 if header.hash == hash {
                     Some(header.number)
@@ -237,6 +238,8 @@ where
         // Since we're syncing headers in batches, gap tip will move in reverse direction towards
         // our local head with every iteration. To get the actual target block number we're
         // syncing towards, we need to take into account already synced headers from the database.
+        // It is `None`, if tip didn't change and we're still downloading headers for previously
+        // calculated gap.
         let target_block_number = if let Some(tip_block_number) = tip_block_number {
             let local_max_block_number = tx
                 .cursor_read::<tables::CanonicalHeaders>()?
@@ -248,15 +251,26 @@ where
             None
         };
 
-        let mut stage_checkpoint =
-            current_progress.headers_stage_checkpoint().unwrap_or(HeadersCheckpoint {
-                // If for some reason (e.g. due to DB migration) we don't have `downloaded_headers`,
-                // set it to the local head block number. It is correct because on the first
-                // iteration of headers stage, local head block number equals to the total headers
-                // downloaded so far.
-                downloaded_headers: local_head,
-                total_headers: 0,
-            });
+        let mut stage_checkpoint = current_progress
+            .headers_stage_checkpoint()
+            .unwrap_or(HeadersCheckpoint {
+            // If for some reason (e.g. due to DB migration) we don't have `downloaded_headers`,
+            // set it to the local head block number. It is correct because on the first
+            // iteration of headers stage, local head block number equals to the total headers
+            // downloaded so far.
+            downloaded_headers: local_head,
+            // Shouldn't fail because on the first iteration, we download the header for missing
+            // tip, and use its block number.
+            total_headers: target_block_number.unwrap_or_else(|| {
+                warn!(target: "sync::stages::headers", ?tip, "No downloaded header for tip found");
+                // Safe, because `Display` impl for checkpoint will fallback to displaying just
+                // `downloaded_headers`
+                0
+            }),
+        });
+
+        // Total headers can be updated if we received new tip from the network, and need to fill
+        // the local gap.
         if let Some(target_block_number) = target_block_number {
             stage_checkpoint.total_headers = target_block_number;
         }

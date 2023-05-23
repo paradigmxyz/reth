@@ -165,7 +165,7 @@ impl StageCheckpoint {
         }
     }
 
-    /// Returns the storage hashing stage checkpoint, if any.
+    /// Returns the headers stage checkpoint, if any.
     pub fn headers_stage_checkpoint(&self) -> Option<HeadersCheckpoint> {
         match self.stage_checkpoint {
             Some(StageUnitCheckpoint::Headers(checkpoint)) => Some(checkpoint),
@@ -191,7 +191,7 @@ impl StageCheckpoint {
         self
     }
 
-    /// Sets the stage checkpoint to storage hashing.
+    /// Sets the stage checkpoint to headers.
     pub fn with_headers_stage_checkpoint(mut self, checkpoint: HeadersCheckpoint) -> Self {
         self.stage_checkpoint = Some(StageUnitCheckpoint::Headers(checkpoint));
         self
