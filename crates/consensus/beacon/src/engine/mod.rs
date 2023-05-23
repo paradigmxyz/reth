@@ -905,16 +905,15 @@ where
         &self,
         block_number: BlockNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error> {
-        // TODO(rjected): use the HeaderProvider once it checks the tree
         let max_hash = match self.blockchain.block_hash(block_number)? {
             Some(block) => block,
             None => return Err(Error::Provider(ProviderError::HeaderNotFound(block_number.into()))),
         };
-        let max_header = match self.blockchain.block_by_number(block_number)? {
+        let max_header = match self.blockchain.header_by_number(block_number)? {
             Some(block) => block,
             None => return Err(Error::Provider(ProviderError::HeaderNotFound(block_number.into()))),
         };
-        Ok(max_header.header.seal(max_hash))
+        Ok(max_header.seal(max_hash))
     }
 }
 
