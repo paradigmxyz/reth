@@ -291,7 +291,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .is_block_hash_canonical(&parent.hash)
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
         {
-            return self.try_append_canonical_chain(block, parent)
+            return self.try_append_canonical_chain(block)
         }
 
         // this is another check to ensure that if the block points to a canonical block its block
@@ -326,15 +326,15 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// This tries to append the given block to the canonical chain.
     ///
-    /// WARNING: this expects that the block is part of the canonical chain, see
-    /// [Self::is_block_hash_canonical]. Hence, it is expected that the block can be traced back
-    /// to the current canonical block.
+    /// WARNING: this expects that the block is part of the canonical chain: The block's parent is
+    /// part of the canonical chain (e.g. the block's parent is the latest canonical hash). See also
+    /// [Self::is_block_hash_canonical].
     #[instrument(skip_all, target = "blockchain_tree")]
     fn try_append_canonical_chain(
         &mut self,
         block: SealedBlockWithSenders,
-        parent: BlockNumHash,
     ) -> Result<BlockStatus, InsertBlockError> {
+        let parent = block.parent_num_hash();
         let block_num_hash = block.num_hash();
         debug!(target: "blockchain_tree", head = ?block_num_hash.hash, ?parent, "Appending block to canonical chain");
         // create new chain that points to that block
