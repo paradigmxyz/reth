@@ -151,6 +151,10 @@ impl HeaderProvider for MockEthProvider {
     ) -> Result<Vec<SealedHeader>> {
         Ok(self.headers_range(range)?.into_iter().map(|h| h.seal_slow()).collect())
     }
+
+    fn sealed_header(&self, number: BlockNumber) -> Result<Option<SealedHeader>> {
+        Ok(self.header_by_number(number)?.map(|h| h.seal_slow()))
+    }
 }
 
 impl TransactionsProvider for MockEthProvider {
