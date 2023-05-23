@@ -108,6 +108,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         None
     }
 
+    fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders> {
+        trace!(target: "blockchain_tree", ?hash, "Returning lowest buffered ancestor");
+        self.tree.read().lowest_buffered_ancestor(&hash).cloned()
+    }
+
     fn canonical_tip(&self) -> BlockNumHash {
         trace!(target: "blockchain_tree", "Returning canonical tip");
         self.tree.read().block_indices().canonical_tip()

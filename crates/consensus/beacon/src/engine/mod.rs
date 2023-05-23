@@ -554,10 +554,29 @@ where
             } else {
                 state.head_block_hash
             };
-            self.sync.set_pipeline_sync_target(target);
+
+            // we need to first check the buffer for the head and its ancestors
+            let lowest_unknown_hash = self
+                .blockchain
+                .lowest_buffered_ancestor(target)
+                .map(|block| block.parent_hash)
+                .unwrap_or(target);
+
+            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering pipeline with target instead of downloading");
+
+            self.sync.set_pipeline_sync_target(lowest_unknown_hash);
         } else {
+            // we need to first check the buffer for the head and its ancestors
+            let lowest_unknown_hash = self
+                .blockchain
+                .lowest_buffered_ancestor(state.head_block_hash)
+                .map(|block| block.parent_hash)
+                .unwrap_or(state.head_block_hash);
+
+            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for the new head");
+
             // trigger a full block download for the _missing_ new head
-            self.sync.download_full_block(state.head_block_hash);
+            self.sync.download_full_block(lowest_unknown_hash);
         }
 
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
@@ -736,7 +755,7 @@ where
                 self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
                 PayloadStatusEnum::Accepted
             }
-            BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
+            BlockStatus::Disconnected { .. } => PayloadStatusEnum::Syncing,
         };
         Ok(PayloadStatus::new(status, latest_valid_hash))
     }

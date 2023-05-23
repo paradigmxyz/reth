@@ -185,8 +185,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // check if block is disconnected
-        if self.buffered_blocks.block(block).is_some() {
-            return Ok(Some(BlockStatus::Disconnected))
+        if let Some(block) = self.buffered_blocks.block(block) {
+            return Ok(Some(BlockStatus::Disconnected { missing_parent: block.parent_num_hash() }))
         }
 
         Ok(None)
@@ -323,8 +323,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // insert block inside unconnected block buffer. Delaying its execution.
-        self.buffered_blocks.insert_block(block);
-        Ok(BlockStatus::Disconnected)
+        self.buffered_blocks.insert_block(block.clone());
+
+        // find the lowest ancestor of the block in the buffer to return as the missing parent
+        // this shouldn't return None because that only happens if the block was evicted, which
+        // shouldn't happen right after insertion
+        let lowest_ancestor =
+            self.buffered_blocks.lowest_ancestor(&block.hash).ok_or_else(|| {
+                InsertBlockError::tree_error(
+                    BlockchainTreeError::BlockBufferingFailed { block_hash: block.hash },
+                    block.block,
+                )
+            })?;
+
+        Ok(BlockStatus::Disconnected { missing_parent: lowest_ancestor.parent_num_hash() })
     }
 
     /// This tries to append the given block to the canonical chain.
@@ -570,10 +582,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Gets the lowest ancestor for the given block in the block buffer.
-    pub fn lowest_buffered_ancestor(
-        &mut self,
-        hash: &BlockHash,
-    ) -> Option<&SealedBlockWithSenders> {
+    pub fn lowest_buffered_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
         self.buffered_blocks.lowest_ancestor(hash)
     }
 
@@ -1196,7 +1205,10 @@ mod tests {
         tree.finalize_block(10);
 
         // block 2 parent is not known, block2 is buffered.
-        assert_eq!(tree.insert_block(block2.clone()).unwrap(), BlockStatus::Disconnected);
+        assert_eq!(
+            tree.insert_block(block2.clone()).unwrap(),
+            BlockStatus::Disconnected { missing_parent: block2.parent_num_hash() }
+        );
 
         // Buffered block: [block2]
         // Trie state:
@@ -1213,7 +1225,7 @@ mod tests {
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),
-            Some(BlockStatus::Disconnected)
+            Some(BlockStatus::Disconnected { missing_parent: block2.parent_num_hash() })
         );
 
         // check if random block is known
@@ -1477,7 +1489,11 @@ mod tests {
         block2b.hash = H256([0x99; 32]);
         block2b.parent_hash = H256([0x88; 32]);
 
-        assert_eq!(tree.insert_block(block2b.clone()).unwrap(), BlockStatus::Disconnected);
+        assert_eq!(
+            tree.insert_block(block2b.clone()).unwrap(),
+            BlockStatus::Disconnected { missing_parent: block2b.parent_num_hash() }
+        );
+
         TreeTester::default()
             .with_buffered_blocks(BTreeMap::from([(
                 block2b.number,
