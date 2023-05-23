@@ -106,6 +106,10 @@ where
     ) -> Result<Vec<SealedHeader>> {
         self.database.sealed_headers_range(range)
     }
+
+    fn sealed_header(&self, number: BlockNumber) -> Result<Option<SealedHeader>> {
+        self.database.sealed_header(number)
+    }
 }
 
 impl<DB, Tree> BlockHashProvider for BlockchainProvider<DB, Tree>
