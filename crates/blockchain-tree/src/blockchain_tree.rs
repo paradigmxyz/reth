@@ -1,7 +1,8 @@
 //! Implementation of [`BlockchainTree`]
 use crate::{
-    canonical_chain::CanonicalChain, chain::BlockChainId, AppendableChain, BlockBuffer,
-    BlockIndices, BlockchainTreeConfig, PostStateData, TreeExternals,
+    canonical_chain::CanonicalChain,
+    chain::{BlockChainId, BlockKind},
+    AppendableChain, BlockBuffer, BlockIndices, BlockchainTreeConfig, PostStateData, TreeExternals,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
@@ -379,7 +380,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let canonical_chain = self.canonical_chain();
 
         let (block_status, chain) = if block.parent_hash == canonical_chain.tip().hash {
-            let chain = AppendableChain::new_canonical_fork_extend(
+            let chain = AppendableChain::new_canonical_head_fork(
                 block,
                 &parent_header,
                 canonical_chain.inner(),
@@ -441,30 +442,45 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         };
 
         let chain_tip = parent_chain.tip().hash();
-        let canonical_block_hashes = self.block_indices.canonical_chain();
+        let canonical_chain = self.block_indices.canonical_chain();
 
         // append the block if it is continuing the side chain.
         let status = if chain_tip == block.parent_hash {
+            // check if the chain extends the currently tracked canonical head
+            let block_kind = if canonical_fork.hash == canonical_chain.tip().hash {
+                BlockKind::ExtendsCanonicalHead
+            } else {
+                BlockKind::ForksHistoricalBlock
+            };
+
             debug!(target: "blockchain_tree", "Appending block to side chain");
             let block_hash = block.hash();
             let block_number = block.number;
             parent_chain.append_block(
                 block,
                 block_hashes,
-                canonical_block_hashes.inner(),
-                canonical_fork,
+                canonical_chain.inner(),
                 &self.externals,
+                canonical_fork,
+                block_kind,
             )?;
 
             self.block_indices.insert_non_fork_block(block_number, block_hash, chain_id);
-            Ok(BlockStatus::Valid)
+
+            if block_kind.extends_canonical_head() {
+                // if the block can be traced back to the canonical head, we were able to fully
+                // validate it
+                Ok(BlockStatus::Valid)
+            } else {
+                Ok(BlockStatus::Accepted)
+            }
         } else {
             debug!(target: "blockchain_tree", ?canonical_fork, "Starting new fork from side chain");
             // the block starts a new fork
             let chain = parent_chain.new_chain_fork(
                 block,
                 block_hashes,
-                canonical_block_hashes.inner(),
+                canonical_chain.inner(),
                 canonical_fork,
                 &self.externals,
             )?;
