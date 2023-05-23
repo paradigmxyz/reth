@@ -2,7 +2,7 @@
 use crate::{
     chain, config, db,
     dirs::{LogsDir, PlatformPath},
-  execution_debug, merkle_debug, node, p2p,
+    execution_debug, merkle_debug, node, p2p,
     runner::CliRunner,
     stage, test_eth_chain, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
