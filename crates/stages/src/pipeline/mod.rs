@@ -390,6 +390,21 @@ where
                             target: prev_checkpoint.unwrap_or_default().block_number,
                             bad_block: block,
                         })
+                    } else if let StageError::ExecutionError { block, error } = err {
+                        warn!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            bad_block = %block.number,
+                            "Stage encountered an execution error: {error}"
+                        );
+
+                        // We unwind because of an execution error. If the unwind itself fails, we
+                        // bail entirely, otherwise we restart the execution loop from the
+                        // beginning.
+                        Ok(ControlFlow::Unwind {
+                            target: prev_checkpoint.unwrap_or_default().block_number,
+                            bad_block: block,
+                        })
                     } else if err.is_fatal() {
                         error!(
                             target: "sync::pipeline",
