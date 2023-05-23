@@ -308,6 +308,11 @@ impl SealedHeader {
         self.header
     }
 
+    /// This is the inverse of [Header::seal_slow] which returns the raw header and hash.
+    pub fn split(self) -> (Header, BlockHash) {
+        (self.header, self.hash)
+    }
+
     /// Return header/block hash.
     pub fn hash(&self) -> BlockHash {
         self.hash

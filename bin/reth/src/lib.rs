@@ -13,8 +13,6 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod dirs;
-pub mod drop_stage;
-pub mod dump_stage;
 pub mod execution_debug;
 pub mod merkle_debug;
 pub mod node;
@@ -26,5 +24,6 @@ pub mod test_eth_chain;
 pub mod test_vectors;
 pub mod utils;
 pub mod version;
-use built as _;
+
+#[cfg(feature = "jemalloc")]
 use jemallocator as _;

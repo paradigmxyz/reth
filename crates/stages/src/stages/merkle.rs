@@ -6,7 +6,9 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::consensus;
-use reth_primitives::{hex, trie::StoredSubNode, BlockNumber, MerkleCheckpoint, H256};
+use reth_primitives::{
+    hex, trie::StoredSubNode, BlockNumber, MerkleCheckpoint, StageCheckpoint, H256,
+};
 use reth_provider::Transaction;
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::{fmt::Debug, ops::DerefMut};
@@ -146,10 +148,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let threshold = match self {
             MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput {
-                    stage_progress: input.previous_stage_progress(),
-                    done: true,
-                })
+                return Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
@@ -158,7 +157,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let range = input.next_block_range();
         let (from_block, to_block) = range.clone().into_inner();
-        let current_block = input.previous_stage_progress();
+        let current_block = input.previous_stage_checkpoint().block_number;
 
         let block_root = tx.get_header(current_block)?.state_root;
 
@@ -206,7 +205,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         state.hash_builder.into(),
                     );
                     self.save_execution_checkpoint(tx, Some(checkpoint))?;
-                    return Ok(ExecOutput { stage_progress: input.stage_progress(), done: false })
+                    return Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
                 }
                 StateRootProgress::Complete(root, updates) => {
                     updates.flush(tx.deref_mut())?;
@@ -227,7 +226,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         self.validate_state_root(trie_root, block_root, to_block)?;
 
         info!(target: "sync::stages::merkle::exec", stage_progress = to_block, is_final_range = true, "Stage iteration finished");
-        Ok(ExecOutput { stage_progress: to_block, done: true })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(to_block), done: true })
     }
 
     /// Unwind the stage.
@@ -239,14 +238,14 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let range = input.unwind_block_range();
         if matches!(self, MerkleStage::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-            return Ok(UnwindOutput { stage_progress: input.unwind_to })
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
 
         if input.unwind_to == 0 {
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
             info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-            return Ok(UnwindOutput { stage_progress: input.unwind_to })
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
 
         // Unwind trie only if there are transitions
@@ -266,7 +265,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 
@@ -301,8 +300,8 @@ mod tests {
         let mut runner = MerkleTestRunner::default();
         // set low threshold so we hash the whole storage
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -313,8 +312,8 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done, stage_progress })
-                if done && stage_progress == previous_stage
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
+                if block_number == previous_stage
         );
 
         // Validate the stage execution
@@ -329,8 +328,8 @@ mod tests {
         // Set up the runner
         let mut runner = MerkleTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
@@ -341,8 +340,8 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { done, stage_progress })
-                if done && stage_progress == previous_stage
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
+                if block_number == previous_stage
         );
 
         // Validate the stage execution
@@ -377,9 +376,9 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.stage_progress.unwrap_or_default();
+            let stage_progress = input.checkpoint.unwrap_or_default().block_number;
             let start = stage_progress + 1;
-            let end = input.previous_stage_progress();
+            let end = input.previous_stage_checkpoint().block_number;
 
             let num_of_accounts = 31;
             let accounts = random_contract_account_range(&mut (0..num_of_accounts))

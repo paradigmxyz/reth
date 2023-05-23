@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::{
-    eth::error::{EthApiError, EthResult, InvalidTransactionError},
+    eth::error::{EthApiError, EthResult, RpcInvalidTransactionError},
     EthApi,
 };
 use reth_primitives::{
@@ -62,7 +62,7 @@ where
                     .transaction
                     .nonce()
                     .checked_add(1)
-                    .ok_or(InvalidTransactionError::NonceMaxValue)?;
+                    .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
                 return Ok(U256::from(tx_count))
             }
         }

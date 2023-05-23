@@ -1,6 +1,8 @@
-use crate::{dump_stage::setup, utils::DbTool};
+use super::setup;
+use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
+use reth_primitives::StageCheckpoint;
 use reth_provider::Transaction;
 use reth_stages::{stages::StorageHashingStage, Stage, StageId, UnwindInput};
 use std::{ops::DerefMut, path::PathBuf};
@@ -37,7 +39,11 @@ async fn unwind_and_copy<DB: Database>(
     exec_stage
         .unwind(
             &mut unwind_tx,
-            UnwindInput { unwind_to: from, stage_progress: tip_block_number, bad_block: None },
+            UnwindInput {
+                unwind_to: from,
+                checkpoint: StageCheckpoint::new(tip_block_number),
+                bad_block: None,
+            },
         )
         .await?;
     let unwind_inner_tx = unwind_tx.deref_mut();
@@ -71,8 +77,8 @@ async fn dry_run(
             .execute(
                 &mut tx,
                 reth_stages::ExecInput {
-                    previous_stage: Some((StageId("Another"), to)),
-                    stage_progress: Some(from),
+                    previous_stage: Some((StageId("Another"), StageCheckpoint::new(to))),
+                    checkpoint: Some(StageCheckpoint::new(from)),
                 },
             )
             .await?

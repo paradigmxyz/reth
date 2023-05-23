@@ -2,4 +2,5 @@
 /book
 /assets
 /.github
-Dockerfile
+/data
+*.tar.gz

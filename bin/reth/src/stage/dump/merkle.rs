@@ -1,7 +1,8 @@
-use crate::{dump_stage::setup, utils::DbTool};
+use super::setup;
+use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
-use reth_primitives::{BlockNumber, MAINNET};
+use reth_primitives::{BlockNumber, StageCheckpoint, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{
     stages::{
@@ -48,10 +49,14 @@ async fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let (from, to) = range;
     let mut unwind_tx = Transaction::new(db_tool.db)?;
-    let unwind = UnwindInput { unwind_to: from, stage_progress: tip_block_number, bad_block: None };
+    let unwind = UnwindInput {
+        unwind_to: from,
+        checkpoint: StageCheckpoint::new(tip_block_number),
+        bad_block: None,
+    };
     let execute_input = reth_stages::ExecInput {
-        previous_stage: Some((StageId("Another"), to)),
-        stage_progress: Some(from),
+        previous_stage: Some((StageId("Another"), StageCheckpoint::new(to))),
+        checkpoint: Some(StageCheckpoint::new(from)),
     };
 
     // Unwind hashes all the way to FROM
@@ -73,7 +78,11 @@ async fn unwind_and_copy<DB: Database>(
     exec_stage
         .unwind(
             &mut unwind_tx,
-            UnwindInput { unwind_to: to, stage_progress: tip_block_number, bad_block: None },
+            UnwindInput {
+                unwind_to: to,
+                checkpoint: StageCheckpoint::new(tip_block_number),
+                bad_block: None,
+            },
         )
         .await?;
 
@@ -120,8 +129,8 @@ async fn dry_run(
         .execute(
             &mut tx,
             reth_stages::ExecInput {
-                previous_stage: Some((StageId("Another"), to)),
-                stage_progress: Some(from),
+                previous_stage: Some((StageId("Another"), StageCheckpoint::new(to))),
+                checkpoint: Some(StageCheckpoint::new(from)),
             },
         )
         .await?

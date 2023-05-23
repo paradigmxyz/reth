@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError as DbError,
 };
-use reth_primitives::BlockNumber;
+use reth_primitives::StageCheckpoint;
 use std::fmt::Display;
 
 /// All known stages
@@ -98,17 +98,20 @@ impl StageId {
     }
 
     /// Get the last committed progress of this stage.
-    pub fn get_progress<'db>(&self, tx: &impl DbTx<'db>) -> Result<Option<BlockNumber>, DbError> {
+    pub fn get_checkpoint<'db>(
+        &self,
+        tx: &impl DbTx<'db>,
+    ) -> Result<Option<StageCheckpoint>, DbError> {
         tx.get::<SyncStage>(self.0.to_string())
     }
 
     /// Save the progress of this stage.
-    pub fn save_progress<'db>(
+    pub fn save_checkpoint<'db>(
         &self,
         tx: &impl DbTxMut<'db>,
-        block: BlockNumber,
+        checkpoint: StageCheckpoint,
     ) -> Result<(), DbError> {
-        tx.put::<SyncStage>(self.0.to_string(), block)
+        tx.put::<SyncStage>(self.0.to_string(), checkpoint)
     }
 }
 

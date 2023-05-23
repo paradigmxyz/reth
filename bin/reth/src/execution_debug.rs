@@ -255,7 +255,8 @@ impl Command {
         ctx.task_executor
             .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
 
-        let latest_block_number = FINISH.get_progress(&db.tx()?)?.unwrap_or_default();
+        let latest_block_number =
+            FINISH.get_checkpoint(&db.tx()?)?.unwrap_or_default().block_number;
         if latest_block_number >= self.to {
             info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
             return Ok(())

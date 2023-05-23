@@ -29,8 +29,8 @@ macro_rules! stage_test_suite {
                 // Set up the runner
                 let mut runner = $runner::default();
                 let input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, previous_stage)),
-                    stage_progress: Some(stage_progress),
+                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::StageCheckpoint::new(previous_stage))),
+                    checkpoint: Some(reth_primitives::StageCheckpoint::new(stage_progress)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
                 let rx = runner.execute(input);
@@ -42,8 +42,8 @@ macro_rules! stage_test_suite {
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(
                     result,
-                    Ok(ExecOutput { done, stage_progress })
-                        if done && stage_progress == previous_stage
+                    Ok(ExecOutput { done, checkpoint })
+                        if done && checkpoint.block_number == previous_stage
                 );
 
                 // Validate the stage execution
@@ -66,7 +66,7 @@ macro_rules! stage_test_suite {
                 let rx = runner.unwind(input).await;
                 assert_matches::assert_matches!(
                     rx,
-                    Ok(UnwindOutput { stage_progress }) if stage_progress == input.unwind_to
+                    Ok(UnwindOutput { checkpoint }) if checkpoint.block_number == input.unwind_to
                 );
 
                 // Validate the stage unwind
@@ -81,8 +81,8 @@ macro_rules! stage_test_suite {
                 // Set up the runner
                 let mut runner = $runner::default();
                 let execute_input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, previous_stage)),
-                    stage_progress: Some(stage_progress),
+                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::StageCheckpoint::new(previous_stage))),
+                    checkpoint: Some(reth_primitives::StageCheckpoint::new(stage_progress)),
                 };
                 let seed = runner.seed_execution(execute_input).expect("failed to seed");
 
@@ -94,15 +94,17 @@ macro_rules! stage_test_suite {
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(
                     result,
-                    Ok(ExecOutput { done, stage_progress })
-                        if done && stage_progress == previous_stage
+                    Ok(ExecOutput { done, checkpoint })
+                        if done && checkpoint.block_number == previous_stage
                 );
                 assert_matches::assert_matches!(runner.validate_execution(execute_input, result.ok()),Ok(_), "execution validation");
 
 
                 // Run stage unwind
                 let unwind_input = crate::stage::UnwindInput {
-                    unwind_to: stage_progress, stage_progress: previous_stage, bad_block: None,
+                    unwind_to: stage_progress,
+                    checkpoint: reth_primitives::StageCheckpoint::new(previous_stage),
+                    bad_block: None,
                 };
 
                 runner.before_unwind(unwind_input).expect("Failed to unwind state");
@@ -111,7 +113,7 @@ macro_rules! stage_test_suite {
                 // Assert the successful unwind result
                 assert_matches::assert_matches!(
                     rx,
-                    Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_input.unwind_to
+                    Ok(UnwindOutput { checkpoint }) if checkpoint.block_number == unwind_input.unwind_to
                 );
 
                 // Validate the stage unwind
@@ -136,8 +138,8 @@ macro_rules! stage_test_suite_ext {
                 // Set up the runner
                 let mut runner = $runner::default();
                 let input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, stage_progress)),
-                    stage_progress: Some(stage_progress),
+                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::StageCheckpoint::new(stage_progress))),
+                    checkpoint: Some(reth_primitives::StageCheckpoint::new(stage_progress)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
 
@@ -151,8 +153,8 @@ macro_rules! stage_test_suite_ext {
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(
                     result,
-                    Ok(ExecOutput { done, stage_progress })
-                        if done && stage_progress == stage_progress
+                    Ok(ExecOutput { done, checkpoint })
+                        if done && checkpoint.block_number == stage_progress
                 );
 
                 // Validate the stage execution

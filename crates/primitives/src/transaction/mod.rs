@@ -261,7 +261,7 @@ impl Compact for Transaction {
                 let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
                 (Transaction::Eip1559(tx), buf)
             }
-            _ => unreachable!(),
+            _ => unreachable!("Junk data in database: unknown Transaction variant"),
         }
     }
 }
@@ -717,7 +717,7 @@ impl Compact for TransactionKind {
                 let (addr, buf) = Address::from_compact(buf, buf.len());
                 (TransactionKind::Call(addr), buf)
             }
-            _ => unreachable!(),
+            _ => unreachable!("Junk data in database: unknown TransactionKind variant"),
         }
     }
 }

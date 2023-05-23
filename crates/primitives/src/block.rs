@@ -146,8 +146,15 @@ impl SealedBlock {
 
     /// Seal sealed block with recovered transaction senders.
     pub fn seal_with_senders(self) -> Option<SealedBlockWithSenders> {
-        let senders = self.senders()?;
-        Some(SealedBlockWithSenders { block: self, senders })
+        self.try_seal_with_senders().ok()
+    }
+
+    /// Seal sealed block with recovered transaction senders.
+    pub fn try_seal_with_senders(self) -> Result<SealedBlockWithSenders, Self> {
+        match self.senders() {
+            Some(senders) => Ok(SealedBlockWithSenders { block: self, senders }),
+            None => Err(self),
+        }
     }
 
     /// Unseal the block

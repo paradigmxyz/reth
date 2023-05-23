@@ -7,14 +7,15 @@ use crate::{
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
+    version::SHORT_VERSION,
 };
-use clap::{crate_version, Parser};
+use clap::Parser;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
+use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -30,7 +31,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
-    consensus::{Consensus, ForkchoiceState},
+    consensus::Consensus,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         either::EitherDownloader,
@@ -70,10 +71,12 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::dirs::MaybePlatformPath;
+use crate::{args::PayloadBuilderArgs, dirs::MaybePlatformPath};
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::bytes::BytesMut;
 use reth_provider::providers::BlockchainProvider;
+use reth_rlp::Encodable;
 use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
@@ -104,11 +107,11 @@ pub struct Command {
     /// - goerli
     /// - sepolia
     #[arg(
-    long,
-    value_name = "CHAIN_OR_PATH",
-    verbatim_doc_comment,
-    default_value = "mainnet",
-    value_parser = genesis_value_parser
+        long,
+        value_name = "CHAIN_OR_PATH",
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
 
@@ -125,6 +128,9 @@ pub struct Command {
     rpc: RpcServerArgs,
 
     #[clap(flatten)]
+    builder: PayloadBuilderArgs,
+
+    #[clap(flatten)]
     debug: DebugArgs,
 
     /// Automatically mine blocks for new transactions
@@ -135,7 +141,7 @@ pub struct Command {
 impl Command {
     /// Execute `node` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth {} starting", crate_version!());
+        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -244,51 +250,19 @@ impl Command {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        // Forward genesis as forkchoice state to the consensus engine.
-        // This will allow the downloader to start
-        if self.debug.continuous {
-            info!(target: "reth::cli", "Continuous sync mode enabled");
-            let (tip_tx, _tip_rx) = oneshot::channel();
-            let state = ForkchoiceState {
-                head_block_hash: genesis_hash,
-                finalized_block_hash: genesis_hash,
-                safe_block_hash: genesis_hash,
-            };
-            consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
-                state,
-                payload_attrs: None,
-                tx: tip_tx,
-            })?;
-        }
-
-        // Forward the `debug.tip` as forkchoice state to the consensus engine.
-        // This will initiate the sync up to the provided tip.
-        let _tip_rx = match self.debug.tip {
-            Some(tip) => {
-                let (tip_tx, tip_rx) = oneshot::channel();
-                let state = ForkchoiceState {
-                    head_block_hash: tip,
-                    finalized_block_hash: tip,
-                    safe_block_hash: tip,
-                };
-                consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
-                    state,
-                    payload_attrs: None,
-                    tx: tip_tx,
-                })?;
-                debug!(target: "reth::cli", %tip, "Tip manually set");
-                Some(tip_rx)
-            }
-            None => None,
-        };
-
         // configure the payload builder
+        let mut extradata = BytesMut::new();
+        self.builder.extradata.as_bytes().encode(&mut extradata);
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
             transaction_pool.clone(),
             ctx.task_executor.clone(),
-            // TODO use extradata from args
-            BasicPayloadJobGeneratorConfig::default(),
+            BasicPayloadJobGeneratorConfig::default()
+                .interval(self.builder.interval)
+                .deadline(self.builder.deadline)
+                .max_payload_tasks(self.builder.max_payload_tasks)
+                .extradata(extradata.freeze())
+                .max_gas_limit(self.builder.max_gas_limit),
             Arc::clone(&self.chain),
         );
         let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
@@ -339,6 +313,20 @@ impl Command {
 
         let pipeline_events = pipeline.events();
 
+        let initial_target = if let Some(tip) = self.debug.tip {
+            // Set the provided tip as the initial pipeline target.
+            debug!(target: "reth::cli", %tip, "Tip manually set");
+            Some(tip)
+        } else if self.debug.continuous {
+            // Set genesis as the initial pipeline target.
+            // This will allow the downloader to start
+            debug!(target: "reth::cli", "Continuous sync mode enabled");
+            Some(genesis_hash)
+        } else {
+            None
+        };
+
+        // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
             client,
@@ -349,6 +337,7 @@ impl Command {
             self.debug.max_block,
             self.debug.continuous,
             payload_builder.clone(),
+            initial_target,
             consensus_engine_tx,
             consensus_engine_rx,
         );
@@ -519,7 +508,7 @@ impl Command {
         db: Arc<Env<WriteMap>>,
     ) -> Result<Head, reth_interfaces::db::DatabaseError> {
         db.view(|tx| {
-            let head = FINISH.get_progress(tx)?.unwrap_or_default();
+            let head = FINISH.get_checkpoint(tx)?.unwrap_or_default().block_number;
             let header = tx
                 .get::<tables::Headers>(head)?
                 .expect("the header for the latest block is missing, database is corrupt");

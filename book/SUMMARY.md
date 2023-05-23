@@ -5,6 +5,7 @@
     1. [Pre-Built Binaries](./installation/binaries.md)
     1. [Docker](./installation/docker.md)
     1. [Build from Source](./installation/source.md)
+    1. [Update Priorities](./installation/priorities.md)
 1. [Run a Node](./run/run-a-node.md)
     1. [Mainnet or official Testnets](./run/mainnet.md)
     1. [Local Testnet](./run/local_testnet.md)
