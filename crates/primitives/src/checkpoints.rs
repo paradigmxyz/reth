@@ -97,7 +97,7 @@ impl Compact for MerkleCheckpoint {
     }
 }
 
-/// Saves the progress of AccountHashing
+/// Saves the progress of AccountHashing stage.
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct AccountHashingCheckpoint {
@@ -109,7 +109,7 @@ pub struct AccountHashingCheckpoint {
     pub to: u64,
 }
 
-/// Saves the progress of StorageHashing
+/// Saves the progress of StorageHashing stage.
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct StorageHashingCheckpoint {
@@ -121,6 +121,16 @@ pub struct StorageHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
+}
+
+/// Saves the progress of Headers stage.
+#[main_codec]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub struct HeadersCheckpoint {
+    /// Number of headers already downloaded.
+    pub downloaded_headers: u64,
+    /// Total headers to be downloaded.
+    pub total_headers: u64,
 }
 
 /// Saves the progress of a stage.
@@ -155,6 +165,14 @@ impl StageCheckpoint {
         }
     }
 
+    /// Returns the storage hashing stage checkpoint, if any.
+    pub fn headers_stage_checkpoint(&self) -> Option<HeadersCheckpoint> {
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::Headers(checkpoint)) => Some(checkpoint),
+            _ => None,
+        }
+    }
+
     /// Sets the stage checkpoint to account hashing.
     pub fn with_account_hashing_stage_checkpoint(
         mut self,
@@ -172,13 +190,29 @@ impl StageCheckpoint {
         self.stage_checkpoint = Some(StageUnitCheckpoint::Storage(checkpoint));
         self
     }
+
+    /// Sets the stage checkpoint to storage hashing.
+    pub fn with_headers_stage_checkpoint(mut self, checkpoint: HeadersCheckpoint) -> Self {
+        self.stage_checkpoint = Some(StageUnitCheckpoint::Headers(checkpoint));
+        self
+    }
 }
 
-// TODO(alexey): ideally, we'd want to display block number + stage-specific metric (if available)
-//  in places like logs or traces
 impl Display for StageCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.block_number, f)
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                downloaded_headers,
+                total_headers,
+            })) => {
+                if total_headers > 0 {
+                    write!(f, "{:.1}%", 100.0 * downloaded_headers as f64 / total_headers as f64)
+                } else {
+                    write!(f, "{downloaded_headers}")
+                }
+            }
+            _ => write!(f, "{}", self.block_number),
+        }
     }
 }
 
@@ -194,6 +228,8 @@ pub enum StageUnitCheckpoint {
     Account(AccountHashingCheckpoint),
     /// Saves the progress of StorageHashing stage.
     Storage(StorageHashingCheckpoint),
+    /// Saves the progress of Hashing stage.
+    Headers(HeadersCheckpoint),
 }
 
 impl Compact for StageUnitCheckpoint {
@@ -212,6 +248,10 @@ impl Compact for StageUnitCheckpoint {
             }
             StageUnitCheckpoint::Storage(data) => {
                 buf.put_u8(2);
+                1 + data.to_compact(buf)
+            }
+            StageUnitCheckpoint::Headers(data) => {
+                buf.put_u8(3);
                 1 + data.to_compact(buf)
             }
         }
@@ -233,6 +273,10 @@ impl Compact for StageUnitCheckpoint {
             2 => {
                 let (data, buf) = StorageHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Storage(data), buf)
+            }
+            3 => {
+                let (data, buf) = HeadersCheckpoint::from_compact(&buf[1..], buf.len() - 1);
+                (Self::Headers(data), buf)
             }
             _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
         }

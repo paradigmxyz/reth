@@ -10,7 +10,9 @@ use reth_interfaces::{
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
     provider::ProviderError,
 };
-use reth_primitives::{BlockHashOrNumber, BlockNumber, SealedHeader, StageCheckpoint, H256};
+use reth_primitives::{
+    BlockHashOrNumber, BlockNumber, HeadersCheckpoint, SealedHeader, StageCheckpoint, H256,
+};
 use reth_provider::Transaction;
 use tokio::sync::watch;
 use tracing::*;
@@ -218,6 +220,15 @@ where
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
+        let mut stage_checkpoint =
+            current_progress.headers_stage_checkpoint().unwrap_or(HeadersCheckpoint {
+                downloaded_headers: 0,
+                // TODO(alexey): set total headers to download from the `remote_head - local_head`
+                //  block number
+                total_headers: 0,
+            });
+        stage_checkpoint.downloaded_headers += downloaded_headers.len() as u64;
+
         // Write the headers to db
         self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
 
@@ -228,9 +239,16 @@ where
                     .map(|(num, _)| num)
                     .unwrap_or_default(),
             );
-            Ok(ExecOutput { checkpoint: StageCheckpoint::new(stage_progress), done: true })
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint::new(stage_progress)
+                    .with_headers_stage_checkpoint(stage_checkpoint),
+                done: true,
+            })
         } else {
-            Ok(ExecOutput { checkpoint: current_progress, done: false })
+            Ok(ExecOutput {
+                checkpoint: current_progress.with_headers_stage_checkpoint(stage_checkpoint),
+                done: false,
+            })
         }
     }
 
@@ -284,7 +302,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::random_header;
-    use reth_primitives::H256;
+    use reth_primitives::{StageUnitCheckpoint, H256};
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
@@ -474,7 +492,15 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true }) if block_number == tip.number);
+        assert_matches!( result, Ok(ExecOutput { checkpoint: StageCheckpoint {
+            block_number,
+            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                downloaded_headers,
+                total_headers,
+            }))
+        }, done: true }) if block_number == tip.number
+            // -1 because we don't need to download the local head
+            && downloaded_headers == headers.len() as u64 - 1);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -539,7 +565,7 @@ mod tests {
         let mut runner = HeadersTestRunner::with_linear_downloader();
         // pick range that's larger than the configured headers batch size
         let (stage_progress, previous_stage) = (600, 1200);
-        let input = ExecInput {
+        let mut input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
@@ -553,15 +579,30 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false }) if block_number == stage_progress);
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
+            block_number,
+            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                downloaded_headers,
+                total_headers,
+            }))
+        }, done: false }) if block_number == stage_progress && downloaded_headers == 500 );
 
         runner.client.clear().await;
         runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
+        input.checkpoint = Some(result.unwrap().checkpoint);
 
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true }) if block_number == tip.number);
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
+            block_number,
+            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                downloaded_headers,
+                total_headers,
+            }))
+        }, done: true }) if block_number == tip.number
+            // -1 because we don't need to download the local head
+            && downloaded_headers == headers.len() as u64 - 1);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 }
