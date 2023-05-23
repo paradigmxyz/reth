@@ -220,12 +220,21 @@ where
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
+        let tip_block_number = match tip {
+            BlockHashOrNumber::Hash(hash) => downloaded_headers.first().and_then(|header| {
+                if header.hash == hash {
+                    Some(header.number)
+                } else {
+                    None
+                }
+            }),
+            BlockHashOrNumber::Number(number) => Some(number),
+        };
+
         let mut stage_checkpoint =
             current_progress.headers_stage_checkpoint().unwrap_or(HeadersCheckpoint {
                 downloaded_headers: 0,
-                // TODO(alexey): set total headers to download from the `remote_head - local_head`
-                //  block number
-                total_headers: 0,
+                total_headers: tip_block_number.unwrap_or_default(),
             });
         stage_checkpoint.downloaded_headers += downloaded_headers.len() as u64;
 
@@ -500,7 +509,8 @@ mod tests {
             }))
         }, done: true }) if block_number == tip.number
             // -1 because we don't need to download the local head
-            && downloaded_headers == headers.len() as u64 - 1);
+            && downloaded_headers == headers.len() as u64 - 1
+            && total_headers == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -585,7 +595,8 @@ mod tests {
                 downloaded_headers,
                 total_headers,
             }))
-        }, done: false }) if block_number == stage_progress && downloaded_headers == 500 );
+        }, done: false }) if block_number == stage_progress && downloaded_headers == 500 &&
+            total_headers == tip.number);
 
         runner.client.clear().await;
         runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
@@ -602,7 +613,8 @@ mod tests {
             }))
         }, done: true }) if block_number == tip.number
             // -1 because we don't need to download the local head
-            && downloaded_headers == headers.len() as u64 - 1);
+            && downloaded_headers == headers.len() as u64 - 1
+            && total_headers == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 }
