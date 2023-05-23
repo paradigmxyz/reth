@@ -125,8 +125,7 @@ impl BlockBuffer {
 
     /// Return a reference to the lowest ancestor of the given block in the buffer.
     pub fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
-        let num = self.hash_to_num.get(hash)?;
-        let mut current_block = self.blocks.get(num)?.get(hash)?;
+        let mut current_block = self.block_by_hash(hash)?;
         while let Some(block) =
             self.blocks.get(&(current_block.number - 1))?.get(&current_block.parent_hash)
         {
