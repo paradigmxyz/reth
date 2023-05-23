@@ -314,10 +314,7 @@ where
                 })
             }
 
-            self.listeners.notify(PipelineEvent::Running {
-                stage_id,
-                stage_progress: prev_checkpoint.map(|progress| progress.block_number),
-            });
+            self.listeners.notify(PipelineEvent::Running { stage_id, checkpoint: prev_checkpoint });
 
             match stage
                 .execute(&mut tx, ExecInput { previous_stage, checkpoint: prev_checkpoint })
@@ -464,12 +461,12 @@ mod tests {
         assert_eq!(
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("A"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("B"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
@@ -517,17 +514,17 @@ mod tests {
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 // Executing
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("A"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("B"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
-                PipelineEvent::Running { stage_id: StageId("C"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("C"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("C"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
@@ -606,12 +603,12 @@ mod tests {
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 // Executing
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("A"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("B"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
@@ -680,12 +677,12 @@ mod tests {
         assert_eq!(
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("A"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("B"), checkpoint: None },
                 PipelineEvent::Error { stage_id: StageId("B") },
                 PipelineEvent::Unwinding {
                     stage_id: StageId("A"),
@@ -699,12 +696,15 @@ mod tests {
                     stage_id: StageId("A"),
                     result: UnwindOutput { checkpoint: StageCheckpoint::new(0) },
                 },
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: Some(0) },
+                PipelineEvent::Running {
+                    stage_id: StageId("A"),
+                    checkpoint: Some(StageCheckpoint::new(0))
+                },
                 PipelineEvent::Ran {
                     stage_id: StageId("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Running { stage_id: StageId("B"), checkpoint: None },
                 PipelineEvent::Ran {
                     stage_id: StageId("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
