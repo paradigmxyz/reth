@@ -219,7 +219,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
 
     /// Check if the slot was zeroed out in the post state.
     /// The database is not checked since we don't insert zero valued slots.
-    fn is_slot_empty(&self, account: &H256, slot: &H256) -> bool {
+    fn is_touched_slot_value_zero(&self, account: &H256, slot: &H256) -> bool {
         self.post_state
             .storages
             .get(account)
@@ -307,7 +307,7 @@ where
 
             while db_item
                 .as_ref()
-                .map(|entry| self.is_slot_empty(&account, &entry.key))
+                .map(|entry| self.is_touched_slot_value_zero(&account, &entry.key))
                 .unwrap_or_default()
             {
                 db_item = self.cursor.next_dup_val()?;
@@ -342,7 +342,7 @@ where
 
             while db_item
                 .as_ref()
-                .map(|entry| self.is_slot_empty(&account, &entry.key))
+                .map(|entry| self.is_touched_slot_value_zero(&account, &entry.key))
                 .unwrap_or_default()
             {
                 db_item = self.cursor.next_dup_val()?;
