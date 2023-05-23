@@ -255,10 +255,9 @@ where
             .headers_stage_checkpoint()
             .unwrap_or(HeadersCheckpoint {
             // If for some reason (e.g. due to DB migration) we don't have `downloaded_headers`,
-            // set it to the local head block number. It is correct because on the first
-            // iteration of headers stage, local head block number equals to the total headers
-            // downloaded so far.
-            downloaded_headers: local_head,
+            // set it to the local head block number + number of block already filled in the gap.
+            downloaded_headers: local_head +
+                (target_block_number.unwrap_or_default() - tip_block_number.unwrap_or_default()),
             // Shouldn't fail because on the first iteration, we download the header for missing
             // tip, and use its block number.
             total_headers: target_block_number.unwrap_or_else(|| {
