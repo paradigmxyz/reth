@@ -17,7 +17,8 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    listener::EventListeners, BlockNumber, Head, Header, SealedBlock, SealedHeader, H256, U256,
+    listener::EventListeners, BlockHash, BlockNumber, Head, Header, SealedBlock, SealedHeader,
+    H256, U256,
 };
 use reth_provider::{BlockProvider, BlockSource, CanonChainTracker, ProviderError};
 use reth_rpc_types::engine::{
@@ -289,9 +290,7 @@ where
 
         // If this is sent from new payload then the parent hash could be in a side chain, and is
         // not necessarily canonical
-        if self.blockchain.header_by_hash(parent_hash).is_some() ||
-            self.blockchain.find_canonical_ancestor(parent_hash).is_some()
-        {
+        if self.contains_header(parent_hash) {
             Some(parent_hash)
         } else {
             // because the is_block_pre_merge check above did not return, the invalid payload should
@@ -317,6 +316,13 @@ where
                 }
             })
         }
+    }
+
+    /// Checks whether or not the requested block hash is in the database or in the blockchain
+    /// tree.
+    fn contains_header(&self, hash: BlockHash) -> bool {
+        self.blockchain.header_by_hash(hash).is_some() ||
+            self.blockchain.find_canonical_ancestor(hash).is_some()
     }
 
     /// Loads the header for the given `block_number` from the database.
