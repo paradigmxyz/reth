@@ -905,15 +905,12 @@ where
         &self,
         block_number: BlockNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error> {
-        let max_hash = match self.blockchain.block_hash(block_number)? {
-            Some(block) => block,
+        let headers = self.blockchain.sealed_headers_range(block_number..=block_number)?;
+        let header = match headers.first() {
+            Some(header) => header,
             None => return Err(Error::Provider(ProviderError::HeaderNotFound(block_number.into()))),
         };
-        let max_header = match self.blockchain.header_by_number(block_number)? {
-            Some(block) => block,
-            None => return Err(Error::Provider(ProviderError::HeaderNotFound(block_number.into()))),
-        };
-        Ok(max_header.seal(max_hash))
+        Ok(header.clone())
     }
 }
 
