@@ -254,8 +254,9 @@ where
         let mut stage_checkpoint = current_progress
             .headers_stage_checkpoint()
             .unwrap_or(HeadersCheckpoint {
-            // If for some reason (e.g. due to DB migration) we don't have `downloaded_headers`,
-            // set it to the local head block number + number of block already filled in the gap.
+            // If for some reason (e.g. due to DB migration) we don't have `downloaded_headers`
+            // in the middle of headers sync, set it to the local head block number +
+            // number of block already filled in the gap.
             downloaded_headers: local_head +
                 (target_block_number.unwrap_or_default() - tip_block_number.unwrap_or_default()),
             // Shouldn't fail because on the first iteration, we download the header for missing
