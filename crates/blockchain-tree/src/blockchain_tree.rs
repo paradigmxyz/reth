@@ -744,7 +744,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     fn try_connect_buffered_blocks(&mut self, new_block: BlockNumHash) {
         trace!(target: "blockchain_tree", ?new_block, "try_connect_buffered_blocks");
 
-        let include_blocks = self.buffered_blocks.take_all_children(new_block);
+        let include_blocks = self.buffered_blocks.remove_with_children(new_block);
         // insert block children
         for block in include_blocks.into_iter() {
             // dont fail on error, just ignore the block.
