@@ -263,8 +263,8 @@ where
             // tip, and use its block number.
             total_headers: target_block_number.unwrap_or_else(|| {
                 warn!(target: "sync::stages::headers", ?tip, "No downloaded header for tip found");
-                // Safe, because `Display` impl for checkpoint will fallback to displaying just
-                // `downloaded_headers`
+                // Safe, because `Display` impl for `StageCheckpoint` will fallback to displaying
+                // just `downloaded_headers`
                 0
             }),
         });

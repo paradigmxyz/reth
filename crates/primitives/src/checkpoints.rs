@@ -133,6 +133,16 @@ pub struct HeadersCheckpoint {
     pub total_headers: u64,
 }
 
+impl Display for HeadersCheckpoint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.total_headers > 0 {
+            write!(f, "{:.1}%", 100.0 * self.downloaded_headers as f64 / self.total_headers as f64)
+        } else {
+            write!(f, "{}", self.downloaded_headers)
+        }
+    }
+}
+
 /// Saves the progress of a stage.
 #[main_codec]
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -201,16 +211,7 @@ impl StageCheckpoint {
 impl Display for StageCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
-                downloaded_headers,
-                total_headers,
-            })) => {
-                if total_headers > 0 {
-                    write!(f, "{:.1}%", 100.0 * downloaded_headers as f64 / total_headers as f64)
-                } else {
-                    write!(f, "{downloaded_headers}")
-                }
-            }
+            Some(StageUnitCheckpoint::Headers(stage_checkpoint)) => stage_checkpoint.fmt(f),
             _ => write!(f, "{}", self.block_number),
         }
     }
