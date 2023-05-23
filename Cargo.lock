@@ -5130,6 +5130,7 @@ dependencies = [
  "itertools",
  "parking_lot 0.12.1",
  "pin-project",
+ "proptest",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",

@@ -34,11 +34,15 @@ parking_lot = "0.12"
 reth-rlp = { path = "../../rlp", optional = true }
 
 [dev-dependencies]
+# reth
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { path = "../../primitives", features = ["arbitrary", "test-utils"] }
 reth-rlp = { path = "../../rlp" }
 reth-trie = { path = "../../trie", features = ["test-utils"] }
+
+# misc
 parking_lot = "0.12"
+proptest = "1.0"
 
 [features]
 bench = []

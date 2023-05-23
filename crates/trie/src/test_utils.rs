@@ -1,9 +1,13 @@
 use crate::account::EthAccount;
 use reth_primitives::{proofs::KeccakHasher, Account, Address, H256, U256};
 use reth_rlp::{encode_fixed_size, Encodable};
+use std::collections::BTreeMap;
 
 /// Re-export of [triehash].
 pub use triehash;
+
+/// The plain state of the accounts.
+pub type State = BTreeMap<Address, (Account, BTreeMap<H256, U256>)>;
 
 /// Compute the state root of a given set of accounts using [triehash::sec_trie_root].
 pub fn state_root<I, S>(accounts: I) -> H256

@@ -638,14 +638,15 @@ impl PostState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use reth_db::{
         database::Database,
         mdbx::{test_utils, Env, EnvKind, WriteMap},
         transaction::DbTx,
     };
     use reth_primitives::proofs::EMPTY_ROOT;
-    use reth_trie::test_utils::state_root;
-    use std::sync::Arc;
+    use reth_trie::test_utils::{state_root, State};
+    use std::{collections::btree_map::Entry, sync::Arc};
 
     // Ensure that the transition id is not incremented if postate is extended by another empty
     // poststate.
@@ -1825,7 +1826,7 @@ mod tests {
 
     #[test]
     fn post_state_state_root() {
-        let mut state: BTreeMap<Address, (Account, BTreeMap<H256, U256>)> = (0..10)
+        let mut state: State = (0..10)
             .map(|key| {
                 let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
                 let storage =
@@ -1983,5 +1984,121 @@ mod tests {
                     .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
             )
         );
+    }
+
+    #[test]
+    fn fuzz_post_state_state_root() {
+        proptest!(ProptestConfig::with_cases(20), |(mut state: State, changes: BTreeMap<Address, (Option<Account>, BTreeMap<H256, U256>)>)| {
+            let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+            // insert initial state to the database
+            db.update(|tx| {
+                for (address, (account, storage)) in state.iter() {
+                    let hashed_address = keccak256(address);
+                    tx.put::<tables::HashedAccount>(hashed_address, *account).unwrap();
+                    for (slot, value) in storage {
+                        tx.put::<tables::HashedStorage>(
+                            hashed_address,
+                            StorageEntry { key: keccak256(slot), value: *value },
+                        )
+                        .unwrap();
+                    }
+                }
+
+                let (_, updates) = StateRoot::new(tx).root_with_updates().unwrap();
+                updates.flush(tx).unwrap();
+            })
+            .unwrap();
+
+            let block_number = 1;
+            let tx = db.tx().unwrap();
+            let mut post_state = PostState::new();
+
+            // database only state root is correct
+            assert_eq!(
+                post_state.state_root_slow(&tx).unwrap(),
+                state_root(
+                    state
+                        .clone()
+                        .into_iter()
+                        .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+                )
+            );
+
+            for (address, (info, storage)) in changes {
+                let post_state_entry = post_state.account(&address);
+                let state_entry = state.entry(address);
+                match info {
+                    Some(info) => {
+                        match post_state_entry {
+                            Some(&None) => {
+                                post_state.create_account(block_number, address, info);
+                            }
+                            Some(&Some(old)) => {
+                                post_state.change_account(block_number, address, old, info)
+                            }
+                            None if matches!(state_entry, Entry::Occupied(..)) => post_state
+                                .change_account(
+                                    block_number,
+                                    address,
+                                    Account::default(),
+                                    info,
+                                ),
+                            None => post_state.create_account(block_number, address, info),
+                        }
+
+                        match state_entry {
+                            Entry::Occupied(mut e) => {
+                                let (old_info, old_storage) = e.get_mut();
+                                *old_info = info;
+                                for (slot, value) in storage.clone() {
+                                    old_storage.insert(slot, value);
+                                }
+                            }
+                            Entry::Vacant(e) => {
+                                e.insert((info, storage.clone()));
+                            }
+                        }
+
+                        post_state.change_storage(
+                            1,
+                            address,
+                            BTreeMap::from_iter(storage.into_iter().map(|(slot, value)| {
+                                (U256::from_be_bytes(slot.to_fixed_bytes()), (U256::ZERO, value))
+                            })),
+                        );
+                    }
+                    None => match post_state_entry {
+                        Some(&Some(old)) => {
+                            post_state.destroy_account(block_number, address, old);
+                            if let Entry::Occupied(e) = state_entry {
+                                e.remove();
+                            }
+                        }
+                        None if matches!(state_entry, Entry::Occupied(..)) => {
+                            post_state.destroy_account(
+                                block_number,
+                                address,
+                                Account::default(),
+                            );
+                            if let Entry::Occupied(e) = state_entry {
+                                e.remove();
+                            }
+                        }
+                        Some(&None) | None => (),
+                    },
+                };
+            }
+
+            assert_eq!(
+                post_state.state_root_slow(&tx).unwrap(),
+                state_root(
+                    state
+                        .clone()
+                        .into_iter()
+                        .map(|(address, (account, storage))| (address, (account, storage.into_iter())))
+                )
+            );
+        });
     }
 }

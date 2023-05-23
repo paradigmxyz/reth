@@ -494,7 +494,7 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        state_root, state_root_prehashed, storage_root, storage_root_prehashed,
+        state_root, state_root_prehashed, storage_root, storage_root_prehashed, State,
     };
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{
@@ -707,8 +707,6 @@ mod tests {
 
         assert_eq!(storage_root(storage.into_iter()), got);
     }
-
-    type State = BTreeMap<Address, (Account, BTreeMap<H256, U256>)>;
 
     #[test]
     fn arbitrary_state_root() {
@@ -1164,40 +1162,36 @@ mod tests {
         assert_trie_updates(&account_updates);
     }
 
-    // TODO: limit the thumber of test cases?
     proptest! {
         #[test]
         fn fuzz_state_root_incremental(account_changes: [BTreeMap<H256, U256>; 5]) {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let db = create_test_rw_db();
+            let mut tx = Transaction::new(db.as_ref()).unwrap();
+            let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>().unwrap();
 
-                let db = create_test_rw_db();
-                let mut tx = Transaction::new(db.as_ref()).unwrap();
-                let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>().unwrap();
-
-                let mut state = BTreeMap::default();
-                for accounts in account_changes {
-                    let should_generate_changeset = !state.is_empty();
-                    let mut changes = PrefixSet::default();
-                    for (hashed_address, balance) in accounts.clone() {
-                        hashed_account_cursor.upsert(hashed_address, Account { balance,..Default::default() }).unwrap();
-                        if should_generate_changeset {
-                            changes.insert(Nibbles::unpack(hashed_address));
-                        }
+            let mut state = BTreeMap::default();
+            for accounts in account_changes {
+                let should_generate_changeset = !state.is_empty();
+                let mut changes = PrefixSet::default();
+                for (hashed_address, balance) in accounts.clone() {
+                    hashed_account_cursor.upsert(hashed_address, Account { balance,..Default::default() }).unwrap();
+                    if should_generate_changeset {
+                        changes.insert(Nibbles::unpack(hashed_address));
                     }
-
-                    let (state_root, trie_updates) = StateRoot::new(tx.deref_mut())
-                        .with_changed_account_prefixes(changes)
-                        .root_with_updates()
-                        .unwrap();
-
-                    state.append(&mut accounts.clone());
-                    let expected_root = state_root_prehashed(
-                        state.clone().into_iter().map(|(key, balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
-                    );
-                    assert_eq!(expected_root, state_root);
-                    trie_updates.flush(tx.deref_mut()).unwrap();
                 }
-            });
+
+                let (state_root, trie_updates) = StateRoot::new(tx.deref_mut())
+                    .with_changed_account_prefixes(changes)
+                    .root_with_updates()
+                    .unwrap();
+
+                state.append(&mut accounts.clone());
+                let expected_root = state_root_prehashed(
+                    state.clone().into_iter().map(|(key, balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
+                );
+                assert_eq!(expected_root, state_root);
+                trie_updates.flush(tx.deref_mut()).unwrap();
+            }
         }
     }
 
