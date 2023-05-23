@@ -40,16 +40,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn insert_block_without_senders(
-        &self,
-        block: SealedBlock,
-    ) -> Result<BlockStatus, InsertBlockError> {
-        match block.try_seal_with_senders() {
-            Ok(block) => self.tree.write().insert_block_inner(block, true),
-            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
-        }
-    }
-
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         self.tree.write().buffer_block(block)
     }

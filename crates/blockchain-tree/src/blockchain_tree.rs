@@ -269,15 +269,17 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         None
     }
 
-    /// Try inserting block inside the tree.
+    /// Try inserting a validated [Self::validate_block] block inside the tree.
     ///
     /// If blocks does not have parent [`BlockStatus::Disconnected`] would be returned, in which
     /// case it is buffered for future inclusion.
     #[instrument(skip_all, fields(block = ?block.num_hash()), target = "blockchain_tree", ret)]
-    pub fn try_insert_block(
+    fn try_insert_validated_block(
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<BlockStatus, InsertBlockError> {
+        debug_assert!(self.validate_block(&block).is_ok(), "Block must be validated");
+
         let parent = block.parent_num_hash();
 
         // check if block parent can be found in Tree
@@ -638,23 +640,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<BlockStatus, InsertBlockError> {
-        self.insert_block_inner(block, true)
-    }
-
-    /// Insert a block (with recovered senders) in the tree. Check [`BlockchainTree::insert_block`]
-    /// for more info
-    pub(crate) fn insert_block_inner(
-        &mut self,
-        block: SealedBlockWithSenders,
-        do_is_known_check: bool,
-    ) -> Result<BlockStatus, InsertBlockError> {
-        // check if we already know this block
-        if do_is_known_check {
-            match self.is_block_known(block.num_hash()) {
-                Ok(Some(status)) => return Ok(status),
-                Err(err) => return Err(InsertBlockError::new(block.block, err)),
-                _ => {}
-            }
+        // check if we already have this block
+        match self.is_block_known(block.num_hash()) {
+            Ok(Some(status)) => return Ok(status),
+            Err(err) => return Err(InsertBlockError::new(block.block, err)),
+            _ => {}
         }
 
         // validate block consensus rules
@@ -662,8 +652,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             return Err(InsertBlockError::consensus_error(err, block.block))
         }
 
-        // try to insert block
-        self.try_insert_block(block)
+        self.try_insert_validated_block(block)
     }
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
@@ -740,7 +729,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
-    /// Connect unconnected,buffered blocks if the new block closes a gap.
+    /// Connect unconnected (buffered) blocks if the new block closes a gap.
+    ///
+    /// This will try to insert all children of the new block, extending the chain.
+    ///
+    /// If all children are valid, then this essentially moves appends all children blocks to the
+    /// new block's chain.
     fn try_connect_buffered_blocks(&mut self, new_block: BlockNumHash) {
         trace!(target: "blockchain_tree", ?new_block, "try_connect_buffered_blocks");
 
@@ -748,7 +742,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // insert block children
         for block in include_blocks.into_iter() {
             // dont fail on error, just ignore the block.
-            let _ = self.insert_block_inner(block, false).map_err(|err| {
+            let _ = self.try_insert_validated_block(block).map_err(|err| {
                 debug!(
                     target: "blockchain_tree", ?err,
                     "Failed to insert buffered block",
