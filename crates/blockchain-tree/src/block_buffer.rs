@@ -45,7 +45,7 @@ impl BlockBuffer {
         }
     }
 
-    /// Insert block inside the buffer.
+    /// Insert a correct block inside the buffer.
     pub fn insert_block(&mut self, block: SealedBlockWithSenders) {
         let num_hash = block.num_hash();
 
