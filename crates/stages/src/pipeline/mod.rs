@@ -323,6 +323,7 @@ where
                     info!(
                         target: "sync::pipeline",
                         stage = %stage_id,
+                        progress = checkpoint.block_number,
                         %checkpoint,
                         %done,
                         "Stage made progress"
