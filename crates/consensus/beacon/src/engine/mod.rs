@@ -27,7 +27,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
-use reth_stages::Pipeline;
+use reth_stages::{Pipeline, ControlFlow};
 use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{
@@ -873,7 +873,9 @@ where
                             }
                         };
 
-                        if ctrl.is_unwind() {
+                        if let ControlFlow::Unwind { target, bad_block } = ctrl {
+                            // update the `invalid_headers` cache with the new invalid headers
+
                             // Attempt to sync to the head block after unwind.
                             self.sync.set_pipeline_sync_target(current_state.head_block_hash);
                             return None
