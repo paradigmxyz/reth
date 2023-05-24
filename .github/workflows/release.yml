@@ -132,6 +132,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VERSION:  ${{ needs.extract-version.outputs.VERSION }}
+    permissions:
+      # Required to post the release
+      contents: write
     steps:
       # This is necessary for generating the changelog. It has to come before "Download Artifacts" or else it deletes the artifacts.
       - name: Checkout sources
