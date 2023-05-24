@@ -3,6 +3,7 @@ use crate::{
     canonical_chain::CanonicalChain, chain::BlockChainId, AppendableChain, BlockBuffer,
     BlockIndices, BlockchainTreeConfig, PostStateData, TreeExternals,
 };
+use linked_hash_set::LinkedHashSet;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{
@@ -1092,7 +1093,7 @@ mod tests {
                 assert_eq!(*tree.block_indices.blocks_to_chain(), block_to_chain);
             }
             if let Some(fork_to_child) = self.fork_to_child {
-                let mut x: HashMap<BlockHash, Vec<BlockHash>> = HashMap::new();
+                let mut x: HashMap<BlockHash, LinkedHashSet<BlockHash>> = HashMap::new();
                 for (key, hash_set) in fork_to_child.into_iter() {
                     x.insert(key, hash_set.into_iter().collect());
                 }
