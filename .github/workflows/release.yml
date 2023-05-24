@@ -39,7 +39,7 @@ jobs:
               platform: macos-latest
               profile: maxperf
           -   arch: x86_64-pc-windows-gnu
-              platform: windows-2019
+              platform: ubuntu-latest
               profile: maxperf
 
     runs-on: ${{ matrix.platform }}
