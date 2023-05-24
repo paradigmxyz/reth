@@ -123,6 +123,19 @@ impl BlockBuffer {
         self.blocks.get(num)?.get(hash)
     }
 
+    /// Return a reference to the lowest ancestor of the given block in the buffer.
+    pub fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
+        let mut current_block = self.block_by_hash(hash)?;
+        while let Some(block) = self
+            .blocks
+            .get(&(current_block.number - 1))
+            .and_then(|blocks| blocks.get(&current_block.parent_hash))
+        {
+            current_block = block;
+        }
+        Some(current_block)
+    }
+
     /// Return number of blocks inside buffer.
     pub fn len(&self) -> usize {
         self.lru.len()
@@ -230,9 +243,16 @@ mod tests {
         buffer.insert_block(block1.clone());
         buffer.insert_block(block2.clone());
         buffer.insert_block(block3.clone());
-        buffer.insert_block(block4);
+        buffer.insert_block(block4.clone());
 
         assert_eq!(buffer.len(), 4);
+        assert_eq!(buffer.block_by_hash(&block4.hash), Some(&block4));
+        assert_eq!(buffer.block_by_hash(&block2.hash), Some(&block2));
+        assert_eq!(buffer.block_by_hash(&main_parent.hash), None);
+
+        assert_eq!(buffer.lowest_ancestor(&block4.hash), Some(&block4));
+        assert_eq!(buffer.lowest_ancestor(&block3.hash), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block1.hash), Some(&block1));
         assert_eq!(buffer.remove_with_children(main_parent), vec![block1, block2, block3]);
         assert_eq!(buffer.len(), 1);
     }
@@ -354,13 +374,26 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(10);
 
-        buffer.insert_block(block1);
-        buffer.insert_block(block1a);
-        buffer.insert_block(block2);
-        buffer.insert_block(block2a);
-        buffer.insert_block(random_block1);
-        buffer.insert_block(random_block2);
-        buffer.insert_block(random_block3);
+        buffer.insert_block(block1.clone());
+        buffer.insert_block(block1a.clone());
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block2a.clone());
+        buffer.insert_block(random_block1.clone());
+        buffer.insert_block(random_block2.clone());
+        buffer.insert_block(random_block3.clone());
+
+        // check that random blocks are their own ancestor, and that chains have proper ancestors
+        assert_eq!(buffer.lowest_ancestor(&random_block1.hash), Some(&random_block1));
+        assert_eq!(buffer.lowest_ancestor(&random_block2.hash), Some(&random_block2));
+        assert_eq!(buffer.lowest_ancestor(&random_block3.hash), Some(&random_block3));
+
+        // descendants have ancestors
+        assert_eq!(buffer.lowest_ancestor(&block2a.hash), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block2.hash), Some(&block1));
+
+        // roots are themselves
+        assert_eq!(buffer.lowest_ancestor(&block1a.hash), Some(&block1a));
+        assert_eq!(buffer.lowest_ancestor(&block1.hash), Some(&block1));
 
         assert_eq!(buffer.len(), 7);
         buffer.clean_old_blocks(10);
@@ -388,12 +421,25 @@ mod tests {
         let mut buffer = BlockBuffer::new(3);
 
         buffer.insert_block(block1.clone());
-        buffer.insert_block(block2);
-        buffer.insert_block(block3);
-        buffer.insert_block(block4);
+        buffer.insert_block(block2.clone());
+        buffer.insert_block(block3.clone());
+
+        // pre-eviction block1 is the root
+        assert_eq!(buffer.lowest_ancestor(&block3.hash), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block2.hash), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block1.hash), Some(&block1));
+
+        buffer.insert_block(block4.clone());
+
+        assert_eq!(buffer.lowest_ancestor(&block4.hash), Some(&block4));
 
         // block1 gets evicted
         assert_block_existance(&buffer, &block1);
+
+        // check lowest ancestor results post eviction
+        assert_eq!(buffer.lowest_ancestor(&block3.hash), Some(&block2));
+        assert_eq!(buffer.lowest_ancestor(&block2.hash), Some(&block2));
+        assert_eq!(buffer.lowest_ancestor(&block1.hash), None);
 
         assert_eq!(buffer.len(), 3);
     }

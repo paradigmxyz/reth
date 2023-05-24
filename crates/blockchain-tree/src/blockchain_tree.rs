@@ -559,6 +559,19 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Some(chain_id)
     }
 
+    /// Checks the block buffer for the given block.
+    pub fn get_buffered_block(&mut self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
+        self.buffered_blocks.block_by_hash(hash)
+    }
+
+    /// Gets the lowest ancestor for the given block in the block buffer.
+    pub fn lowest_buffered_ancestor(
+        &mut self,
+        hash: &BlockHash,
+    ) -> Option<&SealedBlockWithSenders> {
+        self.buffered_blocks.lowest_ancestor(hash)
+    }
+
     /// Insert a new block in the tree.
     ///
     /// # Note
