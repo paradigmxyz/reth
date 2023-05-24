@@ -7,15 +7,11 @@ use reth_db::{
     table::Table,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{
-    p2p::{
-        headers::client::{HeadersClient, HeadersRequest},
-        priority::Priority,
-    },
-    test_utils::generators::random_block_range,
+use reth_interfaces::p2p::{
+    headers::client::{HeadersClient, HeadersRequest},
+    priority::Priority,
 };
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
-use reth_provider::insert_canonical_block;
 use std::{collections::BTreeMap, path::Path, time::Duration};
 use tracing::info;
 
@@ -65,22 +61,6 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Takes a DB where the tables have already been created.
     pub(crate) fn new(db: &'a DB) -> eyre::Result<Self> {
         Ok(Self { db })
-    }
-
-    /// Seeds the database with some random data, only used for testing
-    pub fn seed(&mut self, len: u64) -> Result<()> {
-        info!(target: "reth::cli", "Generating random block range from 0 to {len}");
-        let chain = random_block_range(0..=len - 1, Default::default(), 0..64);
-
-        self.db.update(|tx| {
-            chain.into_iter().try_for_each(|block| {
-                insert_canonical_block(tx, block, None)?;
-                Ok::<_, eyre::Error>(())
-            })
-        })??;
-
-        info!(target: "reth::cli", "Database seeded with {len} blocks");
-        Ok(())
     }
 
     /// Grabs the contents of the table within a certain index range and places the
