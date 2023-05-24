@@ -984,9 +984,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
 #[cfg(test)]
 mod tests {
-    use crate::block_buffer::BufferedBlocks;
-
     use super::*;
+    use crate::block_buffer::BufferedBlocks;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_db::{

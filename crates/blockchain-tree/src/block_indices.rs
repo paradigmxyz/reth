@@ -22,6 +22,11 @@ pub struct BlockIndices {
     /// `number_to_block` as those are chain specific indices.
     canonical_chain: CanonicalChain,
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
+    ///
+    /// This maintains insertion order for all child blocks, so
+    /// [BlockIndices::pending_block_num_hash] returns always the same block: the first child block
+    /// we inserted.
+    ///
     /// NOTE: It contains just blocks that are forks as a key and not all blocks.
     fork_to_child: HashMap<BlockHash, LinkedHashSet<BlockHash>>,
     /// Utility index for Block number to block hash(s).
@@ -70,11 +75,13 @@ impl BlockIndices {
         &self.blocks_to_chain
     }
 
-    /// Returns the hash and number of the pending block (the first block in the
-    /// [Self::pending_blocks]) set.
+    /// Returns the hash and number of the pending block.
+    ///
+    /// It is possible that multiple child blocks for the canonical tip exist.
+    /// This will always return the _first_ child we recorded for the canonical tip.
     pub(crate) fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         let canonical_tip = self.canonical_tip();
-        let hash = *self.fork_to_child.get(&canonical_tip.hash)?.front()?;
+        let hash = self.fork_to_child.get(&canonical_tip.hash)?.front().copied()?;
         Some(BlockNumHash { number: canonical_tip.number + 1, hash })
     }
 
