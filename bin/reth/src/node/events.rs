@@ -4,7 +4,7 @@ use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
-use reth_primitives::{BlockNumber, StageCheckpoint};
+use reth_primitives::StageCheckpoint;
 use reth_stages::{ExecOutput, PipelineEvent, StageId};
 use std::{
     future::Future,
@@ -22,12 +22,12 @@ struct NodeState {
     /// The stage currently being executed.
     current_stage: Option<StageId>,
     /// The current checkpoint of the executing stage.
-    current_checkpoint: BlockNumber,
+    current_checkpoint: StageCheckpoint,
 }
 
 impl NodeState {
     fn new(network: Option<NetworkHandle>) -> Self {
-        Self { network, current_stage: None, current_checkpoint: 0 }
+        Self { network, current_stage: None, current_checkpoint: StageCheckpoint::new(0) }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -37,26 +37,23 @@ impl NodeState {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
-            PipelineEvent::Running { stage_id, stage_progress } => {
+            PipelineEvent::Running { stage_id, checkpoint } => {
                 let notable = self.current_stage.is_none();
                 self.current_stage = Some(stage_id);
-                self.current_checkpoint = stage_progress.unwrap_or_default();
+                self.current_checkpoint = checkpoint.unwrap_or_default();
 
                 if notable {
-                    info!(target: "reth::cli", stage = %stage_id, from = stage_progress, "Executing stage");
+                    info!(target: "reth::cli", stage = %stage_id, from = ?checkpoint, "Executing stage");
                 }
             }
-            PipelineEvent::Ran {
-                stage_id,
-                result: ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done },
-            } => {
-                let notable = block_number > self.current_checkpoint;
-                self.current_checkpoint = block_number;
+            PipelineEvent::Ran { stage_id, result: ExecOutput { checkpoint, done } } => {
+                let notable = checkpoint.block_number > self.current_checkpoint.block_number;
+                self.current_checkpoint = checkpoint;
                 if done {
                     self.current_stage = None;
-                    info!(target: "reth::cli", stage = %stage_id, checkpoint = block_number, "Stage finished executing");
+                    info!(target: "reth::cli", stage = %stage_id, checkpoint = %checkpoint, "Stage finished executing");
                 } else if notable {
-                    info!(target: "reth::cli", stage = %stage_id, checkpoint = block_number, "Stage committed progress");
+                    info!(target: "reth::cli", stage = %stage_id, checkpoint = %checkpoint, "Stage committed progress");
                 }
             }
             _ => (),
@@ -160,7 +157,7 @@ where
                 .current_stage
                 .map(|id| id.to_string())
                 .unwrap_or_else(|| "None".to_string());
-            info!(target: "reth::cli", connected_peers = this.state.num_connected_peers(), %stage, checkpoint = this.state.current_checkpoint, "Status");
+            info!(target: "reth::cli", connected_peers = this.state.num_connected_peers(), %stage, checkpoint = %this.state.current_checkpoint, "Status");
         }
 
         while let Poll::Ready(Some(event)) = this.events.as_mut().poll_next(cx) {

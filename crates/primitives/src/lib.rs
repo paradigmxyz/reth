@@ -51,8 +51,8 @@ pub use chain::{
     MAINNET, SEPOLIA,
 };
 pub use checkpoints::{
-    AccountHashingCheckpoint, MerkleCheckpoint, StageCheckpoint, StageUnitCheckpoint,
-    StorageHashingCheckpoint,
+    AccountHashingCheckpoint, EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint,
+    StageUnitCheckpoint, StorageHashingCheckpoint,
 };
 pub use compression::*;
 pub use constants::{
