@@ -71,7 +71,7 @@ jobs:
         if:   matrix.arch != 'x86_64-apple-darwin'
         run:  |
           cargo install cross
-          env CROSS_PROFILE=${{ matrix.profile }} make build-aarch64
+          env CROSS_PROFILE=${{ matrix.profile }} make build-${{ matrix.arch }}
 
       - name: Build reth for x86_64-apple-darwin modern
         if:   matrix.arch == 'x86_64-apple-darwin'
