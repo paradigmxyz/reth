@@ -93,7 +93,7 @@ jobs:
           mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth.exe ./artifacts
 
       - name: Configure GPG and create artifacts
-        if: startsWith(matrix.arch, 'x86_64-windows') != true
+        if: startsWith(matrix.arch, 'x86_64-pc-windows-gnu') != true
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -106,7 +106,7 @@ jobs:
           mv *tar.gz* ..
 
       - name: Configure GPG and create artifacts Windows
-        if: startsWith(matrix.arch, 'x86_64-windows')
+        if: startsWith(matrix.arch, 'x86_64-pc-windows-gnu')
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
