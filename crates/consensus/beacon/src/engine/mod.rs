@@ -624,6 +624,7 @@ where
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
+        let block_hash = block.hash();
 
         let res = if self.sync.is_pipeline_idle() {
             // we can only insert new payloads if the pipeline is _not_ running, because it holds
@@ -634,7 +635,14 @@ where
         };
 
         let status = match res {
-            Ok(status) => Ok(status),
+            Ok(status) => {
+                if status.is_valid() {
+                    // block was successfully inserted, so we can cancel the full block request, if
+                    // any exists
+                    self.sync.cancel_full_block_request(block_hash);
+                }
+                Ok(status)
+            }
             Err(error) => {
                 debug!(target: "consensus::engine", ?error, "Error while processing payload");
                 self.map_insert_error(error)
