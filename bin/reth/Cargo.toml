@@ -9,6 +9,7 @@ build = "build.rs"
 
 [dependencies]
 # reth
+reth-config = { path = "../../crates/config" }
 reth-primitives = { path = "../../crates/primitives", features = ["arbitrary"] }
 reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature

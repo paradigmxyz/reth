@@ -19,6 +19,7 @@ use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
+use reth_config::Config;
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
@@ -45,13 +46,10 @@ use reth_provider::{BlockProvider, CanonStateSubscriptions, HeaderProvider, Shar
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::{
-    utils::{
-        chainspec::genesis_value_parser,
-        init::{init_db, init_genesis},
-        parse_socket_address,
-    },
-    Config,
+use reth_staged_sync::utils::{
+    chainspec::genesis_value_parser,
+    init::{init_db, init_genesis},
+    parse_socket_address,
 };
 use reth_stages::{
     prelude::*,

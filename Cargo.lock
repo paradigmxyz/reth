@@ -4578,6 +4578,7 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
+ "reth-config",
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
@@ -4705,6 +4706,21 @@ dependencies = [
  "revm-primitives",
  "serde",
  "test-fuzz",
+]
+
+[[package]]
+name = "reth-config"
+version = "0.1.0"
+dependencies = [
+ "confy",
+ "reth-discv4",
+ "reth-net-nat",
+ "reth-network",
+ "reth-staged-sync",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

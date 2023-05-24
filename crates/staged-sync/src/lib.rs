@@ -13,7 +13,6 @@
 //! - `geth-tests`: Runs tests that require Geth to be installed locally.
 
 pub mod config;
-pub use config::Config;
 
 pub mod utils;
 
