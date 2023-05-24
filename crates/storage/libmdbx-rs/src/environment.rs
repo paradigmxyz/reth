@@ -8,8 +8,6 @@ use crate::{
 use byteorder::{ByteOrder, NativeEndian};
 use libc::c_uint;
 use mem::size_of;
-#[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
 use std::{
     ffi::CString,
     fmt,
