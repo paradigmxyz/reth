@@ -807,7 +807,8 @@ where
         // iterate in reverse and get plain state.
 
         // Bundle execution changeset to its particular transaction and block
-        let mut block_states: BTreeMap<BlockNumber, PostState> = BTreeMap::new();
+        let mut block_states =
+            BTreeMap::from_iter(block_bodies.iter().map(|(num, _)| (*num, PostState::default())));
 
         let mut plain_accounts_cursor = self.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.cursor_dup_write::<tables::PlainStorageState>()?;
