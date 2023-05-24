@@ -1733,7 +1733,7 @@ mod tests {
                 env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: PayloadValidationError::InvalidBlockData
+                validation_error: PayloadValidationError::InvalidBlockData,
             })
             .with_latest_valid_hash(H256::zero());
             assert_eq!(result, expected_result);
