@@ -67,22 +67,6 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         Ok(Self { db })
     }
 
-    /// Seeds the database with some random data, only used for testing
-    pub fn seed(&mut self, len: u64) -> Result<()> {
-        info!(target: "reth::cli", "Generating random block range from 0 to {len}");
-        let chain = random_block_range(0..=len - 1, Default::default(), 0..64);
-
-        self.db.update(|tx| {
-            chain.into_iter().try_for_each(|block| {
-                insert_canonical_block(tx, block, None)?;
-                Ok::<_, eyre::Error>(())
-            })
-        })??;
-
-        info!(target: "reth::cli", "Database seeded with {len} blocks");
-        Ok(())
-    }
-
     /// Grabs the contents of the table within a certain index range and places the
     /// entries into a [`HashMap`][std::collections::HashMap].
     pub fn list<T: Table>(
