@@ -334,7 +334,7 @@ where
         }
 
         let status = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-            validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+            validation_error: PayloadValidationError::LinksToRejectedPayload,
         })
         .with_latest_valid_hash(latest_valid_hash);
 
@@ -533,9 +533,9 @@ where
 
         #[allow(clippy::single_match)]
         match &error {
-            Error::Execution(error @ BlockExecutionError::BlockPreMerge { .. }) => {
+            Error::Execution(BlockExecutionError::BlockPreMerge { hash }) => {
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                    validation_error: error.to_string(),
+                    validation_error: PayloadValidationError::InvalidBlockHash { hash: *hash },
                 })
                 .with_latest_valid_hash(H256::zero())
             }
@@ -776,7 +776,9 @@ where
 
                 let latest_valid_hash =
                     self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-                let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+                let status = PayloadStatusEnum::Invalid {
+                    validation_error: PayloadValidationError::InvalidBlockData,
+                };
                 Ok(PayloadStatus::new(status, latest_valid_hash))
             }
         }
@@ -1538,8 +1540,7 @@ mod tests {
                 })
                 .await;
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
-                    .to_string(),
+                validation_error: PayloadValidationError::InvalidBlockHash { hash: block1.hash },
             })
             .with_latest_valid_hash(H256::zero());
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
@@ -1722,8 +1723,7 @@ mod tests {
                 .await;
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
-                    .to_string(),
+                validation_error: PayloadValidationError::InvalidBlockHash { hash: block1.hash },
             })
             .with_latest_valid_hash(H256::zero());
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
@@ -1733,8 +1733,7 @@ mod tests {
                 env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockExecutionError::BlockPreMerge { hash: block2.hash }
-                    .to_string(),
+                validation_error: PayloadValidationError::InvalidBlockData
             })
             .with_latest_valid_hash(H256::zero());
             assert_eq!(result, expected_result);

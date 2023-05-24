@@ -324,10 +324,12 @@ impl Serialize for PayloadStatus {
 impl From<PayloadError> for PayloadStatusEnum {
     fn from(error: PayloadError) -> Self {
         match error {
-            error @ PayloadError::BlockHash { .. } => {
-                PayloadStatusEnum::InvalidBlockHash { validation_error: error.to_string() }
-            }
-            _ => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
+            PayloadError::BlockHash { consensus, .. } => PayloadStatusEnum::InvalidBlockHash {
+                validation_error: PayloadValidationError::InvalidBlockHash { hash: consensus },
+            },
+            _ => PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::InvalidBlockData,
+            },
         }
     }
 }
@@ -345,7 +347,7 @@ pub enum PayloadStatusEnum {
     ///   - forkchoiceUpdateV1: if the new head is unknown, pre-merge, or reorg to it fails
     Invalid {
         #[serde(rename = "validationError")]
-        validation_error: String,
+        validation_error: PayloadValidationError,
     },
 
     /// SYNCING is returned by the engine API in the following calls:
@@ -358,7 +360,7 @@ pub enum PayloadStatusEnum {
     Accepted,
     InvalidBlockHash {
         #[serde(rename = "validationError")]
-        validation_error: String,
+        validation_error: PayloadValidationError,
     },
 }
 
@@ -375,7 +377,7 @@ impl PayloadStatusEnum {
     }
 
     /// Returns the validation error if the payload status is invalid.
-    pub fn validation_error(&self) -> Option<&str> {
+    pub fn validation_error(&self) -> Option<&PayloadValidationError> {
         match self {
             PayloadStatusEnum::InvalidBlockHash { validation_error } |
             PayloadStatusEnum::Invalid { validation_error } => Some(validation_error),
@@ -425,7 +427,7 @@ impl std::fmt::Display for PayloadStatusEnum {
 /// Various errors that can occur when validating a payload or forkchoice update.
 ///
 /// This is intended for the [PayloadStatusEnum::Invalid] variant.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PayloadValidationError {
     /// Thrown when a forkchoice update's head links to a previously rejected payload.
     #[error("links to previously rejected block")]
@@ -433,6 +435,12 @@ pub enum PayloadValidationError {
     /// Thrown when a new payload contains a wrong block number.
     #[error("invalid block number")]
     InvalidBlockNumber,
+    /// Thrown when a new payload contains a wrong block hash.
+    #[error("invalid block hash")]
+    InvalidBlockHash { hash: H256 },
+    /// Thrown when a new payload violates consensus or execution rules
+    #[error("invalid block data")]
+    InvalidBlockData,
     /// Thrown when a new payload contains a wrong state root
     #[error("invalid merkle root (remote: {remote:?} local: {local:?})")]
     InvalidStateRoot {
