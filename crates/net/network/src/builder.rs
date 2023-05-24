@@ -1,8 +1,10 @@
 //! Builder support for configuring the entire setup.
 
 use crate::{
-    eth_requests::EthRequestHandler, transactions::TransactionsManager, NetworkHandle,
-    NetworkManager,
+    eth_requests::EthRequestHandler,
+    peers::{DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND},
+    transactions::TransactionsManager,
+    NetworkHandle, NetworkManager,
 };
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
@@ -49,7 +51,9 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
         client: Client,
     ) -> NetworkBuilder<C, Tx, EthRequestHandler<Client>> {
         let NetworkBuilder { mut network, transactions, .. } = self;
-        let (tx, rx) = mpsc::unbounded_channel();
+        // We use twice the maximum number of available slots, if all slots are occupied
+        // This is the same as session_event_buffer size in [`SessionsConfig`]
+        let (tx, rx) = mpsc::channel((DEFAULT_MAX_PEERS_OUTBOUND + DEFAULT_MAX_PEERS_INBOUND) * 2);
         network.set_eth_request_handler(tx);
         let peers = network.handle().peers_handle().clone();
         let request_handler = EthRequestHandler::new(client, peers, rx);

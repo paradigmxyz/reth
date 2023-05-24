@@ -100,7 +100,10 @@ pub struct NetworkManager<C> {
     to_transactions_manager: Option<mpsc::UnboundedSender<NetworkTransactionEvent>>,
     /// Sender half to send events to the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
-    to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
+    ///
+    /// We use a bounded channel here to avoid unbounded build up if the node is flooded with
+    /// requests.
+    to_eth_request_handler: Option<mpsc::Sender<IncomingEthRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
@@ -122,7 +125,7 @@ impl<C> NetworkManager<C> {
 
     /// Sets the dedicated channel for events indented for the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
-    pub fn set_eth_request_handler(&mut self, tx: mpsc::UnboundedSender<IncomingEthRequest>) {
+    pub fn set_eth_request_handler(&mut self, tx: mpsc::Sender<IncomingEthRequest>) {
         self.to_eth_request_handler = Some(tx);
     }
 
@@ -363,7 +366,7 @@ where
     /// configured.
     fn delegate_eth_request(&self, event: IncomingEthRequest) {
         if let Some(ref reqs) = self.to_eth_request_handler {
-            let _ = reqs.send(event);
+            let _ = reqs.try_send(event);
         }
     }
 

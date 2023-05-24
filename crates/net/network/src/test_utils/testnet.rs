@@ -1,8 +1,10 @@
 //! A network implementation for testing purposes.
 
 use crate::{
-    error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkConfigBuilder,
-    NetworkEvent, NetworkHandle, NetworkManager,
+    error::NetworkError,
+    eth_requests::EthRequestHandler,
+    peers::{DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND},
+    NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
@@ -18,7 +20,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    sync::{mpsc::unbounded_channel, oneshot},
+    sync::{mpsc::channel, oneshot},
     task::JoinHandle,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -237,9 +239,9 @@ where
         self.network.handle().clone()
     }
 
-    /// Set a new request handler that's connected tot the peer's network
+    /// Set a new request handler that's connected to the peer's network
     pub fn install_request_handler(&mut self) {
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = channel((DEFAULT_MAX_PEERS_OUTBOUND + DEFAULT_MAX_PEERS_INBOUND) * 2);
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
         let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);
