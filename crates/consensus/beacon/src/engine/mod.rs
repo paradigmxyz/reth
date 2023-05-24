@@ -871,8 +871,16 @@ where
                         // update the canon chain if continuous is enabled
                         if self.sync.run_pipeline_continuously() {
                             let max_block = ctrl.progress().unwrap_or_default();
-                            let max_header = match self.get_canonical_header(max_block) {
-                                Ok(header) => header,
+                            let max_header = match self.blockchain.sealed_header(max_block) {
+                                Ok(header) => match header {
+                                    Some(header) => header,
+                                    None => {
+                                        return Some(Err(Error::Provider(
+                                            ProviderError::HeaderNotFound(max_block.into()),
+                                        )
+                                        .into()))
+                                    }
+                                },
                                 Err(error) => {
                                     error!(target: "consensus::engine", ?error, "Error getting canonical header for continuous sync");
                                     return Some(Err(error.into()))
@@ -897,20 +905,6 @@ where
         };
 
         None
-    }
-
-    /// Get the canonical header for the requested block. This checks the database for both the
-    /// block header and the block hash.
-    fn get_canonical_header(
-        &self,
-        block_number: BlockNumber,
-    ) -> Result<SealedHeader, reth_interfaces::Error> {
-        let headers = self.blockchain.sealed_headers_range(block_number..=block_number)?;
-        let header = match headers.first() {
-            Some(header) => header,
-            None => return Err(Error::Provider(ProviderError::HeaderNotFound(block_number.into()))),
-        };
-        Ok(header.clone())
     }
 }
 
