@@ -105,7 +105,7 @@ jobs:
           echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
           mv *tar.gz* ..
 
-      - name: Configure GPG and create artifacts Windows
+      - name: Configure GPG and create artifacts (Windows)
         if: startsWith(matrix.arch, 'x86_64-pc-windows-gnu')
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
