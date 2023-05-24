@@ -1549,9 +1549,7 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_interfaces::{
-            executor::BlockExecutionError, test_utils::generators::random_block,
-        };
+        use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::{Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
