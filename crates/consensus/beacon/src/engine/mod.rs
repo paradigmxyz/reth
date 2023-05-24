@@ -868,6 +868,27 @@ where
                             return None
                         }
 
+                        // update the canon chain if continuous is enabled
+                        if self.sync.run_pipeline_continuously() {
+                            let max_block = ctrl.progress().unwrap_or_default();
+                            let max_header = match self.blockchain.sealed_header(max_block) {
+                                Ok(header) => match header {
+                                    Some(header) => header,
+                                    None => {
+                                        return Some(Err(Error::Provider(
+                                            ProviderError::HeaderNotFound(max_block.into()),
+                                        )
+                                        .into()))
+                                    }
+                                },
+                                Err(error) => {
+                                    error!(target: "consensus::engine", ?error, "Error getting canonical header for continuous sync");
+                                    return Some(Err(error.into()))
+                                }
+                            };
+                            self.blockchain.set_canonical_head(max_header);
+                        }
+
                         // Update the state and hashes of the blockchain tree if possible.
                         match self.restore_tree_if_possible(current_state) {
                             Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
