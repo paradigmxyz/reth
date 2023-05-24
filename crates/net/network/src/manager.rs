@@ -52,7 +52,7 @@ use std::{
     },
     task::{Context, Poll},
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, trace};
 /// Manages the _entire_ state of the network.
@@ -101,8 +101,16 @@ pub struct NetworkManager<C> {
     /// Sender half to send events to the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     ///
-    /// We use a bounded channel here to avoid unbounded build up if the node is flooded with
-    /// requests.
+    /// The channel that originally receives and bundles all requests from all sessions is already
+    /// bounded. However, since handling an eth request is more I/O intensive than delegating
+    /// them from the bounded channel to the eth-request channel, it is possible that this
+    /// builds up if the node is flooded with requests.
+    ///
+    /// Even though nonmalicious requests are relatively cheap, it's possible to craft
+    /// body requests with bogus data up until the allowed max message size limit.
+    /// Thus, we use a bounded channel here to avoid unbounded build up if the node is flooded with
+    /// requests. This channel size is set at
+    /// [`ETH_REQUEST_CHANNEL_CAPACITY`](crate::builder::ETH_REQUEST_CHANNEL_CAPACITY)
     to_eth_request_handler: Option<mpsc::Sender<IncomingEthRequest>>,
     /// Tracks the number of active session (connected peers).
     ///
@@ -366,7 +374,12 @@ where
     /// configured.
     fn delegate_eth_request(&self, event: IncomingEthRequest) {
         if let Some(ref reqs) = self.to_eth_request_handler {
-            let _ = reqs.try_send(event);
+            let _ = reqs.try_send(event).map_err(|e| {
+                if let TrySendError::Full(request) = e {
+                    debug!(target:"net", ?request, "EthRequestHandler channel is full!");
+                    self.metrics.total_dropped_eth_requests_at_full_capacity.increment(1);
+                }
+            });
         }
     }
 

@@ -1,9 +1,7 @@
 //! A network implementation for testing purposes.
 
 use crate::{
-    error::NetworkError,
-    eth_requests::EthRequestHandler,
-    peers::{DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND},
+    builder::ETH_REQUEST_CHANNEL_CAPACITY, error::NetworkError, eth_requests::EthRequestHandler,
     NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use futures::{FutureExt, StreamExt};
@@ -241,7 +239,7 @@ where
 
     /// Set a new request handler that's connected to the peer's network
     pub fn install_request_handler(&mut self) {
-        let (tx, rx) = channel((DEFAULT_MAX_PEERS_OUTBOUND + DEFAULT_MAX_PEERS_INBOUND) * 2);
+        let (tx, rx) = channel(ETH_REQUEST_CHANNEL_CAPACITY);
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
         let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);

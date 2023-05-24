@@ -1,13 +1,15 @@
 //! Builder support for configuring the entire setup.
 
 use crate::{
-    eth_requests::EthRequestHandler,
-    peers::{DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND},
-    transactions::TransactionsManager,
-    NetworkHandle, NetworkManager,
+    eth_requests::EthRequestHandler, transactions::TransactionsManager, NetworkHandle,
+    NetworkManager,
 };
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
+
+/// We set the max channel capacity of the EthRequestHandler to 256
+/// 256 requests with malicious 10MB body requests is 2.6GB which can be absorbed by the node.
+pub(crate) const ETH_REQUEST_CHANNEL_CAPACITY: usize = 256;
 
 /// A builder that can configure all components of the network.
 pub struct NetworkBuilder<C, Tx, Eth> {
@@ -51,9 +53,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
         client: Client,
     ) -> NetworkBuilder<C, Tx, EthRequestHandler<Client>> {
         let NetworkBuilder { mut network, transactions, .. } = self;
-        // We use twice the maximum number of available slots, if all slots are occupied
-        // This is the same as session_event_buffer size in [`SessionsConfig`]
-        let (tx, rx) = mpsc::channel((DEFAULT_MAX_PEERS_OUTBOUND + DEFAULT_MAX_PEERS_INBOUND) * 2);
+        let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
         network.set_eth_request_handler(tx);
         let peers = network.handle().peers_handle().clone();
         let request_handler = EthRequestHandler::new(client, peers, rx);
