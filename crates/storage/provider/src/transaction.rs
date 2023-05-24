@@ -602,7 +602,7 @@ where
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(Vec::new())
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
         }
 
         // Get transactions and senders
