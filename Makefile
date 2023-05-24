@@ -41,16 +41,15 @@ build-native-%:
 # - The current user is in the `docker` group.
 #
 # The resulting binaries will be created in the `target/` directory.
-#
-# Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
-# See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
-build-%: export RUSTFLAGS=-C link-arg=-lgcc -Clink-arg=-static-libgcc
 
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc,$(FEATURES))
 
+# Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
+# See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
-	cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+ 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
