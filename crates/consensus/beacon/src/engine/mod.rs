@@ -290,9 +290,20 @@ where
         // If this is sent from new payload then the parent hash could be in a side chain, and is
         // not necessarily canonical
         if self.blockchain.header_by_hash(parent_hash).is_some() {
+            // parent is in side-chain: validated but not canonical yet
             Some(parent_hash)
         } else {
-            self.blockchain.find_canonical_ancestor(parent_hash)
+            let parent_hash = self.blockchain.find_canonical_ancestor(parent_hash)?;
+            let parent_header = self.blockchain.header(&parent_hash).ok().flatten()?;
+
+            // we need to check if the parent block is the last POW block, if so then the payload is
+            // the first POS. The engine API spec mandates a zero hash to be returned: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
+            if parent_header.difficulty != U256::ZERO {
+                return Some(H256::zero())
+            }
+
+            // parent is canonical POS block
+            Some(parent_hash)
         }
     }
 
