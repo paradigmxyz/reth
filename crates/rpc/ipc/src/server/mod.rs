@@ -123,7 +123,7 @@ impl IpcServer {
                 #[cfg(windows)]
                 let connections = Box::pin(connections);
                 Incoming::new(connections)
-            },
+            }
             Err(err) => {
                 on_ready.send(Err(err.to_string())).ok();
                 return Err(err)
