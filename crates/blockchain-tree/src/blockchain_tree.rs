@@ -3,7 +3,6 @@ use crate::{
     canonical_chain::CanonicalChain, chain::BlockChainId, AppendableChain, BlockBuffer,
     BlockIndices, BlockchainTreeConfig, PostStateData, TreeExternals,
 };
-use linked_hash_set::LinkedHashSet;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{
@@ -989,6 +988,7 @@ mod tests {
 
     use super::*;
     use assert_matches::assert_matches;
+    use linked_hash_set::LinkedHashSet;
     use reth_db::{
         mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
         transaction::DbTxMut,
