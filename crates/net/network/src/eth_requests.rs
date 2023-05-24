@@ -16,8 +16,8 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio::sync::{mpsc::Receiver, oneshot};
+use tokio_stream::wrappers::ReceiverStream;
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
@@ -54,7 +54,7 @@ pub struct EthRequestHandler<C> {
     // TODO use to report spammers
     peers: PeersHandle,
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
-    incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
+    incoming_requests: ReceiverStream<IncomingEthRequest>,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
 }
@@ -62,13 +62,9 @@ pub struct EthRequestHandler<C> {
 // === impl EthRequestHandler ===
 impl<C> EthRequestHandler<C> {
     /// Create a new instance
-    pub fn new(
-        client: C,
-        peers: PeersHandle,
-        incoming: UnboundedReceiver<IncomingEthRequest>,
-    ) -> Self {
+    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest>) -> Self {
         let metrics = Default::default();
-        Self { client, peers, incoming_requests: UnboundedReceiverStream::new(incoming), metrics }
+        Self { client, peers, incoming_requests: ReceiverStream::new(incoming), metrics }
     }
 }
 
