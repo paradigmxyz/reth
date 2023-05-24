@@ -79,6 +79,13 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                         #(#roundtrips)*
                     });
                 }
+
+                #[test]
+                fn malformed_rlp_checks() {
+                    let mut buf = vec![];
+                    let field = super::#type_ident::default();
+                    #(#malformed_checks)*
+                }
             }
         }
     }
