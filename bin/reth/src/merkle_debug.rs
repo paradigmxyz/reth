@@ -69,15 +69,18 @@ impl Command {
             EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default().block_number;
         assert!(execution_checkpoint_block < self.to, "Nothing to run");
 
-        let should_reset_stages = !(execution_checkpoint_block ==
-            ACCOUNT_HASHING.get_checkpoint(tx.deref())?.unwrap_or_default().block_number &&
-            execution_checkpoint_block ==
-                STORAGE_HASHING.get_checkpoint(tx.deref())?.unwrap_or_default().block_number &&
-            execution_checkpoint_block ==
-                MERKLE_EXECUTION
-                    .get_checkpoint(tx.deref())?
-                    .unwrap_or_default()
-                    .block_number);
+        // Check if any of hashing or merkle stages aren't on the same block number as
+        // Execution stage or have any intermediate progress.
+        let should_reset_stages = [ACCOUNT_HASHING, STORAGE_HASHING, MERKLE_EXECUTION]
+            .into_iter()
+            .map(|stage| stage.get_checkpoint(tx.deref()))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(Option::unwrap_or_default)
+            .any(|checkpoint| {
+                checkpoint.block_number != execution_checkpoint_block ||
+                    checkpoint.stage_checkpoint.is_some()
+            });
 
         let factory = reth_revm::Factory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
