@@ -5,34 +5,32 @@ BIN_DIR = "dist/bin"
 
 BUILD_PATH = "target"
 
-# List of features to use when building natively. Can be overriden via the environment.
+# List of features to use when building. Can be overriden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
-    FEATURES?=
+    FEATURES ?=
 else
-    FEATURES?=jemalloc
+    FEATURES ?= jemalloc
 endif
 
-# List of features to use when cross-compiling. Can be overridden via the environment.
-CROSS_FEATURES ?= jemalloc
-
-# Cargo profile for Cross builds. Default is for local builds, CI uses an override.
-CROSS_PROFILE ?= release
-
-# Cargo profile for regular builds.
+# Cargo profile for builds. Default is for local builds, CI uses an override.
 PROFILE ?= release
 
 # Extra flags for Cargo
 CARGO_INSTALL_EXTRA_FLAGS ?=
 
-# Builds the reth binary in release (optimized).
+# Builds and installs the reth binary.
 #
-# Binaries will most likely be found in `./target/release`
+# The binary will most likely be in `~/.cargo/bin`
 install:
 	cargo install --path bin/reth --bin reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
+
+# Builds the reth binary natively.
+build-native-%:
+	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -49,14 +47,23 @@ install:
 build-%: export RUSTFLAGS=-C link-arg=-lgcc -Clink-arg=-static-libgcc
 
 # No jemalloc on Windows
-build-x86_64-pc-windows-gnu: CROSS_FEATURES := $(filter-out jemalloc,$(CROSS_FEATURES))
+build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc,$(FEATURES))
 
 build-%:
-	cross build --bin reth --target $* --features "$(CROSS_FEATURES)" --profile "$(CROSS_PROFILE)"
+	cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+
+# Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
+# If we wanted to, we would need to build a custom Docker image with the SDK available.
+#
+# Note: You must set `SDKROOT` and `MACOSX_DEPLOYMENT_TARGET`. These can be found using `xcrun`.
+#
+# `SDKROOT=$(xcrun -sdk macosx --show-sdk-path) MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)`
+build-x86_64-apple-darwin: build-native-x86_64-apple-darwin
+build-aarch64-apple-darwin: build-native-aarch64-apple-darwin
 
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
-	cp $(BUILD_PATH)/$(1)/$(CROSS_PROFILE)/$(2) $(BIN_DIR)/$(2)
+	cp $(BUILD_PATH)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
 	cd $(BIN_DIR) && \
 		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) && \
 		rm $(2)
@@ -67,6 +74,8 @@ endef
 #
 # The current git tag will be used as the version in the output file names. You
 # will likely need to use `git tag` and create a semver tag (e.g., `v0.2.3`).
+#
+# Note: This excludes macOS tarballs because of SDK licensing issues.
 build-release-tarballs:
 	[ -d $(BIN_DIR) ] || mkdir -p $(BIN_DIR)
 	$(MAKE) build-x86_64-unknown-linux-gnu
@@ -76,7 +85,7 @@ build-release-tarballs:
 	$(MAKE) build-x86_64-pc-windows-gnu
 	$(call tarball_release_binary,"x86_64-pc-windows-gnu","reth.exe","")
 
-# Performs a `cargo` clean and removes the `dist` directory
+# Performs a `cargo` clean and removes the binary directory
 clean:
 	cargo clean
-	rm -r dist
+	rm -r $(BIN_DIR)
