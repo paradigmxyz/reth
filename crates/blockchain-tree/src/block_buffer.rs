@@ -53,7 +53,7 @@ impl BlockBuffer {
         let num_hash = block.num_hash();
 
         self.parent_to_child.entry(block.parent_hash).or_default().insert(block.num_hash());
-        self.hash_to_num.entry(block.hash).or_insert(block.number);
+        self.hash_to_num.insert(block.hash, block.number);
         self.blocks.entry(block.number).or_default().insert(block.hash, block);
 
         if let Some((evicted_num_hash, _)) =
@@ -63,7 +63,6 @@ impl BlockBuffer {
             if let Some(evicted_block) = self.remove_from_blocks(&evicted_num_hash) {
                 // evict the block if limit is hit
                 self.remove_from_parent(evicted_block.parent_hash, &evicted_num_hash);
-                self.remove_from_hash_to_num(evicted_block.hash);
             }
         }
     }
@@ -78,7 +77,6 @@ impl BlockBuffer {
         // remove parent block if present
         let mut taken = Vec::new();
         if let Some(block) = self.remove_from_blocks(&parent) {
-            self.remove_from_hash_to_num(parent.hash);
             taken.push(block);
         }
 
@@ -136,14 +134,14 @@ impl BlockBuffer {
     }
 
     /// Remove from the hash to num map.
-    fn remove_from_hash_to_num(&mut self, hash: BlockHash) {
-        if let hash_map::Entry::Occupied(entry) = self.hash_to_num.entry(hash) {
-            entry.remove();
-        }
+    fn remove_from_hash_to_num(&mut self, hash: &BlockHash) {
+        self.hash_to_num.remove(hash);
     }
 
     /// Remove from parent child connection. Dont touch childrens.
     fn remove_from_parent(&mut self, parent: BlockHash, block: &BlockNumHash) {
+        self.remove_from_hash_to_num(&parent);
+
         // remove from parent to child connection, but only for this block parent.
         if let hash_map::Entry::Occupied(mut entry) = self.parent_to_child.entry(parent) {
             entry.get_mut().remove(block);
@@ -158,6 +156,8 @@ impl BlockBuffer {
     ///
     /// Note: This function will not remove block from the `self.parent_to_child` connection.
     fn remove_from_blocks(&mut self, block: &BlockNumHash) -> Option<SealedBlockWithSenders> {
+        self.remove_from_hash_to_num(&block.hash);
+
         if let Entry::Occupied(mut entry) = self.blocks.entry(block.number) {
             let ret = entry.get_mut().remove(&block.hash);
             // if set is empty remove block entry.
@@ -182,7 +182,6 @@ impl BlockBuffer {
                 // remove child from buffer
                 for child in parent_childrens.iter() {
                     if let Some(block) = self.remove_from_blocks(child) {
-                        self.remove_from_hash_to_num(child.hash);
                         removed_blocks.push(block);
                     }
                 }
