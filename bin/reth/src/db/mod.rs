@@ -60,12 +60,6 @@ pub enum Subcommands {
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
-    /// Seeds the database with random blocks on top of each other
-    Seed {
-        /// How many blocks to generate
-        #[arg(default_value = DEFAULT_NUM_ITEMS)]
-        len: u64,
-    },
     /// Deletes all database entries
     Drop,
 }
@@ -149,9 +143,6 @@ impl Command {
                 })??;
 
                 println!("{stats_table}");
-            }
-            Subcommands::Seed { len } => {
-                tool.seed(*len)?;
             }
             Subcommands::List(args) => {
                 macro_rules! table_tui {

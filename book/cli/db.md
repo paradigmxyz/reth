@@ -12,8 +12,6 @@ Commands:
           Lists all the tables, their entry count and their size
   list
           Lists the contents of a table
-  seed
-          Seeds the database with random blocks on top of each other
   drop
           Deletes all database entries
   help
