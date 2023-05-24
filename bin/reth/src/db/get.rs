@@ -16,7 +16,7 @@ pub struct Command {
     pub table: String, // TODO: Convert to enum
 
     /// The key to get content for
-    #[arg(long, value_parser = maybe_json_value_parser)]
+    #[arg(value_parser = maybe_json_value_parser)]
     pub key: String,
 }
 
@@ -111,13 +111,12 @@ mod tests {
 
     #[test]
     fn parse_numeric_key_args() {
-        let args = CommandParser::<Command>::parse_from(["reth", "Headers", "--key", "123"]).args;
+        let args = CommandParser::<Command>::parse_from(["reth", "Headers", "123"]).args;
         assert_eq!(args.table_key::<Headers>().unwrap(), 123);
 
         let args = CommandParser::<Command>::parse_from([
             "reth",
             "HashedAccount",
-            "--key",
             "0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac",
         ])
         .args;
@@ -131,14 +130,13 @@ mod tests {
     #[test]
     fn parse_string_key_args() {
         let args =
-            CommandParser::<Command>::parse_from(["reth", "SyncStage", "--key", "MerkleExecution"])
-                .args;
+            CommandParser::<Command>::parse_from(["reth", "SyncStage", "MerkleExecution"]).args;
         assert_eq!(args.table_key::<SyncStage>().unwrap(), "MerkleExecution");
     }
 
     #[test]
     fn parse_json_key_args() {
-        let args = CommandParser::<Command>::parse_from(["reth", "StorageHistory", "--key", r#"{ "address": "0x01957911244e546ce519fbac6f798958fafadb41", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#]).args;
+        let args = CommandParser::<Command>::parse_from(["reth", "StorageHistory", r#"{ "address": "0x01957911244e546ce519fbac6f798958fafadb41", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#]).args;
         assert_eq!(
             args.table_key::<StorageHistory>().unwrap(),
             StorageShardedKey::new(
