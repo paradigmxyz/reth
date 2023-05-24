@@ -59,7 +59,7 @@ build-%:
 # `SDKROOT=$(xcrun -sdk macosx --show-sdk-path) MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)`
 build-x86_64-apple-darwin:
 	$(MAKE) build-native-x86_64-apple-darwin
-build-aarch64-apple-darwin::
+build-aarch64-apple-darwin:
 	$(MAKE) build-native-aarch64-apple-darwin
 
 # Create a `.tar.gz` containing a binary for a specific target.
