@@ -36,7 +36,7 @@ impl<'tx, C> HashedStorageCursor for C
 where
     C: DbCursorRO<'tx, tables::HashedStorage> + DbDupCursorRO<'tx, tables::HashedStorage>,
 {
-    fn is_empty(&mut self, key: H256) -> Result<bool, reth_db::DatabaseError> {
+    fn is_storage_empty(&mut self, key: H256) -> Result<bool, reth_db::DatabaseError> {
         Ok(self.seek_exact(key)?.is_none())
     }
 
