@@ -7,15 +7,11 @@ use reth_db::{
     table::Table,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{
-    p2p::{
-        headers::client::{HeadersClient, HeadersRequest},
-        priority::Priority,
-    },
-    test_utils::generators::random_block_range,
+use reth_interfaces::p2p::{
+    headers::client::{HeadersClient, HeadersRequest},
+    priority::Priority,
 };
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
-use reth_provider::insert_canonical_block;
 use std::{collections::BTreeMap, path::Path, time::Duration};
 use tracing::info;
 
