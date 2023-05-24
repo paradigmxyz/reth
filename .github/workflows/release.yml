@@ -120,7 +120,7 @@ jobs:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          echo $env:GPG_SIGNING_KEY | base64 --decode | gpg --batch --import
+          echo $env:GPG_SIGNING_KEY | base64 --decode -i | gpg --batch --import
           cd artifacts
           tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth.exe
           gpg --passphrase "$env:GPG_PASSPHRASE" --batch --pinentry-mode loopback -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
