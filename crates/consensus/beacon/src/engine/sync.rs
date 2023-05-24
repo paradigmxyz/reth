@@ -85,6 +85,11 @@ where
         self.inflight_full_block_requests.clear();
     }
 
+    /// Cancels the full block request with the given hash.
+    pub(crate) fn cancel_full_block_request(&mut self, hash: H256) {
+        self.inflight_full_block_requests.retain(|req| *req.hash() != hash);
+    }
+
     /// Returns `true` if the pipeline is idle.
     pub(crate) fn is_pipeline_idle(&self) -> bool {
         self.pipeline_state.is_idle()
