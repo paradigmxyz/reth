@@ -51,6 +51,9 @@ jobs:
         uses: actions/checkout@v3
       - name: Get latest version of stable Rust
         run: rustup update stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       # ==============================
       # Windows dependencies
@@ -88,11 +91,15 @@ jobs:
           mkdir artifacts
           mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth ./artifacts
 
-      - name: Move cross-compiled binary
+      - name: Move cross-compiled binary (Windows)
         if:   matrix.arch == 'x86_64-pc-windows-gnu'
         run: |
           mkdir artifacts
           mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth.exe ./artifacts
+
+      # ==============================
+      #       Signing
+      # ==============================
 
       - name: Configure GPG and create artifacts
         if: startsWith(matrix.arch, 'x86_64-pc-windows-gnu') != true
