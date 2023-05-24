@@ -145,7 +145,8 @@ where
 {
     let ctrl_c = tokio::signal::ctrl_c();
 
-    if cfg!(unix) {
+    #[cfg(unix)]
+    {
         let mut stream = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let sigterm = stream.recv();
         pin_mut!(sigterm, ctrl_c, fut);
@@ -159,7 +160,10 @@ where
             },
             res = fut => res?,
         }
-    } else {
+    }
+
+    #[cfg(not(unix))]
+    {
         pin_mut!(ctrl_c, fut);
 
         tokio::select! {

@@ -35,6 +35,9 @@ pub struct NetworkMetrics {
 
     /// Number of invalid/malformed messages received from peers
     pub(crate) invalid_messages_received: Counter,
+
+    /// Number of Eth Requests dropped due to channel being at full capacity
+    pub(crate) total_dropped_eth_requests_at_full_capacity: Counter,
 }
 
 /// Metrics for the TransactionsManager

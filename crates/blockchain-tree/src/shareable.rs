@@ -5,6 +5,7 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::InsertBlockError, BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer,
+        CanonicalOutcome,
     },
     consensus::Consensus,
     Error,
@@ -39,16 +40,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn insert_block_without_senders(
-        &self,
-        block: SealedBlock,
-    ) -> Result<BlockStatus, InsertBlockError> {
-        match block.try_seal_with_senders() {
-            Ok(block) => self.tree.write().insert_block_inner(block, true),
-            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
-        }
-    }
-
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         self.tree.write().buffer_block(block)
     }
@@ -68,7 +59,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         self.tree.write().restore_canonical_hashes(last_finalized_block)
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<(), Error> {
+    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error> {
         trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
         self.tree.write().make_canonical(block_hash)
     }

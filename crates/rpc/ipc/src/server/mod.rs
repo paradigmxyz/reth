@@ -119,7 +119,11 @@ impl IpcServer {
 
         let mut connections = FutureDriver::default();
         let incoming = match self.endpoint.incoming() {
-            Ok(connections) => Incoming::new(connections),
+            Ok(connections) => {
+                #[cfg(windows)]
+                let connections = Box::pin(connections);
+                Incoming::new(connections)
+            }
             Err(err) => {
                 on_ready.send(Err(err.to_string())).ok();
                 return Err(err)
@@ -577,7 +581,7 @@ impl<B, L> Builder<B, L> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::client::IpcClientBuilder;

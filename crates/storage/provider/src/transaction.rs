@@ -180,9 +180,10 @@ where
         Ok(td.into())
     }
 
-    /// Unwind table by some number key
+    /// Unwind table by some number key.
+    /// Returns number of rows unwound.
     #[inline]
-    pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<(), DbError>
+    pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<usize, DbError>
     where
         DB: Database,
         T: Table<Key = u64>,
@@ -190,10 +191,11 @@ where
         self.unwind_table::<T, _>(num, |key| key)
     }
 
-    /// Unwind the table to a provided block
+    /// Unwind the table to a provided block.
+    /// Returns number of rows unwound.
     ///
     /// Note: Key is not inclusive and specified key would stay in db.
-    pub(crate) fn unwind_table<T, F>(&self, key: u64, mut selector: F) -> Result<(), DbError>
+    pub(crate) fn unwind_table<T, F>(&self, key: u64, mut selector: F) -> Result<usize, DbError>
     where
         DB: Database,
         T: Table,
@@ -201,14 +203,17 @@ where
     {
         let mut cursor = self.cursor_write::<T>()?;
         let mut reverse_walker = cursor.walk_back(None)?;
+        let mut deleted = 0;
 
         while let Some(Ok((entry_key, _))) = reverse_walker.next() {
             if selector(entry_key.clone()) <= key {
                 break
             }
             self.delete::<T>(entry_key, None)?;
+            deleted += 1;
         }
-        Ok(())
+
+        Ok(deleted)
     }
 
     /// Unwind a table forward by a [Walker][reth_db::abstraction::cursor::Walker] on another table
@@ -602,7 +607,7 @@ where
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(Vec::new())
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
         }
 
         // Get transactions and senders
@@ -807,7 +812,8 @@ where
         // iterate in reverse and get plain state.
 
         // Bundle execution changeset to its particular transaction and block
-        let mut block_states: BTreeMap<BlockNumber, PostState> = BTreeMap::new();
+        let mut block_states =
+            BTreeMap::from_iter(block_bodies.iter().map(|(num, _)| (*num, PostState::default())));
 
         let mut plain_accounts_cursor = self.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.cursor_dup_write::<tables::PlainStorageState>()?;

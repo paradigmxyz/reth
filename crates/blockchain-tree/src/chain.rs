@@ -2,6 +2,7 @@
 //!
 //! A [`Chain`] contains the state of accounts for the chain after execution of its constituent
 //! blocks, as well as a list of the blocks the chain is composed of.
+use super::externals::TreeExternals;
 use crate::{post_state::PostState, PostStateDataRef};
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -20,8 +21,6 @@ use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
 };
-
-use super::externals::TreeExternals;
 
 /// The ID of a sidechain internally in a [`BlockchainTree`][super::BlockchainTree].
 pub(crate) type BlockChainId = u64;
@@ -58,10 +57,10 @@ impl AppendableChain {
         self.chain
     }
 
-    /// Create a new chain that _extends the canonical chain_.
+    /// Create a new chain that forks off the canonical.
     ///
     /// This will also verify the state root of the block extending the canonical chain.
-    pub fn new_canonical_fork_extend<DB, C, EF>(
+    pub fn new_canonical_head_fork<DB, C, EF>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
@@ -83,7 +82,7 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let changeset = Self::validate_and_execute_canonical(
+        let changeset = Self::validate_and_execute_canonical_head_descendant(
             block.clone(),
             parent_header,
             state_provider,
@@ -178,7 +177,39 @@ impl AppendableChain {
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
     /// state root after execution.
-    fn validate_and_execute_canonical<PSDP, DB, C, EF>(
+    fn validate_and_execute<PSDP, DB, C, EF>(
+        block: SealedBlockWithSenders,
+        parent_block: &SealedHeader,
+        post_state_data_provider: PSDP,
+        externals: &TreeExternals<DB, C, EF>,
+        block_kind: BlockKind,
+    ) -> Result<PostState, Error>
+    where
+        PSDP: PostStateDataProvider,
+        DB: Database,
+        C: Consensus,
+        EF: ExecutorFactory,
+    {
+        if block_kind.extends_canonical_head() {
+            Self::validate_and_execute_canonical_head_descendant(
+                block,
+                parent_block,
+                post_state_data_provider,
+                externals,
+            )
+        } else {
+            Self::validate_and_execute_sidechain(
+                block,
+                parent_block,
+                post_state_data_provider,
+                externals,
+            )
+        }
+    }
+
+    /// Validate and execute the given block that _extends the canonical chain_, validating its
+    /// state root after execution.
+    fn validate_and_execute_canonical_head_descendant<PSDP, DB, C, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         post_state_data_provider: PSDP,
@@ -256,14 +287,25 @@ impl AppendableChain {
     }
 
     /// Validate and execute the given block, and append it to this chain.
+    ///
+    /// This expects that the block's ancestors can be traced back to the `canonical_fork` (the
+    /// first parent block of the `block`'s chain that is in the canonical chain).
+    ///
+    /// In other words, expects a gap less (side-) chain:  [`canonical_fork..block`] in order to be
+    /// able to __execute__ the block.
+    ///
+    /// CAUTION: This will only perform state root check if it's possible: if the `canonical_fork`
+    /// is the canonical head, or: state root check can't be performed if the given canonical is
+    /// __not__ the canonical head.
     #[track_caller]
     pub(crate) fn append_block<DB, C, EF>(
         &mut self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, C, EF>,
+        canonical_fork: ForkBlock,
+        block_kind: BlockKind,
     ) -> Result<(), InsertBlockError>
     where
         DB: Database,
@@ -279,15 +321,39 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let block_state = Self::validate_and_execute_sidechain(
+        let block_state = Self::validate_and_execute(
             block.clone(),
             parent_block,
             post_state_data,
             externals,
+            block_kind,
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         self.state.extend(block_state);
         self.blocks.insert(block.number, block);
         Ok(())
+    }
+}
+
+/// Represents what kind of block is being executed and validated.
+///
+/// This is required because the state root check can only be performed if the targeted block can be
+/// traced back to the canonical __head__.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockKind {
+    /// The `block` is a descendant of the canonical head:
+    ///
+    ///    [`head..(block.parent)*,block`]
+    ExtendsCanonicalHead,
+    /// The block can be traced back to an ancestor of the canonical head: a historical block, but
+    /// this chain does __not__ include the canonical head.
+    ForksHistoricalBlock,
+}
+
+impl BlockKind {
+    /// Returns `true` if the block is a descendant of the canonical head.
+    #[inline]
+    pub(crate) fn extends_canonical_head(&self) -> bool {
+        matches!(self, BlockKind::ExtendsCanonicalHead)
     }
 }
