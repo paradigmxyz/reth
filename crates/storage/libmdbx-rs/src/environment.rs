@@ -10,8 +10,6 @@ use libc::c_uint;
 use mem::size_of;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt;
 use std::{
     ffi::CString,
     fmt,
