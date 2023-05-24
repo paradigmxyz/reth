@@ -375,8 +375,8 @@ where
     fn delegate_eth_request(&self, event: IncomingEthRequest) {
         if let Some(ref reqs) = self.to_eth_request_handler {
             let _ = reqs.try_send(event).map_err(|e| {
-                if let TrySendError::Full(request) = e {
-                    debug!(target:"net", ?request, "EthRequestHandler channel is full!");
+                if let TrySendError::Full(_) = e {
+                    debug!(target:"net", "EthRequestHandler channel is full!");
                     self.metrics.total_dropped_eth_requests_at_full_capacity.increment(1);
                 }
             });
