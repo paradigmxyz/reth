@@ -46,13 +46,13 @@ install:
 #
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
-build-% build-x86_64-windows-gnu: export RUSTFLAGS=-C link-arg=-lgcc -Clink-arg=-static-libgcc
+build-%: export RUSTFLAGS=-C link-arg=-lgcc -Clink-arg=-static-libgcc
+
+# No jemalloc on Windows
+build-x86_64-pc-windows-gnu: CROSS_FEATURES := $(filter-out jemalloc,$(CROSS_FEATURES))
 
 build-%:
 	cross build --bin reth --target $* --features "$(CROSS_FEATURES)" --profile "$(CROSS_PROFILE)"
-build-x86_64-pc-windows-gnu:
-	$(eval CROSS_FEATURES := $(filter-out jemalloc,$(CROSS_FEATURES)))
-	cross build --bin reth --target x86_64-pc-windows-gnu --features "$(CROSS_FEATURES)" --profile "$(CROSS_PROFILE)"
 
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
