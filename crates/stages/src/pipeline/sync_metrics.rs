@@ -1,7 +1,7 @@
 use crate::StageId;
 use metrics::Gauge;
 use reth_metrics_derive::Metrics;
-use reth_primitives::{HeadersCheckpoint, StageCheckpoint, StageUnitCheckpoint};
+use reth_primitives::{EntitiesCheckpoint, StageCheckpoint, StageUnitCheckpoint};
 use std::collections::HashMap;
 
 #[derive(Metrics)]
@@ -31,12 +31,12 @@ impl Metrics {
 
         #[allow(clippy::single_match)]
         match checkpoint.stage_checkpoint {
-            Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
-                downloaded_headers,
-                total_headers,
-            })) => {
-                stage_metrics.entities_processed.set(downloaded_headers as f64);
-                stage_metrics.entities_total.set(total_headers as f64);
+            Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint { processed, total })) => {
+                stage_metrics.entities_processed.set(processed as f64);
+
+                if let Some(total) = total {
+                    stage_metrics.entities_total.set(total as f64);
+                }
             }
             _ => (),
         }
