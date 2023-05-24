@@ -61,19 +61,6 @@ jobs:
           cache-on-failure: true
 
       # ==============================
-      # Windows dependencies
-      # ==============================
-
-      - uses: KyleMayes/install-llvm-action@v1
-        if: startsWith(matrix.arch, 'x86_64-pc-windows-gnu')
-        with:
-          version: "13.0"
-          directory: ${{ runner.temp }}/llvm
-      - name: Set LIBCLANG_PATH
-        if: startsWith(matrix.arch, 'x86_64-pc-windows-gnu')
-        run: echo "LIBCLANG_PATH=$((gcm clang).source -replace "clang.exe")" >> $env:GITHUB_ENV
-
-      # ==============================
       # Apple M1 SDK setup
       # ==============================
 
