@@ -29,7 +29,7 @@ CARGO_INSTALL_EXTRA_FLAGS ?=
 #
 # Binaries will most likely be found in `./target/release`
 install:
-	cargo install --path reth --force --locked \
+	cargo install --path bin/reth --bin reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)

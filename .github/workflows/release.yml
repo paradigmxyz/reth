@@ -77,7 +77,7 @@ jobs:
         if:   matrix.arch == 'x86_64-apple-darwin'
         run: |
           mkdir artifacts
-          cargo install --bin reth --force --locked --profile ${{ matrix.profile }}
+          cargo install --bin reth --path bin/reth --force --locked --profile ${{ matrix.profile }}
           mv ~/.cargo/bin/reth ./artifacts
 
       - name: Move cross-compiled binary
