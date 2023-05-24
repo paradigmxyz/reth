@@ -1021,10 +1021,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
 #[cfg(test)]
 mod tests {
-    use crate::block_buffer::BufferedBlocks;
-
     use super::*;
+    use crate::block_buffer::BufferedBlocks;
     use assert_matches::assert_matches;
+    use linked_hash_set::LinkedHashSet;
     use reth_db::{
         mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
         transaction::DbTxMut,
@@ -1129,7 +1129,11 @@ mod tests {
                 assert_eq!(*tree.block_indices.blocks_to_chain(), block_to_chain);
             }
             if let Some(fork_to_child) = self.fork_to_child {
-                assert_eq!(*tree.block_indices.fork_to_child(), fork_to_child);
+                let mut x: HashMap<BlockHash, LinkedHashSet<BlockHash>> = HashMap::new();
+                for (key, hash_set) in fork_to_child.into_iter() {
+                    x.insert(key, hash_set.into_iter().collect());
+                }
+                assert_eq!(*tree.block_indices.fork_to_child(), x);
             }
             if let Some(pending_blocks) = self.pending_blocks {
                 let (num, hashes) = tree.block_indices.pending_blocks();

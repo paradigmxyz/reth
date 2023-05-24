@@ -2,6 +2,7 @@
 
 use super::chain::BlockChainId;
 use crate::canonical_chain::CanonicalChain;
+use linked_hash_set::LinkedHashSet;
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
 use reth_provider::Chain;
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
@@ -21,8 +22,13 @@ pub struct BlockIndices {
     /// `number_to_block` as those are chain specific indices.
     canonical_chain: CanonicalChain,
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
+    ///
+    /// This maintains insertion order for all child blocks, so
+    /// [BlockIndices::pending_block_num_hash] returns always the same block: the first child block
+    /// we inserted.
+    ///
     /// NOTE: It contains just blocks that are forks as a key and not all blocks.
-    fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
+    fork_to_child: HashMap<BlockHash, LinkedHashSet<BlockHash>>,
     /// Utility index for Block number to block hash(s).
     ///
     /// This maps all blocks with same block number to their hash.
@@ -60,7 +66,7 @@ impl BlockIndices {
     }
 
     /// Return fork to child indices
-    pub fn fork_to_child(&self) -> &HashMap<BlockHash, HashSet<BlockHash>> {
+    pub fn fork_to_child(&self) -> &HashMap<BlockHash, LinkedHashSet<BlockHash>> {
         &self.fork_to_child
     }
 
@@ -69,11 +75,13 @@ impl BlockIndices {
         &self.blocks_to_chain
     }
 
-    /// Returns the hash and number of the pending block (the first block in the
-    /// [Self::pending_blocks]) set.
+    /// Returns the hash and number of the pending block.
+    ///
+    /// It is possible that multiple child blocks for the canonical tip exist.
+    /// This will always return the _first_ child we recorded for the canonical tip.
     pub(crate) fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         let canonical_tip = self.canonical_tip();
-        let hash = self.fork_to_child.get(&canonical_tip.hash)?.iter().next().copied()?;
+        let hash = self.fork_to_child.get(&canonical_tip.hash)?.front().copied()?;
         Some(BlockNumHash { number: canonical_tip.number + 1, hash })
     }
 
@@ -132,7 +140,7 @@ impl BlockIndices {
         }
         let first = chain.first();
         // add parent block -> block index
-        self.fork_to_child.entry(first.parent_hash).or_default().insert(first.hash());
+        self.fork_to_child.entry(first.parent_hash).or_default().insert_if_absent(first.hash());
     }
 
     /// Get the chain ID the block belongs to
