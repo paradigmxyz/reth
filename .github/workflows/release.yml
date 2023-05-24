@@ -26,8 +26,8 @@ jobs:
       matrix:
         arch: [aarch64-unknown-linux-gnu,
                x86_64-unknown-linux-gnu,
-               x86_64-apple-darwin]
-               #x86_64-windows]
+               x86_64-apple-darwin,
+               x86_64-pc-windows-gnu]
         include:
           -   arch: aarch64-unknown-linux-gnu
               platform: ubuntu-latest
@@ -38,9 +38,9 @@ jobs:
           -   arch: x86_64-apple-darwin
               platform: macos-latest
               profile: maxperf
-          #-   arch: x86_64-windows
-          #    platform: windows-2019
-          #    profile: maxperf
+          -   arch: x86_64-pc-windows-gnu
+              platform: windows-2019
+              profile: maxperf
 
     runs-on: ${{ matrix.platform }}
     needs: extract-version
@@ -67,34 +67,30 @@ jobs:
       #       Builds
       # ==============================
 
-      - name: Build reth for aarch64-unknown-linux-gnu
-        if:   matrix.arch == 'aarch64-unknown-linux-gnu'
+      - name: Build reth for ${{ matrix.arch }}
+        if:   matrix.arch != 'x86_64-apple-darwin'
         run:  |
           cargo install cross
           env CROSS_PROFILE=${{ matrix.profile }} make build-aarch64
 
-      - name: Build reth for x86_64-unknown-linux-gnu
-        if:   matrix.arch == 'x86_64-unknown-linux-gnu'
-        run:  |
-          cargo install cross
-          env CROSS_PROFILE=${{ matrix.profile }} make build-x86_64
-
-      - name: Move cross-compiled binary
-        if:  startsWith(matrix.arch, 'aarch64')
-        run: mv target/aarch64-unknown-linux-gnu/${{ matrix.profile }}/reth ~/.cargo/bin/reth
-
-      - name: Move cross-compiled binary
-        if:  startsWith(matrix.arch, 'x86_64-unknown-linux-gnu')
-        run: mv target/x86_64-unknown-linux-gnu/${{ matrix.profile }}/reth ~/.cargo/bin/reth
-
       - name: Build reth for x86_64-apple-darwin modern
         if:   matrix.arch == 'x86_64-apple-darwin'
-        run:  cargo install --path reth --force --locked --profile ${{ matrix.profile }}
+        run: |
+          mkdir artifacts
+          cargo install --path reth --force --locked --profile ${{ matrix.profile }}
+          mv ~/.cargo/bin/reth ./artifacts
 
-      - name: Build reth for Windows modern
-        if:   matrix.arch == 'x86_64-windows'
-        # NOTE: profile set to release (see above)
-        run:  cargo install --path reth --force --locked --profile release
+      - name: Move cross-compiled binary
+        if:   matrix.arch != 'x86_64-pc-windows-gnu'
+        run: |
+          mkdir artifacts
+          mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth ./artifacts
+
+      - name: Move cross-compiled binary
+        if:   matrix.arch == 'x86_64-pc-windows-gnu'
+        run: |
+          mkdir artifacts
+          mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth.exe ./artifacts
 
       - name: Configure GPG and create artifacts
         if: startsWith(matrix.arch, 'x86_64-windows') != true
@@ -104,8 +100,6 @@ jobs:
         run: |
           export GPG_TTY=$(tty)
           echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --import
-          mkdir artifacts
-          mv ~/.cargo/bin/reth ./artifacts
           cd artifacts
           tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth
           echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
@@ -118,8 +112,6 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           echo $env:GPG_SIGNING_KEY | base64 --decode | gpg --batch --import
-          mkdir artifacts
-          move $env:USERPROFILE/.cargo/bin/reth.exe ./artifacts
           cd artifacts
           tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth.exe
           gpg --passphrase "$env:GPG_PASSPHRASE" --batch --pinentry-mode loopback -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
@@ -230,6 +222,7 @@ jobs:
           | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
           | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
           | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/windows.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz.asc) |
           | | | | |
           | **System** | **Option** | - | **Resource** |
           | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | [${{ env.VERSION }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}/tags?page=1&ordering=last_updated&name=${{ env.VERSION }}) | [${{ env.IMAGE_NAME }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}) |
