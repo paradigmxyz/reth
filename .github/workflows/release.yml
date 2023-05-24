@@ -10,9 +10,12 @@ on:
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
   IMAGE_NAME: ${{ github.repository_owner }}/reth
+  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: always
 
 jobs:
   extract-version:
+    name: extract version
     runs-on: ubuntu-latest
     steps:
       - name: Extract version
@@ -26,8 +29,9 @@ jobs:
       matrix:
         arch: [aarch64-unknown-linux-gnu,
                x86_64-unknown-linux-gnu,
-               x86_64-apple-darwin]
-               #x86_64-windows]
+               x86_64-apple-darwin,
+               aarch64-apple-darwin,
+               x86_64-pc-windows-gnu]
         include:
           -   arch: aarch64-unknown-linux-gnu
               platform: ubuntu-latest
@@ -38,9 +42,12 @@ jobs:
           -   arch: x86_64-apple-darwin
               platform: macos-latest
               profile: maxperf
-          #-   arch: x86_64-windows
-          #    platform: windows-2019
-          #    profile: maxperf
+          -   arch: aarch64-apple-darwin
+              platform: macos-latest
+              profile: maxperf
+          -   arch: x86_64-pc-windows-gnu
+              platform: ubuntu-latest
+              profile: maxperf
 
     runs-on: ${{ matrix.platform }}
     needs: extract-version
@@ -49,81 +56,59 @@ jobs:
         uses: actions/checkout@v3
       - name: Get latest version of stable Rust
         run: rustup update stable
-
-      # ==============================
-      # Windows dependencies
-      # ==============================
-
-      - uses: KyleMayes/install-llvm-action@v1
-        if: startsWith(matrix.arch, 'x86_64-windows')
+      - name: Install target
+        run: rustup target add ${{ matrix.arch }}
+      - uses: Swatinem/rust-cache@v2
         with:
-          version: "13.0"
-          directory: ${{ runner.temp }}/llvm
-      - name: Set LIBCLANG_PATH
-        if: startsWith(matrix.arch, 'x86_64-windows')
-        run: echo "LIBCLANG_PATH=$((gcm clang).source -replace "clang.exe")" >> $env:GITHUB_ENV
+          cache-on-failure: true
+
+      # ==============================
+      # Apple M1 SDK setup
+      # ==============================
+
+      - name: Apple M1 setup
+        if: ${{ matrix.job.target == 'aarch64-apple-darwin' }}
+        run: |
+          echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
 
       # ==============================
       #       Builds
       # ==============================
 
-      - name: Build reth for aarch64-unknown-linux-gnu
-        if:   matrix.arch == 'aarch64-unknown-linux-gnu'
+      - name: Build reth for ${{ matrix.arch }}
         run:  |
           cargo install cross
-          env CROSS_PROFILE=${{ matrix.profile }} make build-aarch64
-
-      - name: Build reth for x86_64-unknown-linux-gnu
-        if:   matrix.arch == 'x86_64-unknown-linux-gnu'
-        run:  |
-          cargo install cross
-          env CROSS_PROFILE=${{ matrix.profile }} make build-x86_64
+          env PROFILE=${{ matrix.profile }} make build-${{ matrix.arch }}
 
       - name: Move cross-compiled binary
-        if:  startsWith(matrix.arch, 'aarch64')
-        run: mv target/aarch64-unknown-linux-gnu/${{ matrix.profile }}/reth ~/.cargo/bin/reth
+        if:   matrix.arch != 'x86_64-pc-windows-gnu'
+        run: |
+          mkdir artifacts
+          mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth ./artifacts
 
-      - name: Move cross-compiled binary
-        if:  startsWith(matrix.arch, 'x86_64-unknown-linux-gnu')
-        run: mv target/x86_64-unknown-linux-gnu/${{ matrix.profile }}/reth ~/.cargo/bin/reth
+      - name: Move cross-compiled binary (Windows)
+        if:   matrix.arch == 'x86_64-pc-windows-gnu'
+        run: |
+          mkdir artifacts
+          mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth.exe ./artifacts
 
-      - name: Build reth for x86_64-apple-darwin modern
-        if:   matrix.arch == 'x86_64-apple-darwin'
-        run:  cargo install --path reth --force --locked --profile ${{ matrix.profile }}
-
-      - name: Build reth for Windows modern
-        if:   matrix.arch == 'x86_64-windows'
-        # NOTE: profile set to release (see above)
-        run:  cargo install --path reth --force --locked --profile release
+      # ==============================
+      #       Signing
+      # ==============================
 
       - name: Configure GPG and create artifacts
-        if: startsWith(matrix.arch, 'x86_64-windows') != true
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           export GPG_TTY=$(tty)
-          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --import
-          mkdir artifacts
-          mv ~/.cargo/bin/reth ./artifacts
+          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
           cd artifacts
-          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth
+          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth*
           echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
           mv *tar.gz* ..
-
-      - name: Configure GPG and create artifacts Windows
-        if: startsWith(matrix.arch, 'x86_64-windows')
-        env:
-          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          echo $env:GPG_SIGNING_KEY | base64 --decode | gpg --batch --import
-          mkdir artifacts
-          move $env:USERPROFILE/.cargo/bin/reth.exe ./artifacts
-          cd artifacts
-          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth.exe
-          gpg --passphrase "$env:GPG_PASSPHRASE" --batch --pinentry-mode loopback -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
-          move *tar.gz* ..
+        shell: bash
 
       # =======================================================================
       # Upload artifacts
@@ -142,11 +127,14 @@ jobs:
           path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz.asc
 
   draft-release:
-    name:   Draft Release
+    name: draft release
     needs:  [build, extract-version]
     runs-on: ubuntu-latest
     env:
       VERSION:  ${{ needs.extract-version.outputs.VERSION }}
+    permissions:
+      # Required to post the release
+      contents: write
     steps:
       # This is necessary for generating the changelog. It has to come before "Download Artifacts" or else it deletes the artifacts.
       - name: Checkout sources
@@ -163,14 +151,14 @@ jobs:
       # ==============================
       #       Create release draft
       # ==============================
-      - name: Generate Full Changelog
+      - name: Generate full changelog
         id: changelog
         run: |
           echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
           echo "$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 ${{ env.VERSION }}^)..${{ env.VERSION }})" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Create Release Draft
+      - name: Create release draft
         env:
           GITHUB_USER: ${{ github.repository_owner }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -227,9 +215,11 @@ jobs:
           
           | System | Architecture | Binary | PGP Signature |
           |:---:|:---:|:---:|:---|
-          | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
           | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
           | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/windows.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz.asc) |
           | | | | |
           | **System** | **Option** | - | **Resource** |
           | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | [${{ env.VERSION }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}/tags?page=1&ordering=last_updated&name=${{ env.VERSION }}) | [${{ env.IMAGE_NAME }}](https://hub.docker.com/r/${{ env.IMAGE_NAME }}) |
