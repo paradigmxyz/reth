@@ -4714,6 +4714,7 @@ version = "0.1.0"
 dependencies = [
  "confy",
  "reth-discv4",
+ "reth-downloaders",
  "reth-net-nat",
  "reth-network",
  "reth-staged-sync",

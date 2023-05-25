@@ -11,9 +11,6 @@
 //!
 //! - `test-utils`: Various utilities helpful for writing tests
 //! - `geth-tests`: Runs tests that require Geth to be installed locally.
-
-pub mod config;
-
 pub mod utils;
 
 #[cfg(any(test, feature = "test-utils"))]
