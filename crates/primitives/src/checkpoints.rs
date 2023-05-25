@@ -107,18 +107,8 @@ pub struct AccountHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
-    /// During execution, it's measured in accounts.
-    /// During unwinding, it's measured in changesets.
-    ///
-    /// `EntitiesCheckpoint.total` is set only during the execution.
+    /// Progress measured in accounts.
     pub progress: EntitiesCheckpoint,
-}
-
-impl AccountHashingCheckpoint {
-    /// Checks if checkpoint was set during the execution phase.
-    pub fn is_executing(&self) -> bool {
-        self.progress.total.is_some()
-    }
 }
 
 /// Saves the progress of StorageHashing stage.
@@ -133,18 +123,8 @@ pub struct StorageHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
-    /// During execution, it's measured in storage entries.
-    /// During unwinding, it's measured in changesets.
-    ///
-    /// `EntitiesCheckpoint.total` is set only during the execution.
+    /// Progress measured in storage slots.
     pub progress: EntitiesCheckpoint,
-}
-
-impl StorageHashingCheckpoint {
-    /// Checks if checkpoint was set during the execution phase.
-    pub fn is_executing(&self) -> bool {
-        self.progress.total.is_some()
-    }
 }
 
 /// Saves the progress of abstract stage iterating over or downloading entities.

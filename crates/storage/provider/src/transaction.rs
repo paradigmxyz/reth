@@ -289,14 +289,11 @@ where
     }
 
     /// Unwind and clear account hashing.
-    /// Returns the number of account changesets walked.
     pub fn unwind_account_hashing(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<usize, TransactionError> {
+    ) -> Result<(), TransactionError> {
         let mut hashed_accounts = self.cursor_write::<tables::HashedAccount>()?;
-
-        let mut changesets_walked = 0;
 
         // Aggregate all transition changesets and make a list of accounts that have been changed.
         self.cursor_read::<tables::AccountChangeSet>()?
@@ -309,7 +306,6 @@ where
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
                     accounts.insert(account_before.address, account_before.info);
-                    changesets_walked += 1;
                     accounts
                 },
             )
@@ -329,18 +325,15 @@ where
                 Ok(())
             })?;
 
-        Ok(changesets_walked)
+        Ok(())
     }
 
     /// Unwind and clear storage hashing.
-    /// Returns the number of storage changesets walked.
     pub fn unwind_storage_hashing(
         &self,
         range: Range<BlockNumberAddress>,
-    ) -> Result<usize, TransactionError> {
+    ) -> Result<(), TransactionError> {
         let mut hashed_storage = self.cursor_dup_write::<tables::HashedStorage>()?;
-
-        let mut changesets_walked = 0;
 
         // Aggregate all transition changesets and make list of accounts that have been changed.
         self.cursor_read::<tables::StorageChangeSet>()?
@@ -354,7 +347,6 @@ where
                 |mut accounts: BTreeMap<(Address, H256), U256>,
                  (BlockNumberAddress((_, address)), storage_entry)| {
                     accounts.insert((address, storage_entry.key), storage_entry.value);
-                    changesets_walked += 1;
                     accounts
                 },
             )
@@ -380,7 +372,7 @@ where
                 Ok(())
             })?;
 
-        Ok(changesets_walked)
+        Ok(())
     }
 
     /// Unwind and clear account history indices
