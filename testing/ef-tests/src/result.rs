@@ -1,4 +1,5 @@
-use case::Case;
+use crate::case::Case;
+use rayon::iter::ParallelIterator;
 use std::{
     fmt::{Debug, Display, Formatter},
     path::{Path, PathBuf},

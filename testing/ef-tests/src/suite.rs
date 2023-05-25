@@ -1,5 +1,7 @@
-use case::{Case, Cases};
-use result::assert_tests_pass;
+use crate::{
+    case::{Case, Cases},
+    result::assert_tests_pass,
+};
 use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 

@@ -42,7 +42,7 @@ members = [
     "crates/tasks",
     "crates/transaction-pool",
     "crates/trie",
-    "testing/*"
+    "testing/ef-tests"
 ]
 default-members = ["bin/reth"]
 

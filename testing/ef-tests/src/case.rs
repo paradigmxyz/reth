@@ -1,6 +1,5 @@
-use crate::result::Error;
-use rayon::iter::IntoParallelIterator;
-use result::CaseResult;
+use crate::result::{CaseResult, Error};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
     fmt::Debug,
     path::{Path, PathBuf},
