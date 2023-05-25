@@ -118,11 +118,6 @@ pub(crate) fn print_results(
     for case in failed {
         let error = case.result.clone().unwrap_err();
 
-        println!(
-            "[!] Case {} failed (description: {}): {}",
-            case.path.display(),
-            case.desc,
-            error.to_string()
-        );
+        println!("[!] Case {} failed (description: {}): {}", case.path.display(), case.desc, error);
     }
 }
