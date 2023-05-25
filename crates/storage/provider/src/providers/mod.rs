@@ -334,7 +334,14 @@ where
 
     fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
-        self.database.history_by_block_number(block_number)
+
+        let latest = self.database.best_block_number()?;
+        // Return an error if requested block is not synced yet
+        if block_number <= latest {
+            self.database.history_by_block_number(block_number)
+        } else {
+            Err(ProviderError::HeaderNotFound(block_number.into()).into())
+        }
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<StateProviderBox<'_>> {
@@ -348,7 +355,7 @@ where
         // check tree first
         if let Some(pending) = self.tree.find_pending_state_provider(block) {
             trace!(target: "providers::blockchain", "Returning pending state provider");
-            return self.pending_with_provider(pending)
+            return self.pending_with_provider(pending);
         }
         // not found in tree, check database
         self.history_by_block_hash(block)
@@ -360,7 +367,7 @@ where
 
         if let Some(block) = self.tree.pending_block_num_hash() {
             let pending = self.tree.pending_state_provider(block.hash)?;
-            return self.pending_with_provider(pending)
+            return self.pending_with_provider(pending);
         }
         self.latest()
     }

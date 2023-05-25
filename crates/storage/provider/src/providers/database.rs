@@ -64,12 +64,6 @@ impl<DB: Database> ShareableDatabase<DB> {
         // +1 as the changeset that we want is the one that was applied after this block.
         block_number += 1;
 
-        // Return an error if requested block is not synced yet
-        let latest = best_block_number(&tx)?.unwrap_or_default();
-        if block_number > latest {
-            return Err(ProviderError::HeaderNotFound(block_number.into()).into())
-        }
-
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
     }
