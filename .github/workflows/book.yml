@@ -10,6 +10,7 @@ on:
     paths:
       - 'book/**'
       - 'book.toml'
+  merge_group:
 
 jobs:
   test:
