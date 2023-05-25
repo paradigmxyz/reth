@@ -183,10 +183,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
 
         // Write remaining changes
-        let start = Instant::now();
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
+        let start = Instant::now();
         state.write_to_db(&**tx)?;
-        trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
+        trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 
         let is_final_range = stage_progress == max_block;
         info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
