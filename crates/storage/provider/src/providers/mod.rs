@@ -142,6 +142,10 @@ where
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.database.block_number(hash)
     }
+
+    fn latest_block_number(&self) -> Result<BlockNumber> {
+        self.best_block_number()
+    }
 }
 
 impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>

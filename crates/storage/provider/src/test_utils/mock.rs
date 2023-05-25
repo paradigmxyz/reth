@@ -268,6 +268,10 @@ impl BlockNumProvider for MockEthProvider {
         let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number));
         Ok(num)
     }
+
+    fn latest_block_number(&self) -> Result<BlockNumber> {
+        self.best_block_number()
+    }
 }
 
 impl BlockIdProvider for MockEthProvider {

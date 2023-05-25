@@ -1014,7 +1014,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let mut tx = Transaction::new(&self.externals.db)?;
 
-        let tip = tx.tip_number()?;
+        let tip = self.externals.database().latest_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
         info!(target: "blockchain_tree", "Revert canonical chain range: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.

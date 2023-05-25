@@ -41,6 +41,10 @@ impl BlockNumProvider for NoopProvider {
     fn block_number(&self, _hash: H256) -> Result<Option<BlockNumber>> {
         Ok(None)
     }
+
+    fn latest_block_number(&self) -> Result<BlockNumber> {
+        Ok(0)
+    }
 }
 
 impl BlockProvider for NoopProvider {

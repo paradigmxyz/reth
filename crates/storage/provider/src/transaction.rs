@@ -140,11 +140,6 @@ impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
-    /// Get lastest block number.
-    pub fn tip_number(&self) -> Result<u64, DbError> {
-        Ok(self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
-    }
-
     /// Query [tables::CanonicalHeaders] table for block hash by block number
     pub fn get_block_hash(&self, block_number: BlockNumber) -> Result<BlockHash, TransactionError> {
         let hash = self

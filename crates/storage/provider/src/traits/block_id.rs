@@ -34,6 +34,9 @@ pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
             BlockHashOrNumber::Number(num) => self.block_hash(num),
         }
     }
+
+    /// Returns the latest block number.
+    fn latest_block_number(&self) -> Result<BlockNumber>;
 }
 
 /// Client trait for transforming [BlockId] into block numbers or hashes.

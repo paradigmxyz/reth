@@ -194,6 +194,12 @@ impl<DB: Database> BlockNumProvider for ShareableDatabase<DB> {
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))?.map_err(Into::into)
     }
+
+    fn latest_block_number(&self) -> Result<BlockNumber> {
+        self.db.view(|tx| {
+            Ok(tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
+        })?
+    }
 }
 
 impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
