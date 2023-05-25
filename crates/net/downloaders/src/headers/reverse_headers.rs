@@ -257,6 +257,16 @@ where
             validated.push(parent);
         }
 
+        // If the last (smallest) validated header attaches to the local head, validate it.
+        if let Some((last_header, head)) = validated.last().zip(self.local_head.as_ref()) {
+            if last_header.number == head.number + 1 {
+                if let Err(error) = self.validate(last_header, head) {
+                    trace!(target: "downloaders::headers", ?error ,"Failed to validate header");
+                    return Err(HeadersResponseError { request, peer_id: Some(peer_id), error })
+                }
+            }
+        }
+
         // update tracked block info (falling block number)
         self.next_chain_tip_block_number =
             validated.last().expect("exists").number.saturating_sub(1);
