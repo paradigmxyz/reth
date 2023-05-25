@@ -1,13 +1,12 @@
+use crate::utils::DbTool;
 use clap::Parser;
 use eyre::WrapErr;
 use reth_db::{database::Database, table::Table, tables};
 use serde::Deserialize;
 use tracing::error;
 
-use crate::utils::DbTool;
-
-#[derive(Parser, Debug)]
 /// The arguments for the `reth db get` command
+#[derive(Parser, Debug)]
 pub struct Command {
     /// The table name
     ///
@@ -76,7 +75,7 @@ impl Command {
     where
         for<'a> T::Key: Deserialize<'a>,
     {
-        assert!(T::NAME == self.table);
+        assert_eq!(T::NAME, self.table);
 
         serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
     }
