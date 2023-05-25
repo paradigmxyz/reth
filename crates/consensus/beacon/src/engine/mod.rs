@@ -777,7 +777,7 @@ where
                 let latest_valid_hash =
                     self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
                 let status = PayloadStatusEnum::Invalid {
-                    validation_error: PayloadValidationError::InvalidBlockData,
+                    validation_error: PayloadValidationError::Other(error.to_string()),
                 };
                 Ok(PayloadStatus::new(status, latest_valid_hash))
             }
@@ -1731,7 +1731,9 @@ mod tests {
                 env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: PayloadValidationError::InvalidBlockData,
+                validation_error: PayloadValidationError::Other(
+                    BlockExecutionError::BlockPreMerge { hash: block2.hash }.to_string(),
+                ),
             })
             .with_latest_valid_hash(H256::zero());
             assert_eq!(result, expected_result);

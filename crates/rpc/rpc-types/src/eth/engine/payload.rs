@@ -328,7 +328,7 @@ impl From<PayloadError> for PayloadStatusEnum {
                 validation_error: PayloadValidationError::InvalidBlockHash { hash: consensus },
             },
             _ => PayloadStatusEnum::Invalid {
-                validation_error: PayloadValidationError::InvalidBlockData,
+                validation_error: PayloadValidationError::Other(error.to_string()),
             },
         }
     }
@@ -438,9 +438,6 @@ pub enum PayloadValidationError {
     /// Thrown when a new payload contains a wrong block hash.
     #[error("invalid block hash")]
     InvalidBlockHash { hash: H256 },
-    /// Thrown when a new payload violates consensus or execution rules
-    #[error("invalid block data")]
-    InvalidBlockData,
     /// Thrown when a new payload contains a wrong state root
     #[error("invalid merkle root (remote: {remote:?} local: {local:?})")]
     InvalidStateRoot {
@@ -449,10 +446,15 @@ pub enum PayloadValidationError {
         /// The state root of the payload that we computed locally.
         local: H256,
     },
+    /// Thrown when some other error occured while processing payload
+    #[error("Other")]
+    Other(String),
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{
@@ -593,6 +595,34 @@ mod tests {
         assert!(status.latest_valid_hash.is_none());
         assert!(status.status.validation_error().is_none());
         assert_eq!(serde_json::to_string(&status).unwrap(), full);
+    }
+
+    #[test]
+    fn serde_payload_status_error() {
+        let s = r#"{"status":"INVALID_BLOCK_HASH","latestValidHash":null,"validationError":
+        {"InvalidBlockHash":{"hash":"0x1241835b37d267ed64d1840312ae600b1774e48370b0548c87012a1c681aa54d"}}}"#;
+        let status: PayloadStatus = serde_json::from_str(s).unwrap();
+        assert_eq!(
+            status.status,
+            PayloadStatusEnum::InvalidBlockHash {
+                validation_error: PayloadValidationError::InvalidBlockHash {
+                    hash: H256::from_str(
+                        "0x1241835b37d267ed64d1840312ae600b1774e48370b0548c87012a1c681aa54d"
+                    )
+                    .unwrap(),
+                }
+            }
+        );
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":{"Other":"Failed to decode block"}}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::Other(
+                    "Failed to decode block".to_string(),
+                ),
+            },
+        };
+        assert_eq!(s, serde_json::to_string(&q).unwrap());
     }
 
     #[test]
