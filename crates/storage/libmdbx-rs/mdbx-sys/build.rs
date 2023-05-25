@@ -85,9 +85,17 @@ fn main() {
         .flag_if_supported("-Wuninitialized");
 
     let flags = format!("{:?}", cc_builder.get_compiler().cflags_env());
-    cc_builder
-        .define("MDBX_BUILD_FLAGS", flags.as_str())
-        .define("MDBX_TXN_CHECKOWNER", "0")
-        .file(mdbx.join("mdbx.c"))
-        .compile("libmdbx.a");
+    cc_builder.define("MDBX_BUILD_FLAGS", flags.as_str()).define("MDBX_TXN_CHECKOWNER", "0");
+
+    // Enable debugging on debug builds
+    #[cfg(debug_assertions)]
+    cc_builder.define("MDBX_DEBUG", "1");
+
+    // Disables debug logging on optimized builds
+    #[cfg(not(debug_assertions))]
+    {
+        cc_builder.define("NDEBUG", None).define("MDBX_DEBUG", "0");
+    }
+
+    cc_builder.file(mdbx.join("mdbx.c")).compile("libmdbx.a");
 }
