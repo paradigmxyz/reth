@@ -4717,7 +4717,6 @@ dependencies = [
  "reth-downloaders",
  "reth-net-nat",
  "reth-network",
- "reth-staged-sync",
  "secp256k1",
  "serde",
  "serde_json",

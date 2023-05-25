@@ -8,7 +8,6 @@ readme = "README.md"
 
 [dependencies]
 # reth
-reth-staged-sync = { path = "../staged-sync" }
 reth-network = { path = "../net/network" }
 reth-net-nat = { path = "../../crates/net/nat" }
 reth-discv4 = { path = "../../crates/net/discv4" }
