@@ -136,7 +136,7 @@ where
     }
 
     fn best_block_number(&self) -> Result<BlockNumber> {
-        self.database.best_block_number()
+        Ok(self.chain_info.get_canonical_block_number())
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
@@ -149,16 +149,16 @@ where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
 {
+    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(self.tree.pending_block_num_hash())
+    }
+
     fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(self.chain_info.get_safe_num_hash())
     }
 
     fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(self.chain_info.get_finalized_num_hash())
-    }
-
-    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
-        Ok(self.tree.pending_block_num_hash())
     }
 }
 
