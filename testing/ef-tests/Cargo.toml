@@ -1,0 +1,10 @@
+[package]
+name = "ef-tests"
+version = "0.1.0"
+
+[features]
+ef-tests = []
+
+[dependencies]
+rayon = "1.7.0"
+walkdir = "2.3.3"
