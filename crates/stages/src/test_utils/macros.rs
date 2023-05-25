@@ -31,6 +31,7 @@ macro_rules! stage_test_suite {
                 let input = crate::stage::ExecInput {
                     previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::StageCheckpoint::new(previous_stage))),
                     checkpoint: Some(reth_primitives::StageCheckpoint::new(stage_progress)),
+
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
                 let rx = runner.execute(input);

@@ -146,7 +146,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { done: is_final_range, checkpoint: StageCheckpoint::new(end_block) })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(end_block), done: is_final_range })
     }
 
     /// Unwind the stage.

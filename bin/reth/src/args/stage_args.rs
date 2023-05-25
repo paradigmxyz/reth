@@ -8,6 +8,8 @@ pub enum StageEnum {
     Bodies,
     Senders,
     Execution,
+    AccountHashing,
+    StorageHashing,
     Hashing,
     Merkle,
     TxLookup,

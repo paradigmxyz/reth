@@ -78,6 +78,18 @@ impl Command {
                     Ok::<_, eyre::Error>(())
                 })??;
             }
+            StageEnum::AccountHashing => tool.db.update(|tx| {
+                tx.clear::<tables::HashedAccount>()?;
+                tx.put::<tables::SyncStage>(ACCOUNT_HASHING.0.to_string(), Default::default())?;
+
+                Ok::<_, eyre::Error>(())
+            })??,
+            StageEnum::StorageHashing => tool.db.update(|tx| {
+                tx.clear::<tables::HashedStorage>()?;
+                tx.put::<tables::SyncStage>(STORAGE_HASHING.0.to_string(), Default::default())?;
+
+                Ok::<_, eyre::Error>(())
+            })??,
             StageEnum::Hashing => {
                 tool.db.update(|tx| {
                     // Clear hashed accounts

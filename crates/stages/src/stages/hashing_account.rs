@@ -8,12 +8,12 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_primitives::{keccak256, AccountHashingCheckpoint, StageCheckpoint};
+use reth_primitives::{keccak256, AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint};
 use reth_provider::Transaction;
 use std::{
     cmp::max,
     fmt::Debug,
-    ops::{Range, RangeInclusive},
+    ops::{Deref, Range, RangeInclusive},
 };
 use tokio::sync::mpsc;
 use tracing::*;
@@ -30,6 +30,13 @@ pub struct AccountHashingStage {
     pub clean_threshold: u64,
     /// The maximum number of accounts to process before committing.
     pub commit_threshold: u64,
+}
+
+impl AccountHashingStage {
+    /// Create new instance of [AccountHashingStage].
+    pub fn new(clean_threshold: u64, commit_threshold: u64) -> Self {
+        Self { clean_threshold, commit_threshold }
+    }
 }
 
 impl Default for AccountHashingStage {
@@ -130,20 +137,19 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         }
         let (from_block, to_block) = range.into_inner();
 
+        let stage_checkpoint =
+            input.checkpoint.and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
+
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
-            let stage_checkpoint = input
-                .checkpoint
-                .and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
-
             let start_address = match stage_checkpoint {
-                Some(AccountHashingCheckpoint { address: address @ Some(_), from, to })
+                Some(AccountHashingCheckpoint { address: address @ Some(_), from, to, .. })
                     // Checkpoint is only valid if the range of transitions didn't change.
                     // An already hashed account may have been changed with the new range,
-                    // and therefore should be hashed again. 
+                    // and therefore should be hashed again.
                     if from == from_block && to == to_block =>
                 {
                     debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner account hashing checkpoint");
@@ -221,28 +227,40 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         address: Some(next_address.key().unwrap()),
                         from: from_block,
                         to: to_block,
+                        progress: EntitiesCheckpoint {
+                            processed: tx.deref().entries::<tables::HashedAccount>()? as u64,
+                            total: Some(tx.deref().entries::<tables::PlainAccountState>()? as u64),
+                        },
                     },
                 );
-                info!(target: "sync::stages::hashing_account", stage_progress = %checkpoint, is_final_range = false, "Stage iteration finished");
+
+                info!(target: "sync::stages::hashing_account", checkpoint = %checkpoint, is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput { checkpoint, done: false })
             }
         } else {
-            // Aggregate all transition changesets and and make list of account that have been
+            // Aggregate all transition changesets and make a list of accounts that have been
             // changed.
             let lists = tx.get_addresses_of_changed_accounts(from_block..=to_block)?;
-            // iterate over plain state and get newest value.
+            // Iterate over plain state and get newest value.
             // Assumption we are okay to make is that plainstate represent
             // `previous_stage_progress` state.
-            let accounts = tx.get_plainstate_accounts(lists.into_iter())?;
-            // insert and hash accounts to hashing table
+            let accounts = tx.get_plainstate_accounts(lists)?;
+
+            // Insert and hash accounts to hashing table
             tx.insert_account_for_hashing(accounts.into_iter())?;
         }
 
-        // We finished the hashing stage, no future iterations is expected for the same block range,
-        // so no checkpoint is needed.
-        let checkpoint = input.previous_stage_checkpoint();
+        let checkpoint = input.previous_stage_checkpoint().with_account_hashing_stage_checkpoint(
+            AccountHashingCheckpoint {
+                progress: EntitiesCheckpoint {
+                    processed: tx.deref().entries::<tables::HashedAccount>()? as u64,
+                    total: Some(tx.deref().entries::<tables::PlainAccountState>()? as u64),
+                },
+                ..stage_checkpoint.unwrap_or_default()
+            },
+        );
 
-        info!(target: "sync::stages::hashing_account", stage_progress = %checkpoint, is_final_range = true, "Stage iteration finished");
+        info!(target: "sync::stages::hashing_account", checkpoint = %checkpoint, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { checkpoint, done: true })
     }
 
@@ -255,11 +273,23 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         let (range, unwind_progress, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        // Aggregate all transition changesets and and make list of account that have been changed.
-        tx.unwind_account_hashing(range)?;
+        // Aggregate all transition changesets and make a list of accounts that have been changed.
+        let changesets_walked = tx.unwind_account_hashing(range)?;
 
-        info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        let mut stage_checkpoint =
+            input.checkpoint.account_hashing_stage_checkpoint().unwrap_or_default();
+
+        if stage_checkpoint.is_executing() {
+            stage_checkpoint.progress = EntitiesCheckpoint::default();
+        }
+
+        stage_checkpoint.progress.processed += changesets_walked as u64;
+
+        info!(target: "sync::stages::hashing_account", to_block = input.unwind_to, %unwind_progress, is_final_range, "Unwind iteration finished");
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_progress)
+                .with_account_hashing_stage_checkpoint(stage_checkpoint),
+        })
     }
 }
 
@@ -293,7 +323,24 @@ mod tests {
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
 
-        assert_matches!(result, Ok(ExecOutput {checkpoint: StageCheckpoint { block_number, ..}, done: true}) if block_number == previous_stage);
+        assert_matches!(
+            result,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Account(AccountHashingCheckpoint {
+                        progress: EntitiesCheckpoint {
+                            processed,
+                            total: Some(total),
+                        },
+                        ..
+                    })),
+                },
+                done: true,
+            }) if block_number == previous_stage &&
+                processed == total &&
+                total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
+        );
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -337,11 +384,17 @@ mod tests {
                 checkpoint: StageCheckpoint {
                     block_number: 10,
                     stage_checkpoint: Some(StageUnitCheckpoint::Account(
-                        AccountHashingCheckpoint { address: Some(address), from: 11, to: 20 }
+                        AccountHashingCheckpoint {
+                            address: Some(address),
+                            from: 11,
+                            to: 20,
+                            progress: EntitiesCheckpoint { processed: 5, total: Some(total) }
+                        }
                     ))
                 },
                 done: false
-            }) if address == fifth_address
+            }) if address == fifth_address &&
+                total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
         assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 5);
 
@@ -353,9 +406,21 @@ mod tests {
         assert_matches!(
             result,
             Ok(ExecOutput {
-                checkpoint: StageCheckpoint { block_number: 20, stage_checkpoint: None },
+                checkpoint: StageCheckpoint {
+                    block_number: 20,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Account(
+                        AccountHashingCheckpoint {
+                            address: Some(address),
+                            from: 11,
+                            to: 20,
+                            progress: EntitiesCheckpoint { processed, total: Some(total) }
+                        }
+                    ))
+                },
                 done: true
-            })
+            }) if address == fifth_address &&
+                processed == total &&
+                total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
         assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 10);
 
