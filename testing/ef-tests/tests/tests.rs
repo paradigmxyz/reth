@@ -1,6 +1,6 @@
 #![cfg(feature = "ef-tests")]
 
-use ef_tests::{cases::BlockchainTests, suite::Suite};
+use ef_tests::{cases::blockchain_test::BlockchainTests, suite::Suite};
 
 macro_rules! general_state_test {
     ($test_name:ident, $dir:ident) => {
