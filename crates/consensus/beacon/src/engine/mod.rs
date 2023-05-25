@@ -828,10 +828,11 @@ where
                     .map(|status| status.is_valid())
                     .unwrap_or_default()
                 {
+                    // payload is valid
+                    self.sync_state_updater.update_sync_state(SyncState::Idle);
+                } else {
                     // if the payload is invalid, we run the pipeline
                     self.sync.set_pipeline_sync_target(hash);
-                } else {
-                    self.sync_state_updater.update_sync_state(SyncState::Idle);
                 }
             }
             EngineSyncEvent::PipelineStarted(target) => {
