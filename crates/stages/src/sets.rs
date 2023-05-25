@@ -61,6 +61,20 @@ use std::sync::Arc;
 /// - [`OnlineStages`]
 /// - [`OfflineStages`]
 /// - [`FinishStage`]
+///
+/// This expands to the following series of stages:
+/// - [`HeaderStage`]
+/// - [`BodyStage`]
+/// - [`SenderRecoveryStage`]
+/// - [`ExecutionStage`]
+/// - [`MerkleStage`] (unwind)
+/// - [`AccountHashingStage`]
+/// - [`StorageHashingStage`]
+/// - [`MerkleStage`] (execution)
+/// - [`TransactionLookupStage`]
+/// - [`IndexStorageHistoryStage`]
+/// - [`IndexAccountHistoryStage`]
+/// - [`FinishStage`]
 #[derive(Debug)]
 pub struct DefaultStages<H, B, EF> {
     /// Configuration for the online stages
