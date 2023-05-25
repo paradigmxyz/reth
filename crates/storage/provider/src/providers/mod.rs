@@ -335,8 +335,11 @@ where
     fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
 
-        let latest = self.database.best_block_number()?;
-        // Return an error if requested block is not synced yet
+        let latest = self.best_block_number()?;
+        // HistoricalStateProvider can't determine if requested block is synced or not. 
+        // Verifying the block_number would be expensive since we need to lookup sync table 
+        // Instead we check here if the requested block < latest_block and
+        // returns an error if requested block is not synced yet
         if block_number <= latest {
             self.database.history_by_block_number(block_number)
         } else {
