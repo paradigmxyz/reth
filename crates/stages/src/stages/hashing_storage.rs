@@ -176,7 +176,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
             let storages = tx.get_plainstate_storages(lists)?;
-
             tx.insert_storage_for_hashing(storages.into_iter())?;
         }
 
