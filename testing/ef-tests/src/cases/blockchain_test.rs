@@ -1,4 +1,4 @@
-//! Test runners for `BlockchainTests` in https://github.com/ethereum/tests
+//! Test runners for `BlockchainTests` in <https://github.com/ethereum/tests>
 
 use crate::{
     models::{BlockchainTest, ForkSpec, RootOrState},

@@ -1,4 +1,4 @@
-//! Shared models for https://github.com/ethereum/tests
+//! Shared models for <https://github.com/ethereum/tests>
 
 use crate::{assert::assert_equal, Error};
 use reth_db::{
