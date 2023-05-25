@@ -43,17 +43,13 @@ impl NodeState {
                 self.current_checkpoint = checkpoint.unwrap_or_default();
 
                 if notable {
-                    if let Some(checkpoint) = checkpoint {
-                        info!(
-                            target: "reth::cli",
-                            stage = %stage_id,
-                            from = checkpoint.block_number,
-                            %checkpoint,
-                            "Executing stage",
-                        );
-                    } else {
-                        info!(target: "reth::cli", stage = %stage_id, "Executing stage");
-                    }
+                    info!(
+                        target: "reth::cli",
+                        stage = %stage_id,
+                        from = self.current_checkpoint.block_number,
+                        checkpoint = %self.current_checkpoint,
+                        "Executing stage",
+                    );
                 }
             }
             PipelineEvent::Ran { stage_id, result: ExecOutput { checkpoint, done } } => {
