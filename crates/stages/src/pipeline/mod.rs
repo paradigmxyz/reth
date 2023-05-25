@@ -82,6 +82,10 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
+///
+/// # Defaults
+///
+/// The [DefaultStages](crate::sets::DefaultStages) are used to fully sync reth.
 pub struct Pipeline<DB: Database> {
     /// The Database
     db: DB,
