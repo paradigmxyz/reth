@@ -118,9 +118,11 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
 
     /// Returns number of entries in the table using cheap DB stats invocation.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
-        let table_db =
-            self.inner.open_db(Some(T::NAME)).map_err(|e| DatabaseError::FailedToOpen(e.into()))?;
-        Ok(self.inner.db_stat(&table_db).map_err(|e| DatabaseError::Stats(e.into()))?.entries())
+        Ok(self
+            .inner
+            .db_stat_with_dbi(self.get_dbi::<T>()?)
+            .map_err(|e| DatabaseError::Stats(e.into()))?
+            .entries())
     }
 }
 
