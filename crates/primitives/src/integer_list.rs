@@ -123,6 +123,8 @@ pub enum EliasFanoError {
 
 #[cfg(test)]
 mod test {
+    use rand::Rng;
+
     use super::*;
 
     #[test]
@@ -139,5 +141,16 @@ mod test {
 
         let blist = ef_list.to_bytes();
         assert_eq!(IntegerList::from_bytes(&blist).unwrap(), ef_list)
+    }
+
+    #[test]
+    fn check_size_of_elias_fano_size() {
+        let mut rng = rand::thread_rng();
+        let mut vals: Vec<usize> = (0..2_000).map(|_| rng.gen_range(1_000_000..=17_000_000)).collect();
+        vals.sort_unstable();
+        let list = IntegerList::new(vals).unwrap();
+        println!("SIZE OF 2k elements: {:?}", list.0.size_in_bytes());
+        // above print "SIZE OF 2k elements: 3992"
+        // for 100 entried this prints: "SIZE OF 100 elements: 346"
     }
 }

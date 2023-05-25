@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::ShardedKey;
 
 /// Number of indices in one shard.
-pub const NUM_OF_INDICES_IN_SHARD: usize = 100;
+pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data
 /// into different shards. Example:
