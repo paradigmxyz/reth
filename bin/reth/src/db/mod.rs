@@ -13,6 +13,7 @@ use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::sync::Arc;
 use tracing::error;
 
+mod get;
 /// DB List TUI
 mod tui;
 
@@ -60,6 +61,8 @@ pub enum Subcommands {
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
+    /// Gets the content of a table for the given key
+    Get(get::Command),
     /// Deletes all database entries
     Drop,
 }
@@ -96,7 +99,7 @@ impl Command {
 
         let mut tool = DbTool::new(&db)?;
 
-        match &self.command {
+        match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
                 let mut stats_table = ComfyTable::new();
@@ -210,6 +213,9 @@ impl Command {
                     SyncStage,
                     SyncStageProgress
                 ]);
+            }
+            Subcommands::Get(command) => {
+                command.execute(tool)?;
             }
             Subcommands::Drop => {
                 tool.drop(db_path)?;

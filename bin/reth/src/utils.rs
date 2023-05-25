@@ -85,6 +85,11 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             .map_err(|e| eyre::eyre!(e))
     }
 
+    /// Grabs the content of the table for the given key
+    pub fn get<T: Table>(&mut self, key: T::Key) -> Result<Option<T::Value>> {
+        self.db.view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
+    }
+
     /// Drops the database at the given path.
     pub fn drop(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
