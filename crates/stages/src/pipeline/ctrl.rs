@@ -32,4 +32,13 @@ impl ControlFlow {
     pub fn is_unwind(&self) -> bool {
         matches!(self, ControlFlow::Unwind { .. })
     }
+
+    /// Returns the pipeline progress, if the state is not `Unwind`.
+    pub fn progress(&self) -> Option<BlockNumber> {
+        match self {
+            ControlFlow::Unwind { .. } => None,
+            ControlFlow::Continue { progress } => Some(*progress),
+            ControlFlow::NoProgress { stage_progress } => *stage_progress,
+        }
+    }
 }

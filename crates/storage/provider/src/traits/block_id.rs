@@ -15,11 +15,11 @@ pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
     fn best_block_number(&self) -> Result<BlockNumber>;
 
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
-    fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>>;
+    fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>>;
 
     /// Gets the block number for the given `BlockHashOrNumber`. Returns `None` if no block with
     /// this hash exists. If the `BlockHashOrNumber` is a `Number`, it is returned as is.
-    fn convert_hash(&self, id: BlockHashOrNumber) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn convert_hash(&self, id: BlockHashOrNumber) -> Result<Option<BlockNumber>> {
         match id {
             BlockHashOrNumber::Hash(hash) => self.block_number(hash),
             BlockHashOrNumber::Number(num) => Ok(Some(num)),
@@ -53,7 +53,7 @@ pub trait BlockIdProvider: BlockNumProvider + Send + Sync {
         num: BlockNumberOrTag,
     ) -> Result<Option<reth_primitives::BlockNumber>> {
         let num = match num {
-            BlockNumberOrTag::Latest => self.chain_info()?.best_number,
+            BlockNumberOrTag::Latest => self.best_block_number()?,
             BlockNumberOrTag::Earliest => 0,
             BlockNumberOrTag::Pending => {
                 return self
@@ -61,8 +61,8 @@ pub trait BlockIdProvider: BlockNumProvider + Send + Sync {
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.number))
             }
             BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Finalized => return self.finalized_block_num(),
-            BlockNumberOrTag::Safe => return self.safe_block_num(),
+            BlockNumberOrTag::Finalized => return self.finalized_block_number(),
+            BlockNumberOrTag::Safe => return self.safe_block_number(),
         };
         Ok(Some(num))
     }
@@ -111,12 +111,12 @@ pub trait BlockIdProvider: BlockNumProvider + Send + Sync {
     fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>>;
 
     /// Get the safe block number.
-    fn safe_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn safe_block_number(&self) -> Result<Option<BlockNumber>> {
         self.safe_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.number))
     }
 
     /// Get the finalized block number.
-    fn finalized_block_num(&self) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn finalized_block_number(&self) -> Result<Option<BlockNumber>> {
         self.finalized_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.number))
     }
 
