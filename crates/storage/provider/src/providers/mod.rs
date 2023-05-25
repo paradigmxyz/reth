@@ -75,6 +75,30 @@ where
     }
 }
 
+impl<DB, Tree> BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: BlockchainTreeViewer,
+{
+    /// Ensures that the given block number is canonical (synced)
+    ///
+    /// This is a helper for guarding the [HistoricalStateProvider] against block numbers that are
+    /// out of range and would lead to invalid results, mainly during initial sync.
+    ///
+    /// Verifying the block_number would be expensive since we need to lookup sync table
+    /// Instead, we ensure that the `block_number` is within the range of the
+    /// [Self::best_block_number] which is updated when a block is synced.
+    #[inline]
+    fn ensure_canonical_block(&self, block_number: BlockNumber) -> Result<()> {
+        let latest = self.best_block_number()?;
+        if block_number > latest {
+            Err(ProviderError::HeaderNotFound(block_number.into()).into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
 impl<DB, Tree> HeaderProvider for BlockchainProvider<DB, Tree>
 where
     DB: Database,
@@ -334,6 +358,7 @@ where
 
     fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
+        self.ensure_canonical_block(block_number)?;
         self.database.history_by_block_number(block_number)
     }
 
