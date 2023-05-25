@@ -102,6 +102,11 @@ where
 
     /// Starts requesting a full block from the network.
     pub(crate) fn download_full_block(&mut self, hash: H256) {
+        trace!(
+            target: "consensus::engine",
+            ?hash,
+            "start downloading full block."
+        );
         let request = self.full_block_client.get_full_block(hash);
         self.inflight_full_block_requests.push(request);
     }
