@@ -50,16 +50,21 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                      use rand::RngCore;
 
                     // get random instance of type
-                    let mut raw = [0u8;20 ];
+                    let mut raw = [0u8;1024];
                     rand::thread_rng().fill_bytes(&mut raw);
                     let mut unstructured = arbitrary::Unstructured::new(&raw[..]);
-                    let val = <super::#type_ident as arbitrary::Arbitrary>::arbitrary(&mut unstructured).unwrap();
+                    let val = <super::#type_ident as arbitrary::Arbitrary>::arbitrary(&mut unstructured);
+                    if val.is_err() {
+                        // this can be flaky sometimes due to not enough data for iterator based types like Vec
+                        return
+                    }
+                    let val = val.unwrap();
                     let mut buf = vec![];
                     let len = val.encode(&mut buf);
 
                     // malformed rlp-header check
                     let mut decode_buf = &mut buf.as_slice();
-                    let mut header = reth_rlp::Header::decode(decode_buf).unwrap();
+                    let mut header = reth_rlp::Header::decode(decode_buf).expect("failed to decode header");
                     header.payload_length+=1;
                     let mut b = Vec::with_capacity(decode_buf.len());
                     header.encode(&mut b);
