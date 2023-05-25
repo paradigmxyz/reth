@@ -336,8 +336,8 @@ where
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
 
         let latest = self.best_block_number()?;
-        // HistoricalStateProvider can't determine if requested block is synced or not. 
-        // Verifying the block_number would be expensive since we need to lookup sync table 
+        // HistoricalStateProvider can't determine if requested block is synced or not.
+        // Verifying the block_number would be expensive since we need to lookup sync table
         // Instead we check here if the requested block < latest_block and
         // returns an error if requested block is not synced yet
         if block_number <= latest {
@@ -358,7 +358,7 @@ where
         // check tree first
         if let Some(pending) = self.tree.find_pending_state_provider(block) {
             trace!(target: "providers::blockchain", "Returning pending state provider");
-            return self.pending_with_provider(pending);
+            return self.pending_with_provider(pending)
         }
         // not found in tree, check database
         self.history_by_block_hash(block)
@@ -370,7 +370,7 @@ where
 
         if let Some(block) = self.tree.pending_block_num_hash() {
             let pending = self.tree.pending_state_provider(block.hash)?;
-            return self.pending_with_provider(pending);
+            return self.pending_with_provider(pending)
         }
         self.latest()
     }
