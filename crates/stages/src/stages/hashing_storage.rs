@@ -395,7 +395,7 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.checkpoint.unwrap_or_default().block_number + 1;
+            let stage_progress = input.checkpoint().block_number + 1;
             let end = input.previous_stage_checkpoint().block_number;
 
             let n_accounts = 31;
@@ -476,7 +476,7 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             if let Some(output) = output {
-                let start_block = input.checkpoint.unwrap_or_default().block_number + 1;
+                let start_block = input.checkpoint().block_number + 1;
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
                     return Ok(())

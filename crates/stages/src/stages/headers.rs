@@ -195,7 +195,7 @@ where
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let current_progress = input.checkpoint.unwrap_or_default();
+        let current_progress = input.checkpoint();
 
         // Lookup the head and tip of the sync range
         let gap = self.get_sync_gap(tx, current_progress.block_number).await?;
@@ -421,7 +421,7 @@ mod tests {
             type Seed = Vec<SealedHeader>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let start = input.checkpoint.unwrap_or_default().block_number;
+                let start = input.checkpoint().block_number;
                 let head = random_header(start, None);
                 self.tx.insert_headers(std::iter::once(&head))?;
                 // patch td table for `update_head` call
@@ -446,7 +446,7 @@ mod tests {
                 input: ExecInput,
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
-                let initial_stage_progress = input.checkpoint.unwrap_or_default().block_number;
+                let initial_stage_progress = input.checkpoint().block_number;
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_stage_progress => {
                         self.tx.query(|tx| {

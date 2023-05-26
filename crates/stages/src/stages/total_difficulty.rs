@@ -63,7 +63,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;
 
         // Get latest total difficulty
-        let last_header_number = input.checkpoint.unwrap_or_default().block_number;
+        let last_header_number = input.checkpoint().block_number;
         let last_entry = cursor_td
             .seek_exact(last_header_number)?
             .ok_or(ProviderError::TotalDifficultyNotFound { number: last_header_number })?;
@@ -194,7 +194,7 @@ mod tests {
         type Seed = Vec<SealedHeader>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let start = input.checkpoint.unwrap_or_default().block_number;
+            let start = input.checkpoint().block_number;
             let head = random_header(start, None);
             self.tx.insert_headers(std::iter::once(&head))?;
             self.tx.commit(|tx| {
@@ -226,7 +226,7 @@ mod tests {
             input: ExecInput,
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
-            let initial_stage_progress = input.checkpoint.unwrap_or_default().block_number;
+            let initial_stage_progress = input.checkpoint().block_number;
             match output {
                 Some(output) if output.checkpoint.block_number > initial_stage_progress => {
                     self.tx.query(|tx| {
