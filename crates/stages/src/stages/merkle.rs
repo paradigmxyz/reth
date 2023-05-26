@@ -64,7 +64,7 @@ pub enum MerkleStage {
 impl MerkleStage {
     /// Stage default for the Execution variant.
     pub fn default_execution() -> Self {
-        Self::Execution { clean_threshold: 5_000 }
+        Self::Execution { clean_threshold: 50_000 }
     }
 
     /// Stage default for the Unwind variant.
