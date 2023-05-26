@@ -1,6 +1,12 @@
 use parking_lot::RwLock;
 use reth_primitives::{BlockNumHash, BlockNumber, ChainInfo, SealedHeader};
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
 /// Tracks the chain info: canonical head, safe block, finalized block.
 #[derive(Debug, Clone)]
@@ -14,6 +20,7 @@ impl ChainInfoTracker {
         Self {
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
+                canonical_head_number: AtomicU64::new(head.number),
                 canonical_head: RwLock::new(head),
                 safe_block: RwLock::new(None),
                 finalized_block: RwLock::new(None),
@@ -64,7 +71,7 @@ impl ChainInfoTracker {
 
     /// Returns the canonical head of the chain.
     pub(crate) fn get_canonical_block_number(&self) -> BlockNumber {
-        self.inner.canonical_head.read().number
+        self.inner.canonical_head_number.load(Ordering::Relaxed)
     }
 
     /// Returns the safe header of the chain.
@@ -83,7 +90,11 @@ impl ChainInfoTracker {
 
     /// Sets the canonical head of the chain.
     pub(crate) fn set_canonical_head(&self, header: SealedHeader) {
+        let number = header.number;
         *self.inner.canonical_head.write() = header;
+
+        // also update the atomic number.
+        self.inner.canonical_head_number.store(number, Ordering::Relaxed);
     }
 
     /// Sets the safe header of the chain.
@@ -104,6 +115,8 @@ struct ChainInfoInner {
     ///
     /// This is mainly used to track if we're connected to a beacon node.
     last_forkchoice_update: RwLock<Option<Instant>>,
+    /// Tracks the number of the `canonical_head`.
+    canonical_head_number: AtomicU64,
     /// The canonical head of the chain.
     canonical_head: RwLock<SealedHeader>,
     /// The block that the beacon node considers safe.
