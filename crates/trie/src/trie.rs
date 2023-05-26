@@ -570,7 +570,7 @@ mod tests {
         }
 
         // Generate the intermediate nodes on the receiving end of the channel
-        let (_, trie_updates) =
+        let (_, _, trie_updates) =
             StorageRoot::new_hashed(tx.deref(), hashed_address).root_with_updates().unwrap();
 
         // 1. Some state transition happens, update the hashed storage to the new value
@@ -738,6 +738,9 @@ mod tests {
     fn arbitrary_state_root_with_progress() {
         proptest!(
             ProptestConfig::with_cases(10), | (state: State) | {
+                let hashed_entries_total = state.len() +
+                    state.values().map(|(_, slots)| slots.len()).sum::<usize>();
+
                 let db = create_test_rw_db();
                 let mut tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -749,6 +752,7 @@ mod tests {
 
                 let threshold = 10;
                 let mut got = None;
+                let mut hashed_entries_walked = 0;
 
                 let mut intermediate_state: Option<Box<IntermediateStateRootState>> = None;
                 while got.is_none() {
@@ -756,11 +760,18 @@ mod tests {
                         .with_threshold(threshold)
                         .with_intermediate_state(intermediate_state.take().map(|state| *state));
                     match calculator.root_with_progress().unwrap() {
-                        StateRootProgress::Progress(state, _updates) => intermediate_state = Some(state),
-                        StateRootProgress::Complete(root, _updates) => got = Some(root),
+                        StateRootProgress::Progress(state, walked, _) => {
+                            intermediate_state = Some(state);
+                            hashed_entries_walked += walked;
+                        },
+                        StateRootProgress::Complete(root, walked, _) => {
+                            got = Some(root);
+                            hashed_entries_walked += walked;
+                        },
                     };
                 }
                 assert_eq!(expected, got.unwrap());
+                assert_eq!(hashed_entries_total, hashed_entries_walked)
             }
         );
     }
@@ -1225,7 +1236,7 @@ mod tests {
         let (expected_root, expected_updates) =
             extension_node_storage_trie(&mut tx, hashed_address);
 
-        let (got, updates) =
+        let (got, _, updates) =
             StorageRoot::new_hashed(tx.deref_mut(), hashed_address).root_with_updates().unwrap();
         assert_eq!(expected_root, got);
 
