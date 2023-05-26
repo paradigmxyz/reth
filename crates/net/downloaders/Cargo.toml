@@ -13,7 +13,7 @@ reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-db = { path = "../../storage/db" }
 reth-tasks = { path = "../../tasks" }
-reth-metrics-derive = { path = "../../metrics/metrics-derive" }
+reth-metrics = { path = "../../metrics" }
 
 # async
 futures = "0.3"
@@ -25,7 +25,6 @@ tokio-util = { version = "0.7", features = ["codec"] }
 
 # misc
 tracing = { workspace = true }
-metrics = "0.20.1"
 rayon = "1.6.0"
 
 # optional deps for the test-utils feature

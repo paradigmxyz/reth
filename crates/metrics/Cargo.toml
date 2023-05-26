@@ -1,0 +1,20 @@
+[package]
+name = "reth-metrics"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+description = "reth metrics utilities"
+
+[dependencies]
+# reth 
+reth-metrics-derive = { path = "./metrics-derive" }
+
+# metrics
+metrics = "0.20.1"
+
+# async
+tokio = { version = "1.21.2", features = ["full"], optional = true }
+
+[features]
+common = ["tokio"]

@@ -16,22 +16,18 @@ normal = [
 ]
 
 [dependencies]
-
 # reth
 reth-primitives = { path  = "../primitives" }
 reth-provider = { path = "../storage/provider" }
 reth-interfaces = { path = "../interfaces" }
 reth-rlp = { path = "../rlp" }
+reth-metrics = { path = "../metrics" }
 
 # async/futures
 async-trait = "0.1"
 futures-util = "0.3"
 parking_lot = "0.12"
 tokio = { version = "1", default-features = false, features = ["sync"] }
-
-# rpc/metrics
-metrics = "0.20.1"
-reth-metrics-derive = { path = "../metrics/metrics-derive" }
 
 # misc
 aquamarine = "0.3.0"

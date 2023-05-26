@@ -4,7 +4,6 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server,
 };
-use metrics::Unit;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::{
@@ -12,6 +11,7 @@ use reth_db::{
     mdbx::{Env, WriteMap},
     tables,
 };
+use reth_metrics::metrics::{self, absolute_counter, describe_counter, Unit};
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 /// Installs Prometheus as the metrics recorder and serves it over HTTP with a hook.
@@ -89,10 +89,10 @@ pub(crate) async fn initialize_with_db_metrics(
                 let num_pages = leaf_pages + branch_pages + overflow_pages;
                 let table_size = page_size * num_pages;
 
-                metrics::absolute_counter!("db.table_size", table_size as u64, "table" => *table);
-                metrics::absolute_counter!("db.table_pages", leaf_pages as u64, "table" => *table, "type" => "leaf");
-                metrics::absolute_counter!("db.table_pages", branch_pages as u64, "table" => *table, "type" => "branch");
-                metrics::absolute_counter!("db.table_pages", overflow_pages as u64, "table" => *table, "type" => "overflow");
+                absolute_counter!("db.table_size", table_size as u64, "table" => *table);
+                absolute_counter!("db.table_pages", leaf_pages as u64, "table" => *table, "type" => "leaf");
+                absolute_counter!("db.table_pages", branch_pages as u64, "table" => *table, "type" => "branch");
+                absolute_counter!("db.table_pages", overflow_pages as u64, "table" => *table, "type" => "overflow");
             }
 
             Ok::<(), eyre::Report>(())
@@ -103,12 +103,8 @@ pub(crate) async fn initialize_with_db_metrics(
 
     // We describe the metrics after the recorder is installed, otherwise this information is not
     // registered
-    metrics::describe_counter!(
-        "db.table_size",
-        Unit::Bytes,
-        "The size of a database table (in bytes)"
-    );
-    metrics::describe_counter!("db.table_pages", "The number of database pages for a table");
+    describe_counter!("db.table_size", Unit::Bytes, "The size of a database table (in bytes)");
+    describe_counter!("db.table_pages", "The number of database pages for a table");
 
     Ok(())
 }

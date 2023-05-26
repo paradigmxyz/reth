@@ -7,9 +7,9 @@ use crate::{
     DisconnectReason, HelloMessage,
 };
 use futures::{Sink, SinkExt, StreamExt};
-use metrics::counter;
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
+use reth_metrics::metrics::{self, counter};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     hex,
