@@ -490,13 +490,13 @@ impl Command {
             .request_handler(client)
             .split_with_handle();
 
+        task_executor.spawn_critical("p2p txpool", txpool);
+        task_executor.spawn_critical("p2p eth request handler", eth);
+
         let known_peers_file = self.network.persistent_peers_file(default_peers_path);
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
             run_network_until_shutdown(shutdown, network, known_peers_file)
         });
-
-        task_executor.spawn_critical("p2p eth request handler", eth);
-        task_executor.spawn_critical("p2p txpool request handler", txpool);
 
         Ok(handle)
     }
