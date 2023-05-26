@@ -27,6 +27,13 @@ pub struct SenderRecoveryStage {
     pub commit_threshold: u64,
 }
 
+impl SenderRecoveryStage {
+    /// Create new instance of [SenderRecoveryStage].
+    pub fn new(commit_threshold: u64) -> Self {
+        Self { commit_threshold }
+    }
+}
+
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
         Self { commit_threshold: 500_000 }
