@@ -95,15 +95,11 @@ pub struct Command {
 
     /// The block interval for sync and unwind.
     /// Defaults to `1000`.
-    #[arg(long)]
-    pub interval: Option<u64>,
+    #[arg(long, default_value = "1000")]
+    pub interval: u64,
 }
 
 impl Command {
-    fn interval(&self) -> u64 {
-        self.interval.unwrap_or(1000)
-    }
-
     fn build_pipeline<DB, Client>(
         &self,
         config: &Config,
@@ -262,11 +258,10 @@ impl Command {
             return Ok(())
         }
 
-        let interval = self.interval();
         let mut current_max_block = latest_block_number;
         while current_max_block < self.to {
             let next_block = current_max_block + 1;
-            let target_block = self.to.min(current_max_block + interval);
+            let target_block = self.to.min(current_max_block + self.interval);
             let target_block_hash =
                 self.fetch_block_hash(fetch_client.clone(), target_block).await?;
 
