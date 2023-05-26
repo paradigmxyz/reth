@@ -4,7 +4,7 @@ use crate::{
     dirs::{LogsDir, PlatformPath},
     merkle_debug, node, p2p,
     runner::CliRunner,
-    stage, test_eth_chain, test_vectors,
+    stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
@@ -35,7 +35,6 @@ pub fn run() -> eyre::Result<()> {
         Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::MerkleDebug(command) => runner.run_until_ctrl_c(command.execute()),
     }
@@ -62,9 +61,6 @@ pub enum Commands {
     /// P2P Debugging utilities
     #[command(name = "p2p")]
     P2P(p2p::Command),
-    /// Run Ethereum blockchain tests
-    #[command(name = "test-chain")]
-    TestEthChain(test_eth_chain::Command),
     /// Generate Test Vectors
     #[command(name = "test-vectors")]
     TestVectors(test_vectors::Command),

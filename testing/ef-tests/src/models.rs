@@ -1,18 +1,24 @@
-use reth_primitives::{
-    Address, BigEndianHash, Bloom, Bytes, ChainSpec, ChainSpecBuilder, Header as RethHeader,
-    JsonU256, SealedHeader, Withdrawal, H160, H256, H64,
+//! Shared models for <https://github.com/ethereum/tests>
+
+use crate::{assert::assert_equal, Error};
+use reth_db::{
+    cursor::DbDupCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
 };
+use reth_primitives::{
+    keccak256, Account as RethAccount, Address, BigEndianHash, BlockNumber, Bloom, Bytecode, Bytes,
+    ChainSpec, ChainSpecBuilder, Header as RethHeader, JsonU256, SealedBlock, SealedHeader,
+    StorageEntry, Withdrawal, H160, H256, H64, U256,
+};
+use reth_rlp::Decodable;
 use serde::{self, Deserialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Deref};
 
-/// An Ethereum blockchain test.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
-pub struct Test(pub BTreeMap<String, BlockchainTestData>);
-
-/// Ethereum test data.
+/// The definition of a blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockchainTestData {
+pub struct BlockchainTest {
     /// Genesis block header.
     pub genesis_block_header: Header,
     /// RLP encoded genesis block.
@@ -34,7 +40,7 @@ pub struct BlockchainTestData {
 }
 
 /// A block header in an Ethereum blockchain test.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Header {
     /// Bloom filter.
@@ -102,7 +108,6 @@ impl From<Header> for SealedHeader {
 
 /// A block in an Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
     /// Block header.
@@ -119,7 +124,20 @@ pub struct Block {
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
-/// Transaction Sequence in block
+impl Block {
+    /// Write the block to the database.
+    pub fn write_to_db<'a, Tx>(&self, tx: &'a Tx) -> Result<BlockNumber, Error>
+    where
+        Tx: DbTx<'a> + DbTxMut<'a>,
+    {
+        let decoded = SealedBlock::decode(&mut self.rlp.as_ref())?;
+        let block_number = decoded.number;
+        reth_provider::insert_canonical_block(tx, decoded, None)?;
+        Ok(block_number)
+    }
+}
+
+/// Transaction sequence in block
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
@@ -131,7 +149,47 @@ pub struct TransactionSequence {
 
 /// Ethereum blockchain test data state.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
-pub struct State(pub BTreeMap<Address, Account>);
+pub struct State(BTreeMap<Address, Account>);
+
+impl State {
+    /// Write the state to the database.
+    pub fn write_to_db<'a, Tx>(&self, tx: &'a Tx) -> Result<(), Error>
+    where
+        Tx: DbTxMut<'a>,
+    {
+        for (&address, account) in self.0.iter() {
+            let has_code = !account.code.is_empty();
+            let code_hash = has_code.then(|| keccak256(&account.code));
+            tx.put::<tables::PlainAccountState>(
+                address,
+                RethAccount {
+                    balance: account.balance.0,
+                    nonce: account.nonce.0.to::<u64>(),
+                    bytecode_hash: code_hash,
+                },
+            )?;
+            if let Some(code_hash) = code_hash {
+                tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.0.clone()))?;
+            }
+            account.storage.iter().try_for_each(|(k, v)| {
+                tx.put::<tables::PlainStorageState>(
+                    address,
+                    StorageEntry { key: H256::from_slice(&k.0.to_be_bytes::<32>()), value: v.0 },
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Deref for State {
+    type Target = BTreeMap<Address, Account>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Merkle root hash or storage accounts.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -157,8 +215,62 @@ pub struct Account {
     pub storage: BTreeMap<JsonU256, JsonU256>,
 }
 
+impl Account {
+    /// Check that the account matches what is in the database.
+    ///
+    /// In case of a mismatch, `Err(Error::Assertion)` is returned.
+    pub fn assert_db<'a, Tx>(&self, address: Address, tx: &'a Tx) -> Result<(), Error>
+    where
+        Tx: DbTx<'a>,
+    {
+        let account = tx.get::<tables::PlainAccountState>(address)?.ok_or_else(|| {
+            Error::Assertion(format!("Account is missing ({address}) expected: {:?}", self))
+        })?;
+
+        assert_equal(self.balance.into(), account.balance, "Balance does not match")?;
+        assert_equal(self.nonce.0.to(), account.nonce, "Nonce does not match")?;
+
+        if let Some(bytecode_hash) = account.bytecode_hash {
+            assert_equal(keccak256(&self.code), bytecode_hash, "Bytecode does not match")?;
+        } else {
+            assert_equal(
+                self.code.is_empty(),
+                true,
+                "Expected empty bytecode, got bytecode in db.",
+            )?;
+        }
+
+        let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+        for (slot, value) in self.storage.iter() {
+            if let Some(entry) =
+                storage_cursor.seek_by_key_subkey(address, H256(slot.0.to_be_bytes()))?
+            {
+                if U256::from_be_bytes(entry.key.0) == slot.0 {
+                    assert_equal(
+                        value.0,
+                        entry.value,
+                        &format!("Storage for slot {:?} does not match", slot),
+                    )?;
+                } else {
+                    return Err(Error::Assertion(format!(
+                        "Slot {:?} is missing from the database. Expected {:?}",
+                        slot, value
+                    )))
+                }
+            } else {
+                return Err(Error::Assertion(format!(
+                    "Slot {:?} is missing from the database. Expected {:?}",
+                    slot, value
+                )))
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Fork specification.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
     Frontier,
@@ -309,129 +421,6 @@ pub type AccessList = Vec<AccessListItem>;
 mod test {
     use super::*;
     use serde_json;
-
-    #[test]
-    fn blockchain_test_deserialize() {
-        let test = r#"{
-            "evmBytecode_d0g0v0_Berlin" : {
-                "_info" : {
-                    "comment" : "",
-                    "filling-rpc-server" : "evm version 1.10.18-unstable-53304ff6-20220503",
-                    "filling-tool-version" : "retesteth-0.2.2-testinfo+commit.05e0b8ca.Linux.g++",
-                    "generatedTestHash" : "0951de8d9e6b2a08e57234f57ef719a17aee9d7e9d7e852e454a641028b791a9",
-                    "lllcversion" : "Version: 0.5.14-develop.2021.11.27+commit.401d5358.Linux.g++",
-                    "solidity" : "Version: 0.8.5+commit.a4f2e591.Linux.g++",
-                    "source" : "src/GeneralStateTestsFiller/stBugs/evmBytecodeFiller.json",
-                    "sourceHash" : "6ced7b43100305d1cc5aee48344c0eab6002940358e2c126279ef8444c2dea5a"
-                },
-                "blocks" : [
-                    {
-                        "blockHeader" : {
-                            "bloom" : "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-                            "coinbase" : "0x1000000000000000000000000000000000000000",
-                            "difficulty" : "0x020000",
-                            "extraData" : "0x00",
-                            "gasLimit" : "0x54a60a4202e088",
-                            "gasUsed" : "0x01d4c0",
-                            "hash" : "0xb8152a06d2018ed9a1eb1eb6e1fe8c3478d8eae5b04d743bf4a1ec699510cfe5",
-                            "mixHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
-                            "nonce" : "0x0000000000000000",
-                            "number" : "0x01",
-                            "parentHash" : "0xb835c89a42605cfcc542381145b83c826caf10823b81af0f45091040a67e6601",
-                            "receiptTrie" : "0x0ef77336cf7bfbd2c500dcefe7b48d0ef7896d38f6373fbeb301ea4dac3746a7",
-                            "stateRoot" : "0x27bf1aca92967ecd83e11c52887203bbdcab73a27fe07e814cf749fa50483a53",
-                            "timestamp" : "0x03e8",
-                            "transactionsTrie" : "0x9008a2d4af552fea9b45675cd2af6d4117303b57da25b28438ccd1f6bad6828d",
-                            "uncleHash" : "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
-                        },
-                        "rlp" : "0xf90264f901fca0b835c89a42605cfcc542381145b83c826caf10823b81af0f45091040a67e6601a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347941000000000000000000000000000000000000000a027bf1aca92967ecd83e11c52887203bbdcab73a27fe07e814cf749fa50483a53a09008a2d4af552fea9b45675cd2af6d4117303b57da25b28438ccd1f6bad6828da00ef77336cf7bfbd2c500dcefe7b48d0ef7896d38f6373fbeb301ea4dac3746a7b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018754a60a4202e0888301d4c08203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a8301d4c094b94f5374fce5edbc8e2a8697c15331677e6ebf0b80801ca0f3b41c283c02ed98318dc9cac3f0ddc3de2f2f7853a03299a46f22a7c6726c3aa0396ccb5968a532ea070924408625d3e36d4db21bfbd0cb070ba9e1fe9dba58abc0",
-                        "transactions" : [
-                            {
-                                "data" : "0x",
-                                "gasLimit" : "0x01d4c0",
-                                "gasPrice" : "0x0a",
-                                "nonce" : "0x00",
-                                "r" : "0xf3b41c283c02ed98318dc9cac3f0ddc3de2f2f7853a03299a46f22a7c6726c3a",
-                                "s" : "0x396ccb5968a532ea070924408625d3e36d4db21bfbd0cb070ba9e1fe9dba58ab",
-                                "sender" : "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-                                "to" : "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-                                "v" : "0x1c",
-                                "value" : "0x00"
-                            }
-                        ],
-                        "uncleHeaders" : [
-                        ],
-                        "withdrawals" : [
-                        ]
-                    }
-                ],
-                "genesisBlockHeader" : {
-                    "bloom" : "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-                    "coinbase" : "0x1000000000000000000000000000000000000000",
-                    "difficulty" : "0x020000",
-                    "extraData" : "0x00",
-                    "gasLimit" : "0x54a60a4202e088",
-                    "gasUsed" : "0x00",
-                    "hash" : "0xb835c89a42605cfcc542381145b83c826caf10823b81af0f45091040a67e6601",
-                    "mixHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
-                    "nonce" : "0x0000000000000000",
-                    "number" : "0x00",
-                    "parentHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
-                    "receiptTrie" : "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-                    "stateRoot" : "0x642a369a4a9dbf57d83ba05413910a5dd2cff93858c68e9e8293a8fffeae8660",
-                    "timestamp" : "0x00",
-                    "transactionsTrie" : "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-                    "uncleHash" : "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
-                },
-                "genesisRLP" : "0xf901fcf901f7a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347941000000000000000000000000000000000000000a0642a369a4a9dbf57d83ba05413910a5dd2cff93858c68e9e8293a8fffeae8660a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808754a60a4202e088808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0",
-                "lastblockhash" : "0xb8152a06d2018ed9a1eb1eb6e1fe8c3478d8eae5b04d743bf4a1ec699510cfe5",
-                "network" : "Berlin",
-                "postState" : {
-                    "0x1000000000000000000000000000000000000000" : {
-                        "balance" : "0x1bc16d674eda4f80",
-                        "code" : "0x",
-                        "nonce" : "0x00",
-                        "storage" : {
-                        }
-                    },
-                    "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
-                        "balance" : "0x38beec8feeb7d618",
-                        "code" : "0x",
-                        "nonce" : "0x01",
-                        "storage" : {
-                        }
-                    },
-                    "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
-                        "balance" : "0x00",
-                        "code" : "0x67ffffffffffffffff600160006000fb",
-                        "nonce" : "0x3f",
-                        "storage" : {
-                        }
-                    }
-                },
-                "pre" : {
-                    "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
-                        "balance" : "0x38beec8feeca2598",
-                        "code" : "0x",
-                        "nonce" : "0x00",
-                        "storage" : {
-                        }
-                    },
-                    "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b" : {
-                        "balance" : "0x00",
-                        "code" : "0x67ffffffffffffffff600160006000fb",
-                        "nonce" : "0x3f",
-                        "storage" : {
-                        }
-                    }
-                },
-                "sealEngine" : "NoProof"
-            }
-        }"#;
-
-        let res = serde_json::from_str::<Test>(test);
-        assert!(res.is_ok(), "Failed to deserialize BlockchainTestData with error: {res:?}");
-    }
 
     #[test]
     fn header_deserialize() {

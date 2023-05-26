@@ -58,14 +58,15 @@ jobs:
       RUST_LOG: info,sync=error
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Checkout ethereum/tests
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: ethereum/tests
-          path: ethtests
+          path: testing/ef-tests/ethereum-tests
           submodules: recursive
+          depth: 1
 
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
@@ -73,13 +74,14 @@ jobs:
           toolchain: stable
           profile: minimal
           override: true
-
       - uses: Swatinem/rust-cache@v1
         with:
           cache-on-failure: true
+      - name: Install latest nextest release
+        uses: taiki-e/install-action@nextest
 
       - name: Run Ethereum tests
-        run: cargo run --release -- test-chain ethtests/BlockchainTests/GeneralStateTests/
+        run: cargo nextest run --release -p ef-tests --features ef-tests
 
   doc-test:
     name: rustdoc
