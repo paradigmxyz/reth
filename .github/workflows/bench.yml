@@ -42,7 +42,10 @@ jobs:
           cache-on-failure: true
 
       - name: Generate test vectors
-        run: cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
+        run: |
+          cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
+          cp -r testdata main
+          mv testdata pr
 
       - name: Set main baseline
         run: cargo bench --package reth-db --bench iai --manifest-path main/Cargo.toml
