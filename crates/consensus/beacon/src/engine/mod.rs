@@ -558,7 +558,7 @@ where
             self.sync.set_pipeline_sync_target(target);
         } else {
             // trigger a full block download for the _missing_ new head
-            self.sync.download_full_block(state.head_block_hash)
+            self.sync.download_full_block(state.head_block_hash);
         }
 
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
