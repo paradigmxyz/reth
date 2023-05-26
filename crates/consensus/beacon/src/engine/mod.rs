@@ -873,8 +873,11 @@ where
                             }
                         };
 
-                        if let ControlFlow::Unwind { target, bad_block } = ctrl {
+                        if let ControlFlow::Unwind { bad_block, .. } = ctrl {
                             // update the `invalid_headers` cache with the new invalid headers
+                            if let Some(block) = bad_block {
+                                self.invalid_headers.insert(block);
+                            }
 
                             // Attempt to sync to the head block after unwind.
                             self.sync.set_pipeline_sync_target(current_state.head_block_hash);
