@@ -13,6 +13,7 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod dirs;
+pub mod execution_debug;
 pub mod merkle_debug;
 pub mod node;
 pub mod p2p;
