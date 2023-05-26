@@ -298,6 +298,16 @@ impl PayloadStatus {
     }
 }
 
+impl std::fmt::Display for PayloadStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "PayloadStatus {{status: {}, latestValidHash: {:?} }}",
+            self.status, self.latest_valid_hash
+        )
+    }
+}
+
 impl Serialize for PayloadStatus {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -391,6 +401,24 @@ impl PayloadStatusEnum {
     /// Returns true if the payload status is invalid block hash.
     pub fn is_invalid_block_hash(&self) -> bool {
         matches!(self, PayloadStatusEnum::InvalidBlockHash { .. })
+    }
+}
+
+impl std::fmt::Display for PayloadStatusEnum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PayloadStatusEnum::Invalid { validation_error } => {
+                f.write_str(self.as_str())?;
+                f.write_str(": ")?;
+                f.write_str(validation_error.as_str())
+            }
+            PayloadStatusEnum::InvalidBlockHash { validation_error } => {
+                f.write_str(self.as_str())?;
+                f.write_str(": ")?;
+                f.write_str(validation_error.as_str())
+            }
+            _ => f.write_str(self.as_str()),
+        }
     }
 }
 
