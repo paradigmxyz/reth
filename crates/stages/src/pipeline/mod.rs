@@ -221,7 +221,7 @@ where
                 }
                 ControlFlow::Continue { progress } => self.progress.update(progress),
                 ControlFlow::Unwind { target, bad_block } => {
-                    self.unwind(target, bad_block.as_ref().map(|header| header.number)).await?;
+                    self.unwind(target, Some(bad_block.number)).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
@@ -380,7 +380,7 @@ where
                         // beginning.
                         Ok(ControlFlow::Unwind {
                             target: prev_checkpoint.unwrap_or_default().block_number,
-                            bad_block: Some(block),
+                            bad_block: block,
                         })
                     } else if err.is_fatal() {
                         error!(
