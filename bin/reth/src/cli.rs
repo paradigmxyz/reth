@@ -2,7 +2,7 @@
 use crate::{
     chain, config, db,
     dirs::{LogsDir, PlatformPath},
-    merkle_debug, node, p2p,
+    execution_debug, merkle_debug, node, p2p,
     runner::CliRunner,
     stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
@@ -37,6 +37,9 @@ pub fn run() -> eyre::Result<()> {
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::MerkleDebug(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::ExecutionDebug(command) => {
+            runner.run_command_until_exit(|ctx| command.execute(ctx))
+        }
     }
 }
 
@@ -70,6 +73,9 @@ pub enum Commands {
     /// Debug state root calculation
     #[command(name = "merkle-debug")]
     MerkleDebug(merkle_debug::Command),
+    /// Debug execution.
+    #[command(name = "execution-debug")]
+    ExecutionDebug(execution_debug::Command),
 }
 
 #[derive(Debug, Parser)]
