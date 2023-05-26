@@ -439,7 +439,7 @@ where
         );
 
         // short circuit on empty storage
-        if hashed_storage_cursor.is_empty(self.hashed_address)? {
+        if hashed_storage_cursor.is_storage_empty(self.hashed_address)? {
             return Ok((
                 EMPTY_ROOT,
                 TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),

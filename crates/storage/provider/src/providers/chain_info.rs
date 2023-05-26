@@ -1,5 +1,5 @@
 use parking_lot::RwLock;
-use reth_primitives::{BlockNumHash, ChainInfo, SealedHeader};
+use reth_primitives::{BlockNumHash, BlockNumber, ChainInfo, SealedHeader};
 use std::{sync::Arc, time::Instant};
 
 /// Tracks the chain info: canonical head, safe block, finalized block.
@@ -60,6 +60,11 @@ impl ChainInfoTracker {
     #[allow(unused)]
     pub(crate) fn get_canonical_num_hash(&self) -> BlockNumHash {
         self.inner.canonical_head.read().num_hash()
+    }
+
+    /// Returns the canonical head of the chain.
+    pub(crate) fn get_canonical_block_number(&self) -> BlockNumber {
+        self.inner.canonical_head.read().number
     }
 
     /// Returns the safe header of the chain.

@@ -290,9 +290,20 @@ where
         // If this is sent from new payload then the parent hash could be in a side chain, and is
         // not necessarily canonical
         if self.blockchain.header_by_hash(parent_hash).is_some() {
+            // parent is in side-chain: validated but not canonical yet
             Some(parent_hash)
         } else {
-            self.blockchain.find_canonical_ancestor(parent_hash)
+            let parent_hash = self.blockchain.find_canonical_ancestor(parent_hash)?;
+            let parent_header = self.blockchain.header(&parent_hash).ok().flatten()?;
+
+            // we need to check if the parent block is the last POW block, if so then the payload is
+            // the first POS. The engine API spec mandates a zero hash to be returned: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
+            if parent_header.difficulty != U256::ZERO {
+                return Some(H256::zero())
+            }
+
+            // parent is canonical POS block
+            Some(parent_hash)
         }
     }
 
@@ -817,10 +828,11 @@ where
                     .map(|status| status.is_valid())
                     .unwrap_or_default()
                 {
+                    // payload is valid
+                    self.sync_state_updater.update_sync_state(SyncState::Idle);
+                } else {
                     // if the payload is invalid, we run the pipeline
                     self.sync.set_pipeline_sync_target(hash);
-                } else {
-                    self.sync_state_updater.update_sync_state(SyncState::Idle);
                 }
             }
             EngineSyncEvent::PipelineStarted(target) => {
@@ -855,6 +867,27 @@ where
                             // Attempt to sync to the head block after unwind.
                             self.sync.set_pipeline_sync_target(current_state.head_block_hash);
                             return None
+                        }
+
+                        // update the canon chain if continuous is enabled
+                        if self.sync.run_pipeline_continuously() {
+                            let max_block = ctrl.progress().unwrap_or_default();
+                            let max_header = match self.blockchain.sealed_header(max_block) {
+                                Ok(header) => match header {
+                                    Some(header) => header,
+                                    None => {
+                                        return Some(Err(Error::Provider(
+                                            ProviderError::HeaderNotFound(max_block.into()),
+                                        )
+                                        .into()))
+                                    }
+                                },
+                                Err(error) => {
+                                    error!(target: "consensus::engine", ?error, "Error getting canonical header for continuous sync");
+                                    return Some(Err(error.into()))
+                                }
+                            };
+                            self.blockchain.set_canonical_head(max_header);
                         }
 
                         // Update the state and hashes of the blockchain tree if possible.

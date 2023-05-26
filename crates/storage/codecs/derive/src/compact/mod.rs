@@ -251,7 +251,7 @@ mod tests {
             impl Compact for TestStruct {
                 fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
-                    let mut total_len = 0;
+                    let mut total_length = 0;
                     let mut buffer = bytes::BytesMut::new();
                     let f_u64_len = self.f_u64.to_compact(&mut buffer);
                     flags.set_f_u64_len(f_u64_len as u8);
@@ -270,10 +270,10 @@ mod tests {
                     let f_vec_empty_len = self.f_vec_empty.to_compact(&mut buffer);
                     let f_vec_some_len = self.f_vec_some.specialized_to_compact(&mut buffer);
                     let flags = flags.into_bytes();
-                    total_len += flags.len() + buffer.len();
+                    total_length += flags.len() + buffer.len();
                     buf.put_slice(&flags);
                     buf.put(buffer);
-                    total_len
+                    total_length
                 }
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
                     let (flags, mut buf) = TestStructFlags::from(buf);

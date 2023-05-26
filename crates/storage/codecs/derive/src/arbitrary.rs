@@ -16,6 +16,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
     let mut traits = vec![];
     let mut roundtrips = vec![];
+    let mut additional_tests = vec![];
 
     for arg in args {
         if arg.to_string() == "compact" {
@@ -23,10 +24,8 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
-
                     let len = field.clone().to_compact(&mut buf);
                     let (decoded, _) = super::#type_ident::from_compact(&buf, len);
-
                     assert!(field == decoded);
                 }
             });
@@ -35,7 +34,6 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
-
                     let len = field.encode(&mut buf);
                     let mut b = &mut buf.as_slice();
                     let decoded = super::#type_ident::decode(b).unwrap();
@@ -43,9 +41,30 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     // ensure buffer is fully consumed by decode
                     assert!(b.is_empty(), "buffer was not consumed entirely");
 
-                    // malformed header check
+                }
+            });
+            additional_tests.push(quote! {
+
+                #[test]
+                fn malformed_rlp_header_check() {
+                     use rand::RngCore;
+
+                    // get random instance of type
+                    let mut raw = [0u8;1024];
+                    rand::thread_rng().fill_bytes(&mut raw);
+                    let mut unstructured = arbitrary::Unstructured::new(&raw[..]);
+                    let val = <super::#type_ident as arbitrary::Arbitrary>::arbitrary(&mut unstructured);
+                    if val.is_err() {
+                        // this can be flaky sometimes due to not enough data for iterator based types like Vec
+                        return
+                    }
+                    let val = val.unwrap();
+                    let mut buf = vec![];
+                    let len = val.encode(&mut buf);
+
+                    // malformed rlp-header check
                     let mut decode_buf = &mut buf.as_slice();
-                    let mut header = reth_rlp::Header::decode(decode_buf).unwrap();
+                    let mut header = reth_rlp::Header::decode(decode_buf).expect("failed to decode header");
                     header.payload_length+=1;
                     let mut b = Vec::with_capacity(decode_buf.len());
                     header.encode(&mut b);
@@ -53,6 +72,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let res = super::#type_ident::decode(&mut b.as_ref());
                     assert!(res.is_err(), "malformed header was decoded");
                 }
+
             });
         } else if let Ok(num) = arg.to_string().parse() {
             default_cases = num;
@@ -77,6 +97,8 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                         #(#roundtrips)*
                     });
                 }
+
+                #(#additional_tests)*
             }
         }
     }

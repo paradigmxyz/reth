@@ -97,7 +97,7 @@ impl Compact for MerkleCheckpoint {
     }
 }
 
-/// Saves the progress of AccountHashing
+/// Saves the progress of AccountHashing stage.
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct AccountHashingCheckpoint {
@@ -109,7 +109,7 @@ pub struct AccountHashingCheckpoint {
     pub to: u64,
 }
 
-/// Saves the progress of StorageHashing
+/// Saves the progress of StorageHashing stage.
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct StorageHashingCheckpoint {
@@ -121,6 +121,26 @@ pub struct StorageHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
+}
+
+/// Saves the progress of abstract stage iterating over or downloading entities.
+#[main_codec]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub struct EntitiesCheckpoint {
+    /// Number of entities already processed.
+    pub processed: u64,
+    /// Total entities to be processed.
+    pub total: Option<u64>,
+}
+
+impl Display for EntitiesCheckpoint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(total) = self.total {
+            write!(f, "{:.1}%", 100.0 * self.processed as f64 / total as f64)
+        } else {
+            write!(f, "{}", self.processed)
+        }
+    }
 }
 
 /// Saves the progress of a stage.
@@ -155,6 +175,14 @@ impl StageCheckpoint {
         }
     }
 
+    /// Returns the entities stage checkpoint, if any.
+    pub fn entities_stage_checkpoint(&self) -> Option<EntitiesCheckpoint> {
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::Entities(checkpoint)) => Some(checkpoint),
+            _ => None,
+        }
+    }
+
     /// Sets the stage checkpoint to account hashing.
     pub fn with_account_hashing_stage_checkpoint(
         mut self,
@@ -172,13 +200,20 @@ impl StageCheckpoint {
         self.stage_checkpoint = Some(StageUnitCheckpoint::Storage(checkpoint));
         self
     }
+
+    /// Sets the stage checkpoint to entities.
+    pub fn with_entities_stage_checkpoint(mut self, checkpoint: EntitiesCheckpoint) -> Self {
+        self.stage_checkpoint = Some(StageUnitCheckpoint::Entities(checkpoint));
+        self
+    }
 }
 
-// TODO(alexey): ideally, we'd want to display block number + stage-specific metric (if available)
-//  in places like logs or traces
 impl Display for StageCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.block_number, f)
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::Entities(stage_checkpoint)) => stage_checkpoint.fmt(f),
+            _ => write!(f, "{}", self.block_number),
+        }
     }
 }
 
@@ -194,6 +229,8 @@ pub enum StageUnitCheckpoint {
     Account(AccountHashingCheckpoint),
     /// Saves the progress of StorageHashing stage.
     Storage(StorageHashingCheckpoint),
+    /// Saves the progress of abstract stage iterating over or downloading entities.
+    Entities(EntitiesCheckpoint),
 }
 
 impl Compact for StageUnitCheckpoint {
@@ -212,6 +249,10 @@ impl Compact for StageUnitCheckpoint {
             }
             StageUnitCheckpoint::Storage(data) => {
                 buf.put_u8(2);
+                1 + data.to_compact(buf)
+            }
+            StageUnitCheckpoint::Entities(data) => {
+                buf.put_u8(3);
                 1 + data.to_compact(buf)
             }
         }
@@ -233,6 +274,10 @@ impl Compact for StageUnitCheckpoint {
             2 => {
                 let (data, buf) = StorageHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Storage(data), buf)
+            }
+            3 => {
+                let (data, buf) = EntitiesCheckpoint::from_compact(&buf[1..], buf.len() - 1);
+                (Self::Entities(data), buf)
             }
             _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
         }

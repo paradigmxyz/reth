@@ -36,9 +36,9 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList, is_zstd: bool) -> Tok
         impl Compact for #ident {
             fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                 let mut flags = #flags::default();
-                let mut total_len = 0;
+                let mut total_length = 0;
                 #(#to_compact)*
-                total_len
+                total_length
             }
 
             fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -176,7 +176,7 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     // Places the flag bits.
     lines.push(quote! {
         let flags = flags.into_bytes();
-        total_len += flags.len() + buffer.len();
+        total_length += flags.len() + buffer.len();
         buf.put_slice(&flags);
     });
 

@@ -2,7 +2,7 @@ use crate::{
     id::StageId,
     stage::{ExecOutput, UnwindInput, UnwindOutput},
 };
-use reth_primitives::BlockNumber;
+use reth_primitives::StageCheckpoint;
 
 /// An event emitted by a [Pipeline][crate::Pipeline].
 ///
@@ -18,7 +18,7 @@ pub enum PipelineEvent {
         /// The stage that is about to be run.
         stage_id: StageId,
         /// The previous checkpoint of the stage.
-        stage_progress: Option<BlockNumber>,
+        checkpoint: Option<StageCheckpoint>,
     },
     /// Emitted when a stage has run a single time.
     Ran {

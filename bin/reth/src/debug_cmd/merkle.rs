@@ -65,15 +65,22 @@ impl Command {
         let db = Arc::new(init_db(db_path)?);
         let mut tx = Transaction::new(db.as_ref())?;
 
-        let execution_checkpoint = EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default();
-        assert!(execution_checkpoint.block_number < self.to, "Nothing to run");
+        let execution_checkpoint_block =
+            EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default().block_number;
+        assert!(execution_checkpoint_block < self.to, "Nothing to run");
 
-        let should_reset_stages = !(execution_checkpoint ==
-            ACCOUNT_HASHING.get_checkpoint(tx.deref())?.unwrap_or_default() &&
-            execution_checkpoint ==
-                STORAGE_HASHING.get_checkpoint(tx.deref())?.unwrap_or_default() &&
-            execution_checkpoint ==
-                MERKLE_EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default());
+        // Check if any of hashing or merkle stages aren't on the same block number as
+        // Execution stage or have any intermediate progress.
+        let should_reset_stages = [ACCOUNT_HASHING, STORAGE_HASHING, MERKLE_EXECUTION]
+            .into_iter()
+            .map(|stage| stage.get_checkpoint(tx.deref()))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(Option::unwrap_or_default)
+            .any(|checkpoint| {
+                checkpoint.block_number != execution_checkpoint_block ||
+                    checkpoint.stage_checkpoint.is_some()
+            });
 
         let factory = reth_revm::Factory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
@@ -89,16 +96,14 @@ impl Command {
         let mut storage_hashing_stage = StorageHashingStage::default();
         let mut merkle_stage = MerkleStage::default_execution();
 
-        for block in execution_checkpoint.block_number + 1..=self.to {
+        for block in execution_checkpoint_block + 1..=self.to {
             tracing::trace!(target: "reth::cli", block, "Executing block");
-            let progress = if (!should_reset_stages ||
-                block > execution_checkpoint.block_number + 1) &&
-                block > 0
-            {
-                Some(block - 1)
-            } else {
-                None
-            };
+            let progress =
+                if (!should_reset_stages || block > execution_checkpoint_block + 1) && block > 0 {
+                    Some(block - 1)
+                } else {
+                    None
+                };
 
             execution_stage
                 .execute(
