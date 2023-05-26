@@ -24,7 +24,7 @@ jobs:
         with:
           ref: main
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
