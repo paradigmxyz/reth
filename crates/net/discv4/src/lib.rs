@@ -1579,7 +1579,7 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
                 trace!( target : "discv4",  ?to, ?size,"sent payload");
             }
             Err(err) => {
-                warn!( target : "discv4",  ?to, ?err,"Failed to send datagram.");
+                debug!( target : "discv4",  ?to, ?err,"Failed to send datagram.");
             }
         }
     }
