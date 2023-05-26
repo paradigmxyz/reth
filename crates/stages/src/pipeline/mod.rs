@@ -221,7 +221,7 @@ where
                 }
                 ControlFlow::Continue { progress } => self.progress.update(progress),
                 ControlFlow::Unwind { target, bad_block } => {
-                    self.unwind(target, bad_block).await?;
+                    self.unwind(target, bad_block.as_ref().map(|header| header.number)).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
@@ -371,7 +371,7 @@ where
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,
-                            bad_block = %block,
+                            bad_block = %block.number,
                             "Stage encountered a validation error: {error}"
                         );
 
@@ -422,7 +422,9 @@ mod tests {
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
-    use reth_interfaces::{consensus, provider::ProviderError};
+    use reth_interfaces::{
+        consensus, provider::ProviderError, test_utils::generators::random_header,
+    };
     use tokio_stream::StreamExt;
 
     #[test]
@@ -676,7 +678,7 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Validation {
-                        block: 5,
+                        block: random_header(5, Default::default()),
                         error: consensus::ConsensusError::BaseFeeMissing,
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
