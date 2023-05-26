@@ -554,7 +554,7 @@ where
 
         // merkle tree
         {
-            let (state_root, _, trie_updates) =
+            let (state_root, trie_updates) =
                 StateRoot::incremental_root_with_updates(self.deref_mut(), range.clone())?;
             if state_root != expected_state_root {
                 return Err(TransactionError::StateRootMismatch {
@@ -952,7 +952,7 @@ where
             self.unwind_storage_history_indices(storage_range)?;
 
             // merkle tree
-            let (new_state_root, _, trie_updates) =
+            let (new_state_root, trie_updates) =
                 StateRoot::incremental_root_with_updates(self.deref(), range.clone())?;
 
             let parent_number = range.start().saturating_sub(1);

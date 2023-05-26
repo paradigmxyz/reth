@@ -243,22 +243,20 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             }
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block, target = ?to_block, "Updating trie");
-            let (root, hashed_entries_walked, updates) =
-                StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let (root, updates) = StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
             updates.flush(tx.deref_mut())?;
 
+            let total_hashed_entries = (tx.deref().entries::<tables::HashedAccount>()? +
+                tx.deref().entries::<tables::HashedStorage>()?)
+                as u64;
+
             let entities_checkpoint = EntitiesCheckpoint {
-                processed: input
-                    .checkpoint()
-                    .entities_stage_checkpoint()
-                    .unwrap_or_default()
-                    .processed +
-                    hashed_entries_walked as u64,
-                total: Some(
-                    (tx.deref().entries::<tables::HashedAccount>()? +
-                        tx.deref().entries::<tables::HashedStorage>()?) as u64,
-                ),
+                // This is fine because `range` doesn't have an upper bound, so in this `else`
+                // branch we're just hashing all remaining accounts and storage slots we have in the
+                // database.
+                processed: total_hashed_entries,
+                total: Some(total_hashed_entries),
             };
 
             (root, entities_checkpoint)
@@ -313,7 +311,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         // Unwind trie only if there are transitions
         if !range.is_empty() {
-            let (block_root, hashed_entities_walked, updates) =
+            let (block_root, updates) =
                 StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
@@ -324,17 +322,13 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             // Validation passed, apply unwind changes to the database.
             updates.flush(tx.deref_mut())?;
 
-            entities_checkpoint.processed =
-                entities_checkpoint.processed.saturating_sub(hashed_entities_walked as u64);
+            // TODO(alexey): update entities checkpoint
         } else {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }
 
         info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput {
-            checkpoint: StageCheckpoint::new(input.unwind_to)
-                .with_entities_stage_checkpoint(entities_checkpoint),
-        })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 

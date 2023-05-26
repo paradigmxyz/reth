@@ -139,7 +139,7 @@ where
     pub fn incremental_root_with_updates(
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(H256, usize, TrieUpdates), StateRootError> {
+    ) -> Result<(H256, TrieUpdates), StateRootError> {
         tracing::debug!(target: "loader", "incremental state root");
         Self::incremental_root_calculator(tx, range)?.root_with_updates()
     }
@@ -172,11 +172,9 @@ where
     /// # Returns
     ///
     /// The intermediate progress of state root computation and the trie updates.
-    pub fn root_with_updates(self) -> Result<(H256, usize, TrieUpdates), StateRootError> {
+    pub fn root_with_updates(self) -> Result<(H256, TrieUpdates), StateRootError> {
         match self.with_no_threshold().calculate(true)? {
-            StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
-                Ok((root, hashed_entries_walked, updates))
-            }
+            StateRootProgress::Complete(root, _, updates) => Ok((root, updates)),
             StateRootProgress::Progress(..) => unreachable!(), // unreachable threshold
         }
     }
