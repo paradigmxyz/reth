@@ -100,8 +100,19 @@ where
         self.pipeline_state.is_idle()
     }
 
+    /// Returns true if there's already a request for the given hash.
+    pub(crate) fn is_inflight_request(&self, hash: H256) -> bool {
+        self.inflight_full_block_requests.iter().any(|req| *req.hash() == hash)
+    }
+
     /// Starts requesting a full block from the network.
-    pub(crate) fn download_full_block(&mut self, hash: H256) {
+    ///
+    /// Returns `true` if the request was started, `false` if there's already a request for the
+    /// given hash.
+    pub(crate) fn download_full_block(&mut self, hash: H256) -> bool {
+        if self.is_inflight_request(hash) {
+            return false
+        }
         trace!(
             target: "consensus::engine",
             ?hash,
@@ -109,6 +120,7 @@ where
         );
         let request = self.full_block_client.get_full_block(hash);
         self.inflight_full_block_requests.push(request);
+        true
     }
 
     /// Sets a new target to sync the pipeline to.
