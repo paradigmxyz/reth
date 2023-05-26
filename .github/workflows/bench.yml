@@ -53,7 +53,7 @@ jobs:
       - name: Compare PR benchmark
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
         run: |
-          ./main/.github/scripts/compare_iai.sh
+          ./pr/.github/scripts/compare_iai.sh
 
   # Checks that benchmarks not run in CI compile
   bench-check:
