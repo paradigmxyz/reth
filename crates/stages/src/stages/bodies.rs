@@ -362,10 +362,7 @@ mod tests {
         );
         let checkpoint = output.unwrap().checkpoint;
         runner
-            .validate_db_blocks(
-                input.checkpoint.unwrap_or_default().block_number,
-                checkpoint.block_number,
-            )
+            .validate_db_blocks(input.checkpoint().block_number, checkpoint.block_number)
             .expect("Written block data invalid");
 
         // Delete a transaction
@@ -502,7 +499,7 @@ mod tests {
             type Seed = Vec<SealedBlock>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let start = input.checkpoint.unwrap_or_default().block_number;
+                let start = input.checkpoint().block_number;
                 let end = input.previous_stage_checkpoint().block_number;
                 let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
@@ -547,7 +544,7 @@ mod tests {
             ) -> Result<(), TestRunnerError> {
                 let highest_block = match output.as_ref() {
                     Some(output) => output.checkpoint,
-                    None => input.checkpoint.unwrap_or_default(),
+                    None => input.checkpoint(),
                 }
                 .block_number;
                 self.validate_db_blocks(highest_block, highest_block)

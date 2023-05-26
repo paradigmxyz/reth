@@ -69,7 +69,7 @@ mod tests {
         type Seed = Vec<SealedHeader>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let start = input.checkpoint.unwrap_or_default().block_number;
+            let start = input.checkpoint().block_number;
             let head = random_header(start, None);
             self.tx.insert_headers_with_td(std::iter::once(&head))?;
 

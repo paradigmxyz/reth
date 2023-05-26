@@ -45,7 +45,7 @@ impl ExecInput {
         &self,
         threshold: u64,
     ) -> (RangeInclusive<BlockNumber>, bool) {
-        let current_block = self.checkpoint.unwrap_or_default();
+        let current_block = self.checkpoint();
         // +1 is to skip present block and always start from block number 1, not 0.
         let start = current_block.block_number + 1;
         let target = self.previous_stage_checkpoint().block_number;
