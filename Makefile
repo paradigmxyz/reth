@@ -19,6 +19,11 @@ PROFILE ?= release
 # Extra flags for Cargo
 CARGO_INSTALL_EXTRA_FLAGS ?=
 
+# The release tag of https://github.com/ethereum/tests to use for EF tests
+EF_TESTS_TAG := v12.2
+EF_TESTS_URL := https://github.com/ethereum/tests/archive/refs/tags/$(EF_TESTS_TAG).tar.gz
+EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
+
 # Builds and installs the reth binary.
 #
 # The binary will most likely be in `~/.cargo/bin`
@@ -86,7 +91,21 @@ build-release-tarballs:
 	$(MAKE) build-x86_64-pc-windows-gnu
 	$(call tarball_release_binary,"x86_64-pc-windows-gnu","reth.exe","")
 
-# Performs a `cargo` clean and removes the binary directory
+# Downloads and unpacks Ethereum Foundation tests in the `$(EF_TESTS_DIR)` directory.
+#
+# Requires `wget` and `tar`
+$(EF_TESTS_DIR):
+	mkdir $(EF_TESTS_DIR)
+	wget $(EF_TESTS_URL) -O ethereum-tests.tar.gz
+	tar -xzf ethereum-tests.tar.gz --strip-components=1 -C $(EF_TESTS_DIR)
+	rm ethereum-tests.tar.gz
+
+# Runs Ethereum Foundation tests
+ef-tests: $(EF_TESTS_DIR)
+	cargo nextest run -p ef-tests --features ef-tests
+
+# Performs a `cargo` clean and removes the binary and test vectors directories
 clean:
 	cargo clean
-	rm -r $(BIN_DIR)
+	rm -rf $(BIN_DIR)
+	rm -rf $(EF_TESTS_DIR)
