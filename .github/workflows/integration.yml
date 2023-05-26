@@ -73,7 +73,7 @@ jobs:
       RUST_LOG: info,sync=error
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
@@ -81,11 +81,11 @@ jobs:
           toolchain: stable
           profile: minimal
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
-      - name: Run Sync (debug)
+      - name: Run sync (${{ matrix.profile }})
         run: |
           cargo run --profile ${{ matrix.profile }} \
             --bin reth -- node \
