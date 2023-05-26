@@ -288,24 +288,25 @@ pub enum SplitAt {
     Hash(BlockHash),
 }
 
-/// Result of spliting chain.
+/// Result of a split chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChainSplit {
-    /// Chain is not splited. Pending chain is returned.
+    /// Chain is not split. Pending chain is returned.
     /// Given block split is higher than last block.
     /// Or in case of split by hash when hash is unknown.
     NoSplitPending(Chain),
-    /// Chain is not splited. Canonical chain is returned.
+    /// Chain is not split. Canonical chain is returned.
     /// Given block split is lower than first block.
     NoSplitCanonical(Chain),
-    /// Chain is splited in two.
+    /// Chain is split into two.
     /// Given block split is contained in first chain.
     Split {
-        /// Left contains lower block number that get canonicalized.
-        /// And substate is empty and not usable.
+        /// Left contains lower block numbers that get are considered canonicalized. It ends with
+        /// the [SplitAt] block. The substate of this chain is now empty and not usable.
         canonical: Chain,
-        /// Right contains higher block number, that is still pending.
-        /// And substate from original chain is moved here.
+        /// Right contains all subsequent blocks after the [SplitAt], that are still pending.
+        ///
+        /// The substate of the original chain is moved here.
         pending: Chain,
     },
 }
