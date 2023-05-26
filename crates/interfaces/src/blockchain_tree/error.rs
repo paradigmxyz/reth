@@ -2,7 +2,6 @@
 
 use crate::{consensus::ConsensusError, executor::BlockExecutionError};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
-use std::fmt::Formatter;
 
 /// Various error cases that can occur when a block violates tree assumptions.
 #[derive(Debug, Clone, Copy, thiserror::Error, Eq, PartialEq)]
@@ -29,7 +28,7 @@ pub enum BlockchainTreeError {
 }
 
 /// Error thrown when inserting a block failed because the block is considered invalid.
-#[derive(Debug, thiserror::Error)]
+#[derive(thiserror::Error)]
 #[error(transparent)]
 pub struct InsertBlockError {
     inner: Box<InsertBlockErrorData>,
@@ -83,15 +82,36 @@ impl InsertBlockError {
     }
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for InsertBlockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.inner, f)
+    }
+}
+
 struct InsertBlockErrorData {
     block: SealedBlock,
     kind: InsertBlockErrorKind,
 }
 
 impl std::fmt::Display for InsertBlockErrorData {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Failed to insert block {:?}: {}", self.block.hash, self.kind)
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Failed to insert block (hash={:?}, number={}, parent_hash={:?}): {}",
+            self.block.hash, self.block.number, self.block.parent_hash, self.kind
+        )
+    }
+}
+
+impl std::fmt::Debug for InsertBlockErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InsertBlockError")
+            .field("error", &self.kind)
+            .field("hash", &self.block.hash)
+            .field("number", &self.block.number)
+            .field("parent_hash", &self.block.parent_hash)
+            .field("num_txs", &self.block.body.len())
+            .finish_non_exhaustive()
     }
 }
 
