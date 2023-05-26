@@ -173,15 +173,15 @@ where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
 {
-    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+    fn pending_block_num_hash(&self) -> Result<Option<BlockNumHash>> {
         Ok(self.tree.pending_block_num_hash())
     }
 
-    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+    fn safe_block_num_hash(&self) -> Result<Option<BlockNumHash>> {
         Ok(self.chain_info.get_safe_num_hash())
     }
 
-    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+    fn finalized_block_num_hash(&self) -> Result<Option<BlockNumHash>> {
         Ok(self.chain_info.get_finalized_num_hash())
     }
 }

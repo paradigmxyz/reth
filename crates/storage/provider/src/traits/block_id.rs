@@ -48,10 +48,7 @@ pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockIdProvider: BlockNumProvider + Send + Sync {
     /// Converts the `BlockNumberOrTag` variants to a block number.
-    fn convert_block_number(
-        &self,
-        num: BlockNumberOrTag,
-    ) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<BlockNumber>> {
         let num = match num {
             BlockNumberOrTag::Latest => self.best_block_number()?,
             BlockNumberOrTag::Earliest => 0,
@@ -91,10 +88,7 @@ pub trait BlockIdProvider: BlockNumProvider + Send + Sync {
     }
 
     /// Get the number of the block by matching the given id.
-    fn block_number_for_id(
-        &self,
-        block_id: BlockId,
-    ) -> Result<Option<reth_primitives::BlockNumber>> {
+    fn block_number_for_id(&self, block_id: BlockId) -> Result<Option<BlockNumber>> {
         match block_id {
             BlockId::Hash(hash) => self.block_number(hash.into()),
             BlockId::Number(num) => self.convert_block_number(num),
