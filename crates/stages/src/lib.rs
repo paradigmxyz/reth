@@ -75,7 +75,3 @@ pub use error::*;
 pub use id::*;
 pub use pipeline::*;
 pub use stage::*;
-
-// NOTE: Needed so the link in the module-level rustdoc works.
-#[allow(unused_extern_crates)]
-extern crate metrics as metrics_core;

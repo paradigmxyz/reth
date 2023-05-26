@@ -1,6 +1,8 @@
 use crate::StageId;
-use metrics::Gauge;
-use reth_metrics_derive::Metrics;
+use reth_metrics::{
+    metrics::{self, Gauge},
+    Metrics,
+};
 use reth_primitives::{BlockNumber, EntitiesCheckpoint, StageCheckpoint, StageUnitCheckpoint};
 use std::collections::HashMap;
 

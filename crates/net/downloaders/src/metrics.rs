@@ -1,6 +1,8 @@
-use metrics::{Counter, Gauge};
 use reth_interfaces::p2p::error::DownloadError;
-use reth_metrics_derive::Metrics;
+use reth_metrics::{
+    metrics::{self, Counter, Gauge},
+    Metrics,
+};
 
 /// Common downloader metrics.
 ///

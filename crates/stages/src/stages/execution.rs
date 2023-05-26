@@ -1,5 +1,4 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use metrics_core::Gauge;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -7,7 +6,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_metrics_derive::Metrics;
+use reth_metrics::{
+    metrics::{self, Gauge},
+    Metrics,
+};
 use reth_primitives::{
     constants::MGAS_TO_GAS, Block, BlockNumber, BlockWithSenders, StageCheckpoint,
     TransactionSigned, U256,

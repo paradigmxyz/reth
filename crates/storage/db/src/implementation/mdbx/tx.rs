@@ -7,9 +7,9 @@ use crate::{
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseError,
 };
-use metrics::histogram;
 use parking_lot::RwLock;
 use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, DBI, RW};
+use reth_metrics::metrics::{self, histogram};
 use std::{marker::PhantomData, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
