@@ -337,18 +337,24 @@ mod tests {
                 address: Some(Address::from_low_u64_be(rng.gen())),
                 from: rng.gen(),
                 to: rng.gen(),
-                progress: EntitiesCheckpoint { processed: rng.gen(), total: rng.gen() },
+                progress: EntitiesCheckpoint {
+                    processed: rng.gen::<u32>() as u64,
+                    total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                },
             }),
             StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                 address: Some(Address::from_low_u64_be(rng.gen())),
                 storage: Some(H256::from_low_u64_be(rng.gen())),
                 from: rng.gen(),
                 to: rng.gen(),
-                progress: EntitiesCheckpoint { processed: rng.gen(), total: rng.gen() },
+                progress: EntitiesCheckpoint {
+                    processed: rng.gen::<u32>() as u64,
+                    total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                },
             }),
             StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                processed: rng.gen(),
-                total: rng.gen(),
+                processed: rng.gen::<u32>() as u64,
+                total: Some(u32::MAX as u64 + rng.gen::<u64>()),
             }),
         ];
 
