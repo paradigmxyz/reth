@@ -8,6 +8,7 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 
+use reth_config::Config;
 use reth_db::database::Database;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -15,12 +16,9 @@ use reth_downloaders::{
 };
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::{ChainSpec, H256};
-use reth_staged_sync::{
-    utils::{
-        chainspec::genesis_value_parser,
-        init::{init_db, init_genesis},
-    },
-    Config,
+use reth_staged_sync::utils::{
+    chainspec::genesis_value_parser,
+    init::{init_db, init_genesis},
 };
 use reth_stages::{
     prelude::*,

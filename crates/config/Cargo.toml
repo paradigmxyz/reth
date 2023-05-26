@@ -1,0 +1,30 @@
+[package]
+name = "reth-config"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+
+[dependencies]
+# reth
+reth-network = { path = "../net/network" }
+reth-net-nat = { path = "../../crates/net/nat" }
+reth-discv4 = { path = "../../crates/net/discv4" }
+reth-downloaders = { path = "../../crates/net/downloaders" }
+
+# io
+serde = "1.0"
+serde_json = "1.0.91"
+
+#crypto 
+secp256k1 = { version = "0.27.0", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+
+confy = "0.5"
+
+tempfile = "3.4"
+

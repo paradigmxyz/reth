@@ -9,6 +9,7 @@ use crate::{
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
+use reth_config::Config;
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
@@ -26,12 +27,9 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, H256};
 use reth_provider::{ShareableDatabase, Transaction};
-use reth_staged_sync::{
-    utils::{
-        chainspec::genesis_value_parser,
-        init::{init_db, init_genesis},
-    },
-    Config,
+use reth_staged_sync::utils::{
+    chainspec::genesis_value_parser,
+    init::{init_db, init_genesis},
 };
 use reth_stages::{
     sets::DefaultStages,
