@@ -16,13 +16,10 @@ reth-rlp = { path = "../../rlp" }
 reth-provider = { path = "../../storage/provider" }
 reth-payload-builder = { path = "../builder" }
 reth-tasks = { path = "../../tasks" }
+reth-metrics = { path = "../../metrics" }
 
 ## ethereum
 revm = { version = "3" }
-
-# metrics
-metrics = "0.20.1"
-reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 ## async
 tokio = { version = "1", features = ["sync", "time"] }

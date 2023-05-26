@@ -1,7 +1,9 @@
 //! Payload builder service metrics.
 
-use metrics::{Counter, Gauge};
-use reth_metrics_derive::Metrics;
+use reth_metrics::{
+    metrics::{self, Counter, Gauge},
+    Metrics,
+};
 
 /// Payload builder service metrics
 #[derive(Metrics)]

@@ -1,6 +1,8 @@
-use metrics::{Counter, Gauge};
 use reth_eth_wire::DisconnectReason;
-use reth_metrics_derive::Metrics;
+use reth_metrics::{
+    metrics::{self, Counter, Gauge},
+    Metrics,
+};
 
 /// Metrics for the entire network, handled by NetworkManager
 #[derive(Metrics)]

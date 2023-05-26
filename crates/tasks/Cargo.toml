@@ -20,8 +20,7 @@ thiserror = "1.0"
 dyn-clone = "1.0"
 
 ## rpc/metrics
-metrics = "0.20.1"
-reth-metrics-derive = { path = "../metrics/metrics-derive" }
+reth-metrics = { path = "../metrics" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
