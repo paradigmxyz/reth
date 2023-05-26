@@ -29,7 +29,7 @@ pub enum Subcommands {
 }
 
 impl Command {
-    /// Execute `db` command
+    /// Execute `stage` command
     pub async fn execute(self) -> eyre::Result<()> {
         match self.command {
             Subcommands::Run(command) => command.execute().await,
