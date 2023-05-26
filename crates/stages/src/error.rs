@@ -34,8 +34,8 @@ pub enum StageError {
         error: executor::BlockExecutionError,
     },
     /// Invalid checkpoint passed to the stage
-    #[error("Invalid stage progress: {0}")]
-    StageProgress(u64),
+    #[error("Invalid stage checkpoint: {0}")]
+    StageCheckpoint(u64),
     /// Download channel closed
     #[error("Download channel closed")]
     ChannelClosed,
@@ -70,7 +70,7 @@ impl StageError {
             StageError::Database(_) |
                 StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
-                StageError::StageProgress(_) |
+                StageError::StageCheckpoint(_) |
                 StageError::ExecutionError { .. } |
                 StageError::ChannelClosed |
                 StageError::Fatal(_) |
