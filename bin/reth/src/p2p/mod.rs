@@ -6,15 +6,13 @@ use crate::{
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
+use reth_config::Config;
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ShareableDatabase;
-use reth_staged_sync::{
-    utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
-    Config,
-};
+use reth_staged_sync::utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser};
 use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
