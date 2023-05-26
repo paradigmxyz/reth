@@ -9,7 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{Receipt, SealedBlock};
+use reth_primitives::{Receipt, SealedBlock, H256};
 use reth_provider::{BlockIdProvider, BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
@@ -283,18 +283,16 @@ where
             FilterBlockOption::AtBlockHash(block_hash) => {
                 let mut all_logs = Vec::new();
                 // all matching logs in the block, if it exists
-                if let Some(block) = self.eth_cache.get_block(block_hash).await? {
-                    // get receipts for the block
-                    if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
-                        let filter = FilteredParams::new(Some(filter));
-                        logs_utils::append_matching_block_logs(
-                            &mut all_logs,
-                            &filter,
-                            (block_hash, block.number).into(),
-                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
-                            false,
-                        );
-                    }
+                if let Some((block, receipts)) = self.block_and_receipts_by_hash(block_hash).await?
+                {
+                    let filter = FilteredParams::new(Some(filter));
+                    logs_utils::append_matching_block_logs(
+                        &mut all_logs,
+                        &filter,
+                        (block_hash, block.number).into(),
+                        block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
+                        false,
+                    );
                 }
                 Ok(all_logs)
             }
@@ -335,7 +333,8 @@ where
         Ok(id)
     }
 
-    async fn block_and_receipts(
+    /// Fetches both receipts and block for the given block number.
+    async fn block_and_receipts_by_number(
         &self,
         block_number: u64,
     ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
@@ -344,6 +343,14 @@ where
             None => return Ok(None),
         };
 
+        self.block_and_receipts_by_hash(block_hash).await
+    }
+
+    /// Fetches both receipts and block for the given block hash.
+    async fn block_and_receipts_by_hash(
+        &self,
+        block_hash: H256,
+    ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
         let block = self.eth_cache.get_sealed_block(block_hash);
         let receipts = self.eth_cache.get_receipts(block_hash);
 
@@ -386,7 +393,9 @@ where
                 if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
                     FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
-                    if let Some((block, receipts)) = self.block_and_receipts(header.number).await? {
+                    if let Some((block, receipts)) =
+                        self.block_and_receipts_by_number(header.number).await?
+                    {
                         let block_hash = block.hash;
 
                         logs_utils::append_matching_block_logs(
