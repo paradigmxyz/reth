@@ -293,14 +293,14 @@ where
         self.get_take_block_and_execution_range::<true>(chain_spec, range)
     }
 
-    /// Unwind and clear account hashing
+    /// Unwind and clear account hashing.
     pub fn unwind_account_hashing(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(), TransactionError> {
         let mut hashed_accounts = self.cursor_write::<tables::HashedAccount>()?;
 
-        // Aggregate all transition changesets and and make list of account that have been changed.
+        // Aggregate all transition changesets and make a list of accounts that have been changed.
         self.cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?
@@ -329,10 +329,11 @@ where
                 }
                 Ok(())
             })?;
+
         Ok(())
     }
 
-    /// Unwind and clear storage hashing
+    /// Unwind and clear storage hashing.
     pub fn unwind_storage_hashing(
         &self,
         range: Range<BlockNumberAddress>,
@@ -375,6 +376,7 @@ where
                 }
                 Ok(())
             })?;
+
         Ok(())
     }
 

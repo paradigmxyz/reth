@@ -76,6 +76,20 @@ impl Command {
                     )?;
                     insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
                 }
+                StageEnum::AccountHashing => {
+                    tx.clear::<tables::HashedAccount>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::AccountHashing.to_string(),
+                        Default::default(),
+                    )?;
+                }
+                StageEnum::StorageHashing => {
+                    tx.clear::<tables::HashedStorage>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::StorageHashing.to_string(),
+                        Default::default(),
+                    )?;
+                }
                 StageEnum::Hashing => {
                     // Clear hashed accounts
                     tx.clear::<tables::HashedAccount>()?;

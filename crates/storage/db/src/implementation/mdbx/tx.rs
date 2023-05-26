@@ -115,6 +115,15 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
             .map(decode_one::<T>)
             .transpose()
     }
+
+    /// Returns number of entries in the table using cheap DB stats invocation.
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
+        Ok(self
+            .inner
+            .db_stat_with_dbi(self.get_dbi::<T>()?)
+            .map_err(|e| DatabaseError::Stats(e.into()))?
+            .entries())
+    }
 }
 
 impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {

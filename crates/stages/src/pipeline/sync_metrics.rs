@@ -3,7 +3,10 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives::{
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StageUnitCheckpoint},
+    stage::{
+        AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId,
+        StageUnitCheckpoint, StorageHashingCheckpoint,
+    },
     BlockNumber,
 };
 use std::collections::HashMap;
@@ -42,6 +45,18 @@ impl Metrics {
             Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint { processed, total })) => {
                 (processed, total)
             }
+            // Only report metrics for hashing stages if `total` is known, otherwise it means we're
+            // unwinding and operating on changesets, rather than accounts or storage slots.
+            Some(
+                StageUnitCheckpoint::Account(AccountHashingCheckpoint {
+                    progress: EntitiesCheckpoint { processed, total: Some(total) },
+                    ..
+                }) |
+                StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+                    progress: EntitiesCheckpoint { processed, total: Some(total) },
+                    ..
+                }),
+            ) => (processed, Some(total)),
             _ => (checkpoint.block_number, max_block_number),
         };
 

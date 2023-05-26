@@ -107,6 +107,8 @@ pub struct AccountHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
+    /// Progress measured in accounts.
+    pub progress: EntitiesCheckpoint,
 }
 
 /// Saves the progress of StorageHashing stage.
@@ -121,6 +123,8 @@ pub struct StorageHashingCheckpoint {
     pub from: u64,
     /// Last transition id
     pub to: u64,
+    /// Progress measured in storage slots.
+    pub progress: EntitiesCheckpoint,
 }
 
 /// Saves the progress of abstract stage iterating over or downloading entities.
@@ -183,6 +187,12 @@ impl StageCheckpoint {
         }
     }
 
+    /// Sets the block number.
+    pub fn with_block_number(mut self, block_number: BlockNumber) -> Self {
+        self.block_number = block_number;
+        self
+    }
+
     /// Sets the stage checkpoint to account hashing.
     pub fn with_account_hashing_stage_checkpoint(
         mut self,
@@ -211,7 +221,15 @@ impl StageCheckpoint {
 impl Display for StageCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::Entities(stage_checkpoint)) => stage_checkpoint.fmt(f),
+            Some(
+                StageUnitCheckpoint::Account(AccountHashingCheckpoint {
+                    progress: entities, ..
+                }) |
+                StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+                    progress: entities, ..
+                }) |
+                StageUnitCheckpoint::Entities(entities),
+            ) => entities.fmt(f),
             _ => write!(f, "{}", self.block_number),
         }
     }
@@ -319,12 +337,24 @@ mod tests {
                 address: Some(Address::from_low_u64_be(rng.gen())),
                 from: rng.gen(),
                 to: rng.gen(),
+                progress: EntitiesCheckpoint {
+                    processed: rng.gen::<u32>() as u64,
+                    total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                },
             }),
             StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                 address: Some(Address::from_low_u64_be(rng.gen())),
                 storage: Some(H256::from_low_u64_be(rng.gen())),
                 from: rng.gen(),
                 to: rng.gen(),
+                progress: EntitiesCheckpoint {
+                    processed: rng.gen::<u32>() as u64,
+                    total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                },
+            }),
+            StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                processed: rng.gen::<u32>() as u64,
+                total: Some(u32::MAX as u64 + rng.gen::<u64>()),
             }),
         ];
 
