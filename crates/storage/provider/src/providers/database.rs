@@ -192,7 +192,7 @@ impl<DB: Database> BlockNumProvider for ShareableDatabase<DB> {
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
-        self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))?.map_err(Into::into)
+        self.db.view(|tx| read_block_number(tx, hash))?.map_err(Into::into)
     }
 }
 
@@ -206,10 +206,10 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     }
 
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
-        if let Some(number) = self.convert_hash(id)? {
+        let tx = self.db.tx()?;
+        if let Some(number) = convert_hash_or_number(&tx, id)? {
             if let Some(header) = self.header_by_number(number)? {
                 let id = BlockHashOrNumber::Number(number);
-                let tx = self.db.tx()?;
                 let transactions = self
                     .transactions_by_block(id)?
                     .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
@@ -234,8 +234,8 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
-        if let Some(number) = self.convert_hash(id)? {
-            let tx = self.db.tx()?;
+        let tx = self.db.tx()?;
+        if let Some(number) = convert_hash_or_number(&tx, id)? {
             // TODO: this can be optimized to return empty Vec post-merge
             let ommers = tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
             return Ok(ommers)
@@ -328,8 +328,8 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
         &self,
         id: BlockHashOrNumber,
     ) -> Result<Option<Vec<TransactionSigned>>> {
-        if let Some(number) = self.convert_hash(id)? {
-            let tx = self.db.tx()?;
+        let tx = self.db.tx()?;
+        if let Some(number) = convert_hash_or_number(&tx, id)? {
             if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
@@ -391,8 +391,8 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
     }
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
-        if let Some(number) = self.convert_hash(block)? {
-            let tx = self.db.tx()?;
+        let tx = self.db.tx()?;
+        if let Some(number) = convert_hash_or_number(&tx, block)? {
             if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
@@ -418,15 +418,15 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
         timestamp: u64,
     ) -> Result<Option<Vec<Withdrawal>>> {
         if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp) {
-            if let Some(number) = self.convert_hash(id)? {
+            let tx = self.db.tx()?;
+            if let Some(number) = convert_hash_or_number(&tx, id)? {
                 // If we are past shanghai, then all blocks should have a withdrawal list, even if
                 // empty
-                return Ok(Some(
-                    self.db
-                        .view(|tx| tx.get::<tables::BlockWithdrawals>(number))??
-                        .map(|w| w.withdrawals)
-                        .unwrap_or_default(),
-                ))
+                let withdrawals = tx
+                    .get::<tables::BlockWithdrawals>(number)?
+                    .map(|w| w.withdrawals)
+                    .unwrap_or_default();
+                return Ok(Some(withdrawals))
             }
         }
         Ok(None)
@@ -509,6 +509,33 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
     }
+}
+
+/// Returns the block number for the given block hash or number.
+#[inline]
+fn convert_hash_or_number<'a, TX>(
+    tx: &TX,
+    block: BlockHashOrNumber,
+) -> std::result::Result<Option<BlockNumber>, reth_interfaces::db::DatabaseError>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    match block {
+        BlockHashOrNumber::Hash(hash) => read_block_number(tx, hash),
+        BlockHashOrNumber::Number(number) => Ok(Some(number)),
+    }
+}
+
+/// Reads the number for the given block hash.
+#[inline]
+fn read_block_number<'a, TX>(
+    tx: &TX,
+    hash: H256,
+) -> std::result::Result<Option<BlockNumber>, reth_interfaces::db::DatabaseError>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    tx.get::<tables::HeaderNumbers>(hash)
 }
 
 /// Reads the hash for the given block number
