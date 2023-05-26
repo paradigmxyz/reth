@@ -68,7 +68,6 @@ pub enum Commands {
     #[command(name = "config")]
     Config(config::Command),
     /// Various debug routines
-    /// Debug state root caculation
     #[command(name = "debug")]
     Debug(debug_cmd::Command),
 }
