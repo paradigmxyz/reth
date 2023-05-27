@@ -21,7 +21,7 @@
 //!
 //! # Examples
 //!
-//! Configure only a http server with a selection of [RethRpcModule]s
+//! Configure only an http server with a selection of [RethRpcModule]s
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -97,6 +97,7 @@
 //! }
 //! ```
 
+use crate::{auth::AuthRpcModule, error::WsHttpSamePortError};
 use constants::*;
 use error::{RpcError, ServerKind};
 use jsonrpsee::{
@@ -110,7 +111,10 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+    eth::{
+        cache::{cache_new_blocks_task, EthStateCache},
+        gas_oracle::GasPriceOracle,
+    },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
     NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
@@ -146,10 +150,8 @@ pub mod constants;
 
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError};
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
-use reth_rpc::eth::cache::cache_new_blocks_task;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Client, Pool, Network, Tasks, Events>(
@@ -264,7 +266,8 @@ where
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
     /// used to start the transport server(s).
     ///
-    /// And also configures the auth server, which also exposes the `eth_` namespace.
+    /// This behaves exactly as [RpcModuleBuilder::build] for the [TransportRpcModules], but also
+    /// configures the auth (engine api) server, which exposes a subset of the `eth_` namespace.
     pub fn build_with_auth_server<EngineApi>(
         self,
         module_config: TransportRpcModuleConfig,
