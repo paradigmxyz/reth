@@ -47,6 +47,7 @@ impl Config {
 
 /// Configuration for each stage in the pipeline.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
@@ -62,6 +63,7 @@ pub struct StageConfig {
 
 /// Header stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
 pub struct HeadersConfig {
     /// The maximum number of requests to send concurrently.
     ///
@@ -105,6 +107,7 @@ impl From<HeadersConfig> for ReverseHeadersDownloaderBuilder {
 
 /// Total difficulty stage configuration
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
 pub struct TotalDifficultyConfig {
     /// The maximum number of total difficulty entries to sum up before committing progress to the
     /// database.
@@ -119,6 +122,7 @@ impl Default for TotalDifficultyConfig {
 
 /// Body stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
     ///
@@ -172,6 +176,7 @@ impl From<BodiesConfig> for BodiesDownloaderBuilder {
 
 /// Sender recovery stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
 pub struct SenderRecoveryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
     pub commit_threshold: u64,
@@ -185,6 +190,7 @@ impl Default for SenderRecoveryConfig {
 
 /// Execution stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
 pub struct ExecutionConfig {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,
