@@ -962,7 +962,8 @@ where
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
-                let parent_hash = ShareableDatabase::new(self.db, Arc::new(chain_spec.clone()))
+                let parent_hash = self
+                    .shareable
                     .block_hash(parent_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
 
