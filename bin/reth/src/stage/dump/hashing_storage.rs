@@ -2,10 +2,10 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
-use reth_primitives::StageCheckpoint;
+use reth_primitives::{StageCheckpoint, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{stages::StorageHashingStage, Stage, StageId, UnwindInput};
-use std::{ops::DerefMut, path::PathBuf};
+use std::{ops::DerefMut, path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
@@ -33,7 +33,7 @@ async fn unwind_and_copy<DB: Database>(
     tip_block_number: u64,
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
-    let mut unwind_tx = Transaction::new(db_tool.db)?;
+    let mut unwind_tx = Transaction::new(db_tool.db, Arc::new(MAINNET.clone()))?;
     let mut exec_stage = StorageHashingStage::default();
 
     exec_stage
@@ -65,7 +65,7 @@ async fn dry_run(
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
 
-    let mut tx = Transaction::new(&output_db)?;
+    let mut tx = Transaction::new(&output_db, Arc::new(MAINNET.clone()))?;
     let mut exec_stage = StorageHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()

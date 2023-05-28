@@ -153,6 +153,7 @@ impl ImportCommand {
         let factory = reth_revm::Factory::new(self.chain.clone());
 
         let mut pipeline = Pipeline::builder()
+            .with_chain_spec(self.chain.clone())
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
             .with_max_block(file_client.max_block().unwrap_or(0))

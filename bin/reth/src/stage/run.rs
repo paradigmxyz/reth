@@ -111,7 +111,7 @@ impl Command {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
-        let mut tx = Transaction::new(db.as_ref())?;
+        let mut tx = Transaction::new(db.as_ref(), self.chain.clone())?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);

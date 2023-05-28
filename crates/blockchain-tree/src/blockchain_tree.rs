@@ -975,7 +975,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// Canonicalize the given chain and commit it to the database.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
-        let mut tx = Transaction::new(&self.externals.db)?;
+        let mut tx = Transaction::new(&self.externals.db, self.externals.chain_spec.clone())?;
 
         let (blocks, state) = chain.into_inner();
 
@@ -1012,7 +1012,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Option<Chain>, Error> {
         // read data that is needed for new sidechain
 
-        let mut tx = Transaction::new(&self.externals.db)?;
+        let mut tx = Transaction::new(&self.externals.db, self.externals.chain_spec.clone())?;
 
         let tip = self.externals.database().latest_block_number()?;
         let revert_range = (revert_until + 1)..=tip;

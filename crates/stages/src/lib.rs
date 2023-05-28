@@ -47,6 +47,7 @@
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
+//!     .with_chain_spec(Arc::new(MAINNET.clone()))
 //!     .with_tip_sender(tip_tx)
 //!     .add_stages(
 //!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)

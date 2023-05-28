@@ -93,7 +93,7 @@ async fn unwind_and_copy<DB: Database>(
     tip_block_number: u64,
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
-    let mut unwind_tx = Transaction::new(db_tool.db)?;
+    let mut unwind_tx = Transaction::new(db_tool.db, Arc::new(MAINNET.clone()))?;
 
     let mut exec_stage =
         ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
@@ -128,7 +128,7 @@ async fn dry_run(
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let mut tx = Transaction::new(&output_db)?;
+    let mut tx = Transaction::new(&output_db, Arc::new(MAINNET.clone()))?;
     let mut exec_stage =
         ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
 

@@ -55,18 +55,23 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use reth_db::{
         cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
     };
-    use reth_primitives::trie::{BranchNodeCompact, StorageTrieEntry};
+    use reth_primitives::{
+        trie::{BranchNodeCompact, StorageTrieEntry},
+        MAINNET,
+    };
     use reth_provider::Transaction;
 
     // tests that upsert and seek match on the storagetrie cursor
     #[test]
     fn test_storage_cursor_abstraction() {
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
         let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
         let hashed_address = H256::random();

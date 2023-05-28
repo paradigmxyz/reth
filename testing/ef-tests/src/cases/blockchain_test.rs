@@ -5,7 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use reth_db::mdbx::test_utils::create_test_rw_db;
-use reth_primitives::{BlockBody, SealedBlock, StageCheckpoint};
+use reth_primitives::{BlockBody, SealedBlock, StageCheckpoint, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage, StageId};
 use std::{collections::BTreeMap, ffi::OsStr, fs, ops::Deref, path::Path, sync::Arc};
@@ -75,7 +75,7 @@ impl Case for BlockchainTestCase {
 
             // Create the database
             let db = create_test_rw_db();
-            let mut transaction = Transaction::new(db.as_ref())?;
+            let mut transaction = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone()))?;
 
             // Insert test state
             reth_provider::insert_canonical_block(

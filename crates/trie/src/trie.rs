@@ -508,13 +508,14 @@ mod tests {
         keccak256,
         proofs::KeccakHasher,
         trie::{BranchNodeCompact, TrieMask},
-        Account, Address, H256, U256,
+        Account, Address, H256, MAINNET, U256,
     };
     use reth_provider::Transaction;
     use std::{
         collections::BTreeMap,
         ops::{Deref, DerefMut, Mul},
         str::FromStr,
+        sync::Arc,
     };
 
     fn insert_account<'a, TX: DbTxMut<'a>>(
@@ -544,7 +545,7 @@ mod tests {
 
     fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
         let hashed_address = H256::from_low_u64_be(1);
 
         let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
@@ -609,7 +610,7 @@ mod tests {
 
             let hashed_address = keccak256(address);
             let db = create_test_rw_db();
-            let mut tx = Transaction::new(db.as_ref()).unwrap();
+            let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
             for (key, value) in &storage {
                 tx.put::<tables::HashedStorage>(
                     hashed_address,
@@ -665,7 +666,7 @@ mod tests {
     // This ensures we return an empty root when there are no storage entries
     fn test_empty_storage_root() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
 
         let address = Address::random();
         let code = "el buen fla";
@@ -685,7 +686,7 @@ mod tests {
     // This ensures that the walker goes over all the storage slots
     fn test_storage_root() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
 
         let address = Address::random();
         let storage = BTreeMap::from([
@@ -724,7 +725,7 @@ mod tests {
         proptest!(
             ProptestConfig::with_cases(10), | (state: State) | {
                 let db = create_test_rw_db();
-                let mut tx = Transaction::new(db.as_ref()).unwrap();
+                let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
 
                 for (address, (account, storage)) in &state {
                     insert_account(&mut *tx, *address, *account, storage)
@@ -752,7 +753,7 @@ mod tests {
 
     fn test_state_root_with_state(state: State) {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
 
         for (address, (account, storage)) in &state {
             insert_account(&mut *tx, *address, *account, storage)
@@ -777,7 +778,7 @@ mod tests {
     #[test]
     fn storage_root_regression() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
         // Some address whose hash starts with 0xB041
         let address3 = Address::from_str("16b07afd1c635f77172e842a000ead9a2a222459").unwrap();
         let key3 = keccak256(address3);
@@ -819,7 +820,7 @@ mod tests {
         );
 
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
 
         let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>().unwrap();
         let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
@@ -1119,7 +1120,7 @@ mod tests {
     #[test]
     fn account_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
 
         let expected = extension_node_trie(&mut tx);
 
@@ -1144,7 +1145,7 @@ mod tests {
 
     fn account_trie_around_extension_node_with_dbtrie() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
 
         let expected = extension_node_trie(&mut tx);
 
@@ -1171,7 +1172,7 @@ mod tests {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
 
                 let db = create_test_rw_db();
-                let mut tx = Transaction::new(db.as_ref()).unwrap();
+                let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
                 let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>().unwrap();
 
                 let mut state = BTreeMap::default();
@@ -1204,7 +1205,7 @@ mod tests {
     #[test]
     fn storage_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
 
         let hashed_address = H256::random();
         let (expected_root, expected_updates) =

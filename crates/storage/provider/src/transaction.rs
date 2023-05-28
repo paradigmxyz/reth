@@ -43,6 +43,7 @@ use std::{
 pub struct Transaction<'this, DB: Database> {
     /// A handle to the DB.
     pub(crate) db: &'this DB,
+    shareable: ShareableDatabase<&'this DB>,
     tx: Option<<DB as DatabaseGAT<'this>>::TXMut>,
 }
 
@@ -87,18 +88,31 @@ where
     /// Create a new container with the given database handle.
     ///
     /// A new inner transaction will be opened.
-    pub fn new(db: &'this DB) -> Result<Self, DbError> {
-        Ok(Self { db, tx: Some(db.tx_mut()?) })
+    pub fn new(db: &'this DB, chain_spec: Arc<ChainSpec>) -> Result<Self, DbError> {
+        Ok(Self {
+            db,
+            tx: Some(db.tx_mut()?),
+            shareable: ShareableDatabase::new(db, chain_spec.clone()),
+        })
     }
 
     /// Creates a new container with given database and transaction handles.
-    pub fn new_raw(db: &'this DB, tx: <DB as DatabaseGAT<'this>>::TXMut) -> Self {
-        Self { db, tx: Some(tx) }
+    pub fn new_raw(
+        db: &'this DB,
+        tx: <DB as DatabaseGAT<'this>>::TXMut,
+        chain_spec: Arc<ChainSpec>,
+    ) -> Self {
+        Self { db, tx: Some(tx), shareable: ShareableDatabase::new(db, chain_spec.clone()) }
     }
 
     /// Accessor to the internal Database
     pub fn inner(&self) -> &'this DB {
         self.db
+    }
+
+    /// Returns a [`ShareableDatabase`] which can expose different provider functions.
+    pub fn shareable_inner(&self) -> &ShareableDatabase<&DB> {
+        &self.shareable
     }
 
     /// Drops the current inner transaction and open a new one.
@@ -1414,12 +1428,12 @@ mod test {
         let db = create_test_rw_db();
 
         // setup
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
         let chain_spec = ChainSpecBuilder::default()
             .chain(MAINNET.chain)
             .genesis(MAINNET.genesis.clone())
             .shanghai_activated()
             .build();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(chain_spec.clone())).unwrap();
 
         let data = BlockChainTestData::default();
         let genesis = data.genesis.clone();
@@ -1492,12 +1506,12 @@ mod test {
         let db = create_test_rw_db();
 
         // setup
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
         let chain_spec = ChainSpecBuilder::default()
             .chain(MAINNET.chain)
             .genesis(MAINNET.genesis.clone())
             .shanghai_activated()
             .build();
+        let mut tx = Transaction::new(db.as_ref(), Arc::new(chain_spec.clone())).unwrap();
 
         let data = BlockChainTestData::default();
         let genesis = data.genesis.clone();

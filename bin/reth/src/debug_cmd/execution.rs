@@ -126,6 +126,7 @@ impl Command {
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
+            .with_chain_spec(self.chain.clone())
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
@@ -271,7 +272,7 @@ impl Command {
 
             // Unwind the pipeline without committing.
             {
-                let tx = Transaction::new(db.as_ref())?;
+                let tx = Transaction::new(db.as_ref(), self.chain.clone())?;
                 tx.take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }
 

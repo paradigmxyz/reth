@@ -63,7 +63,7 @@ impl Command {
         std::fs::create_dir_all(&db_path)?;
 
         let db = Arc::new(init_db(db_path)?);
-        let mut tx = Transaction::new(db.as_ref())?;
+        let mut tx = Transaction::new(db.as_ref(), self.chain.clone())?;
 
         let execution_checkpoint_block =
             EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default().block_number;

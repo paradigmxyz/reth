@@ -13,7 +13,8 @@ use reth_db::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
+    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
+    MAINNET, U256,
 };
 use reth_provider::Transaction;
 use std::{
@@ -54,7 +55,8 @@ impl TestTransaction {
 
     /// Return a database wrapped in [Transaction].
     pub fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
-        Transaction::new(self.tx.borrow()).expect("failed to create db container")
+        Transaction::new(self.tx.borrow(), Arc::new(MAINNET.clone()))
+            .expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.

@@ -628,7 +628,7 @@ impl Command {
     {
         let stage_conf = &config.stages;
 
-        let mut builder = Pipeline::builder();
+        let mut builder = Pipeline::builder().with_chain_spec(self.chain.clone());
 
         if let Some(max_block) = max_block {
             debug!(target: "reth::cli", max_block, "Configuring builder to use max block");

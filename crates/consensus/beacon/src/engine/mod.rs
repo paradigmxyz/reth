@@ -1270,7 +1270,14 @@ mod tests {
     }
 
     fn insert_blocks<'a, DB: Database>(db: &DB, mut blocks: impl Iterator<Item = &'a SealedBlock>) {
-        let mut transaction = Transaction::new(db).unwrap();
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+        let mut transaction = Transaction::new(db, chain_spec).unwrap();
         blocks
             .try_for_each(|b| {
                 transaction

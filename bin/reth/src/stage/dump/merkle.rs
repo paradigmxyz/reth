@@ -48,7 +48,7 @@ async fn unwind_and_copy<DB: Database>(
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
     let (from, to) = range;
-    let mut unwind_tx = Transaction::new(db_tool.db)?;
+    let mut unwind_tx = Transaction::new(db_tool.db, Arc::new(MAINNET.clone()))?;
     let unwind = UnwindInput {
         unwind_to: from,
         checkpoint: StageCheckpoint::new(tip_block_number),
@@ -119,7 +119,7 @@ async fn dry_run(
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
 
-    let mut tx = Transaction::new(&output_db)?;
+    let mut tx = Transaction::new(&output_db, Arc::new(MAINNET.clone()))?;
     let mut exec_output = false;
     while !exec_output {
         exec_output = MerkleStage::Execution {

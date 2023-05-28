@@ -33,6 +33,7 @@
 //! // Build a pipeline with all offline stages and a custom stage at the end.
 //! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! Pipeline::builder()
+//!     .with_chain_spec(Arc::new(MAINNET.clone()))
 //!     .add_stages(
 //!         OfflineStages::new(factory).builder().add_stage(MyCustomStage)
 //!     )

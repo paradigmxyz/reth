@@ -1,9 +1,9 @@
 use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_primitives::{listener::EventListeners, BlockNumber, StageCheckpoint, H256};
+use reth_primitives::{listener::EventListeners, BlockNumber, ChainSpec, StageCheckpoint, H256};
 use reth_provider::Transaction;
-use std::{ops::Deref, pin::Pin};
+use std::{ops::Deref, pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -100,6 +100,7 @@ pub struct Pipeline<DB: Database> {
     /// A receiver for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<H256>>,
     metrics: Metrics,
+    chain: Arc<ChainSpec>,
 }
 
 impl<DB> Pipeline<DB>
@@ -243,7 +244,7 @@ where
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let mut tx = Transaction::new(&self.db)?;
+        let mut tx = Transaction::new(&self.db, self.chain.clone())?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -300,7 +301,7 @@ where
         let stage_id = stage.id();
         let mut made_progress = false;
         loop {
-            let mut tx = Transaction::new(&self.db)?;
+            let mut tx = Transaction::new(&self.db, self.chain.clone())?;
 
             let prev_checkpoint = stage_id.get_checkpoint(tx.deref())?;
 
@@ -420,6 +421,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
     use reth_interfaces::{consensus, provider::ProviderError};
+    use reth_primitives::MAINNET;
     use tokio_stream::StreamExt;
 
     #[test]
@@ -455,6 +457,7 @@ mod tests {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
         let mut pipeline = Pipeline::builder()
+            .with_chain_spec(Arc::new(MAINNET.clone()))
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true })),
@@ -496,6 +499,7 @@ mod tests {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
         let mut pipeline = Pipeline::builder()
+            .with_chain_spec(Arc::new(MAINNET.clone()))
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
@@ -591,6 +595,7 @@ mod tests {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
         let mut pipeline = Pipeline::builder()
+            .with_chain_spec(Arc::new(MAINNET.clone()))
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
@@ -664,6 +669,7 @@ mod tests {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
         let mut pipeline = Pipeline::builder()
+            .with_chain_spec(Arc::new(MAINNET.clone()))
             .add_stage(
                 TestStage::new(StageId("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
@@ -734,6 +740,7 @@ mod tests {
         // Non-fatal
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
         let mut pipeline = Pipeline::builder()
+            .with_chain_spec(Arc::new(MAINNET.clone()))
             .add_stage(
                 TestStage::new(StageId("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
@@ -747,6 +754,7 @@ mod tests {
         // Fatal
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
         let mut pipeline = Pipeline::builder()
+            .with_chain_spec(Arc::new(MAINNET.clone()))
             .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))

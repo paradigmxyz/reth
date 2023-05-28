@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use crate::{pipeline::BoxedStage, Pipeline, Stage, StageId, StageSet};
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{BlockNumber, ChainSpec, H256};
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
@@ -15,6 +17,8 @@ where
     max_block: Option<BlockNumber>,
     /// A receiver for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<H256>>,
+    /// Chain Spec
+    chain: Option<Arc<ChainSpec>>,
 }
 
 impl<DB> PipelineBuilder<DB>
@@ -58,11 +62,17 @@ where
         self
     }
 
+    /// Set the tip sender.
+    pub fn with_chain_spec(mut self, chain: Arc<ChainSpec>) -> Self {
+        self.chain = Some(chain);
+        self
+    }
+
     /// Builds the final [`Pipeline`] using the given database.
     ///
     /// Note: it's expected that this is either an [Arc](std::sync::Arc) or an Arc wrapper type.
     pub fn build(self, db: DB) -> Pipeline<DB> {
-        let Self { stages, max_block, tip_tx } = self;
+        let Self { stages, max_block, tip_tx, chain } = self;
         Pipeline {
             db,
             stages,
@@ -71,13 +81,14 @@ where
             listeners: Default::default(),
             progress: Default::default(),
             metrics: Default::default(),
+            chain: chain.expect("No ChainSpec selected."),
         }
     }
 }
 
 impl<DB: Database> Default for PipelineBuilder<DB> {
     fn default() -> Self {
-        Self { stages: Vec::new(), max_block: None, tip_tx: None }
+        Self { stages: Vec::new(), max_block: None, tip_tx: None, chain: None }
     }
 }
 

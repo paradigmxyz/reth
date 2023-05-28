@@ -67,7 +67,7 @@ pub fn init_genesis<DB: Database>(
     let tx = db.tx_mut()?;
 
     // use transaction to insert genesis header
-    let transaction = Transaction::new_raw(&db, tx);
+    let transaction = Transaction::new_raw(&db, tx, chain.clone());
     insert_genesis_hashes(transaction, genesis)?;
 
     // Insert header

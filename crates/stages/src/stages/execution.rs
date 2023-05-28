@@ -368,7 +368,7 @@ mod tests {
     };
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, SealedBlock,
-        StorageEntry, H160, H256, U256,
+        StorageEntry, H160, H256, MAINNET, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_revm::Factory;
@@ -396,7 +396,7 @@ mod tests {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let mut tx = Transaction::new(state_db.as_ref()).unwrap();
+        let mut tx = Transaction::new(state_db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(1))),
             /// The progress of this stage the last time it was executed.
@@ -485,7 +485,7 @@ mod tests {
         // is merged as it has similar framework
 
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let mut tx = Transaction::new(state_db.as_ref()).unwrap();
+        let mut tx = Transaction::new(state_db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(1))),
             /// The progress of this stage the last time it was executed.

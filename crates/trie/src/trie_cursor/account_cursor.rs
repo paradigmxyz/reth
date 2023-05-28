@@ -38,6 +38,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
@@ -45,13 +47,13 @@ mod tests {
         tables,
         transaction::DbTxMut,
     };
-    use reth_primitives::hex_literal::hex;
+    use reth_primitives::{hex_literal::hex, MAINNET};
     use reth_provider::Transaction;
 
     #[test]
     fn test_account_trie_order() {
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let tx = Transaction::new(db.as_ref(), Arc::new(MAINNET.clone())).unwrap();
         let mut cursor = tx.cursor_write::<tables::AccountsTrie>().unwrap();
 
         let data = vec![
