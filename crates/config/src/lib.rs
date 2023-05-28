@@ -5,6 +5,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Common metric types that can be used across the Reth codebase
+//! Standalone crate for Reth config types
 
-pub mod metered_sender;
+pub mod config;
+pub use config::Config;

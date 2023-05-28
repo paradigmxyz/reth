@@ -17,6 +17,7 @@ reth-codecs = { path = "../../storage/codecs" }
 reth-primitives = { path = "../../primitives" }
 reth-ecies = { path = "../ecies" }
 reth-rlp = { path = "../../rlp", features = ["alloc", "derive", "std", "ethereum-types", "smol_str"] }
+reth-metrics = { path = "../../metrics" }
 
 # used for Chain and builders
 ethers-core = { version = "2.0.4", default-features = false}
@@ -29,7 +30,6 @@ pin-project = "1.0"
 tracing = { workspace = true }
 snap = "1.0.5"
 smol_str = "0.1"
-metrics = "0.20.1"
 async-trait = "0.1"
 
 # arbitrary utils

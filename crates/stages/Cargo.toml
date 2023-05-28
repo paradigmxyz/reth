@@ -20,7 +20,7 @@ reth-interfaces = { path = "../interfaces" }
 reth-db = { path = "../storage/db" }
 reth-codecs = { path = "../storage/codecs" }
 reth-provider = { path = "../storage/provider" }
-reth-metrics-derive = { path = "../metrics/metrics-derive" }
+reth-metrics = { path = "../metrics" }
 reth-trie = { path = "../trie" }
 
 # async
@@ -32,7 +32,6 @@ pin-project = "1.0.12"
 
 # observability
 tracing = { workspace = true }
-metrics = "0.20.1"
 
 # misc
 thiserror = "1.0.37"

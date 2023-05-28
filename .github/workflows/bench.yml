@@ -1,5 +1,6 @@
 on:
   pull_request:
+  merge_group:
 
 env:
   RUSTFLAGS: -D warnings
@@ -23,7 +24,7 @@ jobs:
         with:
           ref: main
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 

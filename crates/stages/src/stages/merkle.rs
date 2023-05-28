@@ -64,7 +64,7 @@ pub enum MerkleStage {
 impl MerkleStage {
     /// Stage default for the Execution variant.
     pub fn default_execution() -> Self {
-        Self::Execution { clean_threshold: 5_000 }
+        Self::Execution { clean_threshold: 50_000 }
     }
 
     /// Stage default for the Unwind variant.
@@ -376,7 +376,7 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.checkpoint.unwrap_or_default().block_number;
+            let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
             let end = input.previous_stage_checkpoint().block_number;
 

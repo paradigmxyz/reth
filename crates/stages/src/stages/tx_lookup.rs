@@ -338,7 +338,7 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.checkpoint.unwrap_or_default().block_number;
+            let stage_progress = input.checkpoint().block_number;
             let end = input.previous_stage_checkpoint().block_number;
 
             let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
@@ -353,7 +353,7 @@ mod tests {
         ) -> Result<(), TestRunnerError> {
             match output {
                 Some(output) => self.tx.query(|tx| {
-                    let start_block = input.checkpoint.unwrap_or_default().block_number + 1;
+                    let start_block = input.checkpoint().block_number + 1;
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
@@ -377,9 +377,7 @@ mod tests {
 
                     Ok(())
                 })?,
-                None => {
-                    self.ensure_no_hash_by_block(input.checkpoint.unwrap_or_default().block_number)?
-                }
+                None => self.ensure_no_hash_by_block(input.checkpoint().block_number)?,
             };
             Ok(())
         }

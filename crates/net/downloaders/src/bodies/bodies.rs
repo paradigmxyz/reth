@@ -207,6 +207,7 @@ where
         self.metrics.in_flight_requests.set(0.);
         self.metrics.buffered_responses.set(0.);
         self.metrics.buffered_blocks.set(0.);
+        self.metrics.buffered_blocks_size_bytes.set(0.);
         self.metrics.queued_blocks.set(0.);
     }
 
@@ -221,8 +222,9 @@ where
     fn pop_buffered_response(&mut self) -> Option<OrderedBodiesResponse> {
         let resp = self.buffered_responses.pop()?;
         self.metrics.buffered_responses.decrement(1.);
-        self.num_buffered_blocks -= resp.0.len();
+        self.num_buffered_blocks -= resp.len();
         self.metrics.buffered_blocks.set(self.num_buffered_blocks as f64);
+        self.metrics.buffered_blocks_size_bytes.decrement(resp.size() as f64);
         Some(resp)
     }
 
@@ -230,9 +232,11 @@ where
     fn buffer_bodies_response(&mut self, response: Vec<BlockResponse>) {
         self.num_buffered_blocks += response.len();
         self.metrics.buffered_blocks.set(self.num_buffered_blocks as f64);
-        let response = OrderedBodiesResponse(response);
+        let size = response.iter().map(|b| b.size()).sum::<usize>();
+        let response = OrderedBodiesResponse { resp: response, size };
         self.buffered_responses.push(response);
         self.metrics.buffered_responses.set(self.buffered_responses.len() as f64);
+        self.metrics.buffered_blocks_size_bytes.increment(size as f64);
     }
 
     /// Returns a response if it's first block number matches the next expected.
@@ -244,7 +248,7 @@ where
             if next_block_range.contains(&expected) {
                 return self.pop_buffered_response().map(|buffered| {
                     buffered
-                        .0
+                        .resp
                         .into_iter()
                         .skip_while(|b| b.block_number() < expected)
                         .take_while(|b| self.download_range.contains(&b.block_number()))
@@ -425,7 +429,11 @@ where
 }
 
 #[derive(Debug)]
-struct OrderedBodiesResponse(Vec<BlockResponse>);
+struct OrderedBodiesResponse {
+    resp: Vec<BlockResponse>,
+    /// The total size of the response in bytes
+    size: usize,
+}
 
 impl OrderedBodiesResponse {
     /// Returns the block number of the first element
@@ -433,7 +441,7 @@ impl OrderedBodiesResponse {
     /// # Panics
     /// If the response vec is empty.
     fn first_block_number(&self) -> u64 {
-        self.0.first().expect("is not empty").block_number()
+        self.resp.first().expect("is not empty").block_number()
     }
 
     /// Returns the range of the block numbers in the response
@@ -441,7 +449,20 @@ impl OrderedBodiesResponse {
     /// # Panics
     /// If the response vec is empty.
     fn block_range(&self) -> RangeInclusive<u64> {
-        self.first_block_number()..=self.0.last().expect("is not empty").block_number()
+        self.first_block_number()..=self.resp.last().expect("is not empty").block_number()
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.resp.len()
+    }
+
+    /// Returns the size of the response in bytes
+    ///
+    /// See [BlockResponse::size]
+    #[inline]
+    fn size(&self) -> usize {
+        self.size
     }
 }
 

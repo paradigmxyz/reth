@@ -558,7 +558,7 @@ where
             self.sync.set_pipeline_sync_target(target);
         } else {
             // trigger a full block download for the _missing_ new head
-            self.sync.download_full_block(state.head_block_hash)
+            self.sync.download_full_block(state.head_block_hash);
         }
 
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
@@ -822,7 +822,6 @@ where
                 //  closing the gap either via pipeline, or by fetching the blocks via block number
                 //  [head..FCU.number]
 
-                let hash = block.hash;
                 if self
                     .try_insert_new_payload(block)
                     .map(|status| status.is_valid())
@@ -830,9 +829,9 @@ where
                 {
                     // payload is valid
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
-                } else {
-                    // if the payload is invalid, we run the pipeline
-                    self.sync.set_pipeline_sync_target(hash);
+                } else if let Some(ref state) = self.forkchoice_state {
+                    // if the payload is invalid, we run the pipeline to the head block.
+                    self.sync.set_pipeline_sync_target(state.head_block_hash);
                 }
             }
             EngineSyncEvent::PipelineStarted(target) => {

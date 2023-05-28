@@ -800,7 +800,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
             ChainSplit::NoSplitCanonical(canonical) => canonical,
             ChainSplit::NoSplitPending(_) => {
-                panic!("Should not happen as block indices guarantee structure of blocks")
+                unreachable!("Should not happen as block indices guarantee structure of blocks")
             }
         }
     }
@@ -835,7 +835,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         self.find_canonical_header(hash).map(|header| header.is_some())
     }
 
-    /// Make a block and its parent(s) part of the canonical chain.
+    /// Make a block and its parent(s) part of the canonical chain and commit them to the database
     ///
     /// # Note
     ///
@@ -872,7 +872,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
 
-        // we are splitting chain as there is possibility that only part of chain get canonicalized.
+        // we are splitting chain at the block hash that we want to make canonical
         let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
 
         let mut block_fork = canonical.fork_block();

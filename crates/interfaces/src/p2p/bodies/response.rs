@@ -18,6 +18,16 @@ impl BlockResponse {
         }
     }
 
+    /// Returns the total number of bytes of all transactions input data in the block
+    pub fn size(&self) -> usize {
+        match self {
+            BlockResponse::Full(block) => {
+                block.body.iter().map(|tx| tx.transaction.input().len()).sum()
+            }
+            BlockResponse::Empty(_) => 0,
+        }
+    }
+
     /// Return the block number
     pub fn block_number(&self) -> BlockNumber {
         self.header().number

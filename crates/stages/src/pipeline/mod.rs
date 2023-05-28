@@ -139,6 +139,7 @@ where
                     .view(|tx| stage_id.get_checkpoint(tx).ok().flatten().unwrap_or_default())
                     .ok()
                     .unwrap_or_default(),
+                None,
             );
         }
     }
@@ -195,7 +196,7 @@ where
     /// If any stage is unsuccessful at execution, we proceed to
     /// unwind. This will undo the progress across the entire pipeline
     /// up to the block that caused the error.
-    async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
+    pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
             let stage = &self.stages[stage_index];
@@ -265,7 +266,13 @@ where
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.checkpoint;
-                        self.metrics.stage_checkpoint(stage_id, stage_progress);
+                        self.metrics.stage_checkpoint(
+                            stage_id,
+                            stage_progress,
+                            // We assume it was set in the previous execute iteration, so it
+                            // doesn't change when we unwind.
+                            None,
+                        );
                         stage_id.save_checkpoint(tx.deref(), stage_progress)?;
 
                         self.listeners
@@ -323,7 +330,8 @@ where
                 .await
             {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
-                    made_progress |= checkpoint != prev_checkpoint.unwrap_or_default();
+                    made_progress |=
+                        checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
                     info!(
                         target: "sync::pipeline",
                         stage = %stage_id,
@@ -332,7 +340,11 @@ where
                         %done,
                         "Stage made progress"
                     );
-                    self.metrics.stage_checkpoint(stage_id, checkpoint);
+                    self.metrics.stage_checkpoint(
+                        stage_id,
+                        checkpoint,
+                        previous_stage.map(|(_, checkpoint)| checkpoint.block_number),
+                    );
                     stage_id.save_checkpoint(tx.deref(), checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });

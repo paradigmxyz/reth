@@ -1,14 +1,15 @@
 [workspace]
 members = [
     "bin/reth",
+    "crates/config",
     "crates/consensus/auto-seal",
     "crates/consensus/beacon",
     "crates/consensus/common",
     "crates/blockchain-tree",
     "crates/interfaces",
     "crates/payload/builder",
+    "crates/metrics",
     "crates/metrics/metrics-derive",
-    "crates/metrics/common",
     "crates/net/common",
     "crates/net/ecies",
     "crates/net/eth-wire",
@@ -42,6 +43,7 @@ members = [
     "crates/tasks",
     "crates/transaction-pool",
     "crates/trie",
+    "testing/ef-tests"
 ]
 default-members = ["bin/reth"]
 
