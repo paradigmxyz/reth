@@ -10,6 +10,12 @@ pub enum ProviderError {
     /// A block body is missing.
     #[error("Block meta not found for block #{0}")]
     BlockBodyIndicesNotFound(BlockNumber),
+    /// The ommers for a block is missing.
+    #[error("Ommers not found for block #{number}")]
+    BlockOmmers { number: BlockNumber },
+    /// Thrown when required block related data was not found but was required.
+    #[error("No block found for {0:?}")]
+    BlockNotFound(BlockNumber),
     /// The transition id was found for the given address and storage key, but the changeset was
     /// not found.
     #[error("Storage ChangeSet address: ({address:?} key: {storage_key:?}) for block:#{block_number} does not exist")]

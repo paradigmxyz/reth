@@ -9,7 +9,7 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     hex, trie::StoredSubNode, BlockNumber, MerkleCheckpoint, StageCheckpoint, H256,
 };
-use reth_provider::Transaction;
+use reth_provider::{HeaderProvider, ProviderError, Transaction};
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::{fmt::Debug, ops::DerefMut};
 use tracing::*;
@@ -159,7 +159,11 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let (from_block, to_block) = range.clone().into_inner();
         let current_block = input.previous_stage_checkpoint().block_number;
 
-        let block_root = tx.get_header(current_block)?.state_root;
+        let block_root = tx
+            .shareable_inner()
+            .header_by_number(current_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(current_block.into()))?
+            .state_root;
 
         let checkpoint = self.get_execution_checkpoint(tx)?;
 
@@ -255,7 +259,12 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calulated state root
-            let target_root = tx.get_header(input.unwind_to)?.state_root;
+            let target_root = tx
+                .shareable_inner()
+                .header_by_number(input.unwind_to)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?
+                .state_root;
+
             self.validate_state_root(block_root, target_root, input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.

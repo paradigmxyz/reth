@@ -1,7 +1,7 @@
 use crate::{
     insert_canonical_block,
     post_state::{PostState, StorageChangeset},
-    BlockHashProvider, ShareableDatabase,
+    BlockHashProvider, HeaderProvider, ShareableDatabase,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -20,7 +20,7 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
+    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, SealedBlock,
     SealedBlockWithSenders, StageCheckpoint, StorageEntry, TransactionSigned,
     TransactionSignedEcRecovered, H256, U256,
 };
@@ -89,11 +89,7 @@ where
     ///
     /// A new inner transaction will be opened.
     pub fn new(db: &'this DB, chain_spec: Arc<ChainSpec>) -> Result<Self, DbError> {
-        Ok(Self {
-            db,
-            tx: Some(db.tx_mut()?),
-            shareable: ShareableDatabase::new(db, chain_spec.clone()),
-        })
+        Ok(Self { db, tx: Some(db.tx_mut()?), shareable: ShareableDatabase::new(db, chain_spec) })
     }
 
     /// Creates a new container with given database and transaction handles.
@@ -102,7 +98,7 @@ where
         tx: <DB as DatabaseGAT<'this>>::TXMut,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        Self { db, tx: Some(tx), shareable: ShareableDatabase::new(db, chain_spec.clone()) }
+        Self { db, tx: Some(tx), shareable: ShareableDatabase::new(db, chain_spec) }
     }
 
     /// Accessor to the internal Database
@@ -165,22 +161,6 @@ where
             .get::<tables::BlockBodyIndices>(number)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
         Ok(body)
-    }
-
-    /// Query the block header by number
-    pub fn get_header(&self, number: BlockNumber) -> Result<Header, TransactionError> {
-        let header = self
-            .get::<tables::Headers>(number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-        Ok(header)
-    }
-
-    /// Get the total difficulty for a block.
-    pub fn get_td(&self, block: BlockNumber) -> Result<U256, TransactionError> {
-        let td = self
-            .get::<tables::HeaderTD>(block)?
-            .ok_or(ProviderError::TotalDifficultyNotFound { number: block })?;
-        Ok(td.into())
     }
 
     /// Unwind table by some number key.
@@ -957,7 +937,11 @@ where
                 StateRoot::incremental_root_with_updates(self.deref(), range.clone())?;
 
             let parent_number = range.start().saturating_sub(1);
-            let parent_state_root = self.get_header(parent_number)?.state_root;
+            let parent_state_root = self
+                .shareable_inner()
+                .header_by_number(parent_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
+                .state_root;
 
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
@@ -965,7 +949,7 @@ where
                 let parent_hash = self
                     .shareable
                     .block_hash(parent_number)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
+                    .ok_or(ProviderError::BlockNotFound(parent_number))?;
 
                 return Err(TransactionError::UnwindStateRootMismatch {
                     got: new_state_root,

@@ -23,6 +23,9 @@ pub enum StageError {
     /// The stage encountered a database error.
     #[error("An internal database error occurred: {0}")]
     Database(#[from] DbError),
+    /// The stage encountered an interface error.
+    #[error("An interface error occurred: {0}")]
+    Interface(#[from] reth_interfaces::Error),
     #[error("Stage encountered a execution error in block {block}: {error}.")]
     /// The stage encountered a execution error
     // TODO: Probably redundant, should be rolled into `Validation`

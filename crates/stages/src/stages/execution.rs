@@ -15,7 +15,8 @@ use reth_primitives::{
     TransactionSigned, U256,
 };
 use reth_provider::{
-    post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
+    post_state::PostState, BlockExecutor, BlockProvider, ExecutorFactory, HeaderProvider,
+    LatestStateProviderRef, ProviderError, Transaction,
 };
 use std::time::Instant;
 use tracing::*;
@@ -88,9 +89,20 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &Transaction<'_, DB>,
         block_number: BlockNumber,
     ) -> Result<(BlockWithSenders, U256), StageError> {
-        let header = tx.get_header(block_number)?;
-        let td = tx.get_td(block_number)?;
-        let ommers = tx.get::<tables::BlockOmmers>(block_number)?.unwrap_or_default().ommers;
+        let shareable_db = tx.shareable_inner();
+        let header = shareable_db
+            .header_by_number(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+        let td = shareable_db
+            .header_td_by_number(block_number)?
+            .ok_or(ProviderError::TotalDifficultyNotFound { number: block_number })?;
+
+        let ommers = shareable_db
+            .ommers(block_number.into())?
+            .ok_or(ProviderError::BlockOmmers { number: block_number })?;
+
+        // todo shareable_db.withdrawals_by_block(id, timestamp) - what's the timestamp?
         let withdrawals = tx.get::<tables::BlockWithdrawals>(block_number)?.map(|v| v.withdrawals);
 
         // Get the block body
