@@ -7,9 +7,9 @@ use crate::{
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header,
-    Receipt, SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber,
-    Withdrawal, H256, U256,
+    Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Head, Header, Receipt,
+    SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal,
+    H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -86,6 +86,33 @@ impl<DB: Database> ShareableDatabase<DB> {
 
         trace!(target: "providers::db", ?block_hash, "Returning historical state provider for block hash");
         Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
+    }
+
+    /// Reads the block's ommers blocks and withdrawals.
+    ///
+    /// Note: these are mutually exclusive, after shanghai, this only returns withdrawals. Before
+    /// shanghai, this only returns ommers.
+    #[allow(clippy::type_complexity)]
+    fn read_block_ommers_and_withdrawals<'a, TX>(
+        &self,
+        tx: &TX,
+        block_number: u64,
+        timestamp: u64,
+    ) -> std::result::Result<
+        (Option<Vec<Header>>, Option<Vec<Withdrawal>>),
+        reth_interfaces::db::DatabaseError,
+    >
+    where
+        TX: DbTx<'a> + Send + Sync,
+    {
+        let mut ommers = None;
+        let mut withdrawals = None;
+        if self.chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
+            withdrawals = read_withdrawals_by_number(tx, block_number)?;
+        } else {
+            ommers = tx.get::<tables::BlockOmmers>(block_number)?.map(|o| o.ommers);
+        }
+        Ok((ommers, withdrawals))
     }
 }
 
@@ -208,14 +235,13 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
         let tx = self.db.tx()?;
         if let Some(number) = convert_hash_or_number(&tx, id)? {
-            if let Some(header) = self.header_by_number(number)? {
-                let id = BlockHashOrNumber::Number(number);
-                let transactions = self
-                    .transactions_by_block(id)?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
+            if let Some(header) = read_header(&tx, number)? {
+                // we check for shanghai first
+                let (ommers, withdrawals) =
+                    self.read_block_ommers_and_withdrawals(&tx, number, header.timestamp)?;
 
-                let ommers = tx.get::<tables::BlockOmmers>(header.number)?.map(|o| o.ommers);
-                let withdrawals = self.withdrawals_by_block(id, header.timestamp)?;
+                let transactions = read_transactions_by_number(&tx, number)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
 
                 return Ok(Some(Block {
                     header,
@@ -330,19 +356,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
     ) -> Result<Option<Vec<TransactionSigned>>> {
         let tx = self.db.tx()?;
         if let Some(number) = convert_hash_or_number(&tx, id)? {
-            if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
-                let tx_range = body.tx_num_range();
-                return if tx_range.is_empty() {
-                    Ok(Some(Vec::new()))
-                } else {
-                    let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-                    let transactions = tx_cursor
-                        .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<std::result::Result<Vec<_>, _>>()?;
-                    Ok(Some(transactions))
-                }
-            }
+            return Ok(read_transactions_by_number(&tx, number)?)
         }
         Ok(None)
     }
@@ -417,15 +431,12 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> Result<Option<Vec<Withdrawal>>> {
-        if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp) {
+        if self.chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
             let tx = self.db.tx()?;
             if let Some(number) = convert_hash_or_number(&tx, id)? {
                 // If we are past shanghai, then all blocks should have a withdrawal list, even if
                 // empty
-                let withdrawals = tx
-                    .get::<tables::BlockWithdrawals>(number)?
-                    .map(|w| w.withdrawals)
-                    .unwrap_or_default();
+                let withdrawals = read_withdrawals_by_number(&tx, number)?.unwrap_or_default();
                 return Ok(Some(withdrawals))
             }
         }
@@ -555,6 +566,56 @@ where
     }
 }
 
+/// Fetches the Withdrawals that belong to the given block number
+#[inline]
+fn read_transactions_by_number<'a, TX>(
+    tx: &TX,
+    block_number: u64,
+) -> std::result::Result<Option<Vec<TransactionSigned>>, reth_interfaces::db::DatabaseError>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    if let Some(body) = tx.get::<tables::BlockBodyIndices>(block_number)? {
+        let tx_range = body.tx_num_range();
+        return if tx_range.is_empty() {
+            Ok(Some(Vec::new()))
+        } else {
+            let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+            let transactions = tx_cursor
+                .walk_range(tx_range)?
+                .map(|result| result.map(|(_, tx)| tx.into()))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(Some(transactions))
+        }
+    }
+
+    Ok(None)
+}
+
+/// Fetches the Withdrawals that belong to the given block number
+#[inline]
+fn read_withdrawals_by_number<'a, TX>(
+    tx: &TX,
+    block_number: u64,
+) -> std::result::Result<Option<Vec<Withdrawal>>, reth_interfaces::db::DatabaseError>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    tx.get::<tables::BlockWithdrawals>(block_number).map(|w| w.map(|w| w.withdrawals))
+}
+
+/// Fetches the corresponding header
+#[inline]
+fn read_header<'a, TX>(
+    tx: &TX,
+    block_number: u64,
+) -> std::result::Result<Option<Header>, reth_interfaces::db::DatabaseError>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    tx.get::<tables::Headers>(block_number)
+}
+
 /// Fetches Header and its hash
 #[inline]
 fn read_sealed_header<'a, TX>(
@@ -568,7 +629,7 @@ where
         Some(block_hash) => block_hash,
         None => return Ok(None),
     };
-    match tx.get::<tables::Headers>(block_number)? {
+    match read_header(tx, block_number)? {
         Some(header) => Ok(Some((header, block_hash))),
         None => Ok(None),
     }
