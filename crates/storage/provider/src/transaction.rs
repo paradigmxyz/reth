@@ -1,6 +1,7 @@
 use crate::{
     insert_canonical_block,
     post_state::{PostState, StorageChangeset},
+    BlockHashProvider, ShareableDatabase,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -28,6 +29,7 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
+    sync::Arc,
 };
 
 /// A container for any DB transaction that will open a new inner transaction when the current
@@ -140,14 +142,6 @@ impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
-    /// Query [tables::CanonicalHeaders] table for block hash by block number
-    pub fn get_block_hash(&self, block_number: BlockNumber) -> Result<BlockHash, TransactionError> {
-        let hash = self
-            .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(hash)
-    }
-
     /// Query the block body by number.
     pub fn block_body_indices(
         &self,
@@ -954,7 +948,10 @@ where
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
-                let parent_hash = self.get_block_hash(parent_number)?;
+                let parent_hash = ShareableDatabase::new(self.db, Arc::new(chain_spec.clone()))
+                    .block_hash(parent_number)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
+
                 return Err(TransactionError::UnwindStateRootMismatch {
                     got: new_state_root,
                     expected: parent_state_root,
@@ -1370,6 +1367,9 @@ pub enum TransactionError {
     /// The transaction encountered a database integrity error.
     #[error(transparent)]
     DatabaseIntegrity(#[from] ProviderError),
+    /// Interface error.
+    #[error(transparent)]
+    InterfaceError(#[from] reth_interfaces::Error),
     /// The trie error.
     #[error(transparent)]
     TrieError(#[from] StateRootError),
