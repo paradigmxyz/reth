@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use reth_primitives::{
     constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self, EMPTY_LIST_HASH},
@@ -5,7 +7,7 @@ use reth_primitives::{
     H256, H64, U256, U64,
 };
 use reth_rlp::{Decodable, Encodable};
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde::{de::Visitor, ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
@@ -427,7 +429,7 @@ impl std::fmt::Display for PayloadStatusEnum {
 /// Various errors that can occur when validating a payload or forkchoice update.
 ///
 /// This is intended for the [PayloadStatusEnum::Invalid] variant.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PayloadValidationError {
     /// Thrown when a forkchoice update's head links to a previously rejected payload.
     #[error("links to previously rejected block")]
@@ -436,10 +438,10 @@ pub enum PayloadValidationError {
     #[error("invalid block number")]
     InvalidBlockNumber,
     /// Thrown when a new payload contains a wrong block hash.
-    #[error("invalid block hash")]
+    #[error("invalid block hash: {hash:?}")]
     InvalidBlockHash { hash: H256 },
     /// Thrown when a new payload contains a wrong state root
-    #[error("invalid merkle root (remote: {remote:?} local: {local:?})")]
+    #[error("invalid merkle root: (remote: {remote:?} local: {local:?})")]
     InvalidStateRoot {
         /// The state root of the payload we received from remote (CL)
         remote: H256,
@@ -447,14 +449,75 @@ pub enum PayloadValidationError {
         local: H256,
     },
     /// Thrown when some other error occured while processing payload
-    #[error("Other")]
+    #[error("{0}")]
     Other(String),
+}
+
+impl Serialize for PayloadValidationError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for PayloadValidationError {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct PayloadValidationErrorVisitor;
+        impl<'de> Visitor<'de> for PayloadValidationErrorVisitor {
+            type Value = PayloadValidationError;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("Expected type was string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v == PayloadValidationError::LinksToRejectedPayload.to_string() {
+                    Ok(PayloadValidationError::LinksToRejectedPayload)
+                } else if v == PayloadValidationError::InvalidBlockNumber.to_string() {
+                    Ok(PayloadValidationError::InvalidBlockNumber)
+                // InvalidBlockHash
+                } else if v.starts_with("invalid block hash") {
+                    if let Some(s) = v.split(' ').nth(3) {
+                        if let Ok(hash) = H256::from_str(s) {
+                            Ok(PayloadValidationError::InvalidBlockHash { hash })
+                        } else {
+                            Err(E::custom("Invalid block hash string"))
+                        }
+                    } else {
+                        Err(E::custom("Invalid validation error string"))
+                    }
+                // InvalidStateRoot
+                } else if v.starts_with("invalid merkle root") {
+                    let splits: Vec<_> = v.split(' ').collect();
+                    let (remote_str, local_str) = (splits[4], splits[6]);
+                    if let Ok(remote) = H256::from_str(remote_str) {
+                        if let Ok(local) = H256::from_str(&local_str[..local_str.len() - 1]) {
+                            Ok(PayloadValidationError::InvalidStateRoot { remote, local })
+                        } else {
+                            Err(E::custom("Invalid local hash string"))
+                        }
+                    } else {
+                        Err(E::custom("Invalid remote hash string"))
+                    }
+                } else {
+                    Ok(PayloadValidationError::Other(v.to_string()))
+                }
+            }
+        }
+        deserializer.deserialize_identifier(PayloadValidationErrorVisitor)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{
@@ -465,6 +528,7 @@ mod tests {
         TransactionSigned, H256,
     };
     use reth_rlp::{Decodable, DecodeError};
+    use std::str::FromStr;
 
     fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
         let unsealed = src.unseal();
@@ -598,9 +662,10 @@ mod tests {
     }
 
     #[test]
-    fn serde_payload_status_error() {
+    fn serde_payload_status_error_deserialize() {
         let s = r#"{"status":"INVALID_BLOCK_HASH","latestValidHash":null,"validationError":
-        {"InvalidBlockHash":{"hash":"0x1241835b37d267ed64d1840312ae600b1774e48370b0548c87012a1c681aa54d"}}}"#;
+        "invalid block hash: 0x1241835b37d267ed64d1840312ae600b1774e48370b0548c87012a1c681aa54d"}"#;
+
         let status: PayloadStatus = serde_json::from_str(s).unwrap();
         assert_eq!(
             status.status,
@@ -613,7 +678,7 @@ mod tests {
                 }
             }
         );
-        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":{"Other":"Failed to decode block"}}"#;
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"Failed to decode block"}"#;
         let q = PayloadStatus {
             latest_valid_hash: None,
             status: PayloadStatusEnum::Invalid {
@@ -622,7 +687,44 @@ mod tests {
                 ),
             },
         };
-        assert_eq!(s, serde_json::to_string(&q).unwrap());
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"links to previously rejected block"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::LinksToRejectedPayload,
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"invalid block number"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::InvalidBlockNumber,
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
+
+        let s = r#"{"status":"INVALID","latestValidHash":null,"validationError": 
+        "invalid merkle root: (remote: 0x3f77fb29ce67436532fee970e1add8f5cc80e8878c79b967af53b1fd92a0cab7 local: 0x603b9628dabdaadb442a3bb3d7e0360efc110e1948472909230909f1690fed17)"}"#;
+        let q = PayloadStatus {
+            latest_valid_hash: None,
+            status: PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::InvalidStateRoot {
+                    remote: H256::from_str(
+                        "0x3f77fb29ce67436532fee970e1add8f5cc80e8878c79b967af53b1fd92a0cab7",
+                    )
+                    .unwrap(),
+                    local: H256::from_str(
+                        "0x603b9628dabdaadb442a3bb3d7e0360efc110e1948472909230909f1690fed17",
+                    )
+                    .unwrap(),
+                },
+            },
+        };
+        assert_eq!(q, serde_json::from_str(s).unwrap());
     }
 
     #[test]
