@@ -20,6 +20,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
     ))),
+    fork_timestamps: ForkTimestamps::default().shanghai(1681338455),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(1150000)),
@@ -54,6 +55,7 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
     ))),
+    fork_timestamps: ForkTimestamps::default().shanghai(1678832736),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -82,6 +84,7 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
     ))),
+    fork_timestamps: ForkTimestamps::default().shanghai(1677557088),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -127,6 +130,12 @@ pub struct ChainSpec {
 
     /// The genesis block
     pub genesis: Genesis,
+
+    /// Timestamps of various hardforks
+    ///
+    /// This caches entries in `hardforks` map
+    #[serde(skip, default)]
+    pub fork_timestamps: ForkTimestamps,
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
@@ -210,7 +219,10 @@ impl ChainSpec {
     /// Convenience method to check if [Hardfork::Shanghai] is active at a given timestamp.
     #[inline]
     pub fn is_shanghai_activated_at_timestamp(&self, timestamp: u64) -> bool {
-        self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp)
+        self.fork_timestamps
+            .shanghai
+            .map(|shanghai| timestamp >= shanghai)
+            .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp))
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
@@ -325,8 +337,33 @@ impl From<EthersGenesis> for ChainSpec {
             chain: genesis.config.chain_id.into(),
             genesis: genesis_block,
             genesis_hash: None,
+            fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
         }
+    }
+}
+
+/// Various timestamps of forks
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct ForkTimestamps {
+    /// The timestamp of the shanghai fork
+    pub shanghai: Option<u64>,
+}
+
+impl ForkTimestamps {
+    /// Creates a new [`ForkTimestamps`] from the given hardforks by extracing the timestamps
+    fn from_hardforks(forks: &BTreeMap<Hardfork, ForkCondition>) -> Self {
+        let mut timestamps = ForkTimestamps::default();
+        if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
+            timestamps = timestamps.shanghai(shanghai);
+        }
+        timestamps
+    }
+
+    /// Sets the given shanghai timestamp
+    pub fn shanghai(mut self, shanghai: u64) -> Self {
+        self.shanghai = Some(shanghai);
+        self
     }
 }
 
@@ -497,6 +534,7 @@ impl ChainSpecBuilder {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
+            fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
         }
     }
@@ -620,6 +658,14 @@ impl ForkCondition {
                 Head { total_difficulty, ..Default::default() }
             }
             ForkCondition::Never => unreachable!(),
+        }
+    }
+
+    /// Returns the timestamp of the fork condition, if it is timestamp based.
+    pub fn as_timestamp(&self) -> Option<u64> {
+        match self {
+            ForkCondition::Timestamp(timestamp) => Some(*timestamp),
+            _ => None,
         }
     }
 }
