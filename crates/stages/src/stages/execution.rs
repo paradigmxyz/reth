@@ -312,6 +312,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         // Unwind all receipts for transactions in the block range
         tx.unwind_table_by_num::<tables::Receipts>(first_tx_num)?;
+        // `unwind_table_by_num` doesn't unwind the provided key, so we need to unwind it manually
         tx.delete::<tables::Receipts>(first_tx_num, None)?;
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
