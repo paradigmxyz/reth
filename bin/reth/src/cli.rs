@@ -10,17 +10,16 @@ use crate::{
 use clap::{ArgAction, Args, Parser, Subcommand};
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
-    tracing_subscriber::{filter::Directive, registry::LookupSpan},
+    tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
-use std::str::FromStr;
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
     let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
-    if let Some((layer, _guard)) = opt.logs.layer() {
+    if let Some((layer, _guard)) = opt.logs.layer()? {
         layers.push(layer);
     }
     reth_tracing::init(layers);
@@ -115,21 +114,20 @@ pub struct Logs {
 
 impl Logs {
     /// Builds a tracing layer from the current log options.
-    pub fn layer<S>(&self) -> Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>
+    pub fn layer<S>(&self) -> eyre::Result<Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>>
     where
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
     {
-        let directive = Directive::from_str(self.filter.as_str())
-            .unwrap_or_else(|_| Directive::from_str("debug").unwrap());
+        let filter = EnvFilter::builder().parse(&self.filter)?;
 
         if self.journald {
-            Some((reth_tracing::journald(directive).expect("Could not connect to journald"), None))
+            Ok(Some((reth_tracing::journald(filter).expect("Could not connect to journald"), None)))
         } else if self.persistent {
-            let (layer, guard) = reth_tracing::file(directive, &self.log_directory, "reth.log");
-            Some((layer, Some(guard)))
+            let (layer, guard) = reth_tracing::file(filter, &self.log_directory, "reth.log");
+            Ok(Some((layer, Some(guard))))
         } else {
-            None
+            Ok(None)
         }
     }
 }
