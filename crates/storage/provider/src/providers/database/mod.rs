@@ -30,14 +30,14 @@ pub struct ShareableDatabase<DB> {
 }
 
 impl<DB: Database> ShareableDatabase<DB> {
-    /// Returns a provider with a created [`DbTx`] inside, which allows fetching data from the
+    /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashProvider`]
     pub fn provider(&self) -> Result<ProviderRO<'_, DB>> {
         Ok(Provider::new(self.db.tx()?, self.chain_spec.clone()))
     }
 
-    /// Returns a provider with a created [`DbTxMut`] inside, which allows fetching and updating
+    /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashProvider`]
     pub fn provider_rw(&self) -> Result<ProviderRW<'_, DB>> {
