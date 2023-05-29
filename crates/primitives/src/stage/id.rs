@@ -56,12 +56,12 @@ impl StageId {
         }
     }
 
-    /// Returns true if it's a downloading stage [HEADERS] or [BODIES
+    /// Returns true if it's a downloading stage [StageId::Headers] or [StageId::Bodies]
     pub fn is_downloading_stage(&self) -> bool {
         matches!(self, StageId::Headers | StageId::Bodies)
     }
 
-    /// Returns true indicating if it's the finish stage [FINISH]
+    /// Returns true indicating if it's the finish stage [StageId::Finish]
     pub fn is_finish(&self) -> bool {
         matches!(self, StageId::Finish)
     }
