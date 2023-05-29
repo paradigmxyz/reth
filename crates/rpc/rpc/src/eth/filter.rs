@@ -9,7 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{Receipt, SealedBlock, H256};
+use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock, H256};
 use reth_provider::{BlockIdProvider, BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
@@ -336,9 +336,9 @@ where
     /// Fetches both receipts and block for the given block number.
     async fn block_and_receipts_by_number(
         &self,
-        block_number: u64,
+        hash_or_number: BlockHashOrNumber,
     ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        let block_hash = match self.client.block_hash(block_number)? {
+        let block_hash = match self.client.convert_block_hash(hash_or_number)? {
             Some(hash) => hash,
             None => return Ok(None),
         };
@@ -388,13 +388,20 @@ where
         {
             let headers = self.client.headers_range(from..=to)?;
 
-            for header in headers {
+            for (idx, header) in headers.iter().enumerate() {
+                // these are consecutive headers, so we can use the parent hash of the next block to
+                // get the current header's hash
+                let num_hash: BlockHashOrNumber = headers
+                    .get(idx + 1)
+                    .map(|h| h.parent_hash.into())
+                    .unwrap_or_else(|| header.number.into());
+
                 // only if filter matches
                 if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
                     FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
                     if let Some((block, receipts)) =
-                        self.block_and_receipts_by_number(header.number).await?
+                        self.block_and_receipts_by_number(num_hash).await?
                     {
                         let block_hash = block.hash;
 
