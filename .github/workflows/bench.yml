@@ -15,40 +15,45 @@ jobs:
   iai:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Valgrind
-        run: |
-          sudo apt install valgrind
+      - name: Checkout main sources
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          path: main
 
       - name: Checkout PR sources
         uses: actions/checkout@v3
         with:
-          ref: main
+          clean: false
+          path: pr
+
+      - name: Install Valgrind
+        run: |
+          sudo apt install valgrind
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
+          workspaces: |
+            main -> target
+            pr -> target
           cache-on-failure: true
 
       - name: Generate test vectors
-        uses: actions-rs/cargo@v1
-        with:
-          command: run
-          args: --bin reth -- test-vectors tables
+        run: |
+          cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
+          cp -r testdata main
+          mv testdata pr
 
       - name: Set main baseline
-        uses: actions-rs/cargo@v1
-        with:
-          command: bench
-          args: --package reth-db --bench iai
-
-      - name: Checkout main sources
-        uses: actions/checkout@v3
-        with:
-          clean: false
+        run: cargo bench --package reth-db --bench iai --manifest-path main/Cargo.toml
 
       - name: Compare PR benchmark
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
         run: |
-          ./.github/scripts/compare_iai.sh
+          ./pr/.github/scripts/compare_iai.sh
 
   # Checks that benchmarks not run in CI compile
   bench-check:
