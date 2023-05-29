@@ -683,7 +683,7 @@ pub fn get_stage_checkpoint<'a, TX>(
 where
     TX: DbTx<'a> + Send + Sync,
 {
-    Ok(tx.get::<tables::SyncStage>(id.to_string())?)
+    tx.get::<tables::SyncStage>(id.to_string())
 }
 
 #[cfg(test)]
