@@ -896,9 +896,6 @@ where
 
                         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
                             trace!(target: "consensus::engine", hash=?bad_block.hash, "Bad block detected in unwind");
-                            // Attempt to sync to the latest valid hash after unwind, because the
-                            // head may be invalid.
-                            self.sync.set_pipeline_sync_target(bad_block.parent_hash);
 
                             // update the `invalid_headers` cache with the new invalid headers
                             self.invalid_headers.insert(bad_block);
