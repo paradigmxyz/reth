@@ -692,6 +692,22 @@ mod tests {
 
     // Tests that we skip any fork blocks in block #0 (the genesis ruleset)
     #[test]
+    fn test_fork_timestamps() {
+        let spec = ChainSpec::builder().chain(Chain::mainnet()).genesis(Genesis::default()).build();
+        assert!(spec.fork_timestamps.shanghai.is_none());
+
+        let spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(1337))
+            .build();
+        assert_eq!(spec.fork_timestamps.shanghai, Some(1337));
+        assert!(spec.is_shanghai_activated_at_timestamp(1337));
+        assert!(!spec.is_shanghai_activated_at_timestamp(1336));
+    }
+
+    // Tests that we skip any fork blocks in block #0 (the genesis ruleset)
+    #[test]
     fn ignores_genesis_fork_blocks() {
         let spec = ChainSpec::builder()
             .chain(Chain::mainnet())
