@@ -20,6 +20,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
     ))),
+    fork_timestamps: ForkTimestamps::default().shanghai(1681338455),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(1150000)),
@@ -54,6 +55,7 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
     ))),
+    fork_timestamps: ForkTimestamps::default().shanghai(1678832736),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -82,6 +84,7 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
     ))),
+    fork_timestamps: ForkTimestamps::default().shanghai(1677557088),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -127,6 +130,12 @@ pub struct ChainSpec {
 
     /// The genesis block
     pub genesis: Genesis,
+
+    /// Timestamps of various hardforks
+    ///
+    /// This caches entries in `hardforks` map
+    #[serde(skip, default)]
+    pub fork_timestamps: ForkTimestamps,
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
@@ -210,7 +219,10 @@ impl ChainSpec {
     /// Convenience method to check if [Hardfork::Shanghai] is active at a given timestamp.
     #[inline]
     pub fn is_shanghai_activated_at_timestamp(&self, timestamp: u64) -> bool {
-        self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp)
+        self.fork_timestamps
+            .shanghai
+            .map(|shanghai| timestamp >= shanghai)
+            .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp))
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
@@ -325,8 +337,33 @@ impl From<EthersGenesis> for ChainSpec {
             chain: genesis.config.chain_id.into(),
             genesis: genesis_block,
             genesis_hash: None,
+            fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
         }
+    }
+}
+
+/// Various timestamps of forks
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct ForkTimestamps {
+    /// The timestamp of the shanghai fork
+    pub shanghai: Option<u64>,
+}
+
+impl ForkTimestamps {
+    /// Creates a new [`ForkTimestamps`] from the given hardforks by extracing the timestamps
+    fn from_hardforks(forks: &BTreeMap<Hardfork, ForkCondition>) -> Self {
+        let mut timestamps = ForkTimestamps::default();
+        if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
+            timestamps = timestamps.shanghai(shanghai);
+        }
+        timestamps
+    }
+
+    /// Sets the given shanghai timestamp
+    pub fn shanghai(mut self, shanghai: u64) -> Self {
+        self.shanghai = Some(shanghai);
+        self
     }
 }
 
@@ -497,6 +534,7 @@ impl ChainSpecBuilder {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
+            fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
         }
     }
@@ -537,6 +575,11 @@ pub enum ForkCondition {
 }
 
 impl ForkCondition {
+    /// Returns true if the fork condition is timestamp based.
+    pub fn is_timestamp(&self) -> bool {
+        matches!(self, ForkCondition::Timestamp(_))
+    }
+
     /// Checks whether the fork condition is satisfied at the given block.
     ///
     /// For TTD conditions, this will only return true if the activation block is already known.
@@ -622,6 +665,14 @@ impl ForkCondition {
             ForkCondition::Never => unreachable!(),
         }
     }
+
+    /// Returns the timestamp of the fork condition, if it is timestamp based.
+    pub fn as_timestamp(&self) -> Option<u64> {
+        match self {
+            ForkCondition::Timestamp(timestamp) => Some(*timestamp),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -641,6 +692,46 @@ mod tests {
                 "Expected fork ID {:?}, computed fork ID {:?} at block {}",
                 expected_id, computed_id, block.number
             );
+        }
+    }
+
+    // Tests that the ForkTimestamps are correctly set up.
+    #[test]
+    fn test_fork_timestamps() {
+        let spec = ChainSpec::builder().chain(Chain::mainnet()).genesis(Genesis::default()).build();
+        assert!(spec.fork_timestamps.shanghai.is_none());
+
+        let spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(1337))
+            .build();
+        assert_eq!(spec.fork_timestamps.shanghai, Some(1337));
+        assert!(spec.is_shanghai_activated_at_timestamp(1337));
+        assert!(!spec.is_shanghai_activated_at_timestamp(1336));
+    }
+
+    // Tests that all predefined timestamps are correctly set up in the chainspecs
+    #[test]
+    fn test_predefined_chain_spec_fork_timestamps() {
+        fn ensure_timestamp_fork_conditions(spec: &ChainSpec) {
+            // This is a sanity test that ensures we always set all currently known fork timestamps,
+            // this will fail if a new timestamp based fork condition has added to the hardforks but
+            // no corresponding entry in the ForkTimestamp types, See also
+            // [ForkTimestamps::from_hardforks]
+
+            // currently there are only 1 timestamps known: shanghai
+            let known_timestamp_based_forks = 1;
+            let num_timestamp_based_forks =
+                spec.hardforks.values().copied().filter(ForkCondition::is_timestamp).count();
+            assert_eq!(num_timestamp_based_forks, known_timestamp_based_forks);
+
+            // ensures all timestamp forks are set
+            assert!(spec.fork_timestamps.shanghai.is_some());
+        }
+
+        for spec in [&*MAINNET, &*SEPOLIA] {
+            ensure_timestamp_fork_conditions(spec);
         }
     }
 
