@@ -58,12 +58,12 @@ where
 
 /// Builds a new tracing layer that appends to a log file.
 ///
-/// The events are filtered by `directive`.
+/// The events are filtered by `filter`.
 ///
 /// The boxed layer and a guard is returned. When the guard is dropped the buffer for the log
 /// file is immediately flushed to disk. Any events after the guard is dropped may be missed.
 pub fn file<S>(
-    directive: impl Into<Directive>,
+    filter: EnvFilter,
     dir: impl AsRef<Path>,
     file_name: impl AsRef<Path>,
 ) -> (BoxedLayer<S>, tracing_appender::non_blocking::WorkerGuard)
@@ -76,7 +76,7 @@ where
     let layer = tracing_subscriber::fmt::layer()
         .with_ansi(false)
         .with_writer(writer)
-        .with_filter(EnvFilter::default().add_directive(directive.into()))
+        .with_filter(filter)
         .boxed();
 
     (layer, guard)
@@ -90,17 +90,15 @@ pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
 
 /// Builds a new tracing layer that writes events to journald.
 ///
-/// The events are filtered by `directive`.
+/// The events are filtered by `filter`.
 ///
 /// If the layer cannot connect to journald for any reason this function will return an error.
-pub fn journald<S>(directive: impl Into<Directive>) -> std::io::Result<BoxedLayer<S>>
+pub fn journald<S>(filter: EnvFilter) -> std::io::Result<BoxedLayer<S>>
 where
     S: Subscriber,
     for<'a> S: LookupSpan<'a>,
 {
-    Ok(tracing_journald::layer()?
-        .with_filter(EnvFilter::default().add_directive(directive.into()))
-        .boxed())
+    Ok(tracing_journald::layer()?.with_filter(filter).boxed())
 }
 
 /// Initializes a tracing subscriber for tests.
