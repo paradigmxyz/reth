@@ -414,12 +414,12 @@ impl std::fmt::Display for PayloadStatusEnum {
             PayloadStatusEnum::Invalid { validation_error } => {
                 f.write_str(self.as_str())?;
                 f.write_str(": ")?;
-                f.write_str(validation_error.as_str())
+                f.write_str(validation_error.to_string().as_str())
             }
             PayloadStatusEnum::InvalidBlockHash { validation_error } => {
                 f.write_str(self.as_str())?;
                 f.write_str(": ")?;
-                f.write_str(validation_error.as_str())
+                f.write_str(validation_error.to_string().as_str())
             }
             _ => f.write_str(self.as_str()),
         }
