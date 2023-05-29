@@ -41,8 +41,13 @@ use reth_interfaces::{
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
-use reth_provider::{BlockProvider, CanonStateSubscriptions, HeaderProvider, ShareableDatabase};
+use reth_primitives::{
+    stage::StageId, BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256,
+};
+use reth_provider::{
+    providers::get_stage_checkpoint, BlockProvider, CanonStateSubscriptions, HeaderProvider,
+    ShareableDatabase,
+};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
@@ -55,7 +60,7 @@ use reth_stages::{
     prelude::*,
     stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage, FINISH,
+        TotalDifficultyStage,
     },
 };
 use reth_tasks::TaskExecutor;
@@ -75,7 +80,6 @@ use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::bytes::BytesMut;
 use reth_provider::providers::BlockchainProvider;
 use reth_rlp::Encodable;
-use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
 
@@ -506,7 +510,7 @@ impl Command {
         db: Arc<Env<WriteMap>>,
     ) -> Result<Head, reth_interfaces::db::DatabaseError> {
         db.view(|tx| {
-            let head = FINISH.get_checkpoint(tx)?.unwrap_or_default().block_number;
+            let head = get_stage_checkpoint(tx, StageId::Finish)?.unwrap_or_default().block_number;
             let header = tx
                 .get::<tables::Headers>(head)?
                 .expect("the header for the latest block is missing, database is corrupt");
@@ -681,8 +685,8 @@ impl Command {
                         max_changesets: stage_conf.execution.max_changesets,
                     },
                 ))
-                .disable_if(MERKLE_UNWIND, || self.auto_mine)
-                .disable_if(MERKLE_EXECUTION, || self.auto_mine),
+                .disable_if(StageId::MerkleUnwind, || self.auto_mine)
+                .disable_if(StageId::MerkleExecute, || self.auto_mine),
             )
             .build(db);
 

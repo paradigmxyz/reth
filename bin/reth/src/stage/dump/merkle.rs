@@ -2,14 +2,14 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
-use reth_primitives::{BlockNumber, StageCheckpoint, MAINNET};
+use reth_primitives::{stage::StageId, BlockNumber, StageCheckpoint, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage,
     },
-    Stage, StageId, UnwindInput,
+    Stage, UnwindInput,
 };
 use std::{ops::DerefMut, path::PathBuf, sync::Arc};
 use tracing::info;
@@ -55,7 +55,7 @@ async fn unwind_and_copy<DB: Database>(
         bad_block: None,
     };
     let execute_input = reth_stages::ExecInput {
-        previous_stage: Some((StageId("Another"), StageCheckpoint::new(to))),
+        previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(to))),
         checkpoint: Some(StageCheckpoint::new(from)),
     };
 
@@ -129,7 +129,7 @@ async fn dry_run(
         .execute(
             &mut tx,
             reth_stages::ExecInput {
-                previous_stage: Some((StageId("Another"), StageCheckpoint::new(to))),
+                previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(to))),
                 checkpoint: Some(StageCheckpoint::new(from)),
             },
         )

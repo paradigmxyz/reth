@@ -1,6 +1,6 @@
-use crate::{pipeline::BoxedStage, Pipeline, Stage, StageId, StageSet};
+use crate::{pipeline::BoxedStage, Pipeline, Stage, StageSet};
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, H256};
+use reth_primitives::{stage::StageId, BlockNumber, H256};
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].

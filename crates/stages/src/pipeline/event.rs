@@ -1,8 +1,5 @@
-use crate::{
-    id::StageId,
-    stage::{ExecOutput, UnwindInput, UnwindOutput},
-};
-use reth_primitives::StageCheckpoint;
+use crate::stage::{ExecOutput, UnwindInput, UnwindOutput};
+use reth_primitives::{stage::StageId, StageCheckpoint};
 
 /// An event emitted by a [Pipeline][crate::Pipeline].
 ///

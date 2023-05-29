@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_primitives::{keccak256, AccountHashingCheckpoint, StageCheckpoint};
+use reth_primitives::{keccak256, stage::StageId, AccountHashingCheckpoint, StageCheckpoint};
 use reth_provider::Transaction;
 use std::{
     cmp::max,
@@ -17,9 +17,6 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tracing::*;
-
-/// The [`StageId`] of the account hashing stage.
-pub const ACCOUNT_HASHING: StageId = StageId("AccountHashing");
 
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -115,7 +112,7 @@ impl AccountHashingStage {
 impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        ACCOUNT_HASHING
+        StageId::AccountHashing
     }
 
     /// Execute the stage.

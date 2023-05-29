@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -7,15 +7,14 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable, RawValue,
 };
-use reth_primitives::{keccak256, StageCheckpoint, TransactionSignedNoHash, TxNumber, H160};
+use reth_primitives::{
+    keccak256, stage::StageId, StageCheckpoint, TransactionSignedNoHash, TxNumber, H160,
+};
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::*;
-
-/// The [`StageId`] of the sender recovery stage.
-pub const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
@@ -37,7 +36,7 @@ impl Default for SenderRecoveryStage {
 impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        SENDER_RECOVERY
+        StageId::SenderRecovery
     }
 
     /// Retrieve the range of transactions to iterate over by querying

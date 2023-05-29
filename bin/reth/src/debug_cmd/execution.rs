@@ -25,8 +25,8 @@ use reth_interfaces::{
 };
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, H256};
-use reth_provider::{ShareableDatabase, Transaction};
+use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
+use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
 use reth_staged_sync::utils::{
     chainspec::genesis_value_parser,
     init::{init_db, init_genesis},
@@ -35,7 +35,7 @@ use reth_stages::{
     sets::DefaultStages,
     stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage, FINISH,
+        TotalDifficultyStage,
     },
     Pipeline, StageSet,
 };
@@ -250,7 +250,7 @@ impl Command {
             .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
 
         let latest_block_number =
-            FINISH.get_checkpoint(&db.tx()?)?.unwrap_or_default().block_number;
+            get_stage_checkpoint(&db.tx()?, StageId::Finish)?.unwrap_or_default().block_number;
         if latest_block_number >= self.to {
             info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
             return Ok(())
