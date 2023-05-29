@@ -17,14 +17,17 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    listener::EventListeners, BlockNumber, Head, Header, SealedBlock, SealedHeader, H256, U256,
+    listener::EventListeners, stage::StageId, BlockNumber, Head, Header, SealedBlock, SealedHeader,
+    H256, U256,
 };
-use reth_provider::{BlockProvider, BlockSource, CanonChainTracker, ProviderError};
+use reth_provider::{
+    providers::get_stage_checkpoint, BlockProvider, BlockSource, CanonChainTracker, ProviderError,
+};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
-use reth_stages::{stages::FINISH, Pipeline};
+use reth_stages::Pipeline;
 use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{
@@ -405,7 +408,9 @@ where
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=header.number, "canonicalized new head");
 
                     let pipeline_min_progress =
-                        FINISH.get_checkpoint(&self.db.tx()?)?.unwrap_or_default().block_number;
+                        get_stage_checkpoint(&self.db.tx()?, StageId::Finish)?
+                            .unwrap_or_default()
+                            .block_number;
 
                     if pipeline_min_progress < header.number {
                         debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=header.number, "pipeline run to head required");
@@ -1282,6 +1287,7 @@ mod tests {
 
     mod fork_choice_updated {
         use super::*;
+        use reth_db::transaction::DbTxMut;
         use reth_interfaces::test_utils::generators::random_block;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
 
@@ -1338,7 +1344,12 @@ mod tests {
             let block1 = random_block(1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
             env.db
-                .update(|tx| FINISH.save_checkpoint(tx, StageCheckpoint::new(block1.number)))
+                .update(|tx| {
+                    tx.put::<tables::SyncStage>(
+                        StageId::Finish.to_string(),
+                        StageCheckpoint::new(block1.number),
+                    )
+                })
                 .unwrap()
                 .unwrap();
 

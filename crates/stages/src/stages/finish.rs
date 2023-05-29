@@ -1,10 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::StageCheckpoint;
+use reth_primitives::{stage::StageId, StageCheckpoint};
 use reth_provider::Transaction;
-
-/// The [`StageId`] of the finish stage.
-pub const FINISH: StageId = StageId("Finish");
 
 /// The finish stage.
 ///
@@ -16,7 +13,7 @@ pub struct FinishStage;
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for FinishStage {
     fn id(&self) -> StageId {
-        FINISH
+        StageId::Finish
     }
 
     async fn execute(

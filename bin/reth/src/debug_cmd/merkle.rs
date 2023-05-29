@@ -2,18 +2,17 @@
 use crate::dirs::{DataDirPath, MaybePlatformPath};
 use clap::Parser;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
-use reth_primitives::{ChainSpec, StageCheckpoint};
+use reth_primitives::{stage::StageId, ChainSpec, StageCheckpoint};
 use reth_provider::Transaction;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage, ACCOUNT_HASHING, EXECUTION, MERKLE_EXECUTION, SENDER_RECOVERY,
-        STORAGE_HASHING,
+        StorageHashingStage,
     },
     ExecInput, Stage,
 };
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 /// `reth merkle-debug` command
 #[derive(Debug, Parser)]
@@ -66,21 +65,22 @@ impl Command {
         let mut tx = Transaction::new(db.as_ref())?;
 
         let execution_checkpoint_block =
-            EXECUTION.get_checkpoint(tx.deref())?.unwrap_or_default().block_number;
+            tx.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
         assert!(execution_checkpoint_block < self.to, "Nothing to run");
 
         // Check if any of hashing or merkle stages aren't on the same block number as
         // Execution stage or have any intermediate progress.
-        let should_reset_stages = [ACCOUNT_HASHING, STORAGE_HASHING, MERKLE_EXECUTION]
-            .into_iter()
-            .map(|stage| stage.get_checkpoint(tx.deref()))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(Option::unwrap_or_default)
-            .any(|checkpoint| {
-                checkpoint.block_number != execution_checkpoint_block ||
-                    checkpoint.stage_checkpoint.is_some()
-            });
+        let should_reset_stages =
+            [StageId::AccountHashing, StageId::StorageHashing, StageId::MerkleExecute]
+                .into_iter()
+                .map(|stage_id| tx.get_stage_checkpoint(stage_id))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(Option::unwrap_or_default)
+                .any(|checkpoint| {
+                    checkpoint.block_number != execution_checkpoint_block ||
+                        checkpoint.stage_checkpoint.is_some()
+                });
 
         let factory = reth_revm::Factory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
@@ -109,7 +109,10 @@ impl Command {
                 .execute(
                     &mut tx,
                     ExecInput {
-                        previous_stage: Some((SENDER_RECOVERY, StageCheckpoint::new(block))),
+                        previous_stage: Some((
+                            StageId::SenderRecovery,
+                            StageCheckpoint::new(block),
+                        )),
                         checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
                     },
                 )
@@ -121,7 +124,7 @@ impl Command {
                     .execute(
                         &mut tx,
                         ExecInput {
-                            previous_stage: Some((EXECUTION, StageCheckpoint::new(block))),
+                            previous_stage: Some((StageId::Execution, StageCheckpoint::new(block))),
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
@@ -135,7 +138,10 @@ impl Command {
                     .execute(
                         &mut tx,
                         ExecInput {
-                            previous_stage: Some((ACCOUNT_HASHING, StageCheckpoint::new(block))),
+                            previous_stage: Some((
+                                StageId::AccountHashing,
+                                StageCheckpoint::new(block),
+                            )),
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
@@ -147,7 +153,10 @@ impl Command {
                 .execute(
                     &mut tx,
                     ExecInput {
-                        previous_stage: Some((STORAGE_HASHING, StageCheckpoint::new(block))),
+                        previous_stage: Some((
+                            StageId::StorageHashing,
+                            StageCheckpoint::new(block),
+                        )),
                         checkpoint: progress.map(StageCheckpoint::new),
                     },
                 )
@@ -165,7 +174,7 @@ impl Command {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let clean_input = ExecInput {
-                    previous_stage: Some((STORAGE_HASHING, StageCheckpoint::new(block))),
+                    previous_stage: Some((StageId::StorageHashing, StageCheckpoint::new(block))),
                     checkpoint: None,
                 };
                 loop {

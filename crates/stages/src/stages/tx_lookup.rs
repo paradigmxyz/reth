@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use rayon::prelude::*;
 use reth_db::{
@@ -8,15 +8,13 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    rpc_utils::keccak256, BlockNumber, StageCheckpoint, TransactionSignedNoHash, TxNumber, H256,
+    rpc_utils::keccak256, stage::StageId, BlockNumber, StageCheckpoint, TransactionSignedNoHash,
+    TxNumber, H256,
 };
 use reth_provider::Transaction;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::*;
-
-/// The [`StageId`] of the transaction lookup stage.
-pub const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
 
 /// The transaction lookup stage.
 ///
@@ -46,7 +44,7 @@ impl TransactionLookupStage {
 impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        TRANSACTION_LOOKUP
+        StageId::TransactionLookup
     }
 
     /// Write transaction hash -> id entries

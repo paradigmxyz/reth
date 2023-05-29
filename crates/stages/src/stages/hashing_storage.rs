@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use num_traits::Zero;
 use reth_db::{
     cursor::DbDupCursorRO,
@@ -7,13 +7,12 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, StageCheckpoint, StorageEntry, StorageHashingCheckpoint};
+use reth_primitives::{
+    keccak256, stage::StageId, StageCheckpoint, StorageEntry, StorageHashingCheckpoint,
+};
 use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
-
-/// The [`StageId`] of the storage hashing stage.
-pub const STORAGE_HASHING: StageId = StageId("StorageHashing");
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -36,7 +35,7 @@ impl Default for StorageHashingStage {
 impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        STORAGE_HASHING
+        StageId::StorageHashing
     }
 
     /// Execute the stage.

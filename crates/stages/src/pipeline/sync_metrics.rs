@@ -1,9 +1,10 @@
-use crate::StageId;
 use reth_metrics::{
     metrics::{self, Gauge},
     Metrics,
 };
-use reth_primitives::{BlockNumber, EntitiesCheckpoint, StageCheckpoint, StageUnitCheckpoint};
+use reth_primitives::{
+    stage::StageId, BlockNumber, EntitiesCheckpoint, StageCheckpoint, StageUnitCheckpoint,
+};
 use std::collections::HashMap;
 
 #[derive(Metrics)]

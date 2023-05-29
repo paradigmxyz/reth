@@ -2,14 +2,14 @@ use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
     BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
+    PipelineProvider, ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header,
-    Receipt, SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber,
-    Withdrawal, H256, U256,
+    stage::StageId, Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec,
+    Hardfork, Head, Header, Receipt, SealedBlock, SealedHeader, StageCheckpoint, TransactionMeta,
+    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -511,6 +511,20 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
     }
 }
 
+impl<DB: Database> PipelineProvider for ShareableDatabase<DB> {
+    fn get_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
+        Ok(self.db.view(|tx| tx.get::<tables::SyncStage>(id.to_string()))??)
+    }
+
+    fn get_minimum_checkpoint_block(&self) -> Result<BlockNumber> {
+        Ok(self
+            .db
+            .view(|tx| tx.get::<tables::SyncStage>(StageId::Finish.to_string()))??
+            .unwrap_or_default()
+            .block_number)
+    }
+}
+
 /// Returns the block number for the given block hash or number.
 #[inline]
 fn convert_hash_or_number<'a, TX>(
@@ -598,7 +612,7 @@ fn best_block_number<'a, TX>(
 where
     TX: DbTx<'a> + Send + Sync,
 {
-    tx.get::<tables::SyncStage>("Finish".to_string())
+    tx.get::<tables::SyncStage>("Finish".to_string()) // TODO:
         .map(|result| result.map(|checkpoint| checkpoint.block_number))
 }
 
@@ -611,6 +625,18 @@ where
     TX: DbTx<'a> + Send + Sync,
 {
     tx.cursor_read::<tables::CanonicalHeaders>()?.last()
+}
+
+/// Get checkpoint for the given stage.
+#[inline]
+pub fn get_stage_checkpoint<'a, TX>(
+    tx: &TX,
+    id: StageId,
+) -> std::result::Result<Option<StageCheckpoint>, reth_interfaces::db::DatabaseError>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    Ok(tx.get::<tables::SyncStage>(id.to_string())?)
 }
 
 #[cfg(test)]

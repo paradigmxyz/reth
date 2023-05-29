@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -11,14 +11,12 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, EntitiesCheckpoint, SealedHeader, StageCheckpoint, H256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, EntitiesCheckpoint, SealedHeader,
+    StageCheckpoint, H256,
 };
 use reth_provider::Transaction;
 use tokio::sync::watch;
 use tracing::*;
-
-/// The [`StageId`] of the headers downloader stage.
-pub const HEADERS: StageId = StageId("Headers");
 
 /// The header sync mode.
 #[derive(Debug)]
@@ -185,7 +183,7 @@ where
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        HEADERS
+        StageId::Headers
     }
 
     /// Download the headers in reverse order (falling block numbers)

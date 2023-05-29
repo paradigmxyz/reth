@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -11,7 +11,7 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives::{
-    constants::MGAS_TO_GAS, Block, BlockNumber, BlockWithSenders, StageCheckpoint,
+    constants::MGAS_TO_GAS, stage::StageId, Block, BlockNumber, BlockWithSenders, StageCheckpoint,
     TransactionSigned, U256,
 };
 use reth_provider::{
@@ -19,9 +19,6 @@ use reth_provider::{
 };
 use std::time::Instant;
 use tracing::*;
-
-/// The [`StageId`] of the execution stage.
-pub const EXECUTION: StageId = StageId("Execution");
 
 /// Execution stage metrics.
 #[derive(Metrics)]
@@ -207,7 +204,7 @@ const BIG_STACK_SIZE: usize = 64 * 1024 * 1024;
 impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        EXECUTION
+        StageId::Execution
     }
 
     /// Execute the stage

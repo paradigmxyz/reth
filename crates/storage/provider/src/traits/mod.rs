@@ -44,3 +44,6 @@ pub use chain::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     CanonStateSubscriptions,
 };
+
+mod pipeline;
+pub use pipeline::PipelineProvider;

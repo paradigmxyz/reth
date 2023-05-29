@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -11,13 +11,10 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use reth_primitives::StageCheckpoint;
+use reth_primitives::{stage::StageId, StageCheckpoint};
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
-
-/// The [`StageId`] of the bodies downloader stage.
-pub const BODIES: StageId = StageId("Bodies");
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
@@ -62,7 +59,7 @@ pub struct BodyStage<D: BodyDownloader> {
 impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        BODIES
+        StageId::Bodies
     }
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced

@@ -31,6 +31,7 @@ mod log;
 mod net;
 mod peer;
 mod receipt;
+pub mod stage;
 mod storage;
 mod transaction;
 pub mod trie;
