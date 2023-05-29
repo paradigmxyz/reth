@@ -186,7 +186,9 @@ impl From<SenderRecoveryStageError> for StageError {
 mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
-    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, H256};
+    use reth_primitives::{
+        stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, H256,
+    };
 
     use super::*;
     use crate::test_utils::{
