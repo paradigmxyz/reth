@@ -312,7 +312,7 @@ where
                             if this.full_block_cache.queue(block_hash, Either::Left(response_tx)) {
                                 let client = this.client.clone();
                                 let action_tx = this.action_tx.clone();
-                                this.action_task_spawner.spawn(Box::pin(async move {
+                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     let res = client.block_by_hash(block_hash);
                                     let _ = action_tx
                                         .send(CacheAction::BlockResult { block_hash, res });
@@ -330,7 +330,7 @@ where
                             if this.full_block_cache.queue(block_hash, Either::Right(response_tx)) {
                                 let client = this.client.clone();
                                 let action_tx = this.action_tx.clone();
-                                this.action_task_spawner.spawn(Box::pin(async move {
+                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     let res = client.block_by_hash(block_hash);
                                     let _ = action_tx
                                         .send(CacheAction::BlockResult { block_hash, res });
@@ -350,7 +350,7 @@ where
                             if this.receipts_cache.queue(block_hash, response_tx) {
                                 let client = this.client.clone();
                                 let action_tx = this.action_tx.clone();
-                                this.action_task_spawner.spawn(Box::pin(async move {
+                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     let res = client.receipts_by_block(block_hash.into());
                                     let _ = action_tx
                                         .send(CacheAction::ReceiptsResult { block_hash, res });
@@ -369,7 +369,7 @@ where
                             if this.evm_env_cache.queue(block_hash, response_tx) {
                                 let client = this.client.clone();
                                 let action_tx = this.action_tx.clone();
-                                this.action_task_spawner.spawn(Box::pin(async move {
+                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     let mut cfg = CfgEnv::default();
                                     let mut block_env = BlockEnv::default();
                                     let res = client
