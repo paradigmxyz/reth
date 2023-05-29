@@ -575,6 +575,11 @@ pub enum ForkCondition {
 }
 
 impl ForkCondition {
+    /// Returns true if the fork condition is timestamp based.
+    pub fn is_timestamp(&self) -> bool {
+        matches!(self, ForkCondition::Timestamp(_))
+    }
+
     /// Checks whether the fork condition is satisfied at the given block.
     ///
     /// For TTD conditions, this will only return true if the activation block is already known.
@@ -690,7 +695,7 @@ mod tests {
         }
     }
 
-    // Tests that we skip any fork blocks in block #0 (the genesis ruleset)
+    // Tests that the ForkTimestamps are correctly set up.
     #[test]
     fn test_fork_timestamps() {
         let spec = ChainSpec::builder().chain(Chain::mainnet()).genesis(Genesis::default()).build();
@@ -704,6 +709,30 @@ mod tests {
         assert_eq!(spec.fork_timestamps.shanghai, Some(1337));
         assert!(spec.is_shanghai_activated_at_timestamp(1337));
         assert!(!spec.is_shanghai_activated_at_timestamp(1336));
+    }
+
+    // Tests that all predefined timestamps are correctly set up in the chainspecs
+    #[test]
+    fn test_predefined_chain_spec_fork_timestamps() {
+        fn ensure_timestamp_fork_conditions(spec: &ChainSpec) {
+            // This is a sanity test that ensures we always set all currently known fork timestamps,
+            // this will fail if a new timestamp based fork condition has added to the hardforks but
+            // no corresponding entry in the ForkTimestamp types, See also
+            // [ForkTimestamps::from_hardforks]
+
+            // currently there are only 1 timestamps known: shanghai
+            let known_timestamp_based_forks = 1;
+            let num_timestamp_based_forks =
+                spec.hardforks.values().copied().filter(ForkCondition::is_timestamp).count();
+            assert_eq!(num_timestamp_based_forks, known_timestamp_based_forks);
+
+            // ensures all timestamp forks are set
+            assert!(spec.fork_timestamps.shanghai.is_some());
+        }
+
+        for spec in [&*MAINNET, &*SEPOLIA] {
+            ensure_timestamp_fork_conditions(spec);
+        }
     }
 
     // Tests that we skip any fork blocks in block #0 (the genesis ruleset)
