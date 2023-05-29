@@ -2,7 +2,7 @@ use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
     BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    PipelineProvider, ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
@@ -508,20 +508,6 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
-    }
-}
-
-impl<DB: Database> PipelineProvider for ShareableDatabase<DB> {
-    fn get_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
-        Ok(self.db.view(|tx| tx.get::<tables::SyncStage>(id.to_string()))??)
-    }
-
-    fn get_minimum_checkpoint_block(&self) -> Result<BlockNumber> {
-        Ok(self
-            .db
-            .view(|tx| tx.get::<tables::SyncStage>(StageId::Finish.to_string()))??
-            .unwrap_or_default()
-            .block_number)
     }
 }
 
