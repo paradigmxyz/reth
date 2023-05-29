@@ -20,6 +20,11 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
     ))),
+    // <https://etherscan.io/block/15537394>
+    paris_block_and_final_difficulty: Some((
+        15537394,
+        U256::from(58_750_003_716_598_352_816_469u128),
+    )),
     fork_timestamps: ForkTimestamps::default().shanghai(1681338455),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -55,6 +60,8 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
     ))),
+    // <https://goerli.etherscan.io/block/7382818>
+    paris_block_and_final_difficulty: Some((7382818, U256::from(10_790_000))),
     fork_timestamps: ForkTimestamps::default().shanghai(1678832736),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -84,6 +91,8 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis_hash: Some(H256(hex!(
         "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
     ))),
+    // <https://sepolia.etherscan.io/block/1450409>
+    paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
     fork_timestamps: ForkTimestamps::default().shanghai(1677557088),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -130,6 +139,10 @@ pub struct ChainSpec {
 
     /// The genesis block
     pub genesis: Genesis,
+
+    /// The block at which [Hardfork::Paris] was activated and the final difficulty at this block.
+    #[serde(skip, default)]
+    pub paris_block_and_final_difficulty: Option<(u64, U256)>,
 
     /// Timestamps of various hardforks
     ///
@@ -193,6 +206,20 @@ impl ChainSpec {
         } else {
             self.genesis_header().hash_slow()
         }
+    }
+
+    /// Returns the final difficulty if the given block number is after the Paris hardfork.
+    ///
+    /// Note: technically this would also be valid for the block before the paris upgrade, but this
+    /// edge case is omitted here.
+    pub fn final_paris_difficulty(&self, block_number: u64) -> Option<U256> {
+        self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
+            if block_number >= activated_at {
+                Some(final_difficulty)
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns the forks in this specification and their activation conditions.
@@ -339,6 +366,7 @@ impl From<EthersGenesis> for ChainSpec {
             genesis_hash: None,
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
+            paris_block_and_final_difficulty: None,
         }
     }
 }
@@ -536,6 +564,7 @@ impl ChainSpecBuilder {
             genesis_hash: None,
             fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
+            paris_block_and_final_difficulty: None,
         }
     }
 }
