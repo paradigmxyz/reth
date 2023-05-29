@@ -1,4 +1,6 @@
-/// All known stages
+/// Stage IDs for all known stages.
+///
+/// For custom stages, use [`StageId::Other`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[allow(missing_docs)]
 pub enum StageId {
