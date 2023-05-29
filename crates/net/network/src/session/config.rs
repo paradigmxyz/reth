@@ -19,6 +19,7 @@ pub const PROTOCOL_BREACH_REQUEST_TIMEOUT: Duration = Duration::from_secs(2 * 60
 /// Configuration options when creating a [SessionManager](crate::session::SessionManager).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct SessionsConfig {
     /// Size of the session command buffer (per session task).
     pub session_command_buffer: usize,
