@@ -161,7 +161,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let block_root = tx.get_header(current_block)?.state_root;
 
-        let checkpoint = self.get_execution_checkpoint(tx)?;
+        let mut checkpoint = self.get_execution_checkpoint(tx)?;
 
         let trie_root = if range.is_empty() {
             block_root
@@ -185,6 +185,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     "Rebuilding trie"
                 );
                 // Reset the checkpoint and clear trie tables
+                checkpoint = None;
                 self.save_execution_checkpoint(tx, None)?;
                 tx.clear::<tables::AccountsTrie>()?;
                 tx.clear::<tables::StoragesTrie>()?;
