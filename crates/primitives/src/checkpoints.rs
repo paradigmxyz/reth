@@ -330,7 +330,7 @@ mod tests {
 
         for checkpoint in checkpoints {
             let mut buf = Vec::new();
-            let encoded = checkpoint.clone().to_compact(&mut buf);
+            let encoded = checkpoint.to_compact(&mut buf);
             let (decoded, _) = StageUnitCheckpoint::from_compact(&buf, encoded);
             assert_eq!(decoded, checkpoint);
         }
