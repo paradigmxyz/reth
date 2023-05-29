@@ -1,7 +1,7 @@
-use crate::{error::StageError, id::StageId};
+use crate::error::StageError;
 use async_trait::async_trait;
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, StageCheckpoint};
+use reth_primitives::{stage::StageId, BlockNumber, StageCheckpoint};
 use reth_provider::Transaction;
 use std::{
     cmp::{max, min},

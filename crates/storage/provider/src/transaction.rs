@@ -1,6 +1,7 @@
 use crate::{
     insert_canonical_block,
     post_state::{PostState, StorageChangeset},
+    providers::get_stage_checkpoint,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -19,8 +20,8 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedBlockWithSenders, StageCheckpoint, StorageEntry, TransactionSigned,
+    keccak256, stage::StageId, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork,
+    Header, SealedBlock, SealedBlockWithSenders, StageCheckpoint, StorageEntry, TransactionSigned,
     TransactionSignedEcRecovered, H256, U256,
 };
 use reth_trie::{StateRoot, StateRootError};
@@ -1278,6 +1279,21 @@ where
                 )?
             }
         }
+        Ok(())
+    }
+
+    /// Get the stage checkpoint.
+    pub fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>, DbError> {
+        get_stage_checkpoint(self.deref(), id)
+    }
+
+    /// Save stage checkpoint.
+    pub fn save_stage_checkpoint(
+        &self,
+        id: StageId,
+        checkpoint: StageCheckpoint,
+    ) -> Result<(), DbError> {
+        self.put::<tables::SyncStage>(id.to_string(), checkpoint)?;
         Ok(())
     }
 

@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_codecs::Compact;
 use reth_db::{
     database::Database,
@@ -7,21 +7,12 @@ use reth_db::{
 };
 use reth_interfaces::consensus;
 use reth_primitives::{
-    hex, trie::StoredSubNode, BlockNumber, MerkleCheckpoint, StageCheckpoint, H256,
+    hex, stage::StageId, trie::StoredSubNode, BlockNumber, MerkleCheckpoint, StageCheckpoint, H256,
 };
 use reth_provider::Transaction;
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::{fmt::Debug, ops::DerefMut};
 use tracing::*;
-
-/// The [`StageId`] of the merkle hashing execution stage.
-pub const MERKLE_EXECUTION: StageId = StageId("MerkleExecute");
-
-/// The [`StageId`] of the merkle hashing unwind stage.
-pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwind");
-
-/// The [`StageId`] of the merkle hashing unwind and execution stage.
-pub const MERKLE_BOTH: StageId = StageId("MerkleBoth");
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
@@ -95,8 +86,9 @@ impl MerkleStage {
         &self,
         tx: &Transaction<'_, DB>,
     ) -> Result<Option<MerkleCheckpoint>, StageError> {
-        let buf =
-            tx.get::<tables::SyncStageProgress>(MERKLE_EXECUTION.0.into())?.unwrap_or_default();
+        let buf = tx
+            .get::<tables::SyncStageProgress>(StageId::MerkleExecute.to_string())?
+            .unwrap_or_default();
 
         if buf.is_empty() {
             return Ok(None)
@@ -122,7 +114,7 @@ impl MerkleStage {
             );
             checkpoint.to_compact(&mut buf);
         }
-        tx.put::<tables::SyncStageProgress>(MERKLE_EXECUTION.0.into(), buf)?;
+        tx.put::<tables::SyncStageProgress>(StageId::MerkleExecute.to_string(), buf)?;
         Ok(())
     }
 }
@@ -132,10 +124,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         match self {
-            MerkleStage::Execution { .. } => MERKLE_EXECUTION,
-            MerkleStage::Unwind => MERKLE_UNWIND,
+            MerkleStage::Execution { .. } => StageId::MerkleExecute,
+            MerkleStage::Unwind => StageId::MerkleUnwind,
             #[cfg(any(test, feature = "test-utils"))]
-            MerkleStage::Both { .. } => MERKLE_BOTH,
+            MerkleStage::Both { .. } => StageId::Other("MerkleBoth"),
         }
     }
 

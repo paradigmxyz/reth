@@ -5,11 +5,11 @@ use criterion::{
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::mdbx::{Env, WriteMap};
 use reth_interfaces::test_utils::TestConsensus;
-use reth_primitives::StageCheckpoint;
+use reth_primitives::{stage::StageId, StageCheckpoint};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
-    ExecInput, Stage, StageId, UnwindInput,
+    ExecInput, Stage, UnwindInput,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -163,7 +163,7 @@ fn measure_stage<F, S>(
         (
             ExecInput {
                 previous_stage: Some((
-                    StageId("Another"),
+                    StageId::Other("Another"),
                     StageCheckpoint::new(block_interval.end),
                 )),
                 checkpoint: Some(StageCheckpoint::new(block_interval.start)),

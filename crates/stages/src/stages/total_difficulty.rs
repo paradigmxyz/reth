@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -6,13 +6,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{consensus::Consensus, provider::ProviderError};
-use reth_primitives::{StageCheckpoint, U256};
+use reth_primitives::{stage::StageId, StageCheckpoint, U256};
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
-
-/// The [`StageId`] of the total difficulty stage.
-pub const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
 
 /// The total difficulty stage.
 ///
@@ -44,7 +41,7 @@ impl TotalDifficultyStage {
 impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        TOTAL_DIFFICULTY
+        StageId::TotalDifficulty
     }
 
     /// Write total difficulty entries

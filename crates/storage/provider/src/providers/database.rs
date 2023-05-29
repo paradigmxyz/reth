@@ -7,9 +7,9 @@ use crate::{
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Head, Header, Receipt,
-    SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal,
-    H256, U256,
+    stage::StageId, Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Head,
+    Header, Receipt, SealedBlock, SealedHeader, StageCheckpoint, TransactionMeta,
+    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -659,7 +659,7 @@ fn best_block_number<'a, TX>(
 where
     TX: DbTx<'a> + Send + Sync,
 {
-    tx.get::<tables::SyncStage>("Finish".to_string())
+    tx.get::<tables::SyncStage>("Finish".to_string()) // TODO:
         .map(|result| result.map(|checkpoint| checkpoint.block_number))
 }
 
@@ -672,6 +672,18 @@ where
     TX: DbTx<'a> + Send + Sync,
 {
     tx.cursor_read::<tables::CanonicalHeaders>()?.last()
+}
+
+/// Get checkpoint for the given stage.
+#[inline]
+pub fn get_stage_checkpoint<'a, TX>(
+    tx: &TX,
+    id: StageId,
+) -> std::result::Result<Option<StageCheckpoint>, reth_interfaces::db::DatabaseError>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    tx.get::<tables::SyncStage>(id.to_string())
 }
 
 #[cfg(test)]

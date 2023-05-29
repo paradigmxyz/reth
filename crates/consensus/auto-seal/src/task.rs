@@ -4,7 +4,9 @@ use reth_beacon_consensus::BeaconEngineMessage;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
-    proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
+    proofs,
+    stage::StageId,
+    Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
     SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
@@ -12,7 +14,7 @@ use reth_revm::{
     database::{State, SubState},
     executor::Executor,
 };
-use reth_stages::{stages::FINISH, PipelineEvent};
+use reth_stages::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -233,7 +235,7 @@ where
                                     if let Some(PipelineEvent::Running { stage_id, .. }) =
                                         events.next().await
                                     {
-                                        if stage_id == FINISH {
+                                        if stage_id == StageId::Finish {
                                             debug!(target: "consensus::auto", "received finish stage event");
                                             break
                                         }

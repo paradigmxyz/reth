@@ -5,9 +5,8 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account, Bytecode, ChainSpec, H256, U256};
+use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, H256, U256};
 use reth_provider::{PostState, Transaction, TransactionError};
-use reth_stages::StageKind;
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -81,7 +80,7 @@ pub fn init_genesis<DB: Database>(
     insert_genesis_state::<DB>(&tx, genesis)?;
 
     // insert sync stage
-    for stage in StageKind::ALL.iter() {
+    for stage in StageId::ALL.iter() {
         tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
     }
 

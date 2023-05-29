@@ -1,12 +1,9 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, models::BlockNumberAddress};
-use reth_primitives::StageCheckpoint;
+use reth_primitives::{stage::StageId, StageCheckpoint};
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use tracing::*;
-
-/// The [`StageId`] of the storage history indexing stage.
-pub const INDEX_STORAGE_HISTORY: StageId = StageId("IndexStorageHistory");
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -28,7 +25,7 @@ impl Default for IndexStorageHistoryStage {
 impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        INDEX_STORAGE_HISTORY
+        StageId::IndexStorageHistory
     }
 
     /// Execute the stage.

@@ -11,7 +11,7 @@ use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::{ChainSpec, StageCheckpoint};
+use reth_primitives::{stage::StageId, ChainSpec, StageCheckpoint};
 use reth_provider::{ShareableDatabase, Transaction};
 use reth_staged_sync::utils::{chainspec::chain_spec_value_parser, init::init_db};
 use reth_stages::{
@@ -19,7 +19,7 @@ use reth_stages::{
         BodyStage, ExecutionStage, ExecutionStageThresholds, MerkleStage, SenderRecoveryStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, StageId, UnwindInput,
+    ExecInput, ExecOutput, Stage, UnwindInput,
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -199,7 +199,10 @@ impl Command {
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
         let mut input = ExecInput {
-            previous_stage: Some((StageId("No Previous Stage"), StageCheckpoint::new(self.to))),
+            previous_stage: Some((
+                StageId::Other("No Previous Stage"),
+                StageCheckpoint::new(self.to),
+            )),
             checkpoint: Some(StageCheckpoint::new(self.from)),
         };
 

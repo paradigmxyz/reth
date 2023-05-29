@@ -54,7 +54,6 @@
 //!     .build(db);
 //! ```
 mod error;
-mod id;
 mod pipeline;
 mod stage;
 mod util;
@@ -72,6 +71,5 @@ pub mod stages;
 pub mod sets;
 
 pub use error::*;
-pub use id::*;
 pub use pipeline::*;
 pub use stage::*;
