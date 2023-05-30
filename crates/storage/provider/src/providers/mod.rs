@@ -2,8 +2,8 @@ use crate::{
     BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
-    ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
-    WithdrawalsProvider,
+    ReceiptProvider, StageCheckpointProvider, StateProviderBox, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -12,9 +12,10 @@ use reth_interfaces::{
     Error, Result,
 };
 use reth_primitives::{
-    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
-    ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    stage::StageId, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
+    BlockNumberOrTag, ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StageCheckpoint, TransactionMeta, TransactionSigned, TxHash, TxNumber,
+    Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
@@ -302,6 +303,16 @@ where
 
     fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
         self.database.latest_withdrawal()
+    }
+}
+
+impl<DB, Tree> StageCheckpointProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: Send + Sync,
+{
+    fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
+        self.database.get_stage_checkpoint(id)
     }
 }
 
