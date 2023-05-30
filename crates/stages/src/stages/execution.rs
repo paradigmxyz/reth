@@ -143,14 +143,20 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Progress tracking
         let mut stage_progress = start_block;
-        let mut stage_checkpoint =
-            input.checkpoint().entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
+        let mut stage_checkpoint = input
+            .checkpoint()
+            .entities_stage_checkpoint()
+            // We should always have a checkpoint for the Execution stage prepared by the Headers
+            // stage. This default value is for the case when the synced node is updated from the
+            // version which didn't have the logic for Execution checkpoint update in Headers.
+            .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
                 total: Some({
+                    let mut cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut gas_total = 0;
 
-                    for result in tx.cursor_read::<tables::Headers>()?.walk(None)? {
-                        gas_total += result?.1.gas_used;
+                    while let Some((_, header)) = cursor.next()? {
+                        gas_total += header.gas_used;
                     }
 
                     gas_total
