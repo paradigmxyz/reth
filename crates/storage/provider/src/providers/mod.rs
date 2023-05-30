@@ -12,10 +12,10 @@ use reth_interfaces::{
     Error, Result,
 };
 use reth_primitives::{
-    stage::StageId, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StageCheckpoint, TransactionMeta, TransactionSigned, TxHash, TxNumber,
-    Withdrawal, H256, U256,
+    stage::{StageCheckpoint, StageId},
+    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
+    ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
