@@ -20,9 +20,11 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, stage::StageId, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork,
-    Header, SealedBlock, SealedBlockWithSenders, StageCheckpoint, StorageEntry, TransactionSigned,
-    TransactionSignedEcRecovered, H256, U256,
+    keccak256,
+    stage::{StageCheckpoint, StageId},
+    Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
+    SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered, H256,
+    U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{

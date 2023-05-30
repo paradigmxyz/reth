@@ -6,7 +6,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{consensus::Consensus, provider::ProviderError};
-use reth_primitives::{stage::StageId, StageCheckpoint, U256};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    U256,
+};
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;

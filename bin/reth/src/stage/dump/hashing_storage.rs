@@ -2,7 +2,7 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
-use reth_primitives::{stage::StageId, StageCheckpoint};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::Transaction;
 use reth_stages::{stages::StorageHashingStage, Stage, UnwindInput};
 use std::{ops::DerefMut, path::PathBuf};

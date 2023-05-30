@@ -8,7 +8,9 @@ use reth_db::{
     RawKey, RawTable, RawValue,
 };
 use reth_primitives::{
-    keccak256, stage::StageId, StageCheckpoint, TransactionSignedNoHash, TxNumber, H160,
+    keccak256,
+    stage::{StageCheckpoint, StageId},
+    TransactionSignedNoHash, TxNumber, H160,
 };
 use reth_provider::Transaction;
 use std::fmt::Debug;

@@ -6,6 +6,7 @@ use crate::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
     ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey, StorageValue,
     TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY, U256,
@@ -279,10 +280,7 @@ impl StateProviderFactory for NoopProvider {
 }
 
 impl StageCheckpointProvider for NoopProvider {
-    fn get_stage_checkpoint(
-        &self,
-        _id: reth_primitives::stage::StageId,
-    ) -> Result<Option<reth_primitives::StageCheckpoint>> {
+    fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(None)
     }
 }

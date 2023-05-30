@@ -992,7 +992,7 @@ mod tests {
     };
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{
-        ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, StageCheckpoint, H256, MAINNET,
+        stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET,
     };
     use reth_provider::{
         providers::BlockchainProvider, test_utils::TestExecutorFactory, ShareableDatabase,

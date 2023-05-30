@@ -8,9 +8,10 @@ use crate::{
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
-    stage::StageId, Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Head,
-    Header, Receipt, SealedBlock, SealedHeader, StageCheckpoint, TransactionMeta,
-    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    stage::{StageCheckpoint, StageId},
+    Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Head, Header, Receipt,
+    SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal,
+    H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,

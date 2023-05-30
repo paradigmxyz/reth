@@ -4,7 +4,7 @@ use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
-use reth_primitives::{stage::StageId, StageCheckpoint};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,

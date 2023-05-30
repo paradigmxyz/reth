@@ -2,7 +2,7 @@ use super::{constants, StageRange};
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
-use reth_primitives::{stage::StageId, StageCheckpoint};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
     test_utils::TestTransaction,
