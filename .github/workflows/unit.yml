@@ -96,6 +96,7 @@ jobs:
 
   unit-success:
     name: unit success
+    runs-on: ubuntu-latest
     needs: [test, eth-blockchain, doc-test]
     steps:
       - run: echo Success!

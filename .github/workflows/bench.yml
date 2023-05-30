@@ -70,5 +70,6 @@ jobs:
   bench-success:
     name: bench success
     needs: bench-check
+    runs-on: ubuntu-latest
     steps:
       - run: echo Success!

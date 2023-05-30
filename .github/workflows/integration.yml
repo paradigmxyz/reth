@@ -92,6 +92,7 @@ jobs:
 
   integration-success:
     name: integration success
+    runs-on: ubuntu-latest
     needs: [test, sync]
     steps:
       - run: echo Success!
