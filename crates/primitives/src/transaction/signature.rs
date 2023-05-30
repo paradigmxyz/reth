@@ -113,7 +113,7 @@ impl Signature {
         })
     }
 
-    /// Recover signature from hash.
+    /// Recover signer address from message hash.
     pub fn recover_signer(&self, hash: H256) -> Option<Address> {
         let mut sig: [u8; 65] = [0; 65];
 
