@@ -199,7 +199,7 @@ where
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
-    ) -> (Self, BeaconConsensusEngineHandle) {
+    ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             client,
@@ -231,7 +231,7 @@ where
         target: Option<H256>,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
-    ) -> (Self, BeaconConsensusEngineHandle) {
+    ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
             pipeline,
@@ -253,11 +253,34 @@ where
             metrics: Metrics::default(),
         };
 
-        if let Some(target) = target {
+        let maybe_pipeline_target = match target {
+            // Provided target always takes precedence.
+            target @ Some(_) => target,
+            None => {
+                // If no target was provided, check if the stages are congruent - check if the
+                // checkpoint of the last stage matches the checkpoint of the first.
+                let headers_stage_checkpoint = this
+                    .blockchain
+                    .get_stage_checkpoint(StageId::Headers)?
+                    .unwrap_or_default()
+                    .block_number;
+                let finish_stage_checkpoint = this
+                    .blockchain
+                    .get_stage_checkpoint(StageId::Finish)?
+                    .unwrap_or_default()
+                    .block_number;
+                if finish_stage_checkpoint != headers_stage_checkpoint {
+                    this.blockchain.block_hash(headers_stage_checkpoint)?
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(target) = maybe_pipeline_target {
             this.sync.set_pipeline_sync_target(target);
         }
 
-        (this, handle)
+        Ok((this, handle))
     }
 
     /// Returns a new [`BeaconConsensusEngineHandle`] that can be cloned and shared.
@@ -1117,7 +1140,8 @@ mod tests {
             false,
             payload_builder,
             None,
-        );
+        )
+        .expect("failed to create consensus engine");
 
         (engine, TestEnv::new(db, tip_rx, handle))
     }

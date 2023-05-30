@@ -341,7 +341,7 @@ impl Command {
             initial_target,
             consensus_engine_tx,
             consensus_engine_rx,
-        );
+        )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select(
