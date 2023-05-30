@@ -128,6 +128,11 @@ where
         self.pending_pipeline_target = Some(target);
     }
 
+    /// Unsets the pipeline sync target.
+    pub(crate) fn unset_pipeline_sync_target(&mut self) {
+        self.pending_pipeline_target = None;
+    }
+
     /// Check if the engine reached max block as specified by `max_block` parameter.
     ///
     /// Note: this is mainly for debugging purposes.
@@ -177,6 +182,7 @@ where
         match &mut self.pipeline_state {
             PipelineState::Idle(pipeline) => {
                 let target = self.pending_pipeline_target.take();
+                trace!(target: "consensus::engine", ?target, "Pipeline is idle, checking target");
 
                 if target.is_none() && !self.run_pipeline_continuously {
                     // nothing to sync
@@ -201,7 +207,10 @@ where
 
                 Some(EngineSyncEvent::PipelineStarted(target))
             }
-            PipelineState::Running(_) => None,
+            PipelineState::Running(_) => {
+                trace!(target: "consensus::engine", "Pipeline is already running, not spawning");
+                None
+            }
         }
     }
 
