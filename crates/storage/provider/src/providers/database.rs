@@ -2,7 +2,8 @@ use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
     BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, StageCheckpointProvider, StateProviderBox, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
@@ -452,6 +453,12 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
                     .and_then(|(_, block_withdrawal)| block_withdrawal.withdrawals.last().cloned())
             })
             .map_err(Into::into)
+    }
+}
+
+impl<DB: Database> StageCheckpointProvider for ShareableDatabase<DB> {
+    fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
+        Ok(get_stage_checkpoint(&self.db.tx()?, id)?)
     }
 }
 
