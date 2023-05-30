@@ -63,6 +63,11 @@ impl Command {
         let db = Env::<WriteMap>::open(db_path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
 
         let range = self.command.unwind_range(&db)?;
+
+        if *range.start() == 0 {
+            eyre::bail!("Cannot unwind genesis block")
+        }
+
         let mut tx = Transaction::new(&db)?;
 
         let blocks_and_execution = tx
