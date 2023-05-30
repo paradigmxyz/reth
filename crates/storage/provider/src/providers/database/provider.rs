@@ -60,7 +60,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> Provider<'this, TX> {
 impl<'this, TX: DbTx<'this>> HeaderProvider for Provider<'this, TX> {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
         if let Some(num) = self.block_number(*block_hash)? {
-            Ok(self.tx.get::<tables::Headers>(num)?)
+            Ok(self.header_by_number(num)?)
         } else {
             Ok(None)
         }
@@ -72,7 +72,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for Provider<'this, TX> {
 
     fn header_td(&self, block_hash: &BlockHash) -> Result<Option<U256>> {
         if let Some(num) = self.block_number(*block_hash)? {
-            Ok(self.tx.get::<tables::HeaderTD>(num)?.map(|td| td.0))
+            self.header_td_by_number(num)
         } else {
             Ok(None)
         }
@@ -161,16 +161,14 @@ impl<'this, TX: DbTx<'this>> BlockProvider for Provider<'this, TX> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
                 // we check for shanghai first
-                let (ommers, withdrawals) =
-                    // TODO another: read_block_ommers_and_withdrawals
-                    {
-                        let mut ommers = None;
-                        let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
-                        if withdrawals.is_none() {
-                            ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-                        }
-                        (ommers, withdrawals)
-                    };
+                let (ommers, withdrawals) = {
+                    let mut ommers = None;
+                    let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
+                    if withdrawals.is_none() {
+                        ommers = self.ommers(number.into())?
+                    }
+                    (ommers, withdrawals)
+                };
 
                 let transactions = self
                     .transactions_by_block(number.into())?
@@ -213,8 +211,8 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
-        if let Some(id) = self.tx.get::<tables::TxHashNumber>(hash)? {
-            Ok(self.tx.get::<tables::Transactions>(id)?)
+        if let Some(id) = self.transaction_id(hash)? {
+            Ok(self.transaction_by_id(id)?)
         } else {
             Ok(None)
         }
@@ -225,8 +223,8 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
         &self,
         tx_hash: TxHash,
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
-        if let Some(transaction_id) = self.tx.get::<tables::TxHashNumber>(tx_hash)? {
-            if let Some(transaction) = self.tx.get::<tables::Transactions>(transaction_id)? {
+        if let Some(transaction_id) = self.transaction_id(tx_hash)? {
+            if let Some(transaction) = self.transaction_by_id(transaction_id)? {
                 let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlock>()?;
                 if let Some(block_number) =
                     transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
@@ -250,7 +248,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
                                 base_fee: header.base_fee_per_gas,
                             };
 
-                            return Ok(Some((transaction.into(), meta)))
+                            return Ok(Some((transaction, meta)))
                         }
                     }
                 }
@@ -318,8 +316,8 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for Provider<'this, TX> {
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> Result<Option<Receipt>> {
-        if let Some(id) = self.tx.get::<tables::TxHashNumber>(hash)? {
-            Ok(self.tx.get::<tables::Receipts>(id)?)
+        if let Some(id) = self.transaction_id(hash)? {
+            self.receipt(id)
         } else {
             Ok(None)
         }
