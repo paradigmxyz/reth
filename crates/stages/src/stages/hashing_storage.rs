@@ -64,7 +64,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                          address: address @ Some(_),
                          storage,
                          from,
-                         to ,
+                         to,
                  })
                 // Checkpoint is only valid if the range of transitions didn't change.
                 // An already hashed storage may have been changed with the new range,
@@ -118,13 +118,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         // There's still some remaining elements on this key, so we need to save
                         // the cursor position for the next
                         // iteration
-
-                        current_key = Some(address);
-                        current_subkey = Some(slot.key);
+                        (current_key, current_subkey) = (Some(address), Some(slot.key));
                     } else {
                         // Go to the next key
-                        current_key = storage.next_no_dup()?.map(|(key, _)| key);
-                        current_subkey = None;
+                        (current_key, current_subkey) = storage
+                            .next_no_dup()?
+                            .map(|(key, storage_entry)| (key, storage_entry.key))
+                            .unzip();
 
                         // Cache keccak256(address) for the next key if it exists
                         if let Some(address) = current_key {
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_clean_account_hashing_with_commit_threshold() {
+    async fn execute_clean_storage_hashing_with_commit_threshold() {
         let (previous_stage, stage_progress) = (500, 100);
         // Set up the runner
         let mut runner = StorageHashingTestRunner::default();
