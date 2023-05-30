@@ -158,6 +158,10 @@ impl<DB: Database> BlockNumProvider for ShareableDatabase<DB> {
         self.provider()?.best_block_number()
     }
 
+    fn last_block_number(&self) -> Result<BlockNumber> {
+        self.provider()?.last_block_number()
+    }
+
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.provider()?.block_number(hash)
     }

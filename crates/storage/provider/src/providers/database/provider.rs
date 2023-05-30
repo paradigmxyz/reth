@@ -142,7 +142,14 @@ impl<'this, TX: DbTx<'this>> BlockNumProvider for Provider<'this, TX> {
     }
 
     fn best_block_number(&self) -> Result<BlockNumber> {
-        Ok(best_block_number(&self.tx)?.unwrap_or_default())
+        Ok(self
+            .get_stage_checkpoint(StageId::Finish)?
+            .map(|checkpoint| checkpoint.block_number)
+            .unwrap_or_default())
+    }
+
+    fn last_block_number(&self) -> Result<BlockNumber> {
+        Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {

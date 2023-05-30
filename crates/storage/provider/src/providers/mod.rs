@@ -168,6 +168,10 @@ where
         Ok(self.chain_info.get_canonical_block_number())
     }
 
+    fn last_block_number(&self) -> Result<BlockNumber> {
+        self.database.provider()?.last_block_number()
+    }
+
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.database.provider()?.block_number(hash)
     }

@@ -14,6 +14,9 @@ pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
     /// Returns the best block number in the chain.
     fn best_block_number(&self) -> Result<BlockNumber>;
 
+    /// Returns the last block number associated with the last canonical header in the database.
+    fn last_block_number(&self) -> Result<BlockNumber>;
+
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>>;
 

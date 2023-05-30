@@ -264,6 +264,10 @@ impl BlockNumProvider for MockEthProvider {
             .ok_or(ProviderError::BestBlockNotFound)?)
     }
 
+    fn last_block_number(&self) -> Result<BlockNumber> {
+        self.best_block_number()
+    }
+
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
         let lock = self.blocks.lock();
         let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number));
