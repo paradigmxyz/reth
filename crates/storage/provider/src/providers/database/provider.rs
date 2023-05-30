@@ -1,7 +1,7 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, StageCheckpointProvider, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{
     cursor::DbCursorRO,
@@ -12,6 +12,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
     Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Head, Header, Receipt,
     SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal,
     H256, U256,
@@ -430,6 +431,12 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for Provider<'this, TX> {
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
+    }
+}
+
+impl<'this, TX: DbTx<'this>> StageCheckpointProvider for Provider<'this, TX> {
+    fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
+        Ok(self.tx.get::<tables::SyncStage>(id.to_string())?)
     }
 }
 

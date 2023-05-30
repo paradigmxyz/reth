@@ -320,7 +320,7 @@ where
     Tree: Send + Sync,
 {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
-        self.database.get_stage_checkpoint(id)
+        self.database.provider()?.get_stage_checkpoint(id)
     }
 }
 

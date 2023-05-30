@@ -254,7 +254,7 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
 
 impl<DB: Database> StageCheckpointProvider for ShareableDatabase<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
-        Ok(get_stage_checkpoint(&self.db.tx()?, id)?)
+        self.provider()?.get_stage_checkpoint(id)
     }
 }
 
