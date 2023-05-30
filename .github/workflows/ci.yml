@@ -54,6 +54,6 @@ jobs:
 
   lint-success:
     name: lint success
-    needs: [code-lint, doc-lint]
+    needs: [lint, doc-lint]
     steps:
       - run: echo Success!
