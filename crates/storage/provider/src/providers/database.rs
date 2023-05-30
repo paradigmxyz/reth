@@ -461,7 +461,7 @@ impl<DB: Database> StageCheckpointProvider for ShareableDatabase<DB> {
         Ok(get_stage_checkpoint(&self.db.tx()?, id)?)
     }
 
-    fn get_minimum_stage_checkpoint_block(&self) -> Result<BlockNumber> {
+    fn get_last_stage_checkpoint(&self) -> Result<BlockNumber> {
         Ok(get_stage_checkpoint(&self.db.tx()?, StageId::Finish)?.unwrap_or_default().block_number)
     }
 }
