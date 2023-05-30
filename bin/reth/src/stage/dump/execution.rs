@@ -4,7 +4,10 @@ use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
-use reth_primitives::{stage::StageId, StageCheckpoint, MAINNET};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    MAINNET,
+};
 use reth_provider::Transaction;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use std::{ops::DerefMut, path::PathBuf, sync::Arc};

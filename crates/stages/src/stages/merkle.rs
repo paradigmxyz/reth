@@ -7,7 +7,10 @@ use reth_db::{
 };
 use reth_interfaces::consensus;
 use reth_primitives::{
-    hex, stage::StageId, trie::StoredSubNode, BlockNumber, MerkleCheckpoint, StageCheckpoint, H256,
+    hex,
+    stage::{MerkleCheckpoint, StageCheckpoint, StageId},
+    trie::StoredSubNode,
+    BlockNumber, H256,
 };
 use reth_provider::Transaction;
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};

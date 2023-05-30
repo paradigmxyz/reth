@@ -5,7 +5,7 @@ use criterion::{
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::mdbx::{Env, WriteMap};
 use reth_interfaces::test_utils::TestConsensus;
-use reth_primitives::{stage::StageId, StageCheckpoint};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,

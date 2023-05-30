@@ -2,7 +2,10 @@
 use crate::dirs::{DataDirPath, MaybePlatformPath};
 use clap::Parser;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
-use reth_primitives::{stage::StageId, ChainSpec, StageCheckpoint};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    ChainSpec,
+};
 use reth_provider::Transaction;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
 use reth_stages::{

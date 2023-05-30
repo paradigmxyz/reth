@@ -2,7 +2,9 @@ use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_primitives::{
-    listener::EventListeners, stage::StageId, BlockNumber, StageCheckpoint, H256,
+    listener::EventListeners,
+    stage::{StageCheckpoint, StageId},
+    BlockNumber, H256,
 };
 use reth_provider::{providers::get_stage_checkpoint, Transaction};
 use std::pin::Pin;

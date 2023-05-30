@@ -3,7 +3,7 @@ use crate::{
     tables::models::*,
 };
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{trie::*, *};
+use reth_primitives::{stage::StageCheckpoint, trie::*, *};
 
 /// Implements compression for Compact type.
 macro_rules! impl_compression_for_compact {
