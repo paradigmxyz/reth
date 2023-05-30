@@ -5,7 +5,7 @@ use crate::{
     ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::database::Database;
+use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::ForkchoiceState,
@@ -227,6 +227,10 @@ where
 
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.database.provider()?.ommers(id)
+    }
+
+    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
+        self.database.provider()?.block_body_indices(num)
     }
 }
 

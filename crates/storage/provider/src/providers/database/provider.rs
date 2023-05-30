@@ -6,6 +6,7 @@ use crate::{
 use reth_db::{
     cursor::DbCursorRO,
     database::DatabaseGAT,
+    models::StoredBlockBodyIndices,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -199,6 +200,10 @@ impl<'this, TX: DbTx<'this>> BlockProvider for Provider<'this, TX> {
 
         Ok(None)
     }
+
+    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
+        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
+    }
 }
 
 impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
@@ -231,9 +236,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
                 {
                     if let Some(sealed_header) = self.sealed_header(block_number)? {
                         let (header, block_hash) = sealed_header.split();
-                        if let Some(block_body) =
-                            self.tx.get::<tables::BlockBodyIndices>(block_number)?
-                        {
+                        if let Some(block_body) = self.block_body_indices(block_number)? {
                             // the index of the tx in the block is the offset:
                             // len([start..tx_id])
                             // SAFETY: `transaction_id` is always `>=` the block's first
@@ -268,7 +271,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
         id: BlockHashOrNumber,
     ) -> Result<Option<Vec<TransactionSigned>>> {
         if let Some(block_number) = self.convert_hash_or_number(id)? {
-            if let Some(body) = self.tx.get::<tables::BlockBodyIndices>(block_number)? {
+            if let Some(body) = self.block_body_indices(block_number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
@@ -325,7 +328,7 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for Provider<'this, TX> {
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
         if let Some(number) = self.convert_hash_or_number(block)? {
-            if let Some(body) = self.tx.get::<tables::BlockBodyIndices>(number)? {
+            if let Some(body) = self.block_body_indices(number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))

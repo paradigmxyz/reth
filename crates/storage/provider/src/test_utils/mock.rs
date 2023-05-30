@@ -5,6 +5,7 @@ use crate::{
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use parking_lot::Mutex;
+use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
@@ -302,6 +303,10 @@ impl BlockProvider for MockEthProvider {
     }
 
     fn ommers(&self, _id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
+
+    fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 }

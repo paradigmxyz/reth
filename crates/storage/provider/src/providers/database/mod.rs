@@ -4,7 +4,7 @@ use crate::{
     BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
     ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, tables, transaction::DbTx};
+use reth_db::{database::Database, models::StoredBlockBodyIndices, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Header, Receipt,
@@ -176,6 +176,10 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
 
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.provider()?.ommers(id)
+    }
+
+    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
+        self.provider()?.block_body_indices(num)
     }
 }
 

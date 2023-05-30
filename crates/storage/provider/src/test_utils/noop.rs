@@ -4,6 +4,7 @@ use crate::{
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StateProvider, StateProviderBox,
     StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
+use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
@@ -57,6 +58,10 @@ impl BlockProvider for NoopProvider {
     }
 
     fn ommers(&self, _id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
+
+    fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 }
