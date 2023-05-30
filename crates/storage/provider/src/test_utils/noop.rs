@@ -1,8 +1,8 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
-    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider,
+    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -275,5 +275,14 @@ impl StateProviderFactory for NoopProvider {
         _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
         Ok(Box::new(*self))
+    }
+}
+
+impl StageCheckpointProvider for NoopProvider {
+    fn get_stage_checkpoint(
+        &self,
+        _id: reth_primitives::stage::StageId,
+    ) -> Result<Option<reth_primitives::StageCheckpoint>> {
+        Ok(None)
     }
 }
