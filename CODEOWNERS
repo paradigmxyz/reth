@@ -5,7 +5,7 @@ crates/net/downloaders/     @onbjerg @rkrasiuk
 crates/blockchain-tree/     @rakita
 crates/revm/src/            @rakita
 crates/revm/                @mattsse
-crates/stages/              @onbjerg @rkrasiuk
+crates/stages/              @onbjerg @rkrasiuk @shekhirin
 crates/storage/             @rakita @joshieDo
 crates/transaction-pool/    @mattsse
 crates/rpc/                 @mattsse @Rjected
