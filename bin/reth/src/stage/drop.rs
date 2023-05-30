@@ -9,9 +9,11 @@ use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{stage::StageId, ChainSpec};
+use reth_primitives::{
+    stage::StageId, ChainSpec, EntitiesCheckpoint, StageCheckpoint, StageUnitCheckpoint,
+};
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
 use std::sync::Arc;
 use tracing::info;
@@ -75,6 +77,7 @@ impl Command {
                     tx.clear::<tables::PlainStorageState>()?;
                     tx.clear::<tables::AccountChangeSet>()?;
                     tx.clear::<tables::StorageChangeSet>()?;
+                    tx.clear::<tables::Receipts>()?;
                     tx.clear::<tables::Bytecodes>()?;
                     tx.clear::<tables::Receipts>()?;
                     tx.put::<tables::SyncStage>(
