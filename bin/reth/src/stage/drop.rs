@@ -9,11 +9,9 @@ use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
-use reth_primitives::{
-    stage::StageId, ChainSpec, EntitiesCheckpoint, StageCheckpoint, StageUnitCheckpoint,
-};
+use reth_primitives::{stage::StageId, ChainSpec};
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
 use std::sync::Arc;
 use tracing::info;
