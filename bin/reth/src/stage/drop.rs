@@ -69,6 +69,7 @@ impl Command {
                     tx.clear::<tables::AccountChangeSet>()?;
                     tx.clear::<tables::StorageChangeSet>()?;
                     tx.clear::<tables::Bytecodes>()?;
+                    tx.clear::<tables::Receipts>()?;
                     tx.put::<tables::SyncStage>(
                         StageId::Execution.to_string(),
                         Default::default(),
