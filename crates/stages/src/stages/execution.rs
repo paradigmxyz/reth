@@ -143,6 +143,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Progress tracking
         let mut stage_progress = start_block;
+        let mut checkpoint = input.checkpoint();
         let mut stage_checkpoint = input
             .checkpoint()
             .entities_stage_checkpoint()
@@ -185,6 +186,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Merge state changes
             state.extend(block_state);
             stage_progress = block_number;
+            checkpoint.block_number = block_number;
             stage_checkpoint.processed += block.gas_used;
 
             // Write history periodically to free up memory
@@ -192,7 +194,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 info!(target: "sync::stages::execution", ?block_number, "Writing history.");
                 state.write_history_to_db(&**tx)?;
                 info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
-                // gas_since_history_write = 0;
+
+                tx.save_stage_checkpoint(
+                    StageId::Execution,
+                    checkpoint.with_entities_stage_checkpoint(stage_checkpoint),
+                )?;
             }
 
             // Check if we should commit now
