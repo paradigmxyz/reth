@@ -11,7 +11,10 @@ use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::{stage::StageId, ChainSpec, StageCheckpoint};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    ChainSpec,
+};
 use reth_provider::{ShareableDatabase, Transaction};
 use reth_staged_sync::utils::{chainspec::chain_spec_value_parser, init::init_db};
 use reth_stages::{

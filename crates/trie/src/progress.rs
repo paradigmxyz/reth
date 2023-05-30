@@ -1,7 +1,8 @@
 use crate::{trie_cursor::CursorSubNode, updates::TrieUpdates};
 use reth_primitives::{
+    stage::MerkleCheckpoint,
     trie::{hash_builder::HashBuilder, Nibbles},
-    MerkleCheckpoint, H256,
+    H256,
 };
 
 /// The progress of the state root computation.

@@ -5,7 +5,10 @@ use crate::{
     Case, Error, Suite,
 };
 use reth_db::mdbx::test_utils::create_test_rw_db;
-use reth_primitives::{stage::StageId, BlockBody, SealedBlock, StageCheckpoint};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    BlockBody, SealedBlock,
+};
 use reth_provider::Transaction;
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, ffi::OsStr, fs, ops::Deref, path::Path, sync::Arc};

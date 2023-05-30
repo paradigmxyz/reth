@@ -1,6 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::{stage::StageId, StageCheckpoint};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::Transaction;
 
 /// The finish stage.

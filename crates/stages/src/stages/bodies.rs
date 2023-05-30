@@ -11,7 +11,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use reth_primitives::{stage::StageId, StageCheckpoint};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;

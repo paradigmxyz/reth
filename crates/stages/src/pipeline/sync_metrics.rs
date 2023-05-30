@@ -3,7 +3,8 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives::{
-    stage::StageId, BlockNumber, EntitiesCheckpoint, StageCheckpoint, StageUnitCheckpoint,
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StageUnitCheckpoint},
+    BlockNumber,
 };
 use std::collections::HashMap;
 

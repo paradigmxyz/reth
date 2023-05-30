@@ -29,8 +29,8 @@ macro_rules! stage_test_suite {
                 // Set up the runner
                 let mut runner = $runner::default();
                 let input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::StageCheckpoint::new(previous_stage))),
-                    checkpoint: Some(reth_primitives::StageCheckpoint::new(stage_progress)),
+                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::stage::StageCheckpoint::new(previous_stage))),
+                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(stage_progress)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
                 let rx = runner.execute(input);
@@ -81,8 +81,8 @@ macro_rules! stage_test_suite {
                 // Set up the runner
                 let mut runner = $runner::default();
                 let execute_input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::StageCheckpoint::new(previous_stage))),
-                    checkpoint: Some(reth_primitives::StageCheckpoint::new(stage_progress)),
+                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::stage::StageCheckpoint::new(previous_stage))),
+                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(stage_progress)),
                 };
                 let seed = runner.seed_execution(execute_input).expect("failed to seed");
 
@@ -103,7 +103,7 @@ macro_rules! stage_test_suite {
                 // Run stage unwind
                 let unwind_input = crate::stage::UnwindInput {
                     unwind_to: stage_progress,
-                    checkpoint: reth_primitives::StageCheckpoint::new(previous_stage),
+                    checkpoint: reth_primitives::stage::StageCheckpoint::new(previous_stage),
                     bad_block: None,
                 };
 
@@ -138,8 +138,8 @@ macro_rules! stage_test_suite_ext {
                 // Set up the runner
                 let mut runner = $runner::default();
                 let input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::StageCheckpoint::new(stage_progress))),
-                    checkpoint: Some(reth_primitives::StageCheckpoint::new(stage_progress)),
+                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, reth_primitives::stage::StageCheckpoint::new(stage_progress))),
+                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(stage_progress)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
 
