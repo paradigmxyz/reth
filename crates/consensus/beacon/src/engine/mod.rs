@@ -386,13 +386,7 @@ where
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
 
-        // TODO: make this less complex - how should we track invalid parents for a given fcu
-        // state?
-        let lowest_buffered_ancestor_fcu = self
-            .blockchain
-            .lowest_buffered_ancestor(state.head_block_hash)
-            .map(|ancestor| ancestor.parent_hash)
-            .unwrap_or_else(|| state.head_block_hash);
+        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
 
         if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu) {
             // TODO: confusing - valid is returned here but the status is invalid
@@ -569,30 +563,36 @@ where
             };
 
             // we need to first check the buffer for the head and its ancestors
-            let lowest_unknown_hash = self
-                .blockchain
-                .lowest_buffered_ancestor(target)
-                .map(|block| block.parent_hash)
-                .unwrap_or(target);
+            let lowest_unknown_hash = self.lowest_buffered_ancestor_or(target);
 
             trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering pipeline with target instead of downloading");
 
             self.sync.set_pipeline_sync_target(lowest_unknown_hash);
         } else {
             // we need to first check the buffer for the head and its ancestors
-            let lowest_unknown_hash = self
-                .blockchain
-                .lowest_buffered_ancestor(state.head_block_hash)
-                .map(|block| block.parent_hash)
-                .unwrap_or(state.head_block_hash);
+            let lowest_unknown_hash = self.lowest_buffered_ancestor_or(state.head_block_hash);
 
             trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for the new head");
 
-            // trigger a full block download for the _missing_ new head
+            // trigger a full block download for missing hash, or the parent of its lowest buffered
+            // ancestor
             self.sync.download_full_block(lowest_unknown_hash);
         }
 
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+    }
+
+    /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
+    /// are any buffered ancestors. If there are no buffered ancestors, and the block itself does
+    /// not exist in the buffer, this returns the hash that is passed in.
+    ///
+    /// Returns the parent hash of the block itself if the block is buffered and has no other
+    /// buffered ancestors.
+    fn lowest_buffered_ancestor_or(&self, hash: H256) -> H256 {
+        self.blockchain
+            .lowest_buffered_ancestor(hash)
+            .map(|block| block.parent_hash)
+            .unwrap_or_else(|| hash)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
@@ -943,11 +943,8 @@ where
                         // Here, we check if the lowest buffered ancestor parent is invalid (if it
                         // exists), or if the head is invalid. ideally we want "is a descendant of
                         // this block invalid"
-                        let lowest_buffered_ancestor = self
-                            .blockchain
-                            .lowest_buffered_ancestor(current_state.head_block_hash)
-                            .map(|ancestor| ancestor.parent_hash)
-                            .unwrap_or_else(|| current_state.head_block_hash);
+                        let lowest_buffered_ancestor =
+                            self.lowest_buffered_ancestor_or(current_state.head_block_hash);
 
                         if self.invalid_headers.get(&lowest_buffered_ancestor).is_none() {
                             // Update the state and hashes of the blockchain tree if possible.
