@@ -573,6 +573,7 @@ impl PostState {
         self.write_history_to_db(tx)?;
 
         // Write new storage state
+        tracing::trace!(target: "provider::post_state", len = self.storage.len(), "Writing new storage state");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         for (address, storage) in self.storage.into_iter() {
             // If the storage was wiped at least once, remove all previous entries from the
@@ -613,13 +614,14 @@ impl PostState {
         }
 
         // Write bytecode
-        tracing::trace!(target: "provider::post_state", len = self.bytecode.len(), "Writing bytecods");
+        tracing::trace!(target: "provider::post_state", len = self.bytecode.len(), "Writing bytecodes");
         let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in self.bytecode.into_iter() {
             bytecodes_cursor.upsert(hash, bytecode)?;
         }
 
         // Write the receipts of the transactions
+        tracing::trace!(target: "provider::post_state", len = self.receipts.len(), "Writing receipts");
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
         for (block, receipts) in self.receipts {

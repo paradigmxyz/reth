@@ -304,6 +304,14 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
 
+        // Look up the start index for the transaction range
+        let first_tx_num = tx.block_body_indices(*range.start())?.first_tx_num();
+
+        // Unwind all receipts for transactions in the block range
+        tx.unwind_table_by_num::<tables::Receipts>(first_tx_num)?;
+        // `unwind_table_by_num` doesn't unwind the provided key, so we need to unwind it manually
+        tx.delete::<tables::Receipts>(first_tx_num, None)?;
+
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
     }
@@ -545,8 +553,10 @@ mod tests {
         assert_eq!(
             db_tx.get::<tables::PlainAccountState>(miner_acc),
             Ok(None),
-            "Third account should be unwinded"
+            "Third account should be unwound"
         );
+
+        assert_eq!(db_tx.get::<tables::Receipts>(0), Ok(None), "First receipt should be unwound");
     }
 
     #[tokio::test]

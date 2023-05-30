@@ -183,6 +183,8 @@ where
 
     /// Unwind table by some number key.
     /// Returns number of rows unwound.
+    ///
+    /// Note: Key is not inclusive and specified key would stay in db.
     #[inline]
     pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<usize, DbError>
     where
@@ -192,7 +194,7 @@ where
         self.unwind_table::<T, _>(num, |key| key)
     }
 
-    /// Unwind the table to a provided block.
+    /// Unwind the table to a provided number key.
     /// Returns number of rows unwound.
     ///
     /// Note: Key is not inclusive and specified key would stay in db.
