@@ -87,16 +87,10 @@ impl Command {
 enum Subcommands {
     /// Unwinds the database until the given block number (range is inclusive).
     #[clap(name = "to-block")]
-    ToBlock {
-        #[clap()]
-        target: BlockHashOrNumber,
-    },
+    ToBlock { target: BlockHashOrNumber },
     /// Unwinds the given number of blocks from the database.
     #[clap(name = "num-blocks")]
-    NumBlocks {
-        #[clap()]
-        amount: u64,
-    },
+    NumBlocks { amount: u64 },
 }
 
 impl Subcommands {
