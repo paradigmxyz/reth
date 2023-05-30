@@ -12,7 +12,7 @@ use reth_metrics::{
 };
 use reth_primitives::{
     constants::MGAS_TO_GAS,
-    stage::{StageCheckpoint, StageId},
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     Block, BlockNumber, BlockWithSenders, TransactionSigned, U256,
 };
 use reth_provider::{
@@ -143,6 +143,19 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Progress tracking
         let mut stage_progress = start_block;
+        let mut stage_checkpoint =
+            input.checkpoint().entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
+                processed: 0,
+                total: Some({
+                    let mut gas_total = 0;
+
+                    for result in tx.cursor_read::<tables::Headers>()?.walk(None)? {
+                        gas_total += result?.1.gas_used;
+                    }
+
+                    gas_total
+                }),
+            });
 
         // Execute block range
         let mut state = PostState::default();
@@ -166,6 +179,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Merge state changes
             state.extend(block_state);
             stage_progress = block_number;
+            stage_checkpoint.processed += block.gas_used;
 
             // Write history periodically to free up memory
             if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
@@ -190,7 +204,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let is_final_range = stage_progress == max_block;
         info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(stage_progress), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(stage_progress)
+                .with_entities_stage_checkpoint(stage_checkpoint),
+            done: is_final_range,
+        })
     }
 }
 
@@ -287,14 +305,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         // Discard unwinded changesets
-        let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
-        while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
-            if block_num <= unwind_to {
-                break
-            }
-            // delete all changesets
-            rev_acc_changeset_walker.delete_current()?;
-        }
+        tx.unwind_table_by_num::<tables::AccountChangeSet>(unwind_to)?;
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
@@ -308,13 +319,31 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         // Look up the start index for the transaction range
         let first_tx_num = tx.block_body_indices(*range.start())?.first_tx_num();
 
+        let mut stage_checkpoint = input.checkpoint.entities_stage_checkpoint();
+
         // Unwind all receipts for transactions in the block range
-        tx.unwind_table_by_num::<tables::Receipts>(first_tx_num)?;
-        // `unwind_table_by_num` doesn't unwind the provided key, so we need to unwind it manually
-        tx.delete::<tables::Receipts>(first_tx_num, None)?;
+        let mut cursor = tx.cursor_write::<tables::Receipts>()?;
+        let mut reverse_walker = cursor.walk_back(None)?;
+
+        while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
+            if tx_number < first_tx_num {
+                break
+            }
+            reverse_walker.delete_current()?;
+
+            if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+                stage_checkpoint.processed -= receipt.cumulative_gas_used;
+            }
+        }
+
+        let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
+            StageCheckpoint::new(unwind_to).with_entities_stage_checkpoint(stage_checkpoint)
+        } else {
+            StageCheckpoint::new(unwind_to)
+        };
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
+        Ok(UnwindOutput { checkpoint })
     }
 }
 
@@ -368,13 +397,14 @@ impl ExecutionStageThresholds {
 mod tests {
     use super::*;
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
+    use assert_matches::assert_matches;
     use reth_db::{
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
         models::AccountBeforeTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, SealedBlock,
-        StorageEntry, H160, H256, U256,
+        hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
+        ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_revm::Factory;
@@ -441,7 +471,16 @@ mod tests {
         let mut execution_stage = stage();
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
-        assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(1), done: true });
+        assert_matches!(output, ExecOutput {
+            checkpoint: StageCheckpoint {
+                block_number: 1,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total: Some(total)
+                }))
+            },
+            done: true
+        } if processed == total && total == block.gas_used);
         let tx = tx.deref_mut();
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
@@ -523,19 +562,27 @@ mod tests {
 
         // execute
         let mut execution_stage = stage();
-        let _ = execution_stage.execute(&mut tx, input).await.unwrap();
+        let result = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
 
         let mut stage = stage();
-        let o = stage
+        let result = stage
             .unwind(
                 &mut tx,
-                UnwindInput { checkpoint: StageCheckpoint::new(1), unwind_to: 0, bad_block: None },
+                UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
             )
             .await
             .unwrap();
 
-        assert_eq!(o, UnwindOutput { checkpoint: StageCheckpoint::new(0) });
+        assert_matches!(result, UnwindOutput {
+            checkpoint: StageCheckpoint {
+                block_number: 0,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed: 0,
+                    total: Some(total)
+                }))
+            }
+        } if total == block.gas_used);
 
         // assert unwind stage
         let db_tx = tx.deref();
