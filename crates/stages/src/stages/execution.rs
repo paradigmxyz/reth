@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -11,17 +11,15 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives::{
-    constants::MGAS_TO_GAS, Block, BlockNumber, BlockWithSenders, StageCheckpoint,
-    TransactionSigned, U256,
+    constants::MGAS_TO_GAS,
+    stage::{StageCheckpoint, StageId},
+    Block, BlockNumber, BlockWithSenders, TransactionSigned, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
 use std::time::Instant;
 use tracing::*;
-
-/// The [`StageId`] of the execution stage.
-pub const EXECUTION: StageId = StageId("Execution");
 
 /// Execution stage metrics.
 #[derive(Metrics)]
@@ -207,7 +205,7 @@ const BIG_STACK_SIZE: usize = 64 * 1024 * 1024;
 impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        EXECUTION
+        StageId::Execution
     }
 
     /// Execute the stage
@@ -295,7 +293,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 break
             }
             // delete all changesets
-            tx.delete::<tables::AccountChangeSet>(block_num, None)?;
+            rev_acc_changeset_walker.delete_current()?;
         }
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
@@ -304,8 +302,16 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 break
             }
             // delete all changesets
-            tx.delete::<tables::StorageChangeSet>(key, None)?;
+            rev_storage_changeset_walker.delete_current()?;
         }
+
+        // Look up the start index for the transaction range
+        let first_tx_num = tx.block_body_indices(*range.start())?.first_tx_num();
+
+        // Unwind all receipts for transactions in the block range
+        tx.unwind_table_by_num::<tables::Receipts>(first_tx_num)?;
+        // `unwind_table_by_num` doesn't unwind the provided key, so we need to unwind it manually
+        tx.delete::<tables::Receipts>(first_tx_num, None)?;
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
@@ -548,8 +554,10 @@ mod tests {
         assert_eq!(
             db_tx.get::<tables::PlainAccountState>(miner_acc),
             Ok(None),
-            "Third account should be unwinded"
+            "Third account should be unwound"
         );
+
+        assert_eq!(db_tx.get::<tables::Receipts>(0), Ok(None), "First receipt should be unwound");
     }
 
     #[tokio::test]

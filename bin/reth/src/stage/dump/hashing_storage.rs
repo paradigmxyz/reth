@@ -2,9 +2,9 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
-use reth_primitives::StageCheckpoint;
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::Transaction;
-use reth_stages::{stages::StorageHashingStage, Stage, StageId, UnwindInput};
+use reth_stages::{stages::StorageHashingStage, Stage, UnwindInput};
 use std::{ops::DerefMut, path::PathBuf};
 use tracing::info;
 
@@ -77,7 +77,7 @@ async fn dry_run(
             .execute(
                 &mut tx,
                 reth_stages::ExecInput {
-                    previous_stage: Some((StageId("Another"), StageCheckpoint::new(to))),
+                    previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(to))),
                     checkpoint: Some(StageCheckpoint::new(from)),
                 },
             )

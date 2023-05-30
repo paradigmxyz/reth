@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
@@ -8,7 +8,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_primitives::{keccak256, AccountHashingCheckpoint, StageCheckpoint};
+use reth_primitives::{
+    keccak256,
+    stage::{AccountHashingCheckpoint, StageCheckpoint, StageId},
+};
 use reth_provider::Transaction;
 use std::{
     cmp::max,
@@ -17,9 +20,6 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tracing::*;
-
-/// The [`StageId`] of the account hashing stage.
-pub const ACCOUNT_HASHING: StageId = StageId("AccountHashing");
 
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -115,7 +115,7 @@ impl AccountHashingStage {
 impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        ACCOUNT_HASHING
+        StageId::AccountHashing
     }
 
     /// Execute the stage.
@@ -271,7 +271,7 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{Account, StageUnitCheckpoint, U256};
+    use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);

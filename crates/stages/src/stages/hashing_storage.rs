@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use num_traits::Zero;
 use reth_db::{
     cursor::DbDupCursorRO,
@@ -7,13 +7,14 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, StageCheckpoint, StorageEntry, StorageHashingCheckpoint};
+use reth_primitives::{
+    keccak256,
+    stage::{StageCheckpoint, StageId, StorageHashingCheckpoint},
+    StorageEntry,
+};
 use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
-
-/// The [`StageId`] of the storage hashing stage.
-pub const STORAGE_HASHING: StageId = StageId("StorageHashing");
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -36,7 +37,7 @@ impl Default for StorageHashingStage {
 impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        STORAGE_HASHING
+        StageId::StorageHashing
     }
 
     /// Execute the stage.
@@ -65,7 +66,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                          address: address @ Some(_),
                          storage,
                          from,
-                         to ,
+                         to,
                  })
                 // Checkpoint is only valid if the range of transitions didn't change.
                 // An already hashed storage may have been changed with the new range,
@@ -119,13 +120,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         // There's still some remaining elements on this key, so we need to save
                         // the cursor position for the next
                         // iteration
-
-                        current_key = Some(address);
-                        current_subkey = Some(slot.key);
+                        (current_key, current_subkey) = (Some(address), Some(slot.key));
                     } else {
                         // Go to the next key
-                        current_key = storage.next_no_dup()?.map(|(key, _)| key);
-                        current_subkey = None;
+                        (current_key, current_subkey) = storage
+                            .next_no_dup()?
+                            .map(|(key, storage_entry)| (key, storage_entry.key))
+                            .unzip();
 
                         // Cache keccak256(address) for the next key if it exists
                         if let Some(address) = current_key {
@@ -206,7 +207,9 @@ mod tests {
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
     };
-    use reth_primitives::{Address, SealedBlock, StageUnitCheckpoint, StorageEntry, H256, U256};
+    use reth_primitives::{
+        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
+    };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 
@@ -255,7 +258,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_clean_account_hashing_with_commit_threshold() {
+    async fn execute_clean_storage_hashing_with_commit_threshold() {
         let (previous_stage, stage_progress) = (500, 100);
         // Set up the runner
         let mut runner = StorageHashingTestRunner::default();

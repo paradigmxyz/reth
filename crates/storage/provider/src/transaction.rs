@@ -1,6 +1,7 @@
 use crate::{
     insert_canonical_block,
     post_state::{PostState, StorageChangeset},
+    providers::get_stage_checkpoint,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -19,9 +20,11 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedBlockWithSenders, StageCheckpoint, StorageEntry, TransactionSigned,
-    TransactionSignedEcRecovered, H256, U256,
+    keccak256,
+    stage::{StageCheckpoint, StageId},
+    Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
+    SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered, H256,
+    U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{
@@ -182,6 +185,8 @@ where
 
     /// Unwind table by some number key.
     /// Returns number of rows unwound.
+    ///
+    /// Note: Key is not inclusive and specified key would stay in db.
     #[inline]
     pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<usize, DbError>
     where
@@ -191,7 +196,7 @@ where
         self.unwind_table::<T, _>(num, |key| key)
     }
 
-    /// Unwind the table to a provided block.
+    /// Unwind the table to a provided number key.
     /// Returns number of rows unwound.
     ///
     /// Note: Key is not inclusive and specified key would stay in db.
@@ -209,7 +214,7 @@ where
             if selector(entry_key.clone()) <= key {
                 break
             }
-            self.delete::<T>(entry_key, None)?;
+            reverse_walker.delete_current()?;
             deleted += 1;
         }
 
@@ -1278,6 +1283,21 @@ where
                 )?
             }
         }
+        Ok(())
+    }
+
+    /// Get the stage checkpoint.
+    pub fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>, DbError> {
+        get_stage_checkpoint(self.deref(), id)
+    }
+
+    /// Save stage checkpoint.
+    pub fn save_stage_checkpoint(
+        &self,
+        id: StageId,
+        checkpoint: StageCheckpoint,
+    ) -> Result<(), DbError> {
+        self.put::<tables::SyncStage>(id.to_string(), checkpoint)?;
         Ok(())
     }
 

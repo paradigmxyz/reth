@@ -2,11 +2,13 @@ use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
     BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, StageCheckpointProvider, StateProviderBox, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
     Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Header, Receipt,
     SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal,
     H256, U256,
@@ -250,6 +252,12 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
     }
 }
 
+impl<DB: Database> StageCheckpointProvider for ShareableDatabase<DB> {
+    fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
+        Ok(get_stage_checkpoint(&self.db.tx()?, id)?)
+    }
+}
+
 impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
     fn fill_env_at(
         &self,
@@ -284,6 +292,18 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
     fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
         self.provider()?.fill_cfg_env_with_header(cfg, header)
     }
+}
+
+/// Get checkpoint for the given stage.
+#[inline]
+pub fn get_stage_checkpoint<'a, TX>(
+    tx: &TX,
+    id: StageId,
+) -> std::result::Result<Option<StageCheckpoint>, reth_interfaces::db::DatabaseError>
+where
+    TX: DbTx<'a> + Send + Sync,
+{
+    tx.get::<tables::SyncStage>(id.to_string())
 }
 
 #[cfg(test)]

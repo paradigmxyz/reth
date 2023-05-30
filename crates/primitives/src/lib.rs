@@ -16,7 +16,6 @@ mod bits;
 mod block;
 pub mod bloom;
 mod chain;
-mod checkpoints;
 mod compression;
 pub mod constants;
 pub mod contract;
@@ -31,6 +30,7 @@ mod log;
 mod net;
 mod peer;
 mod receipt;
+pub mod stage;
 mod storage;
 mod transaction;
 pub mod trie;
@@ -49,10 +49,6 @@ pub use bloom::Bloom;
 pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
     MAINNET, SEPOLIA,
-};
-pub use checkpoints::{
-    AccountHashingCheckpoint, EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint,
-    StageUnitCheckpoint, StorageHashingCheckpoint,
 };
 pub use compression::*;
 pub use constants::{

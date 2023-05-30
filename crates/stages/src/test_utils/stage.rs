@@ -1,5 +1,6 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
+use reth_primitives::stage::StageId;
 use reth_provider::Transaction;
 use std::collections::VecDeque;
 

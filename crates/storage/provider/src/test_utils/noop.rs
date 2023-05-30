@@ -1,12 +1,13 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
-    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider,
+    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
     ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey, StorageValue,
     TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY, U256,
@@ -280,5 +281,11 @@ impl StateProviderFactory for NoopProvider {
         _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
         Ok(Box::new(*self))
+    }
+}
+
+impl StageCheckpointProvider for NoopProvider {
+    fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
+        Ok(None)
     }
 }

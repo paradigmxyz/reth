@@ -2,11 +2,11 @@ use super::{constants, StageRange};
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
-use reth_primitives::StageCheckpoint;
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
     test_utils::TestTransaction,
-    ExecInput, StageId, UnwindInput,
+    ExecInput, UnwindInput,
 };
 use std::path::{Path, PathBuf};
 
@@ -40,7 +40,7 @@ fn find_stage_range(db: &Path) -> StageRange {
 
             stage_range = Some((
                 ExecInput {
-                    previous_stage: Some((StageId("Another"), to)),
+                    previous_stage: Some((StageId::Other("Another"), to)),
                     checkpoint: Some(StageCheckpoint::new(from)),
                 },
                 UnwindInput { unwind_to: from, checkpoint: to, bad_block: None },
@@ -70,7 +70,7 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         path,
         (
             ExecInput {
-                previous_stage: Some((StageId("Another"), StageCheckpoint::new(num_blocks))),
+                previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(num_blocks))),
                 ..Default::default()
             },
             UnwindInput::default(),
