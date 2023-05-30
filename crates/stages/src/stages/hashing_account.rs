@@ -284,7 +284,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 }
 
 fn stage_progress<DB: Database>(
-    tx: &mut Transaction<'_, DB>,
+    tx: &Transaction<'_, DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: tx.deref().entries::<tables::HashedAccount>()? as u64,

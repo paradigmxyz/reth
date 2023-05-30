@@ -150,10 +150,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             }
         }
 
-        // Drop cursors, so we can get mutable tx borrow for stage progress calculation
-        drop(tx_cursor);
-        drop(senders_cursor);
-
         let stage_checkpoint = stage_progress(tx)?;
 
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
@@ -188,7 +184,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 }
 
 fn stage_progress<DB: Database>(
-    tx: &mut Transaction<'_, DB>,
+    tx: &Transaction<'_, DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: tx.deref().entries::<tables::TxSenders>()? as u64,
