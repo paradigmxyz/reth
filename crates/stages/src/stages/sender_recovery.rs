@@ -7,12 +7,13 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable, RawValue,
 };
+use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
-    TransactionSignedNoHash, TxNumber, H160,
+    TransactionSignedNoHash, TxNumber, H160, SealedHeader
 };
-use reth_provider::Transaction;
+use reth_provider::{providers::read_sealed_header, Transaction};
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -108,16 +109,21 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 reth_db::DatabaseError,
             >,
                            rlp_buf: &mut Vec<u8>|
-             -> Result<(u64, H160), Box<StageError>> {
-                let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
+             -> Result<(u64, H160), Box<SenderRecoveryStageError>> {
+                let (tx_id, transaction) =
+                    entry.map_err(|e| Box::new(SenderRecoveryStageError::StageError(e.into())))?;
                 let tx_id = tx_id.key().expect("key to be formated");
 
                 let tx = transaction.value().expect("value to be formated");
                 tx.transaction.encode_without_signature(rlp_buf);
 
-                let sender = tx.signature.recover_signer(keccak256(rlp_buf)).ok_or(
-                    StageError::from(SenderRecoveryStageError::SenderRecovery { tx: tx_id }),
-                )?;
+                let sender =
+                    match tx.signature.recover_signer(keccak256(rlp_buf)) {
+                        Some(sender) => Ok(sender),
+                        None => Err(SenderRecoveryStageError::FailedRecovery(
+                            FailedSenderRecoveryError { tx: tx_id },
+                        )),
+                    }?;
 
                 Ok((tx_id, sender))
             };
@@ -135,7 +141,36 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Iterate over channels and append the sender in the order that they are received.
         for mut channel in channels {
             while let Some(recovered) = channel.recv().await {
-                let (tx_id, sender) = recovered.map_err(|boxed| *boxed)?;
+                let (tx_id, sender) = recovered.map_err(|boxed| match *boxed {
+                    SenderRecoveryStageError::FailedRecovery(err) => {
+                        // we need this so we can report the bad block
+                        let mut tx_block_cursor = match tx.cursor_read::<tables::TransactionBlock>()
+                        {
+                            Ok(cursor) => cursor,
+                            Err(e) => return e.into(),
+                        };
+
+                        // get the block number for the bad transaction
+                        // TODO: remove expect
+                        let block_number =
+                            match tx_block_cursor.seek(err.tx).map(|b| b.map(|(_, bn)| bn)) {
+                                Ok(num) => num,
+                                Err(e) => return e.into(),
+                            }
+                            .expect("tx to be in block");
+
+                        // fetch the sealed header so we can use it in the sender recovery unwind
+                        // TODO: remove expect
+                        let (header, block_hash) = match read_sealed_header(&**tx, block_number) {
+                            Ok(header_hash) => header_hash,
+                            Err(e) => return e.into(),
+                        }
+                        .expect("header to exist for block number");
+
+                        FailedSenderRecoveryError::with_block(header.seal(block_hash))
+                    }
+                    SenderRecoveryStageError::StageError(err) => err,
+                })?;
                 senders_cursor.append(tx_id, sender)?;
             }
         }
@@ -162,16 +197,32 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 }
 
-// TODO(onbjerg): Should unwind
 #[derive(Error, Debug)]
+#[error(transparent)]
 enum SenderRecoveryStageError {
-    #[error("Sender recovery failed for transaction {tx}.")]
-    SenderRecovery { tx: TxNumber },
+    /// A transaction failed sender recovery
+    FailedRecovery(FailedSenderRecoveryError),
+
+    /// A different type of stage error occurred
+    StageError(#[from] StageError),
 }
 
-impl From<SenderRecoveryStageError> for StageError {
-    fn from(error: SenderRecoveryStageError) -> Self {
-        StageError::Fatal(Box::new(error))
+// TODO(onbjerg): Should unwind
+#[derive(Error, Debug)]
+#[error("Sender recovery failed for transaction {tx}.")]
+struct FailedSenderRecoveryError {
+    /// The transaction that failed sender recovery
+    tx: TxNumber,
+}
+
+impl FailedSenderRecoveryError {
+    /// Creates a [StageError] populated with a transaction sender recovery error with the given
+    /// block.
+    fn with_block(block: SealedHeader) -> StageError {
+        StageError::Validation {
+            block,
+            error: consensus::ConsensusError::TransactionSignerRecoveryError,
+        }
     }
 }
 
