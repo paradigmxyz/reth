@@ -210,7 +210,7 @@ where
             if selector(entry_key.clone()) <= key {
                 break
             }
-            self.delete::<T>(entry_key, None)?;
+            reverse_walker.delete_current()?;
             deleted += 1;
         }
 

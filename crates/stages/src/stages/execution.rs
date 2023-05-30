@@ -292,7 +292,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 break
             }
             // delete all changesets
-            tx.delete::<tables::AccountChangeSet>(block_num, None)?;
+            rev_acc_changeset_walker.delete_current()?;
         }
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
@@ -301,7 +301,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 break
             }
             // delete all changesets
-            tx.delete::<tables::StorageChangeSet>(key, None)?;
+            rev_storage_changeset_walker.delete_current()?;
         }
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
