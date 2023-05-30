@@ -330,7 +330,6 @@ impl Command {
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
-            Arc::clone(&db),
             client,
             pipeline,
             blockchain_db.clone(),
