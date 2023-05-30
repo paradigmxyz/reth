@@ -51,3 +51,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check if documentation builds
         run: RUSTDOCFLAGS="-D warnings" cargo doc --all --no-deps --all-features --document-private-items
+
+  lint-success:
+    name: lint success
+    needs: [code-lint, doc-lint]
+    steps:
+      - run: echo Success!
