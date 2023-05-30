@@ -93,6 +93,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run doctests
         run: cargo test --doc --all --all-features
+
   unit-success:
     name: unit success
     needs: [test, eth-blockchain, doc-test]
