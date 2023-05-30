@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 10_000;
 
 /// The default maximum number of concurrently executed tracing calls
-pub(crate) const DEFAULT_MAX_TRACING_REQUESTS: usize = 10;
+pub(crate) const DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ pub struct EthConfig {
     /// Settings for the gas price oracle
     pub gas_oracle: GasPriceOracleConfig,
     /// The maximum number of tracing calls that can be executed in concurrently.
-    pub max_tracing_requests: usize,
+    pub max_tracing_requests: u32,
     /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
     pub max_logs_per_response: usize,
 }
@@ -52,25 +52,25 @@ impl Default for EthConfig {
 
 impl EthConfig {
     /// Configures the caching layer settings
-    pub fn with_state_cache(mut self, cache: EthStateCacheConfig) -> Self {
+    pub fn state_cache(mut self, cache: EthStateCacheConfig) -> Self {
         self.cache = cache;
         self
     }
 
     /// Configures the gas price oracle settings
-    pub fn with_gpo_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
+    pub fn gpo_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
         self.gas_oracle = gas_oracle_config;
         self
     }
 
     /// Configures the maximum number of tracing requests
-    pub fn with_max_tracing_requests(mut self, max_requests: usize) -> Self {
+    pub fn max_tracing_requests(mut self, max_requests: u32) -> Self {
         self.max_tracing_requests = max_requests;
         self
     }
 
     /// Configures the maximum number of logs per response
-    pub fn with_max_logs_per_response(mut self, max_logs: usize) -> Self {
+    pub fn max_logs_per_response(mut self, max_logs: usize) -> Self {
         self.max_logs_per_response = max_logs;
         self
     }

@@ -142,7 +142,7 @@ table!(
 );
 
 table!(
-    /// Stores the block number corresponding to an header.
+    /// Stores the block number corresponding to a header.
     ( HeaderNumbers ) BlockHash | BlockNumber
 );
 
