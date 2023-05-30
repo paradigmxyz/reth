@@ -27,7 +27,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
-use reth_stages::{Pipeline, ControlFlow};
+use reth_stages::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{

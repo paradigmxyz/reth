@@ -11,7 +11,7 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
-    TransactionSignedNoHash, TxNumber, H160, SealedHeader
+    SealedHeader, TransactionSignedNoHash, TxNumber, H160,
 };
 use reth_provider::{providers::read_sealed_header, Transaction};
 use std::fmt::Debug;

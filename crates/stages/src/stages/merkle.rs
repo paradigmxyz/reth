@@ -10,7 +10,7 @@ use reth_primitives::{
     hex,
     stage::{MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
-    BlockNumber, H256, SealedHeader
+    BlockNumber, SealedHeader, H256,
 };
 use reth_provider::Transaction;
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
