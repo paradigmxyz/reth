@@ -26,7 +26,7 @@ pub enum BlockchainTreeError {
     #[error("Block hash {block_hash} not found in blockchain tree chain")]
     BlockHashNotFoundInChain { block_hash: BlockHash },
     // Thrown if the block failed to buffer
-    #[error("Block with hash {block_hash} failed to buffer")]
+    #[error("Block with hash {block_hash:?} failed to buffer")]
     BlockBufferingFailed { block_hash: BlockHash },
 }
 
