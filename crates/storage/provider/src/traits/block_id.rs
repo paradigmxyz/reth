@@ -19,7 +19,7 @@ pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
 
     /// Gets the block number for the given `BlockHashOrNumber`. Returns `None` if no block with
     /// this hash exists. If the `BlockHashOrNumber` is a `Number`, it is returned as is.
-    fn convert_hash(&self, id: BlockHashOrNumber) -> Result<Option<BlockNumber>> {
+    fn convert_hash_or_number(&self, id: BlockHashOrNumber) -> Result<Option<BlockNumber>> {
         match id {
             BlockHashOrNumber::Hash(hash) => self.block_number(hash),
             BlockHashOrNumber::Number(num) => Ok(Some(num)),

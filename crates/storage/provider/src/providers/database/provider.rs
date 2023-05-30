@@ -59,7 +59,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> Provider<'this, TX> {
 
 impl<'this, TX: DbTx<'this>> HeaderProvider for Provider<'this, TX> {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
-        if let Some(num) = self.tx.get::<tables::HeaderNumbers>(*block_hash)? {
+        if let Some(num) = self.block_number(*block_hash)? {
             Ok(self.tx.get::<tables::Headers>(num)?)
         } else {
             Ok(None)
@@ -70,8 +70,8 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for Provider<'this, TX> {
         Ok(self.tx.get::<tables::Headers>(num)?)
     }
 
-    fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
-        if let Some(num) = self.tx.get::<tables::HeaderNumbers>(*hash)? {
+    fn header_td(&self, block_hash: &BlockHash) -> Result<Option<U256>> {
+        if let Some(num) = self.block_number(*block_hash)? {
             Ok(self.tx.get::<tables::HeaderTD>(num)?.map(|td| td.0))
         } else {
             Ok(None)
@@ -96,16 +96,20 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for Provider<'this, TX> {
     ) -> Result<Vec<SealedHeader>> {
         let mut headers = vec![];
         for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
-            let (num, header) = entry?;
-            let hash = read_header_hash(&self.tx, num)?;
+            let (number, header) = entry?;
+            let hash = self
+                .block_hash(number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
             headers.push(header.seal(hash));
         }
         Ok(headers)
     }
 
     fn sealed_header(&self, number: BlockNumber) -> Result<Option<SealedHeader>> {
-        if let Some(header) = self.tx.get::<tables::Headers>(number)? {
-            let hash = read_header_hash(&self.tx, number)?;
+        if let Some(header) = self.header_by_number(number)? {
+            let hash = self
+                .block_hash(number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
             Ok(Some(header.seal(hash)))
         } else {
             Ok(None)
@@ -140,7 +144,7 @@ impl<'this, TX: DbTx<'this>> BlockNumProvider for Provider<'this, TX> {
     }
 
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
-        Ok(read_block_number(&self.tx, hash)?)
+        Ok(self.tx.get::<tables::HeaderNumbers>(hash)?)
     }
 }
 
@@ -154,23 +158,22 @@ impl<'this, TX: DbTx<'this>> BlockProvider for Provider<'this, TX> {
     }
 
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
-        if let Some(number) = convert_hash_or_number(&self.tx, id)? {
-            if let Some(header) = read_header(&self.tx, number)? {
+        if let Some(number) = self.convert_hash_or_number(id)? {
+            if let Some(header) = self.header_by_number(number)? {
                 // we check for shanghai first
                 let (ommers, withdrawals) =
                     // TODO another: read_block_ommers_and_withdrawals
                     {
                         let mut ommers = None;
-                        let mut withdrawals = None;
-                        if self.chain_spec.is_shanghai_activated_at_timestamp(header.timestamp) {
-                            withdrawals = read_withdrawals_by_number(&self.tx, number)?;
-                        } else {
+                        let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
+                        if withdrawals.is_none() {
                             ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
                         }
                         (ommers, withdrawals)
                     };
 
-                let transactions = read_transactions_by_number(&self.tx, number)?
+                let transactions = self
+                    .transactions_by_block(number.into())?
                     .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
 
                 return Ok(Some(Block {
@@ -190,7 +193,7 @@ impl<'this, TX: DbTx<'this>> BlockProvider for Provider<'this, TX> {
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
-        if let Some(number) = convert_hash_or_number(&self.tx, id)? {
+        if let Some(number) = self.convert_hash_or_number(id)? {
             // TODO: this can be optimized to return empty Vec post-merge
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
             return Ok(ommers)
@@ -228,8 +231,8 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
                 if let Some(block_number) =
                     transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
                 {
-                    if let Some((header, block_hash)) = read_sealed_header(&self.tx, block_number)?
-                    {
+                    if let Some(sealed_header) = self.sealed_header(block_number)? {
+                        let (header, block_hash) = sealed_header.split();
                         if let Some(block_body) =
                             self.tx.get::<tables::BlockBodyIndices>(block_number)?
                         {
@@ -266,8 +269,20 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
         &self,
         id: BlockHashOrNumber,
     ) -> Result<Option<Vec<TransactionSigned>>> {
-        if let Some(number) = convert_hash_or_number(&self.tx, id)? {
-            return Ok(read_transactions_by_number(&self.tx, number)?)
+        if let Some(block_number) = self.convert_hash_or_number(id)? {
+            if let Some(body) = self.tx.get::<tables::BlockBodyIndices>(block_number)? {
+                let tx_range = body.tx_num_range();
+                return if tx_range.is_empty() {
+                    Ok(Some(Vec::new()))
+                } else {
+                    let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+                    let transactions = tx_cursor
+                        .walk_range(tx_range)?
+                        .map(|result| result.map(|(_, tx)| tx.into()))
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(Some(transactions))
+                }
+            }
         }
         Ok(None)
     }
@@ -311,7 +326,7 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for Provider<'this, TX> {
     }
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
-        if let Some(number) = convert_hash_or_number(&self.tx, block)? {
+        if let Some(number) = self.convert_hash_or_number(block)? {
             if let Some(body) = self.tx.get::<tables::BlockBodyIndices>(number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
@@ -337,10 +352,14 @@ impl<'this, TX: DbTx<'this>> WithdrawalsProvider for Provider<'this, TX> {
         timestamp: u64,
     ) -> Result<Option<Vec<Withdrawal>>> {
         if self.chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
-            if let Some(number) = convert_hash_or_number(&self.tx, id)? {
+            if let Some(number) = self.convert_hash_or_number(id)? {
                 // If we are past shanghai, then all blocks should have a withdrawal list, even if
                 // empty
-                let withdrawals = read_withdrawals_by_number(&self.tx, number)?.unwrap_or_default();
+                let withdrawals = self
+                    .tx
+                    .get::<tables::BlockWithdrawals>(number)
+                    .map(|w| w.map(|w| w.withdrawals))?
+                    .unwrap_or_default();
                 return Ok(Some(withdrawals))
             }
         }
@@ -422,119 +441,6 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for Provider<'this, TX> {
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
         fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
-    }
-}
-
-/// Returns the block number for the given block hash or number.
-#[inline]
-fn convert_hash_or_number<'a, TX>(
-    tx: &TX,
-    block: BlockHashOrNumber,
-) -> std::result::Result<Option<BlockNumber>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    match block {
-        BlockHashOrNumber::Hash(hash) => read_block_number(tx, hash),
-        BlockHashOrNumber::Number(number) => Ok(Some(number)),
-    }
-}
-
-/// Reads the number for the given block hash.
-#[inline]
-fn read_block_number<'a, TX>(
-    tx: &TX,
-    hash: H256,
-) -> std::result::Result<Option<BlockNumber>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    tx.get::<tables::HeaderNumbers>(hash)
-}
-
-/// Reads the hash for the given block number
-///
-/// Returns an error if no matching entry is found.
-#[inline]
-fn read_header_hash<'a, TX>(
-    tx: &TX,
-    number: u64,
-) -> std::result::Result<BlockHash, reth_interfaces::Error>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    match tx.get::<tables::CanonicalHeaders>(number)? {
-        Some(hash) => Ok(hash),
-        None => Err(ProviderError::HeaderNotFound(number.into()).into()),
-    }
-}
-
-/// Fetches the Withdrawals that belong to the given block number
-#[inline]
-fn read_transactions_by_number<'a, TX>(
-    tx: &TX,
-    block_number: u64,
-) -> std::result::Result<Option<Vec<TransactionSigned>>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    if let Some(body) = tx.get::<tables::BlockBodyIndices>(block_number)? {
-        let tx_range = body.tx_num_range();
-        return if tx_range.is_empty() {
-            Ok(Some(Vec::new()))
-        } else {
-            let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-            let transactions = tx_cursor
-                .walk_range(tx_range)?
-                .map(|result| result.map(|(_, tx)| tx.into()))
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            Ok(Some(transactions))
-        }
-    }
-
-    Ok(None)
-}
-
-/// Fetches the Withdrawals that belong to the given block number
-#[inline]
-fn read_withdrawals_by_number<'a, TX>(
-    tx: &TX,
-    block_number: u64,
-) -> std::result::Result<Option<Vec<Withdrawal>>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    tx.get::<tables::BlockWithdrawals>(block_number).map(|w| w.map(|w| w.withdrawals))
-}
-
-/// Fetches the corresponding header
-#[inline]
-fn read_header<'a, TX>(
-    tx: &TX,
-    block_number: u64,
-) -> std::result::Result<Option<Header>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    tx.get::<tables::Headers>(block_number)
-}
-
-/// Fetches Header and its hash
-#[inline]
-fn read_sealed_header<'a, TX>(
-    tx: &TX,
-    block_number: u64,
-) -> std::result::Result<Option<(Header, BlockHash)>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    let block_hash = match tx.get::<tables::CanonicalHeaders>(block_number)? {
-        Some(block_hash) => block_hash,
-        None => return Ok(None),
-    };
-    match read_header(tx, block_number)? {
-        Some(header) => Ok(Some((header, block_hash))),
-        None => Ok(None),
     }
 }
 
