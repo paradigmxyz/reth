@@ -59,7 +59,7 @@ pub enum KeepPayloadJobAlive {
 pub trait PayloadJobGenerator: Send + Sync {
     /// The type that manages the lifecycle of a payload.
     ///
-    /// This type is a Stream that yields better payloads payload.
+    /// This type is a Stream that yields better payloads.
     type Job: PayloadJob;
 
     /// Creates the initial payload and a new [PayloadJob] that yields better payloads.
