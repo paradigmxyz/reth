@@ -72,29 +72,33 @@ impl<DB: Database> ShareableDatabase<DB> {
         &self,
         mut block_number: BlockNumber,
     ) -> Result<StateProviderBox<'_>> {
-        let tx = self.db.tx()?;
+        let provider = self.provider()?;
 
-        if is_latest_block_number(&tx, block_number)? {
-            return Ok(Box::new(LatestStateProvider::new(tx)))
+        if block_number == provider.best_block_number().unwrap_or_default() &&
+            block_number == provider.last_block_number().unwrap_or_default()
+        {
+            return Ok(Box::new(LatestStateProvider::new(provider.take_tx())))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
         block_number += 1;
 
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
-        Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
+        Ok(Box::new(HistoricalStateProvider::new(provider.take_tx(), block_number)))
     }
 
     /// Storage provider for state at that given block hash
     pub fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<StateProviderBox<'_>> {
-        let tx = self.db.tx()?;
-        // get block number
-        let mut block_number = tx
-            .get::<tables::HeaderNumbers>(block_hash)?
+        let provider = self.provider()?;
+
+        let mut block_number = provider
+            .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        if is_latest_block_number(&tx, block_number)? {
-            return Ok(Box::new(LatestStateProvider::new(tx)))
+        if block_number == provider.best_block_number().unwrap_or_default() &&
+            block_number == provider.last_block_number().unwrap_or_default()
+        {
+            return Ok(Box::new(LatestStateProvider::new(provider.take_tx())))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -102,7 +106,7 @@ impl<DB: Database> ShareableDatabase<DB> {
         block_number += 1;
 
         trace!(target: "providers::db", ?block_hash, "Returning historical state provider for block hash");
-        Ok(Box::new(HistoricalStateProvider::new(tx, block_number)))
+        Ok(Box::new(HistoricalStateProvider::new(provider.take_tx(), block_number)))
     }
 }
 

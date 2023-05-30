@@ -50,6 +50,11 @@ impl<'this, TX: DbTx<'this>> Provider<'this, TX> {
     pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
         Self { tx, chain_spec, _phantom_data: std::marker::PhantomData }
     }
+
+    /// consume `DbTx` or `DbTxMut`
+    pub fn take_tx(self) -> TX {
+        self.tx
+    }
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> Provider<'this, TX> {
@@ -445,43 +450,4 @@ impl<'this, TX: DbTx<'this>> StageCheckpointProvider for Provider<'this, TX> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(self.tx.get::<tables::SyncStage>(id.to_string())?)
     }
-}
-
-/// Fetches checks if the block number is the latest block number.
-#[inline]
-pub(crate) fn is_latest_block_number<'a, TX>(
-    tx: &TX,
-    block_number: BlockNumber,
-) -> std::result::Result<bool, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    // check if the block number is the best block number
-    // there's always at least one header in the database (genesis)
-    let best = best_block_number(tx)?.unwrap_or_default();
-    let last = last_canonical_header(tx)?.map(|(last, _)| last).unwrap_or_default();
-    Ok(block_number == best && block_number == last)
-}
-
-/// Fetches the best block number from the database.
-#[inline]
-pub(crate) fn best_block_number<'a, TX>(
-    tx: &TX,
-) -> std::result::Result<Option<BlockNumber>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    tx.get::<tables::SyncStage>("Finish".to_string())
-        .map(|result| result.map(|checkpoint| checkpoint.block_number))
-}
-
-/// Fetches the last canonical header from the database.
-#[inline]
-pub(crate) fn last_canonical_header<'a, TX>(
-    tx: &TX,
-) -> std::result::Result<Option<(BlockNumber, BlockHash)>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    tx.cursor_read::<tables::CanonicalHeaders>()?.last()
 }
