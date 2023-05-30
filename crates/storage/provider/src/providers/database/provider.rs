@@ -161,26 +161,14 @@ impl<'this, TX: DbTx<'this>> BlockProvider for Provider<'this, TX> {
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
-                // we check for shanghai first
-                let (ommers, withdrawals) = {
-                    let mut ommers = None;
-                    let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
-                    if withdrawals.is_none() {
-                        ommers = self.ommers(number.into())?
-                    }
-                    (ommers, withdrawals)
-                };
-
+                let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
+                let ommers = if withdrawals.is_none() { self.ommers(number.into())? } else { None }
+                    .unwrap_or_default();
                 let transactions = self
                     .transactions_by_block(number.into())?
                     .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
 
-                return Ok(Some(Block {
-                    header,
-                    body: transactions,
-                    ommers: ommers.unwrap_or_default(),
-                    withdrawals,
-                }))
+                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }))
             }
         }
 
