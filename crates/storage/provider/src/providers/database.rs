@@ -460,10 +460,6 @@ impl<DB: Database> StageCheckpointProvider for ShareableDatabase<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(get_stage_checkpoint(&self.db.tx()?, id)?)
     }
-
-    fn get_finish_stage_checkpoint_block_number(&self) -> Result<BlockNumber> {
-        Ok(get_stage_checkpoint(&self.db.tx()?, StageId::Finish)?.unwrap_or_default().block_number)
-    }
 }
 
 impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
