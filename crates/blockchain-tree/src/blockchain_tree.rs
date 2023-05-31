@@ -164,7 +164,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
 
             // check if block is inside database
-            if self.externals.database().block_number(block.hash)?.is_some() {
+            if self.externals.database().provider()?.block_number(block.hash)?.is_some() {
                 return Ok(Some(BlockStatus::Valid))
             }
 
@@ -346,9 +346,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // https://github.com/paradigmxyz/reth/issues/1713
 
         let db = self.externals.database();
+        let provider =
+            db.provider().map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
         // Validate that the block is post merge
-        let parent_td = db
+        let parent_td = provider
             .header_td(&block.parent_hash)
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
             .ok_or_else(|| {
@@ -366,7 +368,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             ))
         }
 
-        let parent_header = db
+        let parent_header = provider
             .header(&block.parent_hash)
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
             .ok_or_else(|| {
@@ -398,6 +400,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             )?;
             (BlockStatus::Accepted, chain)
         };
+
+        // let go of `db` immutable borrow
+        drop(provider);
 
         self.insert_chain(chain);
         self.try_connect_buffered_blocks(block_num_hash);
@@ -816,7 +821,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let mut header = None;
         if let Some(num) = self.block_indices.get_canonical_block_number(hash) {
-            header = self.externals.database().header_by_number(num)?;
+            header = self.externals.database().provider()?.header_by_number(num)?;
         }
 
         if header.is_none() && self.is_block_hash_inside_chain(*hash) {
@@ -824,7 +829,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         if header.is_none() {
-            header = self.externals.database().header(hash)?
+            header = self.externals.database().provider()?.header(hash)?
         }
 
         Ok(header.map(|header| header.seal(*hash)))
@@ -857,6 +862,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             let td = self
                 .externals
                 .database()
+                .provider()?
                 .header_td(block_hash)?
                 .ok_or(BlockExecutionError::MissingTotalDifficulty { hash: *block_hash })?;
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
