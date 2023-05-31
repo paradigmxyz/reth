@@ -37,7 +37,7 @@ impl NodeState {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
-            PipelineEvent::Running { pipeline_progress, pipeline_total, stage_id, checkpoint } => {
+            PipelineEvent::Running { pipeline_position, pipeline_total, stage_id, checkpoint } => {
                 let notable = self.current_stage.is_none();
                 self.current_stage = Some(stage_id);
                 self.current_checkpoint = checkpoint.unwrap_or_default();
@@ -45,7 +45,7 @@ impl NodeState {
                 if notable {
                     info!(
                         target: "reth::cli",
-                        pipeline_stages = %format!("{pipeline_progress}/{pipeline_total}"),
+                        pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
                         stage = %stage_id,
                         from = self.current_checkpoint.block_number,
                         checkpoint = %self.current_checkpoint,
@@ -54,7 +54,7 @@ impl NodeState {
                 }
             }
             PipelineEvent::Ran {
-                pipeline_progress,
+                pipeline_position,
                 pipeline_total,
                 stage_id,
                 result: ExecOutput { checkpoint, done },
@@ -67,7 +67,7 @@ impl NodeState {
 
                 info!(
                     target: "reth::cli",
-                    pipeline_stages = %format!("{pipeline_progress}/{pipeline_total}"),
+                    pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
                     stage = %stage_id,
                     progress = checkpoint.block_number,
                     %checkpoint,
