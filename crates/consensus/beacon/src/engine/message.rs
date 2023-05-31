@@ -1,4 +1,7 @@
-use crate::{engine::error::BeaconOnNewPayloadError, BeaconConsensusEngineEvent};
+use crate::{
+    engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus},
+    BeaconConsensusEngineEvent,
+};
 use futures::{future::Either, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::error::PayloadBuilderError;
@@ -19,8 +22,11 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[derive(Debug)]
 pub struct OnForkChoiceUpdated {
-    /// Tracks if this update was valid.
-    is_valid_update: bool,
+    /// Represents the status of the forkchoice update.
+    ///
+    /// Note: This is separate from the response `fut`, because we still can return an error
+    /// depending on the payload attributes, even if the forkchoice update itself is valid.
+    forkchoice_status: ForkchoiceStatus,
     /// Returns the result of the forkchoice update.
     fut: Either<futures::future::Ready<ForkChoiceUpdateResult>, PendingPayloadId>,
 }
@@ -30,14 +36,19 @@ pub struct OnForkChoiceUpdated {
 impl OnForkChoiceUpdated {
     /// Returns true if this update is valid
     pub(crate) fn is_valid_update(&self) -> bool {
-        self.is_valid_update
+        self.forkchoice_status.is_valid()
+    }
+
+    /// Returns the determined status of the received ForkchoiceState.
+    pub(crate) fn forkchoice_status(&self) -> ForkchoiceStatus {
+        self.forkchoice_status
     }
 
     /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update succeeded and no
     /// payload attributes were provided.
     pub(crate) fn valid(status: PayloadStatus) -> Self {
         Self {
-            is_valid_update: status.is_valid(),
+            forkchoice_status: ForkchoiceStatus::from_payload_status(&status.status),
             fut: Either::Left(futures::future::ready(Ok(ForkchoiceUpdated::new(status)))),
         }
     }
@@ -46,7 +57,7 @@ impl OnForkChoiceUpdated {
     /// forkchoice update failed due to an invalid payload.
     pub(crate) fn with_invalid(status: PayloadStatus) -> Self {
         Self {
-            is_valid_update: false,
+            forkchoice_status: ForkchoiceStatus::from_payload_status(&status.status),
             fut: Either::Left(futures::future::ready(Ok(ForkchoiceUpdated::new(status)))),
         }
     }
@@ -55,7 +66,7 @@ impl OnForkChoiceUpdated {
     /// given state is considered invalid
     pub(crate) fn invalid_state() -> Self {
         Self {
-            is_valid_update: false,
+            forkchoice_status: ForkchoiceStatus::Invalid,
             fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::InvalidState))),
         }
     }
@@ -65,7 +76,7 @@ impl OnForkChoiceUpdated {
     pub(crate) fn invalid_payload_attributes() -> Self {
         Self {
             // This is valid because this is only reachable if the state and payload is valid
-            is_valid_update: true,
+            forkchoice_status: ForkchoiceStatus::Valid,
             fut: Either::Left(futures::future::ready(Err(
                 ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
             ))),
@@ -78,7 +89,7 @@ impl OnForkChoiceUpdated {
         pending_payload_id: oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>,
     ) -> Self {
         Self {
-            is_valid_update: payload_status.is_valid(),
+            forkchoice_status: ForkchoiceStatus::from_payload_status(&payload_status.status),
             fut: Either::Right(PendingPayloadId {
                 payload_status: Some(payload_status),
                 pending_payload_id,
