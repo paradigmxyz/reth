@@ -299,6 +299,8 @@ where
         previous_stage: Option<(StageId, StageCheckpoint)>,
         stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
+        let total_stages = self.stages.len();
+
         let stage = &mut self.stages[stage_index];
         let stage_id = stage.id();
         let mut made_progress = false;
@@ -326,7 +328,12 @@ where
                 })
             }
 
-            self.listeners.notify(PipelineEvent::Running { stage_id, checkpoint: prev_checkpoint });
+            self.listeners.notify(PipelineEvent::Running {
+                pipeline_progress: stage_index + 1,
+                pipeline_total: total_stages,
+                stage_id,
+                checkpoint: prev_checkpoint,
+            });
 
             match stage
                 .execute(&mut tx, ExecInput { previous_stage, checkpoint: prev_checkpoint })
@@ -350,7 +357,12 @@ where
                     );
                     tx.save_stage_checkpoint(stage_id, checkpoint)?;
 
-                    self.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });
+                    self.listeners.notify(PipelineEvent::Ran {
+                        pipeline_progress: stage_index + 1,
+                        pipeline_total: total_stages,
+                        stage_id,
+                        result: out.clone(),
+                    });
 
                     // TODO: Make the commit interval configurable
                     tx.commit()?;
