@@ -232,20 +232,11 @@ fn execution_checkpoint<DB: Database>(
         },
         // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
         // already processed, if there's any.
-        Some(_) if start_block != 1 => ExecutionCheckpoint {
+        _ => ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: start_block, to: max_block },
             progress: EntitiesCheckpoint {
                 processed: total_gas_to_execute(tx, 0..=start_block - 1)?,
                 total: Some(total_gas_to_execute(tx, 0..=max_block)?),
-            },
-        },
-        // If there's no previous progress, recalculate total gas fully, and set processed gas
-        // to zero.
-        _ => ExecutionCheckpoint {
-            block_range: CheckpointBlockRange { from: start_block, to: max_block },
-            progress: EntitiesCheckpoint {
-                processed: 0,
-                total: Some(total_gas_to_execute(tx, start_block..=max_block)?),
             },
         },
     })
@@ -539,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_checkpoint_recalculate_full() {
+    fn execution_checkpoint_recalculate_full_previous_some() {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
 
@@ -572,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_checkpoint_recalculate_total() {
+    fn execution_checkpoint_recalculate_full_previous_none() {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
 
