@@ -116,7 +116,7 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
     },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
+    NetApi, RPCApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -570,6 +570,8 @@ pub enum RethRpcModule {
     Txpool,
     /// `web3_` module
     Web3,
+    /// `rpc_` module
+    Rpc,
 }
 
 // === impl RethRpcModule ===
@@ -823,6 +825,7 @@ where
                         RethRpcModule::Txpool => {
                             TxPoolApi::new(self.pool.clone()).into_rpc().into()
                         }
+                        RethRpcModule::Rpc => RPCApi::new().into_rpc().into(),
                     })
                     .clone()
             })
@@ -1649,6 +1652,7 @@ mod tests {
                 "net" =>  RethRpcModule::Net,
                 "trace" =>  RethRpcModule::Trace,
                 "web3" =>  RethRpcModule::Web3,
+                "rpc" => RethRpcModule::Rpc,
             );
     }
 

@@ -7,6 +7,13 @@ pub struct RPCModules {
     result: HashMap<String, String>,
 }
 
+impl RPCModules {
+    /// Create a new instance of RPCModules
+    pub fn new(result: HashMap<String, String>) -> Self {
+        Self { result }
+    }
+}
+
 impl Default for RPCModules {
     fn default() -> Self {
         Self {
