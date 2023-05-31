@@ -161,9 +161,9 @@ impl Display for EntitiesCheckpoint {
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct CheckpointBlockRange {
-    /// The first block of the range.
+    /// The first block of the range, inclusive.
     pub from: BlockNumber,
-    /// The last block of the range.
+    /// The last block of the range, inclusive.
     pub to: BlockNumber,
 }
 
