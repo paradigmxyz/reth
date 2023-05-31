@@ -4,8 +4,8 @@ use reth_metrics::{
 };
 use reth_primitives::{
     stage::{
-        AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId,
-        StageUnitCheckpoint, StorageHashingCheckpoint,
+        AccountHashingCheckpoint, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint,
+        StageId, StageUnitCheckpoint, StorageHashingCheckpoint,
     },
     BlockNumber,
 };
@@ -42,21 +42,16 @@ impl Metrics {
         stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
         let (processed, total) = match checkpoint.stage_checkpoint {
-            Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint { processed, total })) => {
-                (processed, total)
-            }
+            Some(
+                StageUnitCheckpoint::Entities(progress @ EntitiesCheckpoint { .. }) |
+                StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress, .. }),
+            ) => (progress.processed, progress.total),
             // Only report metrics for hashing stages if `total` is known, otherwise it means we're
             // unwinding and operating on changesets, rather than accounts or storage slots.
             Some(
-                StageUnitCheckpoint::Account(AccountHashingCheckpoint {
-                    progress: EntitiesCheckpoint { processed, total: Some(total) },
-                    ..
-                }) |
-                StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
-                    progress: EntitiesCheckpoint { processed, total: Some(total) },
-                    ..
-                }),
-            ) => (processed, Some(total)),
+                StageUnitCheckpoint::Account(AccountHashingCheckpoint { progress, .. }) |
+                StageUnitCheckpoint::Storage(StorageHashingCheckpoint { progress, .. }),
+            ) if progress.total.is_some() => (progress.processed, progress.total),
             _ => (checkpoint.block_number, max_block_number),
         };
 
