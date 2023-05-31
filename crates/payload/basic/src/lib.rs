@@ -120,7 +120,7 @@ where
                 .find_block_by_hash(attributes.parent, BlockSource::Any)?
                 .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
 
-            // we already now the hash, so we can seal it
+            // we already know the hash, so we can seal it
             block.seal(attributes.parent)
         };
 
@@ -136,8 +136,6 @@ where
             attributes,
             chain_spec: Arc::clone(&self.chain_spec),
         };
-
-        // create empty
 
         let until = tokio::time::Instant::now() + self.config.deadline;
         let deadline = Box::pin(tokio::time::sleep_until(until));
