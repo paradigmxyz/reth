@@ -18,7 +18,7 @@ use std::{ops::RangeBounds, sync::Arc};
 use tracing::trace;
 
 mod provider;
-use provider::*;
+use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
 /// A common provider that fetches data from a database.
 ///
