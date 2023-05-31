@@ -27,7 +27,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
-use reth_stages::Pipeline;
+use reth_stages::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
 use schnellru::{ByLength, LruMap};
 use std::{
@@ -386,6 +386,12 @@ where
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
 
+        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
+
+        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu) {
+            return Ok(OnForkChoiceUpdated::with_invalid(status))
+        }
+
         // TODO: check PoW / EIP-3675 terminal block conditions for the fork choice head
         // TODO: ensure validity of the payload (is this satisfied already?)
 
@@ -554,13 +560,38 @@ where
             } else {
                 state.head_block_hash
             };
-            self.sync.set_pipeline_sync_target(target);
+
+            // we need to first check the buffer for the head and its ancestors
+            let lowest_unknown_hash = self.lowest_buffered_ancestor_or(target);
+
+            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering pipeline with target instead of downloading");
+
+            self.sync.set_pipeline_sync_target(lowest_unknown_hash);
         } else {
-            // trigger a full block download for the _missing_ new head
-            self.sync.download_full_block(state.head_block_hash);
+            // we need to first check the buffer for the head and its ancestors
+            let lowest_unknown_hash = self.lowest_buffered_ancestor_or(state.head_block_hash);
+
+            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for missing ancestors of the new head");
+
+            // trigger a full block download for missing hash, or the parent of its lowest buffered
+            // ancestor
+            self.sync.download_full_block(lowest_unknown_hash);
         }
 
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+    }
+
+    /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
+    /// are any buffered ancestors. If there are no buffered ancestors, and the block itself does
+    /// not exist in the buffer, this returns the hash that is passed in.
+    ///
+    /// Returns the parent hash of the block itself if the block is buffered and has no other
+    /// buffered ancestors.
+    fn lowest_buffered_ancestor_or(&self, hash: H256) -> H256 {
+        self.blockchain
+            .lowest_buffered_ancestor(hash)
+            .map(|block| block.parent_hash)
+            .unwrap_or_else(|| hash)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
@@ -635,6 +666,12 @@ where
             Err(status) => return Ok(status),
         };
         let block_hash = block.hash();
+
+        // TODO: see other notes about checking entire invalid parent chain
+        // check that the payload parent is not invalid
+        if let Some(status) = self.check_invalid_ancestor(block.parent_hash) {
+            return Ok(status)
+        }
 
         let res = if self.sync.is_pipeline_idle() {
             // we can only insert new payloads if the pipeline is _not_ running, because it holds
@@ -736,7 +773,7 @@ where
                 self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
                 PayloadStatusEnum::Accepted
             }
-            BlockStatus::Disconnected => PayloadStatusEnum::Syncing,
+            BlockStatus::Disconnected { .. } => PayloadStatusEnum::Syncing,
         };
         Ok(PayloadStatus::new(status, latest_valid_hash))
     }
@@ -808,6 +845,7 @@ where
     ) -> Option<Result<(), BeaconConsensusEngineError>> {
         match ev {
             EngineSyncEvent::FetchedFullBlock(block) => {
+                trace!(target: "consensus::engine", hash=?block.hash, "Fetched full block");
                 // it is guaranteed that the pipeline is not active at this point.
 
                 // TODO(mattsse): better error handling and start closing the gap if there's any by
@@ -836,6 +874,7 @@ where
                 return Some(Err(BeaconConsensusEngineError::PipelineChannelClosed))
             }
             EngineSyncEvent::PipelineFinished { result, reached_max_block } => {
+                trace!(target: "consensus::engine", ?result, ?reached_max_block, "Pipeline finished");
                 match result {
                     Ok(ctrl) => {
                         if reached_max_block {
@@ -854,9 +893,11 @@ where
                             }
                         };
 
-                        if ctrl.is_unwind() {
-                            // Attempt to sync to the head block after unwind.
-                            self.sync.set_pipeline_sync_target(current_state.head_block_hash);
+                        if let ControlFlow::Unwind { bad_block, .. } = ctrl {
+                            trace!(target: "consensus::engine", hash=?bad_block.hash, "Bad block detected in unwind");
+
+                            // update the `invalid_headers` cache with the new invalid headers
+                            self.invalid_headers.insert(bad_block);
                             return None
                         }
 
@@ -881,14 +922,39 @@ where
                             self.blockchain.set_canonical_head(max_header);
                         }
 
-                        // Update the state and hashes of the blockchain tree if possible.
-                        match self.restore_tree_if_possible(current_state) {
-                            Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
-                            Err(error) => {
-                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
-                                return Some(Err(error.into()))
-                            }
-                        };
+                        // TODO: figure out how to make this less complex:
+                        // restore_tree_if_possible will run the pipeline if the current_state head
+                        // hash is missing. This can arise if we buffer the forkchoice head, and if
+                        // the head is an ancestor of an invalid block. In this case we won't have
+                        // the head hash in the database, so we would set the pipeline sync target
+                        // to a known-invalid head.
+                        //
+                        // This is why we check the invalid header cache here.
+                        // This might be incorrect, because we need to check exactly the invalid
+                        // block here, which is not necessarily the head hash! we might need to
+                        // insert all ancestors into the invalid block cache.
+                        //
+                        // We would need to accompany this change with a change to the invalid
+                        // header cache, because currently we return the parent of the checked
+                        // invalid header as the `latestValidHash`, which could be incorrect if
+                        // there are other parents in the invalid header cache.
+                        //
+                        // Here, we check if the lowest buffered ancestor parent is invalid (if it
+                        // exists), or if the head is invalid. ideally we want "is a descendant of
+                        // this block invalid"
+                        let lowest_buffered_ancestor =
+                            self.lowest_buffered_ancestor_or(current_state.head_block_hash);
+
+                        if self.invalid_headers.get(&lowest_buffered_ancestor).is_none() {
+                            // Update the state and hashes of the blockchain tree if possible.
+                            match self.restore_tree_if_possible(current_state) {
+                                Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
+                                Err(error) => {
+                                    error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
+                                    return Some(Err(error.into()))
+                                }
+                            };
+                        }
                     }
                     // Any pipeline error at this point is fatal.
                     Err(error) => return Some(Err(error.into())),

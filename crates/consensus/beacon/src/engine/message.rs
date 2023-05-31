@@ -41,6 +41,16 @@ impl OnForkChoiceUpdated {
             fut: Either::Left(futures::future::ready(Ok(ForkchoiceUpdated::new(status)))),
         }
     }
+
+    /// Creates a new instance of `OnForkChoiceUpdated` with the given payload status, if the
+    /// forkchoice update failed due to an invalid payload.
+    pub(crate) fn with_invalid(status: PayloadStatus) -> Self {
+        Self {
+            is_valid_update: false,
+            fut: Either::Left(futures::future::ready(Ok(ForkchoiceUpdated::new(status)))),
+        }
+    }
+
     /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update failed because the
     /// given state is considered invalid
     pub(crate) fn invalid_state() -> Self {
