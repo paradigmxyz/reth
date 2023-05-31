@@ -309,46 +309,58 @@ where
         }
     }
 
-    /// Checks if the given `head` points to an invalid header, which requires a specific response
-    /// to a forkchoice update.
-    ///
-    /// This first checks if there is any buffered ancestor of the given `head` that is already
-    /// marked as invalid, otherwise it checks the `head` itself.
-    #[instrument(level = "trace", skip(self), target = "consensus::engine")]
-    fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
-        // first check if there are any buffered ancestors
-        // TODO: check if lowest buffered ancestor, or head, is in invalid chain segment
-        // see: https://github.com/paradigmxyz/reth/issues/2904
-        let (parent_hash, parent_number) =
-            if let Some(buffered_ancestor) = self.blockchain.lowest_buffered_ancestor(head) {
-                // check if the buffered ancestor is in the invalid headers cache, otherwise check
-                // the head itself
-                let header = match self.invalid_headers.get(&buffered_ancestor.parent_hash) {
-                    Some(header) => header,
-                    // check if the head itself was previously marked as invalid
-                    None => self.invalid_headers.get(&head)?,
-                };
-                (header.parent_hash, header.number.saturating_sub(1))
-            } else {
-                // check if the head was previously marked as invalid
-                let header = self.invalid_headers.get(&head)?;
-                (header.parent_hash, header.number.saturating_sub(1))
-            };
-
-        let mut latest_valid_hash = parent_hash;
-
+    /// Prepares the invalid payload response for the given hash, checking the
+    /// database for the parent hash and populating the payload status with the latest valid hash
+    /// according to the engine api spec.
+    fn prepare_invalid_response(&self, mut parent_hash: H256) -> PayloadStatus {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Ok(Some(parent)) = self.blockchain.header_by_number(parent_number) {
+        if let Ok(Some(parent)) = self.blockchain.header_by_hash_or_number(parent_hash.into()) {
             if parent.difficulty != U256::ZERO {
-                latest_valid_hash = H256::zero();
+                parent_hash = H256::zero();
             }
         }
 
-        let status = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+        PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
-        .with_latest_valid_hash(latest_valid_hash);
+        .with_latest_valid_hash(parent_hash)
+    }
+
+    /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
+    /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
+    ///
+    /// Returns a payload status response according to the engine API spec.
+    #[instrument(level = "trace", skip(self), target = "consensus::engine")]
+    fn check_invalid_ancestor_with_head(
+        &mut self,
+        check: H256,
+        head: H256,
+    ) -> Option<PayloadStatus> {
+        // check if the check hash was previously marked as invalid
+        let header = { self.invalid_headers.get(&check)?.clone() };
+
+        // populate the latest valid hash field
+        let status = self.prepare_invalid_response(header.parent_hash);
+
+        // insert the head block into the invalid header cache
+        self.invalid_headers.insert_with_invalid_ancestor(head, header);
+
+        Some(status)
+    }
+
+    /// Checks if the given `head` points to an invalid header, which requires a specific response
+    /// to a forkchoice update.
+    #[instrument(level = "trace", skip(self), target = "consensus::engine")]
+    fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
+        let parent_hash = {
+            // check if the head was previously marked as invalid
+            let header = self.invalid_headers.get(&head)?;
+            header.parent_hash
+        };
+
+        // popualte the latest valid hash field
+        let status = self.prepare_invalid_response(parent_hash);
 
         Some(status)
     }
@@ -790,7 +802,17 @@ where
                 self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
                 PayloadStatusEnum::Accepted
             }
-            BlockStatus::Disconnected { .. } => PayloadStatusEnum::Syncing,
+            BlockStatus::Disconnected { .. } => {
+                // check if the block's parent is already marked as invalid
+                if let Some(status) =
+                    self.check_invalid_ancestor_with_head(block.parent_hash, block.hash)
+                {
+                    return Ok(status)
+                }
+
+                // not known to be invalid, but we don't know anything else
+                PayloadStatusEnum::Syncing
+            }
         };
         Ok(PayloadStatus::new(status, latest_valid_hash))
     }
@@ -1060,13 +1082,8 @@ impl InvalidHeaderCache {
     }
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    fn insert_with_invalid_ancestor(
-        &mut self,
-        header: SealedHeader,
-        invalid_ancestor: Arc<Header>,
-    ) {
-        let hash = header.hash;
-        self.headers.insert(hash, invalid_ancestor);
+    fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
+        self.headers.insert(header_hash, invalid_ancestor);
     }
 
     /// Inserts an invalid ancestor into the map.

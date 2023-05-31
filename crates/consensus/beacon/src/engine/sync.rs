@@ -128,11 +128,6 @@ where
         self.pending_pipeline_target = Some(target);
     }
 
-    /// Unsets the pipeline sync target.
-    pub(crate) fn unset_pipeline_sync_target(&mut self) {
-        self.pending_pipeline_target = None;
-    }
-
     /// Check if the engine reached max block as specified by `max_block` parameter.
     ///
     /// Note: this is mainly for debugging purposes.
