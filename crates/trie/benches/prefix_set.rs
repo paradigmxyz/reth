@@ -120,12 +120,12 @@ mod implementations {
     }
 
     impl PrefixSetAbstraction for BTreeAnyPrefixSet {
-        fn contains(&mut self, key: Nibbles) -> bool {
-            self.keys.iter().any(|k| k.has_prefix(&key))
-        }
-
         fn insert(&mut self, key: Nibbles) {
             self.keys.insert(key);
+        }
+
+        fn contains(&mut self, key: Nibbles) -> bool {
+            self.keys.iter().any(|k| k.has_prefix(&key))
         }
     }
 
@@ -136,6 +136,10 @@ mod implementations {
     }
 
     impl PrefixSetAbstraction for BTreeRangeLastCheckedPrefixSet {
+        fn insert(&mut self, key: Nibbles) {
+            self.keys.insert(key);
+        }
+
         fn contains(&mut self, prefix: Nibbles) -> bool {
             let range = match self.last_checked.as_ref() {
                 // presumably never hit
@@ -157,10 +161,6 @@ mod implementations {
 
             false
         }
-
-        fn insert(&mut self, key: Nibbles) {
-            self.keys.insert(key);
-        }
     }
 
     #[derive(Default)]
@@ -170,6 +170,11 @@ mod implementations {
     }
 
     impl PrefixSetAbstraction for VecBinarySearchPrefixSet {
+        fn insert(&mut self, key: Nibbles) {
+            self.sorted = false;
+            self.keys.push(key);
+        }
+
         fn contains(&mut self, prefix: Nibbles) -> bool {
             if !self.sorted {
                 self.keys.sort();
@@ -184,11 +189,6 @@ mod implementations {
                 },
             }
         }
-
-        fn insert(&mut self, key: Nibbles) {
-            self.sorted = false;
-            self.keys.push(key);
-        }
     }
 
     #[derive(Default)]
@@ -199,6 +199,11 @@ mod implementations {
     }
 
     impl PrefixSetAbstraction for VecCursorPrefixSet {
+        fn insert(&mut self, nibbles: Nibbles) {
+            self.sorted = false;
+            self.keys.push(nibbles);
+        }
+
         fn contains(&mut self, prefix: Nibbles) -> bool {
             if !self.sorted {
                 self.keys.sort();
@@ -225,11 +230,6 @@ mod implementations {
 
             false
         }
-
-        fn insert(&mut self, nibbles: Nibbles) {
-            self.sorted = false;
-            self.keys.push(nibbles);
-        }
     }
 
     #[derive(Default)]
@@ -240,6 +240,11 @@ mod implementations {
     }
 
     impl PrefixSetAbstraction for VecBinarySearchWithLastFoundPrefixSet {
+        fn insert(&mut self, key: Nibbles) {
+            self.sorted = false;
+            self.keys.push(key);
+        }
+
         fn contains(&mut self, prefix: Nibbles) -> bool {
             if !self.sorted {
                 self.keys.sort();
@@ -260,11 +265,6 @@ mod implementations {
                     None => false, // prefix > last key
                 },
             }
-        }
-
-        fn insert(&mut self, key: Nibbles) {
-            self.sorted = false;
-            self.keys.push(key);
         }
     }
 }
