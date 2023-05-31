@@ -6,19 +6,22 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_interfaces::db::DatabaseError;
 use reth_metrics::{
     metrics::{self, Gauge},
     Metrics,
 };
 use reth_primitives::{
     constants::MGAS_TO_GAS,
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Block, BlockNumber, BlockWithSenders, TransactionSigned, U256,
+    stage::{
+        CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
+    },
+    Block, BlockNumber, BlockWithSenders, Header, TransactionSigned, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
-use std::time::Instant;
+use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
 
 /// Execution stage metrics.
@@ -143,25 +146,30 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Progress tracking
         let mut stage_progress = start_block;
-        let mut stage_checkpoint = input
-            .checkpoint()
-            .entities_stage_checkpoint()
-            // We should always have a checkpoint for the Execution stage prepared by the Headers
-            // stage. This default value is for the case when the synced node is updated from the
-            // version which didn't have the logic for Execution checkpoint update in Headers.
-            .unwrap_or(EntitiesCheckpoint {
-                processed: 0,
-                total: Some({
-                    let mut cursor = tx.cursor_read::<tables::Headers>()?;
-                    let mut gas_total = 0;
-
-                    while let Some((_, header)) = cursor.next()? {
-                        gas_total += header.gas_used;
-                    }
-
-                    gas_total
-                }),
-            });
+        let mut stage_checkpoint = match input.checkpoint().execution_stage_checkpoint() {
+            Some(stage_checkpoint @ ExecutionCheckpoint { block_range, .. })
+                if RangeInclusive::<_>::from(block_range) == (start_block..=max_block) =>
+            {
+                stage_checkpoint
+            }
+            Some(ExecutionCheckpoint {
+                block_range,
+                progress: EntitiesCheckpoint { processed, total: Some(total) },
+            }) if block_range.to == start_block => ExecutionCheckpoint {
+                block_range,
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total: Some(total + total_gas_to_execute(tx, start_block..=max_block)?),
+                },
+            },
+            _ => ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                progress: EntitiesCheckpoint {
+                    processed: 0,
+                    total: Some(total_gas_to_execute(tx, start_block..=max_block)?),
+                },
+            },
+        };
 
         // Execute block range
         let mut state = PostState::default();
@@ -185,7 +193,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Merge state changes
             state.extend(block_state);
             stage_progress = block_number;
-            stage_checkpoint.processed += block.gas_used;
+            stage_checkpoint.progress.processed += block.gas_used;
 
             // Write history periodically to free up memory
             if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
@@ -212,10 +220,24 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(stage_progress)
-                .with_entities_stage_checkpoint(stage_checkpoint),
+                .with_execution_stage_checkpoint(stage_checkpoint),
             done: is_final_range,
         })
     }
+}
+
+fn total_gas_to_execute<DB: Database>(
+    tx: &Transaction<'_, DB>,
+    range: RangeInclusive<BlockNumber>,
+) -> Result<u64, DatabaseError> {
+    let mut gas_total = 0;
+
+    for entry in tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
+        let (_, Header { gas_used, .. }) = entry?;
+        gas_total += gas_used;
+    }
+
+    Ok(gas_total)
 }
 
 /// The size of the stack used by the executor.
@@ -325,7 +347,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         // Look up the start index for the transaction range
         let first_tx_num = tx.block_body_indices(*range.start())?.first_tx_num();
 
-        let mut stage_checkpoint = input.checkpoint.entities_stage_checkpoint();
+        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
         // Unwind all receipts for transactions in the block range
         let mut cursor = tx.cursor_write::<tables::Receipts>()?;
@@ -338,12 +360,12 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             reverse_walker.delete_current()?;
 
             if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-                stage_checkpoint.processed -= receipt.cumulative_gas_used;
+                stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
             }
         }
 
         let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
-            StageCheckpoint::new(unwind_to).with_entities_stage_checkpoint(stage_checkpoint)
+            StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
         } else {
             StageCheckpoint::new(unwind_to)
         };
@@ -480,9 +502,15 @@ mod tests {
         assert_matches!(output, ExecOutput {
             checkpoint: StageCheckpoint {
                 block_number: 1,
-                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                    processed,
-                    total: Some(total)
+                stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                    block_range: CheckpointBlockRange {
+                        from: 1,
+                        to: 1,
+                    },
+                    progress: EntitiesCheckpoint {
+                        processed,
+                        total: Some(total)
+                    }
                 }))
             },
             done: true
@@ -583,9 +611,15 @@ mod tests {
         assert_matches!(result, UnwindOutput {
             checkpoint: StageCheckpoint {
                 block_number: 0,
-                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                    processed: 0,
-                    total: Some(total)
+                stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                    block_range: CheckpointBlockRange {
+                        from: 1,
+                        to: 1,
+                    },
+                    progress: EntitiesCheckpoint {
+                        processed: 0,
+                        total: Some(total)
+                    }
                 }))
             }
         } if total == block.gas_used);

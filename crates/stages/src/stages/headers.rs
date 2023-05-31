@@ -217,20 +217,6 @@ where
         // is a fatal error to prevent the pipeline from running forever.
         let downloaded_headers = self.downloader.next().await.ok_or(StageError::ChannelClosed)?;
 
-        let execution_checkpoint = tx.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default();
-        let mut execution_stage_checkpoint =
-            execution_checkpoint.entities_stage_checkpoint().unwrap_or_default();
-
-        for header in &downloaded_headers {
-            execution_stage_checkpoint.total =
-                Some(execution_stage_checkpoint.total.unwrap_or_default() + header.gas_used)
-        }
-
-        tx.save_stage_checkpoint(
-            StageId::Execution,
-            execution_checkpoint.with_entities_stage_checkpoint(execution_stage_checkpoint),
-        )?;
-
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
         let tip_block_number = match tip {
@@ -322,36 +308,12 @@ where
             input.unwind_to + 1,
         )?;
         tx.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-
-        let execution_checkpoint = tx.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default();
-        let mut execution_stage_checkpoint =
-            execution_checkpoint.entities_stage_checkpoint().unwrap_or_default();
-
-        let mut cursor = tx.cursor_write::<tables::Headers>()?;
-        let mut reverse_walker = cursor.walk_back(None)?;
-
-        let mut unwound_headers = 0;
-        while let Some(Ok((block_number, header))) = reverse_walker.next() {
-            if block_number <= input.unwind_to {
-                break
-            }
-
-            execution_stage_checkpoint.total =
-                Some(execution_stage_checkpoint.total.unwrap_or_default() + header.gas_used);
-
-            reverse_walker.delete_current()?;
-            unwound_headers += 1;
-        }
-
-        tx.save_stage_checkpoint(
-            StageId::Execution,
-            execution_checkpoint.with_entities_stage_checkpoint(execution_stage_checkpoint),
-        )?;
+        let unwound_headers = tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         let stage_checkpoint =
             input.checkpoint.entities_stage_checkpoint().map(|checkpoint| EntitiesCheckpoint {
                 processed: checkpoint.processed.saturating_sub(unwound_headers as u64),
-                total: checkpoint.total,
+                total: None,
             });
 
         let mut checkpoint = StageCheckpoint::new(input.unwind_to);
