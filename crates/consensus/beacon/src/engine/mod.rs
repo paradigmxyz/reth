@@ -389,8 +389,7 @@ where
         let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
 
         if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu) {
-            // TODO: confusing - valid is returned here but the status is invalid
-            return Ok(OnForkChoiceUpdated::valid(status))
+            return Ok(OnForkChoiceUpdated::with_invalid(status))
         }
 
         // TODO: check PoW / EIP-3675 terminal block conditions for the fork choice head
