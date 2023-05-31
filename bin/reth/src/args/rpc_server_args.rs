@@ -11,7 +11,16 @@ use reth_provider::{
     BlockProviderIdExt, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
     StateProviderFactory,
 };
-use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
+use reth_rpc::{
+    eth::{
+        cache::{
+            DEFAULT_BLOCK_CACHE_SIZE_BYTES_MB, DEFAULT_ENV_CACHE_SIZE_BYTES_MB,
+            DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB,
+        },
+        gas_oracle::GasPriceOracleConfig,
+    },
+    JwtError, JwtSecret,
+};
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
@@ -127,6 +136,18 @@ pub struct RpcServerArgs {
     /// Gas price oracle configuration.
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
+
+    /// Max size for cached block data in megabytes.
+    #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_SIZE_BYTES_MB)]
+    pub block_cache_size: usize,
+
+    /// Max size for cached receipt data in megabytes.
+    #[arg(long, default_value_t = DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB)]
+    pub receipt_cache_size: usize,
+
+    /// Max size for cached evm env data in megabytes.
+    #[arg(long, default_value_t = DEFAULT_ENV_CACHE_SIZE_BYTES_MB)]
+    pub env_cache_size: usize,
 }
 
 impl RpcServerArgs {
@@ -140,11 +161,19 @@ impl RpcServerArgs {
         self.rpc_max_response_size * 1024 * 1024
     }
 
-    /// Convenience function that returns whether ipc is enabled
-    ///
-    /// By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
-    fn is_ipc_enabled(&self) -> bool {
-        !self.ipcdisable
+    /// Returns the max number of bytes for cached block data in bytes
+    pub fn block_cache_size_bytes(&self) -> usize {
+        self.block_cache_size * 1024 * 1024
+    }
+
+    /// Returns the max number of bytes for cached receipt data in bytes
+    pub fn receipt_cache_size_bytes(&self) -> usize {
+        self.receipt_cache_size * 1024 * 1024
+    }
+
+    /// Returns the max number of bytes for cached evm env data in bytes
+    pub fn env_cache_size_bytes(&self) -> usize {
+        self.env_cache_size * 1024 * 1024
     }
 
     /// Extracts the gas price oracle config from the args.
@@ -162,6 +191,13 @@ impl RpcServerArgs {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
             .gpo_config(self.gas_price_oracle_config())
+    }
+
+    /// Convenience function that returns whether ipc is enabled
+    ///
+    /// By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+    fn is_ipc_enabled(&self) -> bool {
+        !self.ipcdisable
     }
 
     /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
