@@ -45,8 +45,8 @@ impl NodeState {
                 if notable {
                     info!(
                         target: "reth::cli",
+                        pipeline_stages = %format!("{pipeline_progress}/{pipeline_total}"),
                         stage = %stage_id,
-                        pipeline_progress = %format!("{pipeline_progress}/{pipeline_total}"),
                         from = self.current_checkpoint.block_number,
                         checkpoint = %self.current_checkpoint,
                         "Executing stage",
@@ -67,8 +67,8 @@ impl NodeState {
 
                 info!(
                     target: "reth::cli",
+                    pipeline_stages = %format!("{pipeline_progress}/{pipeline_total}"),
                     stage = %stage_id,
-                    pipeline_progress = %format!("{pipeline_progress}/{pipeline_total}"),
                     progress = checkpoint.block_number,
                     %checkpoint,
                     "{}",
