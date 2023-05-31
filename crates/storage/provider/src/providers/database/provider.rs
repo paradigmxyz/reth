@@ -58,7 +58,7 @@ impl<'this, TX: DbTx<'this>> Provider<'this, TX> {
     }
 
     /// Consume `DbTx` or `DbTxMut`.
-    pub fn take_tx(self) -> TX {
+    pub fn into_tx(self) -> TX {
         self.tx
     }
 }
