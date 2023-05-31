@@ -32,7 +32,7 @@ pub(crate) type DatabaseProviderRO<'this, DB> =
 pub(crate) type DatabaseProviderRW<'this, DB> =
     DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>;
 
-/// Provider struct which allows to interface with the database using different types of providers.
+/// A provider struct that fetchs data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashProvider`]
 #[derive(Debug)]
 pub struct DatabaseProvider<'this, TX>
