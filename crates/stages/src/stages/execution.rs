@@ -232,13 +232,19 @@ fn execution_checkpoint<DB: Database>(
         },
         // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
         // already processed, if there's any.
-        _ => ExecutionCheckpoint {
-            block_range: CheckpointBlockRange { from: start_block, to: max_block },
-            progress: EntitiesCheckpoint {
-                processed: calculate_gas_used_from_headers(tx, 0..=start_block - 1)?,
-                total: Some(calculate_gas_used_from_headers(tx, 0..=max_block)?),
-            },
-        },
+        _ => {
+            let processed = calculate_gas_used_from_headers(tx, 0..=start_block - 1)?;
+
+            ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total: Some(
+                        processed + calculate_gas_used_from_headers(tx, start_block..=max_block)?,
+                    ),
+                },
+            }
+        }
     })
 }
 
