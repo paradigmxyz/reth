@@ -219,7 +219,7 @@ where
     /// Create a new instance of the [BeaconConsensusEngine] using the given channel to configure
     /// the [BeaconEngineMessage] communication channel.
     ///
-    /// By default the engine is started with [PipelineState::Idle].
+    /// By default the engine is started with idle pipeline.
     /// The pipeline can be launched immediately in one of the following ways descending in
     /// priority:
     /// - Explicit [Option::Some] target block hash provided via a constructor argument.
