@@ -481,16 +481,16 @@ mod tests {
     }
 
     impl WithdrawalsProvider for Provider {
-        fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
-            self.withdrawals_provider.latest_withdrawal()
-        }
-
         fn withdrawals_by_block(
             &self,
             _id: BlockHashOrNumber,
             _timestamp: u64,
         ) -> RethResult<Option<Vec<Withdrawal>>> {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
+        }
+
+        fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
+            self.withdrawals_provider.latest_withdrawal()
         }
     }
 

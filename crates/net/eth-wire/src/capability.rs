@@ -84,8 +84,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Capability {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for Capability {
     type Parameters = ParamsFor<String>;
-    type Strategy = BoxedStrategy<Capability>;
-
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         any_with::<String>(args) // TODO: what possible values?
             .prop_flat_map(move |name| {
@@ -94,6 +92,8 @@ impl proptest::arbitrary::Arbitrary for Capability {
             })
             .boxed()
     }
+
+    type Strategy = BoxedStrategy<Capability>;
 }
 
 /// Represents all capabilities of a node.

@@ -461,6 +461,11 @@ mod tests {
     }
 
     impl UnwindStageTestRunner for MerkleTestRunner {
+        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+            // The unwind is validated within the stage
+            Ok(())
+        }
+
         fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             let target_block = input.unwind_to + 1;
 
@@ -530,11 +535,6 @@ mod tests {
                     Ok(())
                 })
                 .unwrap();
-            Ok(())
-        }
-
-        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
-            // The unwind is validated within the stage
             Ok(())
         }
     }
