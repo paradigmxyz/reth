@@ -24,16 +24,18 @@ use reth_revm_primitives::{
 };
 use std::{ops::RangeBounds, sync::Arc};
 
-/// A `Provider` that holds a read-only database transaction.
-pub(crate) type ProviderRO<'this, DB> = Provider<'this, <DB as DatabaseGAT<'this>>::TX>;
+/// A [`DatabaseProvider`] that holds a read-only database transaction.
+pub(crate) type DatabaseProviderRO<'this, DB> =
+    DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TX>;
 
-/// A `Provider` that holds a read-write database transaction.
-pub(crate) type ProviderRW<'this, DB> = Provider<'this, <DB as DatabaseGAT<'this>>::TXMut>;
+/// A [`DatabaseProvider`] that holds a read-write database transaction.
+pub(crate) type DatabaseProviderRW<'this, DB> =
+    DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>;
 
 /// Provider struct which allows to interface with the database using different types of providers.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashProvider`]
 #[derive(Debug)]
-pub struct Provider<'this, TX>
+pub struct DatabaseProvider<'this, TX>
 where
     Self: 'this,
 {
@@ -44,14 +46,14 @@ where
     _phantom_data: std::marker::PhantomData<&'this ()>,
 }
 
-impl<'this, TX: DbTxMut<'this>> Provider<'this, TX> {
+impl<'this, TX: DbTxMut<'this>> DatabaseProvider<'this, TX> {
     /// Creates a provider with an inner read-write transaction.
     pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
         Self { tx, chain_spec, _phantom_data: std::marker::PhantomData }
     }
 }
 
-impl<'this, TX: DbTx<'this>> Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
     /// Creates a provider with an inner read-only transaction.
     pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
         Self { tx, chain_spec, _phantom_data: std::marker::PhantomData }
@@ -63,14 +65,14 @@ impl<'this, TX: DbTx<'this>> Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTxMut<'this> + DbTx<'this>> Provider<'this, TX> {
+impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     /// Commit database transaction.
     pub fn commit(self) -> Result<bool> {
         Ok(self.tx.commit()?)
     }
 }
 
-impl<'this, TX: DbTx<'this>> HeaderProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
         if let Some(num) = self.block_number(*block_hash)? {
             Ok(self.header_by_number(num)?)
@@ -130,7 +132,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockHashProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> BlockHashProvider for DatabaseProvider<'this, TX> {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
     }
@@ -145,7 +147,7 @@ impl<'this, TX: DbTx<'this>> BlockHashProvider for Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockNumProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> BlockNumProvider for DatabaseProvider<'this, TX> {
     fn chain_info(&self) -> Result<ChainInfo> {
         let best_number = self.best_block_number()?;
         let best_hash = self.block_hash(best_number)?.unwrap_or_default();
@@ -168,7 +170,7 @@ impl<'this, TX: DbTx<'this>> BlockNumProvider for Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
     fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
         if source.is_database() {
             self.block(hash.into())
@@ -213,7 +215,7 @@ impl<'this, TX: DbTx<'this>> BlockProvider for Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TxHashNumber>(tx_hash)?)
     }
@@ -320,7 +322,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> ReceiptProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
     fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>> {
         Ok(self.tx.get::<tables::Receipts>(id)?)
     }
@@ -353,7 +355,7 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> WithdrawalsProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> WithdrawalsProvider for DatabaseProvider<'this, TX> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -385,7 +387,7 @@ impl<'this, TX: DbTx<'this>> WithdrawalsProvider for Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> EvmEnvProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> EvmEnvProvider for DatabaseProvider<'this, TX> {
     fn fill_env_at(
         &self,
         cfg: &mut CfgEnv,
@@ -452,7 +454,7 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for Provider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> StageCheckpointProvider for Provider<'this, TX> {
+impl<'this, TX: DbTx<'this>> StageCheckpointProvider for DatabaseProvider<'this, TX> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(self.tx.get::<tables::SyncStage>(id.to_string())?)
     }
