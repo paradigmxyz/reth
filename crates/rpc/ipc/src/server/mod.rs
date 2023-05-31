@@ -656,6 +656,21 @@ mod tests {
         assert_eq!(response, msg);
     }
 
+    #[tokio::test]
+    async fn test_ipc_modules() {
+        let endpoint = dummy_endpoint();
+        let server = Builder::default().build(&endpoint).unwrap();
+        let mut module = RpcModule::new(());
+        let msg = r#"{"admin":"1.0","debug":"1.0","engine":"1.0","eth":"1.0","ethash":"1.0","miner":"1.0","net":"1.0","rpc":"1.0","txpool":"1.0","web3":"1.0"}"#;
+        module.register_method("rpc_modules", move |_, _| msg).unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let response: String = client.request("rpc_modules", rpc_params![]).await.unwrap();
+        assert_eq!(response, msg);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     #[traced_test]
     async fn test_rpc_subscription() {
