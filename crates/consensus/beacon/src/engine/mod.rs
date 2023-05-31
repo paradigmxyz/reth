@@ -55,8 +55,10 @@ pub use error::{
 mod metrics;
 
 mod event;
+mod forkchoice;
 pub(crate) mod sync;
 
+use crate::engine::forkchoice::ForkchoiceStateTracker;
 pub use event::BeaconConsensusEngineEvent;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
@@ -163,9 +165,8 @@ where
     engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
     /// A clone of the handle
     handle: BeaconConsensusEngineHandle,
-    /// Current forkchoice state. The engine must receive the initial state in order to start
-    /// syncing.
-    forkchoice_state: Option<ForkchoiceState>,
+    /// Tracks the received forkchoice state updates received by the CL.
+    forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
     payload_builder: PayloadBuilderHandle,
     /// Listeners for engine events.
@@ -246,7 +247,7 @@ where
             sync_state_updater,
             engine_message_rx: UnboundedReceiverStream::new(rx),
             handle: handle.clone(),
-            forkchoice_state: None,
+            forkchoice_state_tracker: Default::default(),
             payload_builder,
             listeners: EventListeners::default(),
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
@@ -354,6 +355,9 @@ where
             }
         };
 
+        // update the forkchoice state tracker
+        self.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
+
         let is_valid_response = on_updated.is_valid_update();
         let _ = tx.send(Ok(on_updated));
 
@@ -394,9 +398,6 @@ where
 
         // TODO: check PoW / EIP-3675 terminal block conditions for the fork choice head
         // TODO: ensure validity of the payload (is this satisfied already?)
-
-        let is_first_forkchoice = self.forkchoice_state.is_none();
-        self.forkchoice_state = Some(state);
 
         let status = if self.sync.is_pipeline_idle() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
@@ -445,7 +446,7 @@ where
                         }
                     }
 
-                    self.on_failed_canonical_forkchoice_update(&state, error, is_first_forkchoice)
+                    self.on_failed_canonical_forkchoice_update(&state, error)
                 }
             }
         } else {
@@ -519,7 +520,6 @@ where
         &mut self,
         state: &ForkchoiceState,
         error: Error,
-        is_first_forkchoice: bool,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
         warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
@@ -550,7 +550,7 @@ where
 
         // if this is the first FCU we received from the beacon node, then we start triggering the
         // pipeline
-        if is_first_forkchoice {
+        if self.forkchoice_state_tracker.is_empty() {
             // find the appropriate target to sync to, if we don't have the safe block hash then we
             // start syncing to the safe block via pipeline first
             let target = if !state.safe_block_hash.is_zero() &&
@@ -859,9 +859,9 @@ where
                 {
                     // payload is valid
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
-                } else if let Some(ref state) = self.forkchoice_state {
+                } else if let Some(target) = self.forkchoice_state_tracker.sync_target() {
                     // if the payload is invalid, we run the pipeline to the head block.
-                    self.sync.set_pipeline_sync_target(state.head_block_hash);
+                    self.sync.set_pipeline_sync_target(target);
                 }
             }
             EngineSyncEvent::PipelineStarted(target) => {
@@ -882,16 +882,6 @@ where
                             // configured block.
                             return Some(Ok(()))
                         }
-
-                        let current_state = match self.forkchoice_state {
-                            Some(state) => state,
-                            None => {
-                                // This is only possible if the node was run with `debug.tip`
-                                // argument and without CL.
-                                warn!(target: "consensus::engine", "No forkchoice state available");
-                                return None
-                            }
-                        };
 
                         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
                             trace!(target: "consensus::engine", hash=?bad_block.hash, "Bad block detected in unwind");
@@ -922,6 +912,19 @@ where
                             self.blockchain.set_canonical_head(max_header);
                         }
 
+                        let sync_target_state = match self
+                            .forkchoice_state_tracker
+                            .sync_target_state()
+                        {
+                            Some(current_state) => current_state,
+                            None => {
+                                // This is only possible if the node was run with `debug.tip`
+                                // argument and without CL.
+                                warn!(target: "consensus::engine", "No forkchoice state available");
+                                return None
+                            }
+                        };
+
                         // TODO: figure out how to make this less complex:
                         // restore_tree_if_possible will run the pipeline if the current_state head
                         // hash is missing. This can arise if we buffer the forkchoice head, and if
@@ -943,11 +946,11 @@ where
                         // exists), or if the head is invalid. ideally we want "is a descendant of
                         // this block invalid"
                         let lowest_buffered_ancestor =
-                            self.lowest_buffered_ancestor_or(current_state.head_block_hash);
+                            self.lowest_buffered_ancestor_or(sync_target_state.head_block_hash);
 
                         if self.invalid_headers.get(&lowest_buffered_ancestor).is_none() {
                             // Update the state and hashes of the blockchain tree if possible.
-                            match self.restore_tree_if_possible(current_state) {
+                            match self.restore_tree_if_possible(sync_target_state) {
                                 Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
                                 Err(error) => {
                                     error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
