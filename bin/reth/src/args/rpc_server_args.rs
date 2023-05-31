@@ -5,7 +5,7 @@ use clap::{
     builder::{PossibleValue, TypedValueParser},
     Arg, Args, Command,
 };
-use futures::FutureExt;
+use futures::{FutureExt, TryFutureExt};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
     BlockProviderIdExt, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider,
@@ -193,6 +193,13 @@ impl RpcServerArgs {
             .gpo_config(self.gas_price_oracle_config())
     }
 
+    /// Convenience function that returns whether ipc is enabled
+    ///
+    /// By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+    fn is_ipc_enabled(&self) -> bool {
+        !self.ipcdisable
+    }
+
     /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
     /// jwt-secret, which designates a file containing the hex-encoded 256 bit secret key to be used
     /// for verifying/generating JWT tokens.
@@ -268,11 +275,17 @@ impl RpcServerArgs {
             .build_with_auth_server(module_config, engine_api);
 
         let server_config = self.rpc_server_config();
-        let has_server = server_config.has_server();
-        let launch_rpc = rpc_modules.start_server(server_config).inspect(|_| {
-            if has_server {
-                info!(target: "reth::cli", "Started RPC server");
+        let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
+            if let Some(url) = handle.ipc_endpoint() {
+                info!(target: "reth::cli", url=%url, "IPC server started");
             }
+            if let Some(addr) = handle.http_local_addr() {
+                info!(target: "reth::cli", url=%addr, "HTTP server started");
+            }
+            if let Some(addr) = handle.ws_local_addr() {
+                info!(target: "reth::cli", url=%addr, "WS server started");
+            }
+            handle
         });
 
         let launch_auth = auth_module.start_server(auth_config).inspect(|_| {
@@ -363,15 +376,27 @@ impl RpcServerArgs {
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
         let mut config = TransportRpcModuleConfig::default()
             .with_config(RpcModuleConfig::new(self.eth_config()));
-        let rpc_modules =
-            RpcModuleSelection::Selection(vec![RethRpcModule::Admin, RethRpcModule::Eth]);
+
         if self.http {
-            config = config.with_http(self.http_api.as_ref().unwrap_or(&rpc_modules).clone());
+            config = config.with_http(
+                self.http_api
+                    .clone()
+                    .unwrap_or_else(|| RpcModuleSelection::standard_modules().into()),
+            );
         }
 
         if self.ws {
-            config = config.with_ws(self.ws_api.as_ref().unwrap_or(&rpc_modules).clone());
+            config = config.with_ws(
+                self.ws_api
+                    .clone()
+                    .unwrap_or_else(|| RpcModuleSelection::standard_modules().into()),
+            );
         }
+
+        if self.is_ipc_enabled() {
+            config = config.with_ipc(RpcModuleSelection::default_ipc_modules());
+        }
+
         config
     }
 
@@ -417,7 +442,7 @@ impl RpcServerArgs {
             config = config.with_ws_address(socket_address).with_ws(self.http_ws_server_builder());
         }
 
-        if !self.ipcdisable {
+        if self.is_ipc_enabled() {
             config = config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(
                 self.ipcpath.as_ref().unwrap_or(&constants::DEFAULT_IPC_ENDPOINT.to_string()),
             );
@@ -509,7 +534,7 @@ mod tests {
         assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
-            vec![RethRpcModule::Admin, RethRpcModule::Eth]
+            RpcModuleSelection::standard_modules()
         );
     }
 
