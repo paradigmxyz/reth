@@ -156,7 +156,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             let (block, senders) = block.into_components();
             let block_state = executor
                 .execute_and_verify_receipt(&block, td, Some(senders))
-                .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
+                .map_err(|error| StageError::ExecutionError {
+                    block: block.header.clone().seal_slow(),
+                    error,
+                })?;
 
             // Gas metrics
             self.metrics

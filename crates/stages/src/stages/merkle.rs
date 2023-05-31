@@ -10,7 +10,7 @@ use reth_primitives::{
     hex,
     stage::{MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
-    BlockNumber, H256,
+    BlockNumber, SealedHeader, H256,
 };
 use reth_provider::Transaction;
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
@@ -66,20 +66,23 @@ impl MerkleStage {
         Self::Unwind
     }
 
-    /// Check that the computed state root matches the expected.
+    /// Check that the computed state root matches the root in the expected header.
     fn validate_state_root(
         &self,
         got: H256,
-        expected: H256,
+        expected: SealedHeader,
         target_block: BlockNumber,
     ) -> Result<(), StageError> {
-        if got == expected {
+        if got == expected.state_root {
             Ok(())
         } else {
             warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Block's root state failed verification");
             Err(StageError::Validation {
-                block: target_block,
-                error: consensus::ConsensusError::BodyStateRootDiff { got, expected },
+                block: expected.clone(),
+                error: consensus::ConsensusError::BodyStateRootDiff {
+                    got,
+                    expected: expected.state_root,
+                },
             })
         }
     }
@@ -154,7 +157,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let (from_block, to_block) = range.clone().into_inner();
         let current_block = input.previous_stage_checkpoint().block_number;
 
-        let block_root = tx.get_header(current_block)?.state_root;
+        let block = tx.get_header(current_block)?;
+        let block_root = block.state_root;
 
         let mut checkpoint = self.get_execution_checkpoint(tx)?;
 
@@ -219,7 +223,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         // Reset the checkpoint
         self.save_execution_checkpoint(tx, None)?;
 
-        self.validate_state_root(trie_root, block_root, to_block)?;
+        self.validate_state_root(trie_root, block.seal_slow(), to_block)?;
 
         info!(target: "sync::stages::merkle::exec", stage_progress = to_block, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(to_block), done: true })
@@ -251,8 +255,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calulated state root
-            let target_root = tx.get_header(input.unwind_to)?.state_root;
-            self.validate_state_root(block_root, target_root, input.unwind_to)?;
+            let target = tx.get_header(input.unwind_to)?;
+            self.validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
             updates.flush(tx.deref_mut())?;

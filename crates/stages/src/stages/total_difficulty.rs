@@ -78,7 +78,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
             self.consensus
                 .validate_header_with_total_difficulty(&header, td)
-                .map_err(|error| StageError::Validation { block: header.number, error })?;
+                .map_err(|error| StageError::Validation { block: header.seal_slow(), error })?;
             cursor_td.append(block_number, td.into())?;
         }
         info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
