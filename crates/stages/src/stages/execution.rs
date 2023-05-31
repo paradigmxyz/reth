@@ -227,7 +227,7 @@ fn execution_checkpoint<DB: Database>(
             block_range: CheckpointBlockRange { from: start_block, to: max_block },
             progress: EntitiesCheckpoint {
                 processed,
-                total: Some(total + total_gas_to_execute(tx, start_block..=max_block)?),
+                total: Some(total + calculate_gas_used_from_headers(tx, start_block..=max_block)?),
             },
         },
         // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
@@ -235,14 +235,14 @@ fn execution_checkpoint<DB: Database>(
         _ => ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: start_block, to: max_block },
             progress: EntitiesCheckpoint {
-                processed: total_gas_to_execute(tx, 0..=start_block - 1)?,
-                total: Some(total_gas_to_execute(tx, 0..=max_block)?),
+                processed: calculate_gas_used_from_headers(tx, 0..=start_block - 1)?,
+                total: Some(calculate_gas_used_from_headers(tx, 0..=max_block)?),
             },
         },
     })
 }
 
-fn total_gas_to_execute<DB: Database>(
+fn calculate_gas_used_from_headers<DB: Database>(
     tx: &Transaction<'_, DB>,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, DatabaseError> {
