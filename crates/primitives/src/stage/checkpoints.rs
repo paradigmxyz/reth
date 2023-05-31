@@ -268,9 +268,10 @@ impl Display for StageCheckpoint {
                 StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                     progress: entities, ..
                 }) |
-                StageUnitCheckpoint::Entities(entities),
+                StageUnitCheckpoint::Entities(entities) |
+                StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }),
             ) => entities.fmt(f),
-            _ => write!(f, "{}", self.block_number),
+            Some(StageUnitCheckpoint::Transaction(_)) | None => write!(f, "{}", self.block_number),
         }
     }
 }
