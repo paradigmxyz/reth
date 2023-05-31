@@ -81,7 +81,7 @@ impl BeaconConsensusEngineHandle {
 
     /// Sends a new payload message to the beacon consensus engine and waits for a response.
     ///
-    ///See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv2>
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
@@ -218,6 +218,16 @@ where
 
     /// Create a new instance of the [BeaconConsensusEngine] using the given channel to configure
     /// the [BeaconEngineMessage] communication channel.
+    ///
+    /// By default the engine is started with [PipelineState::Idle].
+    /// The pipeline can be launched immediately in one of the following ways descending in
+    /// priority:
+    /// - Explicit [Option::Some] target block hash provided via a constructor argument.
+    /// - The process was previously interrupted amidst the pipeline run. This is checked by
+    ///   comparing the checkpoints of the first ([StageId::Headers]) and last ([StageId::Finish])
+    ///   stages. In this case, the latest available header in the database is used as the target.
+    ///
+    /// Propagates any database related error.
     #[allow(clippy::too_many_arguments)]
     pub fn with_channel(
         client: Client,
