@@ -151,7 +151,7 @@ impl Command {
                     },
                 )),
             )
-            .build(db);
+            .build(db, self.chain.clone());
 
         Ok(pipeline)
     }

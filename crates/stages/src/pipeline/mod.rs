@@ -4,10 +4,10 @@ use reth_db::database::Database;
 use reth_primitives::{
     listener::EventListeners,
     stage::{StageCheckpoint, StageId},
-    BlockNumber, H256,
+    BlockNumber, ChainSpec, H256,
 };
 use reth_provider::{providers::get_stage_checkpoint, Transaction};
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -93,6 +93,8 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 pub struct Pipeline<DB: Database> {
     /// The Database
     db: DB,
+    /// Chain spec
+    chain_spec: Arc<ChainSpec>,
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
@@ -425,6 +427,7 @@ mod tests {
     use reth_interfaces::{
         consensus, provider::ProviderError, test_utils::generators::random_header,
     };
+    use reth_primitives::MAINNET;
     use tokio_stream::StreamExt;
 
     #[test]
@@ -469,7 +472,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, Arc::new(MAINNET.clone()));
         let events = pipeline.events();
 
         // Run pipeline
@@ -517,7 +520,7 @@ mod tests {
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, Arc::new(MAINNET.clone()));
         let events = pipeline.events();
 
         // Run pipeline
@@ -606,7 +609,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, Arc::new(MAINNET.clone()));
         let events = pipeline.events();
 
         // Run pipeline
@@ -685,7 +688,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, Arc::new(MAINNET.clone()));
         let events = pipeline.events();
 
         // Run pipeline
@@ -745,7 +748,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, Arc::new(MAINNET.clone()));
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
@@ -755,7 +758,7 @@ mod tests {
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))
-            .build(db);
+            .build(db, Arc::new(MAINNET.clone()));
         let result = pipeline.run().await;
         assert_matches!(
             result,

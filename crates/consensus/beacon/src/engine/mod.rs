@@ -1162,7 +1162,7 @@ mod tests {
         let pipeline = Pipeline::builder()
             .add_stages(TestStages::new(pipeline_exec_outputs, Default::default()))
             .with_tip_sender(tip_tx)
-            .build(db.clone());
+            .build(db.clone(), chain_spec.clone());
 
         // Setup blockchain tree
         let externals =

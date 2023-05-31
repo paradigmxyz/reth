@@ -687,7 +687,7 @@ impl Command {
                 .disable_if(StageId::MerkleUnwind, || self.auto_mine)
                 .disable_if(StageId::MerkleExecute, || self.auto_mine),
             )
-            .build(db);
+            .build(db, self.chain.clone());
 
         Ok(pipeline)
     }
