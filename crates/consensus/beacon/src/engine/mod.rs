@@ -572,7 +572,7 @@ where
             // we need to first check the buffer for the head and its ancestors
             let lowest_unknown_hash = self.lowest_buffered_ancestor_or(state.head_block_hash);
 
-            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for the new head");
+            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for missing ancestors of the new head");
 
             // trigger a full block download for missing hash, or the parent of its lowest buffered
             // ancestor
