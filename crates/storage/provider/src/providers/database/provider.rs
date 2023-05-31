@@ -24,16 +24,20 @@ use reth_revm_primitives::{
 };
 use std::{ops::RangeBounds, sync::Arc};
 
+/// A `Provider` that holds a read-only database transaction.
 pub(crate) type ProviderRO<'this, DB> = Provider<'this, <DB as DatabaseGAT<'this>>::TX>;
 
+/// A `Provider` that holds a read-write database transaction.
 pub(crate) type ProviderRW<'this, DB> = Provider<'this, <DB as DatabaseGAT<'this>>::TXMut>;
 
 /// Provider struct which allows to interface with the database using different types of providers.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashProvider`]
+#[derive(Debug)]
 pub struct Provider<'this, TX>
 where
     Self: 'this,
 {
+    /// Database transaction.
     tx: TX,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
@@ -41,24 +45,26 @@ where
 }
 
 impl<'this, TX: DbTxMut<'this>> Provider<'this, TX> {
+    /// Creates a provider with an inner read-write transaction.
     pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
         Self { tx, chain_spec, _phantom_data: std::marker::PhantomData }
     }
 }
 
 impl<'this, TX: DbTx<'this>> Provider<'this, TX> {
+    /// Creates a provider with an inner read-only transaction.
     pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
         Self { tx, chain_spec, _phantom_data: std::marker::PhantomData }
     }
 
-    /// consume `DbTx` or `DbTxMut`
+    /// Consume `DbTx` or `DbTxMut`.
     pub fn take_tx(self) -> TX {
         self.tx
     }
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> Provider<'this, TX> {
-    /// commit tx
+    /// Commit database transaction.
     pub fn commit(self) -> Result<bool> {
         Ok(self.tx.commit()?)
     }
