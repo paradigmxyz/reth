@@ -93,3 +93,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run doctests
         run: cargo test --doc --all --all-features
+
+  unit-success:
+    name: unit success
+    runs-on: ubuntu-latest
+    needs: [test, eth-blockchain, doc-test]
+    steps:
+      - run: echo Success!
