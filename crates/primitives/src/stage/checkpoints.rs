@@ -167,9 +167,9 @@ pub struct CheckpointBlockRange {
     pub to: BlockNumber,
 }
 
-impl From<CheckpointBlockRange> for RangeInclusive<BlockNumber> {
-    fn from(value: CheckpointBlockRange) -> Self {
-        value.from..=value.to
+impl From<RangeInclusive<BlockNumber>> for CheckpointBlockRange {
+    fn from(range: RangeInclusive<BlockNumber>) -> Self {
+        Self { from: *range.start(), to: *range.end() }
     }
 }
 

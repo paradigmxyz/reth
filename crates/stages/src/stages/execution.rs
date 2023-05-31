@@ -147,21 +147,36 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint = match input.checkpoint().execution_stage_checkpoint() {
+            // If checkpoint block range fully matches our range,
+            // we take the previously used stage checkpoint as-is.
             Some(stage_checkpoint @ ExecutionCheckpoint { block_range, .. })
-                if RangeInclusive::<_>::from(block_range) == (start_block..=max_block) =>
+                if block_range == CheckpointBlockRange::from(start_block..=max_block) =>
             {
                 stage_checkpoint
             }
+            // If checkpoint block range precedes our range seamlessly, we take the previously used
+            // stage checkpoint and add the amount of gas from our range to the checkpoint total.
             Some(ExecutionCheckpoint {
                 block_range,
                 progress: EntitiesCheckpoint { processed, total: Some(total) },
-            }) if block_range.to == start_block => ExecutionCheckpoint {
+            }) if block_range.to == start_block - 1 => ExecutionCheckpoint {
                 block_range,
                 progress: EntitiesCheckpoint {
                     processed,
                     total: Some(total + total_gas_to_execute(tx, start_block..=max_block)?),
                 },
             },
+            // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
+            // already processed, if there's any.
+            Some(_) if start_block != 1 => ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                progress: EntitiesCheckpoint {
+                    processed: total_gas_to_execute(tx, 0..=start_block - 1)?,
+                    total: Some(total_gas_to_execute(tx, start_block..=max_block)?),
+                },
+            },
+            // If there's no previous progress, recalculate total gas fully, and set processed gas
+            // to zero.
             _ => ExecutionCheckpoint {
                 block_range: CheckpointBlockRange { from: start_block, to: max_block },
                 progress: EntitiesCheckpoint {
