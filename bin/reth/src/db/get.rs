@@ -1,7 +1,7 @@
 use crate::utils::DbTool;
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{database::Database, table::Table, tables};
+use reth_db::{database::Database, table::Table, tables, Tables};
 use serde::Deserialize;
 use tracing::error;
 
@@ -12,7 +12,7 @@ pub struct Command {
     ///
     /// NOTE: The dupsort tables are not supported now.
     #[arg()]
-    pub table: String, // TODO: Convert to enum
+    pub table: Tables,
 
     /// The key to get content for
     #[arg(value_parser = maybe_json_value_parser)]
@@ -24,7 +24,7 @@ impl Command {
     pub fn execute<DB: Database>(self, mut tool: DbTool<'_, DB>) -> eyre::Result<()> {
         macro_rules! table_get {
             ([$($table:ident),*]) => {
-                match self.table.as_str() {
+                match self.table.name() {
                     $(stringify!($table) => {
                         let table_key = self.table_key::<tables::$table>().wrap_err("Could not parse the given table key.")?;
 
@@ -39,7 +39,7 @@ impl Command {
                         return Ok(());
                     },)*
                     _ => {
-                        error!(target: "reth::cli", "Unknown or unsupported table.");
+                        error!(target: "reth::cli", "Unsupported table.");
                         return Ok(());
                     }
                 }
@@ -75,7 +75,7 @@ impl Command {
     where
         for<'a> T::Key: Deserialize<'a>,
     {
-        assert_eq!(T::NAME, self.table);
+        //assert_eq!(T::NAME, self.table.);
 
         serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
     }

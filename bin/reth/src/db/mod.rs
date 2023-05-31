@@ -12,6 +12,7 @@ use reth_db::{
     database::Database,
     tables,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
+    Tables,
 };
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::init::init_db;
@@ -80,7 +81,7 @@ pub enum Subcommands {
 /// The arguments for the `reth db list` command
 pub struct ListArgs {
     /// The table name
-    table: String, // TODO: Convert to enum
+    table: Tables,
     /// Skip first N entries
     #[arg(long, short, default_value = "0")]
     skip: usize,
@@ -122,7 +123,7 @@ impl Command {
 
                 tool.db.view(|tx| {
                     let mut tables =
-                        tables::TABLES.iter().map(|(_, name)| name).collect::<Vec<_>>();
+                        Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
                     tables.sort();
                     for table in tables {
                         let table_db =
@@ -196,7 +197,7 @@ impl Command {
                     }
                 }
 
-                table_tui!(args.table.as_str(), args.skip, args.len => [
+                table_tui!(args.table.name(), args.skip, args.len => [
                     CanonicalHeaders,
                     HeaderTD,
                     HeaderNumbers,
