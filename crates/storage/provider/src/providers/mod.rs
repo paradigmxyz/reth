@@ -5,7 +5,7 @@ use crate::{
     ReceiptProvider, StageCheckpointProvider, StateProviderBox, StateProviderFactory,
     TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::database::Database;
+use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::ForkchoiceState,
@@ -68,9 +68,13 @@ where
     /// Create a new provider using only the database and the tree, fetching the latest header from
     /// the database to initialize the provider.
     pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Result<Self> {
-        let best = database.chain_info()?;
-        match database.header_by_number(best.best_number)? {
-            Some(header) => Ok(Self::with_latest(database, tree, header.seal(best.best_hash))),
+        let provider = database.provider()?;
+        let best: ChainInfo = provider.chain_info()?;
+        match provider.header_by_number(best.best_number)? {
+            Some(header) => {
+                drop(provider);
+                Ok(Self::with_latest(database, tree, header.seal(best.best_hash)))
+            }
             None => Err(Error::Provider(ProviderError::HeaderNotFound(best.best_number.into()))),
         }
     }
@@ -106,34 +110,34 @@ where
     Tree: Send + Sync,
 {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
-        self.database.header(block_hash)
+        self.database.provider()?.header(block_hash)
     }
 
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
-        self.database.header_by_number(num)
+        self.database.provider()?.header_by_number(num)
     }
 
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
-        self.database.header_td(hash)
+        self.database.provider()?.header_td(hash)
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
-        self.database.header_td_by_number(number)
+        self.database.provider()?.header_td_by_number(number)
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
-        self.database.headers_range(range)
+        self.database.provider()?.headers_range(range)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<SealedHeader>> {
-        self.database.sealed_headers_range(range)
+        self.database.provider()?.sealed_headers_range(range)
     }
 
     fn sealed_header(&self, number: BlockNumber) -> Result<Option<SealedHeader>> {
-        self.database.sealed_header(number)
+        self.database.provider()?.sealed_header(number)
     }
 }
 
@@ -143,11 +147,11 @@ where
     Tree: Send + Sync,
 {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
-        self.database.block_hash(number)
+        self.database.provider()?.block_hash(number)
     }
 
     fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>> {
-        self.database.canonical_hashes_range(start, end)
+        self.database.provider()?.canonical_hashes_range(start, end)
     }
 }
 
@@ -164,8 +168,12 @@ where
         Ok(self.chain_info.get_canonical_block_number())
     }
 
+    fn last_block_number(&self) -> Result<BlockNumber> {
+        self.database.provider()?.last_block_number()
+    }
+
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
-        self.database.block_number(hash)
+        self.database.provider()?.block_number(hash)
     }
 }
 
@@ -200,12 +208,12 @@ where
                 // hash
                 let mut block = self.tree.block_by_hash(hash).map(|block| block.unseal());
                 if block.is_none() {
-                    block = self.database.block_by_hash(hash)?;
+                    block = self.database.provider()?.block_by_hash(hash)?;
                 }
                 block
             }
             BlockSource::Pending => self.tree.block_by_hash(hash).map(|block| block.unseal()),
-            BlockSource::Database => self.database.block_by_hash(hash)?,
+            BlockSource::Database => self.database.provider()?.block_by_hash(hash)?,
         };
 
         Ok(block)
@@ -214,7 +222,7 @@ where
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
         match id {
             BlockHashOrNumber::Hash(hash) => self.find_block_by_hash(hash, BlockSource::Any),
-            BlockHashOrNumber::Number(num) => self.database.block_by_number(num),
+            BlockHashOrNumber::Number(num) => self.database.provider()?.block_by_number(num),
         }
     }
 
@@ -223,7 +231,11 @@ where
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
-        self.database.ommers(id)
+        self.database.provider()?.ommers(id)
+    }
+
+    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
+        self.database.provider()?.block_body_indices(num)
     }
 }
 
@@ -233,40 +245,40 @@ where
     Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
-        self.database.transaction_id(tx_hash)
+        self.database.provider()?.transaction_id(tx_hash)
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
-        self.database.transaction_by_id(id)
+        self.database.provider()?.transaction_by_id(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
-        self.database.transaction_by_hash(hash)
+        self.database.provider()?.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
-        self.database.transaction_by_hash_with_meta(tx_hash)
+        self.database.provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
     fn transaction_block(&self, id: TxNumber) -> Result<Option<BlockNumber>> {
-        self.database.transaction_block(id)
+        self.database.provider()?.transaction_block(id)
     }
 
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
     ) -> Result<Option<Vec<TransactionSigned>>> {
-        self.database.transactions_by_block(id)
+        self.database.provider()?.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
-        self.database.transactions_by_block_range(range)
+        self.database.provider()?.transactions_by_block_range(range)
     }
 }
 
@@ -276,15 +288,15 @@ where
     Tree: Send + Sync,
 {
     fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>> {
-        self.database.receipt(id)
+        self.database.provider()?.receipt(id)
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> Result<Option<Receipt>> {
-        self.database.receipt_by_hash(hash)
+        self.database.provider()?.receipt_by_hash(hash)
     }
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
-        self.database.receipts_by_block(block)
+        self.database.provider()?.receipts_by_block(block)
     }
 }
 
@@ -298,11 +310,11 @@ where
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> Result<Option<Vec<Withdrawal>>> {
-        self.database.withdrawals_by_block(id, timestamp)
+        self.database.provider()?.withdrawals_by_block(id, timestamp)
     }
 
     fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
-        self.database.latest_withdrawal()
+        self.database.provider()?.latest_withdrawal()
     }
 }
 
@@ -312,7 +324,7 @@ where
     Tree: Send + Sync,
 {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
-        self.database.get_stage_checkpoint(id)
+        self.database.provider()?.get_stage_checkpoint(id)
     }
 }
 
@@ -327,7 +339,7 @@ where
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
     ) -> Result<()> {
-        self.database.fill_env_at(cfg, block_env, at)
+        self.database.provider()?.fill_env_at(cfg, block_env, at)
     }
 
     fn fill_env_with_header(
@@ -336,23 +348,23 @@ where
         block_env: &mut BlockEnv,
         header: &Header,
     ) -> Result<()> {
-        self.database.fill_env_with_header(cfg, block_env, header)
+        self.database.provider()?.fill_env_with_header(cfg, block_env, header)
     }
 
     fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockHashOrNumber) -> Result<()> {
-        self.database.fill_block_env_at(block_env, at)
+        self.database.provider()?.fill_block_env_at(block_env, at)
     }
 
     fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> Result<()> {
-        self.database.fill_block_env_with_header(block_env, header)
+        self.database.provider()?.fill_block_env_with_header(block_env, header)
     }
 
     fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> Result<()> {
-        self.database.fill_cfg_env_at(cfg, at)
+        self.database.provider()?.fill_cfg_env_at(cfg, at)
     }
 
     fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
-        self.database.fill_cfg_env_with_header(cfg, header)
+        self.database.provider()?.fill_cfg_env_with_header(cfg, header)
     }
 }
 

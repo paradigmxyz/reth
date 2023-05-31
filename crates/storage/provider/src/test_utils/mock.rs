@@ -5,6 +5,7 @@ use crate::{
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
 use parking_lot::Mutex;
+use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
@@ -263,6 +264,10 @@ impl BlockNumProvider for MockEthProvider {
             .ok_or(ProviderError::BestBlockNotFound)?)
     }
 
+    fn last_block_number(&self) -> Result<BlockNumber> {
+        self.best_block_number()
+    }
+
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
         let lock = self.blocks.lock();
         let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number));
@@ -302,6 +307,10 @@ impl BlockProvider for MockEthProvider {
     }
 
     fn ommers(&self, _id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
+
+    fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 }
