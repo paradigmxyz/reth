@@ -1043,43 +1043,10 @@ where
     }
 }
 
-/// An invalid header and its invalid ancestor.
-enum InvalidHeaderCacheItem {
-    Ancestor(Arc<Header>),
-    Child {
-        /// The invalid block's header
-        header: Header,
-
-        /// A reference to the block's invalid ancestor.
-        invalid_ancestor: Arc<Header>,
-    },
-}
-
-impl InvalidHeaderCacheItem {
-    /// Returns the block's own header.
-    fn header(&self) -> &Header {
-        match self {
-            Self::Ancestor(header) => header,
-            Self::Child { header, .. } => header,
-        }
-    }
-
-    /// Returns a reference to the block's invalid ancestor.
-    ///
-    /// If the block itself is invalid, but none of its ancestors are invalid,
-    /// this will return a reference to the block's own header.
-    fn invalid_ancestor(&self) -> &Arc<Header> {
-        match self {
-            Self::Ancestor(header) => header,
-            Self::Child { invalid_ancestor, .. } => invalid_ancestor,
-        }
-    }
-}
-
 /// Keeps track of invalid headers.
 struct InvalidHeaderCache {
-    /// This maps a header hash to its own header, and a reference to its invalid ancestor.
-    headers: LruMap<H256, InvalidHeaderCacheItem>,
+    /// This maps a header hash to a reference to its invalid ancestor.
+    headers: LruMap<H256, Arc<Header>>,
 }
 
 impl InvalidHeaderCache {
@@ -1087,17 +1054,9 @@ impl InvalidHeaderCache {
         Self { headers: LruMap::new(ByLength::new(max_length)) }
     }
 
-    /// Returns the invalid block's header if it exists in the cache.
-    fn get(&mut self, hash: &H256) -> Option<&Header> {
-        self.headers.get(hash).map(|h| h.header())
-    }
-
-    /// Returns a reference to the invalid block's ancestor if it exists in the cache.
-    ///
-    /// If the block itself is invalid, but none of its ancestors are invalid, this will return a
-    /// reference to the block's own header.
-    fn invalid_ancestor(&mut self, hash: &H256) -> Option<&Arc<Header>> {
-        self.headers.get(hash).map(|h| h.invalid_ancestor())
+    /// Returns the invalid ancestor's header if it exists in the cache.
+    fn get(&mut self, hash: &H256) -> Option<&mut Arc<Header>> {
+        self.headers.get(hash)
     }
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
@@ -1107,15 +1066,14 @@ impl InvalidHeaderCache {
         invalid_ancestor: Arc<Header>,
     ) {
         let hash = header.hash;
-        let header = header.unseal();
-        self.headers.insert(hash, InvalidHeaderCacheItem::Child { header, invalid_ancestor });
+        self.headers.insert(hash, invalid_ancestor);
     }
 
     /// Inserts an invalid ancestor into the map.
     fn insert(&mut self, invalid_ancestor: SealedHeader) {
         let hash = invalid_ancestor.hash;
         let header = invalid_ancestor.unseal();
-        self.headers.insert(hash, InvalidHeaderCacheItem::Ancestor(Arc::new(header)));
+        self.headers.insert(hash, Arc::new(header));
     }
 }
 
