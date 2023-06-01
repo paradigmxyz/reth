@@ -458,6 +458,7 @@ where
         tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
     ) -> bool {
         self.metrics.forkchoice_updated_messages.increment(1);
+        self.blockchain.on_forkchoice_update_received(&state);
 
         let on_updated = match self.forkchoice_updated(state, attrs) {
             Ok(response) => response,
@@ -597,7 +598,6 @@ where
             total_difficulty: head_td,
         });
         self.blockchain.set_canonical_head(head);
-        self.blockchain.on_forkchoice_update_received(update);
         Ok(())
     }
 
