@@ -1,30 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
 /// Represents the `rpc_modules` response, which returns the
 /// list of all available modules on that transport and their version
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(transparent)]
 pub struct RPCModules {
-    result: HashMap<String, String>,
+    module_map: HashMap<String, String>,
 }
 
 impl RPCModules {
     /// Create a new instance of RPCModules
-    pub fn new(result: HashMap<String, String>) -> Self {
-        Self { result }
+    pub fn new(module_map: HashMap<String, String>) -> Self {
+        Self { module_map }
     }
-}
-
-impl Default for RPCModules {
-    fn default() -> Self {
-        Self {
-            result: HashMap::from([
-                ("txpool".to_owned(), "1.0".to_owned()),
-                ("trace".to_owned(), "1.0".to_owned()),
-                ("eth".to_owned(), "1.0".to_owned()),
-                ("web3".to_owned(), "1.0".to_owned()),
-                ("net".to_owned(), "1.0".to_owned()),
-            ]),
-        }
+    /// Consumes self and returns the inner hashmap mapping module names to their versions
+    pub fn into_modules(self) -> HashMap<String, String> {
+        self.module_map
     }
 }
 
@@ -33,9 +25,15 @@ mod tests {
     use super::*;
     #[test]
     fn test_parse_module_versions_roundtrip() {
-        let s = r#"{"result":{"txpool":"1.0","trace":"1.0","eth":"1.0","web3":"1.0","net":"1.0"}}"#;
-        let m: RPCModules = Default::default();
-
+        let s = r#"{"txpool":"1.0","trace":"1.0","eth":"1.0","web3":"1.0","net":"1.0"}"#;
+        let module_map = HashMap::from([
+            ("txpool".to_owned(), "1.0".to_owned()),
+            ("trace".to_owned(), "1.0".to_owned()),
+            ("eth".to_owned(), "1.0".to_owned()),
+            ("web3".to_owned(), "1.0".to_owned()),
+            ("net".to_owned(), "1.0".to_owned()),
+        ]);
+        let m = RPCModules::new(module_map);
         let de_serialized: RPCModules = serde_json::from_str(&s).unwrap();
         assert_eq!(de_serialized, m);
     }

@@ -1,5 +1,6 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_rpc_types::RPCModules;
+use std::sync::Arc;
 
 /// RPC namespace, used to find the versions of all rpc modules
 #[cfg_attr(not(feature = "client"), rpc(server))]
@@ -8,5 +9,5 @@ use reth_rpc_types::RPCModules;
 pub trait RPCApi {
     /// Lists enabled APIs and the version of each.
     #[method(name = "rpc_modules")]
-    fn list_apis(&self) -> RpcResult<RPCModules>;
+    fn rpc_modules(&self) -> RpcResult<Arc<RPCModules>>;
 }
