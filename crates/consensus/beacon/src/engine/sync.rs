@@ -177,7 +177,6 @@ where
         match &mut self.pipeline_state {
             PipelineState::Idle(pipeline) => {
                 let target = self.pending_pipeline_target.take();
-                trace!(target: "consensus::engine", ?target, "Pipeline is idle, checking target");
 
                 if target.is_none() && !self.run_pipeline_continuously {
                     // nothing to sync
@@ -202,10 +201,7 @@ where
 
                 Some(EngineSyncEvent::PipelineStarted(target))
             }
-            PipelineState::Running(_) => {
-                trace!(target: "consensus::engine", "Pipeline is already running, not spawning");
-                None
-            }
+            PipelineState::Running(_) => None,
         }
     }
 
