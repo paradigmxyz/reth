@@ -45,7 +45,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     }
 
     fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError> {
-        trace!(target: "blockchain_tree", ?block, "Inserting block");
+        trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
         self.tree.write().insert_block(block)
     }
 
