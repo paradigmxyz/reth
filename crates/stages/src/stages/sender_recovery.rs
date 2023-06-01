@@ -76,7 +76,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Target transaction already reached");
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
-                    .with_entities_stage_checkpoint(stage_progress(tx)?),
+                    .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
                 done: is_final_range,
             })
         }
@@ -150,12 +150,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             }
         }
 
-        let stage_checkpoint = stage_progress(tx)?;
-
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
-                .with_entities_stage_checkpoint(stage_checkpoint),
+                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
             done: is_final_range,
         })
     }
@@ -173,17 +171,15 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let latest_tx_id = tx.block_body_indices(unwind_to)?.last_tx_num();
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
-        let stage_checkpoint = stage_progress(tx)?;
-
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
-                .with_entities_stage_checkpoint(stage_checkpoint),
+                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
         })
     }
 }
 
-fn stage_progress<DB: Database>(
+fn stage_checkpoint<DB: Database>(
     tx: &Transaction<'_, DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
