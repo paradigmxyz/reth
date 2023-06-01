@@ -270,18 +270,18 @@ where
             None => {
                 // If no target was provided, check if the stages are congruent - check if the
                 // checkpoint of the last stage matches the checkpoint of the first.
-                let headers_stage_checkpoint = this
+                let first_stage_checkpoint = this
                     .blockchain
-                    .get_stage_checkpoint(StageId::Headers)?
+                    .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
                     .unwrap_or_default()
                     .block_number;
-                let finish_stage_checkpoint = this
+                let last_stage_checkpoint = this
                     .blockchain
-                    .get_stage_checkpoint(StageId::Finish)?
+                    .get_stage_checkpoint(*StageId::ALL.last().unwrap())?
                     .unwrap_or_default()
                     .block_number;
-                if finish_stage_checkpoint != headers_stage_checkpoint {
-                    this.blockchain.block_hash(headers_stage_checkpoint)?
+                if first_stage_checkpoint != last_stage_checkpoint {
+                    this.blockchain.block_hash(first_stage_checkpoint)?
                 } else {
                     None
                 }
