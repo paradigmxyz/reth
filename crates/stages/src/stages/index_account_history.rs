@@ -71,11 +71,13 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             },
         };
 
-        let (changesets, indices) = tx.get_account_transition_ids_from_changeset(range.clone())?;
+        let indices = tx.get_account_transition_ids_from_changeset(range.clone())?;
+        let changesets = indices.values().map(|blocks| blocks.len() as u64).sum::<u64>();
+
         // Insert changeset to history index
         tx.insert_account_history_index(indices)?;
 
-        stage_checkpoint.progress.processed += changesets as u64;
+        stage_checkpoint.progress.processed += changesets;
 
         info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
         Ok(ExecOutput {

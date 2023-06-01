@@ -530,13 +530,13 @@ where
 
         // account history stage
         {
-            let (_, indices) = self.get_account_transition_ids_from_changeset(range.clone())?;
+            let indices = self.get_account_transition_ids_from_changeset(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
         // storage history stage
         {
-            let (_, indices) = self.get_storage_transition_ids_from_changeset(range)?;
+            let indices = self.get_storage_transition_ids_from_changeset(range)?;
             self.insert_storage_history_index(indices)?;
         }
 
@@ -1170,26 +1170,22 @@ where
         Ok(())
     }
 
-    /// Returns the number of storage changesets walked and all block numbers where storage got
-    /// changed.
+    /// Get all transaction ids where account got changed.
     ///
     /// NOTE: Get inclusive range of blocks.
     pub fn get_storage_transition_ids_from_changeset(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(usize, BTreeMap<(Address, H256), Vec<u64>>), TransactionError> {
+    ) -> Result<BTreeMap<(Address, H256), Vec<u64>>, TransactionError> {
         let storage_changeset = self
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(BlockNumberAddress::range(range))?
             .collect::<Result<Vec<_>, _>>()?;
 
         // fold all storages to one set of changes
-        let mut changesets = 0;
         let storage_changeset_lists = storage_changeset.into_iter().fold(
             BTreeMap::new(),
             |mut storages: BTreeMap<(Address, H256), Vec<u64>>, (index, storage)| {
-                changesets += 1;
-
                 storages
                     .entry((index.address(), storage.key))
                     .or_default()
@@ -1197,38 +1193,32 @@ where
                 storages
             },
         );
-
-        Ok((changesets, storage_changeset_lists))
+        Ok(storage_changeset_lists)
     }
 
-    /// Returns the number of account changesets walked and all block numbers where account got
-    /// changed.
+    /// Get all transaction ids where account got changed.
     ///
     /// NOTE: Get inclusive range of blocks.
     pub fn get_account_transition_ids_from_changeset(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(usize, BTreeMap<Address, Vec<u64>>), TransactionError> {
+    ) -> Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
         let account_changesets = self
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
 
-        let mut changesets = 0;
         let account_transitions = account_changesets
             .into_iter()
             // fold all account to one set of changed accounts
             .fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<Address, Vec<u64>>, (index, account)| {
-                    changesets += 1;
-
                     accounts.entry(account.address).or_default().push(index);
                     accounts
                 },
             );
-
-        Ok((changesets, account_transitions))
+        Ok(account_transitions)
     }
 
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage

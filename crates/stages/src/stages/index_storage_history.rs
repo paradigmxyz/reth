@@ -74,10 +74,12 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             },
         };
 
-        let (changesets, indices) = tx.get_storage_transition_ids_from_changeset(range.clone())?;
+        let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;
+        let changesets = indices.values().map(|blocks| blocks.len() as u64).sum::<u64>();
+
         tx.insert_storage_history_index(indices)?;
 
-        stage_checkpoint.progress.processed += changesets as u64;
+        stage_checkpoint.progress.processed += changesets;
 
         info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
