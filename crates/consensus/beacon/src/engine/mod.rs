@@ -331,7 +331,6 @@ where
     /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
     ///
     /// Returns a payload status response according to the engine API spec.
-    #[instrument(level = "trace", skip(self), target = "consensus::engine")]
     fn check_invalid_ancestor_with_head(
         &mut self,
         check: H256,
@@ -351,7 +350,6 @@ where
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response
     /// to a forkchoice update.
-    #[instrument(level = "trace", skip(self), target = "consensus::engine")]
     fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
         let parent_hash = {
             // check if the head was previously marked as invalid
