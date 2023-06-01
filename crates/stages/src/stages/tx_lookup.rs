@@ -377,7 +377,7 @@ mod tests {
             let stage_progress = input.checkpoint().block_number;
             let end = input.previous_stage_checkpoint().block_number;
 
-            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(stage_progress + 1..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }
