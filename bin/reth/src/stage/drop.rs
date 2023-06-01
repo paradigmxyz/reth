@@ -63,6 +63,13 @@ impl Command {
 
         tool.db.update(|tx| {
             match &self.stage {
+                StageEnum::Senders => {
+                    tx.clear::<tables::TxSenders>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::SenderRecovery.to_string(),
+                        Default::default(),
+                    )?;
+                }
                 StageEnum::Execution => {
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;

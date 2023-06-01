@@ -160,7 +160,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         storage: current_subkey,
                         from: from_block,
                         to: to_block,
-                        progress: stage_progress(tx)?,
+                        progress: stage_checkpoint_progress(tx)?,
                     },
                 );
 
@@ -181,7 +181,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // We finished the hashing stage, no future iterations is expected for the same block range,
         // so no checkpoint is needed.
         let checkpoint = input.previous_stage_checkpoint().with_storage_hashing_stage_checkpoint(
-            StorageHashingCheckpoint { progress: stage_progress(tx)?, ..Default::default() },
+            StorageHashingCheckpoint {
+                progress: stage_checkpoint_progress(tx)?,
+                ..Default::default()
+            },
         );
 
         info!(target: "sync::stages::hashing_storage", checkpoint = %checkpoint, is_final_range = true, "Stage iteration finished");
@@ -202,7 +205,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         let mut stage_checkpoint =
             input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
 
-        stage_checkpoint.progress = stage_progress(tx)?;
+        stage_checkpoint.progress = stage_checkpoint_progress(tx)?;
 
         info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, %unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
@@ -212,8 +215,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     }
 }
 
-fn stage_progress<DB: Database>(
-    tx: &mut Transaction<'_, DB>,
+fn stage_checkpoint_progress<DB: Database>(
+    tx: &Transaction<'_, DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: tx.deref().entries::<tables::HashedStorage>()? as u64,

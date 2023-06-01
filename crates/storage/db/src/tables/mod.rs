@@ -170,7 +170,7 @@ table!(
 
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
-    (  Transactions ) TxNumber | TransactionSignedNoHash
+    ( Transactions ) TxNumber | TransactionSignedNoHash
 );
 
 table!(
@@ -293,7 +293,7 @@ dupsort!(
 );
 
 table!(
-    /// Stores the transaction sender for each transaction.
+    /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
     ( TxSenders ) TxNumber | Address
