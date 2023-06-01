@@ -1,6 +1,7 @@
 use crate::{
     BlockIdProvider, BlockNumProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
 };
+use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, Header, SealedBlock, SealedHeader, H256,
@@ -81,6 +82,11 @@ pub trait BlockProvider:
     fn block_by_number(&self, num: u64) -> Result<Option<Block>> {
         self.block(num.into())
     }
+
+    /// Returns the block body indices with matching number from database.
+    ///
+    /// Returns `None` if block is not found.
+    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>>;
 }
 
 /// Trait extension for `BlockProvider`, for types that implement `BlockId` conversion.

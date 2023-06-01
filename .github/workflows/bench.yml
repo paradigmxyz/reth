@@ -66,3 +66,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check if benchmarks build
         run: cargo bench --all --all-features --all-targets --no-run
+
+  bench-success:
+    name: bench success
+    needs: bench-check
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo Success!

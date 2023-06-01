@@ -10,12 +10,17 @@ pub(crate) mod secp256k1 {
     };
     use revm_primitives::{B256, U256};
 
-    /// secp256k1 signer recovery
+    /// Recovers the address of the sender using secp256k1 pubkey recovery.
+    ///
+    /// Converts the public key into an ethereum address by hashing the public key with keccak256.
     pub fn recover_signer(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
         let sig =
             RecoverableSignature::from_compact(&sig[0..64], RecoveryId::from_i32(sig[64] as i32)?)?;
 
         let public = SECP256K1.recover_ecdsa(&Message::from_slice(&msg[..32])?, &sig)?;
+
+        // strip out the first byte because that should be the SECP256K1_TAG_PUBKEY_UNCOMPRESSED
+        // tag returned by libsecp's uncompressed pubkey serialization
         let hash = keccak256(&public.serialize_uncompressed()[1..]);
         Ok(Address::from_slice(&hash[12..]))
     }

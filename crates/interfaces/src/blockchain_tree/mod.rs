@@ -124,7 +124,10 @@ pub enum BlockStatus {
     /// (It is side chain) or hasn't been fully validated but ancestors of a payload are known.
     Accepted,
     /// If blocks is not connected to canonical chain.
-    Disconnected,
+    Disconnected {
+        /// The lowest parent block that is not connected to the canonical chain.
+        missing_parent: BlockNumHash,
+    },
 }
 
 /// Allows read only functionality on the blockchain tree.
@@ -167,6 +170,12 @@ pub trait BlockchainTreeViewer: Send + Sync {
     ///
     /// Note: this could be the given `parent_hash` if it's already canonical.
     fn find_canonical_ancestor(&self, parent_hash: BlockHash) -> Option<BlockHash>;
+
+    /// Given the hash of a block, this checks the buffered blocks for the lowest ancestor in the
+    /// buffer.
+    ///
+    /// If there is a buffered block with the given hash, this returns the block itself.
+    fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders>;
 
     /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
     fn canonical_tip(&self) -> BlockNumHash;

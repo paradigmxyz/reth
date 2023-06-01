@@ -111,17 +111,17 @@ impl AsRef<[u8]> for RawValue<Vec<u8>> {
 impl<V: Value> Compress for RawValue<V> {
     type Compressed = Vec<u8>;
 
+    fn uncompressable_ref(&self) -> Option<&[u8]> {
+        // Already compressed
+        Some(&self.value)
+    }
+
     fn compress(self) -> Self::Compressed {
         self.value
     }
 
     fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
         buf.put_slice(self.value.as_slice())
-    }
-
-    fn uncompressable_ref(&self) -> Option<&[u8]> {
-        // Already compressed
-        Some(&self.value)
     }
 }
 

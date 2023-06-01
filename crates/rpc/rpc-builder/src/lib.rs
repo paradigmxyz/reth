@@ -415,6 +415,20 @@ impl RpcModuleSelection {
             .into_selection()
     }
 
+    /// Returns the [RpcModuleSelection::STANDARD_MODULES] as a selection.
+    pub fn standard_modules() -> Vec<RethRpcModule> {
+        RpcModuleSelection::try_from_selection(RpcModuleSelection::STANDARD_MODULES.iter().copied())
+            .expect("valid selection")
+            .into_selection()
+    }
+
+    /// All modules that are available by default on IPC.
+    ///
+    /// By default all modules are available on IPC.
+    pub fn default_ipc_modules() -> Vec<RethRpcModule> {
+        Self::all_modules()
+    }
+
     /// Creates a new [RpcModuleSelection::Selection] from the given items.
     ///
     /// # Example
@@ -1477,6 +1491,7 @@ impl RpcServer {
             ws_local_addr: ws_http.ws_local_addr,
             http: None,
             ws: None,
+            ipc_endpoint: None,
             ipc: None,
         };
 
@@ -1487,6 +1502,7 @@ impl RpcServer {
         if let Some((server, module)) =
             ipc_server.and_then(|server| ipc.map(|module| (server, module)))
         {
+            handle.ipc_endpoint = Some(server.endpoint().path().to_string());
             handle.ipc = Some(server.start(module).await?);
         }
 
@@ -1515,6 +1531,7 @@ pub struct RpcServerHandle {
     ws_local_addr: Option<SocketAddr>,
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
+    ipc_endpoint: Option<String>,
     ipc: Option<ServerHandle>,
 }
 
@@ -1546,6 +1563,11 @@ impl RpcServerHandle {
         }
 
         Ok(())
+    }
+
+    /// Returns the endpoint of the launched IPC server, if any
+    pub fn ipc_endpoint(&self) -> Option<String> {
+        self.ipc_endpoint.clone()
     }
 
     /// Returns the url to the http server

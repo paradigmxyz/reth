@@ -221,14 +221,14 @@ use proptest::{
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for Chain {
     type Parameters = ParamsFor<u32>;
-    type Strategy = BoxedStrategy<Chain>;
-
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         let named = any::<Selector>()
             .prop_map(move |sel| Chain::Named(sel.select(ethers_core::types::Chain::iter())));
         let id = any::<u64>().prop_map(Chain::from);
         proptest::strategy::Union::new_weighted(vec![(50, named.boxed()), (50, id.boxed())]).boxed()
     }
+
+    type Strategy = BoxedStrategy<Chain>;
 }
 
 #[cfg(test)]

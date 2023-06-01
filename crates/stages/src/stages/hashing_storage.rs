@@ -8,7 +8,9 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256, stage::StageId, StageCheckpoint, StorageEntry, StorageHashingCheckpoint,
+    keccak256,
+    stage::{StageCheckpoint, StageId, StorageHashingCheckpoint},
+    StorageEntry,
 };
 use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug};
@@ -205,7 +207,9 @@ mod tests {
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
     };
-    use reth_primitives::{Address, SealedBlock, StageUnitCheckpoint, StorageEntry, H256, U256};
+    use reth_primitives::{
+        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
+    };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 

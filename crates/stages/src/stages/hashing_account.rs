@@ -8,7 +8,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_primitives::{keccak256, stage::StageId, AccountHashingCheckpoint, StageCheckpoint};
+use reth_primitives::{
+    keccak256,
+    stage::{AccountHashingCheckpoint, StageCheckpoint, StageId},
+};
 use reth_provider::Transaction;
 use std::{
     cmp::max,
@@ -268,7 +271,7 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{Account, StageUnitCheckpoint, U256};
+    use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
