@@ -1,7 +1,8 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::{database::Database, tables, transaction::DbTx};
-use reth_interfaces::db::DatabaseError;
-use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
+use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use reth_primitives::stage::{
+    CheckpointBlockRange, EntitiesCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageId,
+};
 use reth_provider::Transaction;
 use std::{fmt::Debug, ops::Deref};
 use tracing::*;
@@ -41,18 +42,45 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
         }
 
+        let mut stage_checkpoint = match input.checkpoint().index_history_stage_checkpoint() {
+            Some(stage_checkpoint @ IndexHistoryCheckpoint { block_range, .. })
+                if block_range == CheckpointBlockRange::from(&range) =>
+            {
+                stage_checkpoint
+            }
+            Some(IndexHistoryCheckpoint { block_range, progress })
+                if block_range.to == *range.start() =>
+            {
+                IndexHistoryCheckpoint {
+                    block_range: CheckpointBlockRange::from(&range),
+                    progress: EntitiesCheckpoint {
+                        processed: progress.processed,
+                        total: Some(tx.deref().entries::<tables::AccountChangeSet>()? as u64),
+                    },
+                }
+            }
+            _ => IndexHistoryCheckpoint {
+                block_range: CheckpointBlockRange::from(&range),
+                progress: EntitiesCheckpoint {
+                    processed: tx
+                        .cursor_read::<tables::AccountChangeSet>()?
+                        .walk_range(0..=input.checkpoint().block_number)?
+                        .count() as u64,
+                    total: Some(tx.deref().entries::<tables::AccountChangeSet>()? as u64),
+                },
+            },
+        };
+
         let (changesets, indices) = tx.get_account_transition_ids_from_changeset(range.clone())?;
         // Insert changeset to history index
         tx.insert_account_history_index(indices)?;
 
-        let mut stage_checkpoint =
-            stage_checkpoint(tx, input.checkpoint().entities_stage_checkpoint())?;
-        stage_checkpoint.processed += changesets as u64;
+        stage_checkpoint.progress.processed += changesets as u64;
 
         info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(*range.end())
-                .with_entities_stage_checkpoint(stage_checkpoint),
+                .with_index_history_stage_checkpoint(stage_checkpoint),
             done: is_final_range,
         })
     }
@@ -81,16 +109,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { checkpoint })
     }
-}
-
-fn stage_checkpoint<DB: Database>(
-    tx: &Transaction<'_, DB>,
-    prev_checkpoint: Option<EntitiesCheckpoint>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
-    Ok(EntitiesCheckpoint {
-        processed: prev_checkpoint.map(|checkpoint| checkpoint.processed).unwrap_or_default(),
-        total: Some(tx.deref().entries::<tables::AccountChangeSet>()? as u64),
-    })
 }
 
 #[cfg(test)]
@@ -172,8 +190,14 @@ mod tests {
         assert_eq!(
             out,
             ExecOutput {
-                checkpoint: StageCheckpoint::new(5).with_entities_stage_checkpoint(
-                    EntitiesCheckpoint { processed: 2, total: Some(2) }
+                checkpoint: StageCheckpoint::new(5).with_index_history_stage_checkpoint(
+                    IndexHistoryCheckpoint {
+                        block_range: CheckpointBlockRange {
+                            from: input.checkpoint().block_number + 1,
+                            to: run_to
+                        },
+                        progress: EntitiesCheckpoint { processed: 2, total: Some(2) }
+                    }
                 ),
                 done: true
             }
