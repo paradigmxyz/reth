@@ -290,7 +290,7 @@ pub enum StageUnitCheckpoint {
     Storage(StorageHashingCheckpoint),
     /// Saves the progress of abstract stage iterating over or downloading entities.
     Entities(EntitiesCheckpoint),
-    /// Saves the progress of StorageHashing stage.
+    /// Saves the progress of Execution stage.
     Execution(ExecutionCheckpoint),
 }
 
