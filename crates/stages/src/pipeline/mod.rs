@@ -2,6 +2,7 @@ use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_primitives::{listener::EventListeners, stage::StageId, BlockNumber, H256};
+use reth_interfaces::executor::BlockExecutionError;
 use reth_provider::{providers::get_stage_checkpoint, Transaction};
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -390,7 +391,11 @@ where
                             target: prev_checkpoint.unwrap_or_default().block_number,
                             bad_block: block,
                         })
-                    } else if let StageError::ExecutionError { block, error } = err {
+                    } else if let StageError::ExecutionError {
+                        block,
+                        error: BlockExecutionError::Validation(error),
+                    } = err
+                    {
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,

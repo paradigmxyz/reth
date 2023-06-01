@@ -1,11 +1,10 @@
 use reth_primitives::{BlockHash, BlockNumHash, Bloom, H256};
 use thiserror::Error;
 
-/// BlockExecutor Errors
+/// Transaction validation errors
 #[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum BlockExecutionError {
-    // === validation errors ===
+pub enum BlockValidationError {
     #[error("EVM reported invalid transaction ({hash:?}): {message}")]
     EVM { hash: H256, message: String },
     #[error("Failed to recover sender for transaction")]
@@ -25,6 +24,14 @@ pub enum BlockExecutionError {
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
+}
+
+/// BlockExecutor Errors
+#[allow(missing_docs)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum BlockExecutionError {
+    #[error(transparent)]
+    Validation(#[from] BlockValidationError),
 
     // === misc provider error ===
     #[error("Provider error")]

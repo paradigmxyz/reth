@@ -11,7 +11,7 @@ use reth_interfaces::{
         BlockStatus, CanonicalOutcome,
     },
     consensus::{Consensus, ConsensusError},
-    executor::BlockExecutionError,
+    executor::{BlockExecutionError, BlockValidationError},
     Error,
 };
 use reth_primitives::{
@@ -375,10 +375,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 })?;
 
             // Pass the parent total difficulty to short-circuit unnecessary calculations.
-            if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO)
-            {
+            if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
                 return Err(InsertBlockError::execution_error(
-                    BlockExecutionError::BlockPreMerge { hash: block.hash },
+                    BlockValidationError::BlockPreMerge { hash: block.hash }.into(),
                     block.block,
                 ))
             }
@@ -869,14 +868,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // If block is already canonical don't return error.
         if let Some(header) = self.find_canonical_header(block_hash)? {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
-            let td = self
-                .externals
-                .database()
-                .provider()?
-                .header_td(block_hash)?
-                .ok_or(BlockExecutionError::MissingTotalDifficulty { hash: *block_hash })?;
+            let td = self.externals.database().provider()?.header_td(block_hash)?.ok_or(
+                BlockExecutionError::from(BlockValidationError::MissingTotalDifficulty {
+                    hash: *block_hash,
+                }),
+            )?;
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
-                return Err(BlockExecutionError::BlockPreMerge { hash: *block_hash }.into())
+                return Err(BlockExecutionError::from(BlockValidationError::BlockPreMerge {
+                    hash: *block_hash,
+                })
+                .into())
             }
             return Ok(CanonicalOutcome::AlreadyCanonical { header })
         }
