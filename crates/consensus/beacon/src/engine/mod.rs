@@ -342,28 +342,57 @@ where
         }
     }
 
-    /// Checks if the given `head` points to an invalid header, which requires a specific response
-    /// to a forkchoice update.
-    fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
-        // check if the head was previously marked as invalid
-        let (parent_hash, parent_number) = {
-            let header = self.invalid_headers.get(&head)?;
-            (header.parent_hash, header.number.saturating_sub(1))
-        };
-        let mut latest_valid_hash = parent_hash;
-
+    /// Prepares the invalid payload response for the given hash, checking the
+    /// database for the parent hash and populating the payload status with the latest valid hash
+    /// according to the engine api spec.
+    fn prepare_invalid_response(&self, mut parent_hash: H256) -> PayloadStatus {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Ok(Some(parent)) = self.blockchain.header_by_number(parent_number) {
+        if let Ok(Some(parent)) = self.blockchain.header_by_hash_or_number(parent_hash.into()) {
             if parent.difficulty != U256::ZERO {
-                latest_valid_hash = H256::zero();
+                parent_hash = H256::zero();
             }
         }
 
-        let status = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+        PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
-        .with_latest_valid_hash(latest_valid_hash);
+        .with_latest_valid_hash(parent_hash)
+    }
+
+    /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
+    /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
+    ///
+    /// Returns a payload status response according to the engine API spec if the block is known to
+    /// be invalid.
+    fn check_invalid_ancestor_with_head(
+        &mut self,
+        check: H256,
+        head: H256,
+    ) -> Option<PayloadStatus> {
+        // check if the check hash was previously marked as invalid
+        let header = { self.invalid_headers.get(&check)?.clone() };
+
+        // populate the latest valid hash field
+        let status = self.prepare_invalid_response(header.parent_hash);
+
+        // insert the head block into the invalid header cache
+        self.invalid_headers.insert_with_invalid_ancestor(head, header);
+
+        Some(status)
+    }
+
+    /// Checks if the given `head` points to an invalid header, which requires a specific response
+    /// to a forkchoice update.
+    fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
+        let parent_hash = {
+            // check if the head was previously marked as invalid
+            let header = self.invalid_headers.get(&head)?;
+            header.parent_hash
+        };
+
+        // popualte the latest valid hash field
+        let status = self.prepare_invalid_response(parent_hash);
 
         Some(status)
     }
@@ -687,22 +716,21 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip(self, payload), fields(block_hash= ?payload.block_hash, block_number = %payload.block_number.as_u64()), target = "consensus::engine")]
+    #[instrument(level = "trace", skip(self, payload), fields(block_hash= ?payload.block_hash, block_number = %payload.block_number.as_u64(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        trace!(target: "consensus::engine", "Received new payload");
-
         let block = match self.ensure_well_formed_payload(payload) {
             Ok(block) => block,
             Err(status) => return Ok(status),
         };
         let block_hash = block.hash();
 
-        // TODO: see other notes about checking entire invalid parent chain
-        // check that the payload parent is not invalid
+        // now check the block itself
         if let Some(status) = self.check_invalid_ancestor(block.parent_hash) {
+            // The parent is invalid, so this block is also invalid
+            self.invalid_headers.insert(block.header);
             return Ok(status)
         }
 
@@ -806,7 +834,17 @@ where
                 self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
                 PayloadStatusEnum::Accepted
             }
-            BlockStatus::Disconnected { .. } => PayloadStatusEnum::Syncing,
+            BlockStatus::Disconnected { .. } => {
+                // check if the block's parent is already marked as invalid
+                if let Some(status) =
+                    self.check_invalid_ancestor_with_head(block.parent_hash, block.hash)
+                {
+                    return Ok(status)
+                }
+
+                // not known to be invalid, but we don't know anything else
+                PayloadStatusEnum::Syncing
+            }
         };
         Ok(PayloadStatus::new(status, latest_valid_hash))
     }
@@ -961,27 +999,26 @@ where
                         // TODO: figure out how to make this less complex:
                         // restore_tree_if_possible will run the pipeline if the current_state head
                         // hash is missing. This can arise if we buffer the forkchoice head, and if
-                        // the head is an ancestor of an invalid block. In this case we won't have
-                        // the head hash in the database, so we would set the pipeline sync target
-                        // to a known-invalid head.
+                        // the head is an ancestor of an invalid block.
+                        //
+                        //  * The forkchoice head could be buffered if it were first sent as a
+                        //    `newPayload` request.
+                        //
+                        // In this case, we won't have the head hash in the database, so we would
+                        // set the pipeline sync target to a known-invalid head.
                         //
                         // This is why we check the invalid header cache here.
-                        // This might be incorrect, because we need to check exactly the invalid
-                        // block here, which is not necessarily the head hash! we might need to
-                        // insert all ancestors into the invalid block cache.
-                        //
-                        // We would need to accompany this change with a change to the invalid
-                        // header cache, because currently we return the parent of the checked
-                        // invalid header as the `latestValidHash`, which could be incorrect if
-                        // there are other parents in the invalid header cache.
-                        //
-                        // Here, we check if the lowest buffered ancestor parent is invalid (if it
-                        // exists), or if the head is invalid. ideally we want "is a descendant of
-                        // this block invalid"
                         let lowest_buffered_ancestor =
                             self.lowest_buffered_ancestor_or(sync_target_state.head_block_hash);
 
-                        if self.invalid_headers.get(&lowest_buffered_ancestor).is_none() {
+                        // this inserts the head if the lowest buffered ancestor is invalid
+                        if self
+                            .check_invalid_ancestor_with_head(
+                                lowest_buffered_ancestor,
+                                sync_target_state.head_block_hash,
+                            )
+                            .is_none()
+                        {
                             // Update the state and hashes of the blockchain tree if possible.
                             match self.restore_tree_if_possible(sync_target_state) {
                                 Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
@@ -1057,7 +1094,8 @@ where
 
 /// Keeps track of invalid headers.
 struct InvalidHeaderCache {
-    headers: LruMap<H256, Header>,
+    /// This maps a header hash to a reference to its invalid ancestor.
+    headers: LruMap<H256, Arc<Header>>,
 }
 
 impl InvalidHeaderCache {
@@ -1065,16 +1103,21 @@ impl InvalidHeaderCache {
         Self { headers: LruMap::new(ByLength::new(max_length)) }
     }
 
-    /// Returns the header if it exists in the cache.
-    fn get(&mut self, hash: &H256) -> Option<&Header> {
-        self.headers.get(hash).map(|h| &*h)
+    /// Returns the invalid ancestor's header if it exists in the cache.
+    fn get(&mut self, hash: &H256) -> Option<&mut Arc<Header>> {
+        self.headers.get(hash)
     }
 
-    /// Inserts a new header into the map.
-    fn insert(&mut self, header: SealedHeader) {
-        let hash = header.hash;
-        let header = header.unseal();
-        self.headers.insert(hash, header);
+    /// Inserts an invalid block into the cache, with a given invalid ancestor.
+    fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
+        self.headers.insert(header_hash, invalid_ancestor);
+    }
+
+    /// Inserts an invalid ancestor into the map.
+    fn insert(&mut self, invalid_ancestor: SealedHeader) {
+        let hash = invalid_ancestor.hash;
+        let header = invalid_ancestor.unseal();
+        self.headers.insert(hash, Arc::new(header));
     }
 }
 
