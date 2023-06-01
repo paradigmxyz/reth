@@ -330,7 +330,8 @@ where
     /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
     /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
     ///
-    /// Returns a payload status response according to the engine API spec.
+    /// Returns a payload status response according to the engine API spec if the block is known to
+    /// be invalid.
     fn check_invalid_ancestor_with_head(
         &mut self,
         check: H256,
@@ -974,22 +975,17 @@ where
                         // set the pipeline sync target to a known-invalid head.
                         //
                         // This is why we check the invalid header cache here.
-                        // This might be incorrect, because we need to check exactly the invalid
-                        // block here, which is not necessarily the head hash! we might need to
-                        // insert all ancestors into the invalid block cache.
-                        //
-                        // We would need to accompany this change with a change to the invalid
-                        // header cache, because currently we return the parent of the checked
-                        // invalid header as the `latestValidHash`, which could be incorrect if
-                        // there are other parents in the invalid header cache.
-                        //
-                        // Here, we check if the lowest buffered ancestor parent is invalid (if it
-                        // exists), or if the head is invalid. ideally we want "is a descendant of
-                        // this block invalid"
                         let lowest_buffered_ancestor =
                             self.lowest_buffered_ancestor_or(sync_target_state.head_block_hash);
 
-                        if self.invalid_headers.get(&lowest_buffered_ancestor).is_none() {
+                        // this inserts the head if the lowest buffered ancestor is invalid
+                        if self
+                            .check_invalid_ancestor_with_head(
+                                lowest_buffered_ancestor,
+                                sync_target_state.head_block_hash,
+                            )
+                            .is_none()
+                        {
                             // Update the state and hashes of the blockchain tree if possible.
                             match self.restore_tree_if_possible(sync_target_state) {
                                 Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
