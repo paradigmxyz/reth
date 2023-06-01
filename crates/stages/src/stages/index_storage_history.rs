@@ -1,8 +1,9 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::{database::Database, models::BlockNumberAddress};
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_db::{database::Database, models::BlockNumberAddress, tables, transaction::DbTx};
+use reth_interfaces::db::DatabaseError;
+use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
 use reth_provider::Transaction;
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Deref};
 use tracing::*;
 
 /// Stage is indexing history the account changesets generated in
@@ -41,11 +42,19 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             return Ok(ExecOutput::done(target))
         }
 
-        let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;
+        let (changesets, indices) = tx.get_storage_transition_ids_from_changeset(range.clone())?;
         tx.insert_storage_history_index(indices)?;
 
+        let mut stage_checkpoint =
+            stage_checkpoint(tx, input.checkpoint().entities_stage_checkpoint())?;
+        stage_checkpoint.processed += changesets as u64;
+
         info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(*range.end())
+                .with_entities_stage_checkpoint(stage_checkpoint),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -57,11 +66,30 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         let (range, unwind_progress, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
+        let changesets = tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
+
+        let checkpoint = if let Some(mut stage_checkpoint) =
+            input.checkpoint.entities_stage_checkpoint()
+        {
+            stage_checkpoint.processed -= changesets as u64;
+            StageCheckpoint::new(unwind_progress).with_entities_stage_checkpoint(stage_checkpoint)
+        } else {
+            StageCheckpoint::new(unwind_progress)
+        };
 
         info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        Ok(UnwindOutput { checkpoint })
     }
+}
+
+fn stage_checkpoint<DB: Database>(
+    tx: &Transaction<'_, DB>,
+    prev_checkpoint: Option<EntitiesCheckpoint>,
+) -> Result<EntitiesCheckpoint, DatabaseError> {
+    Ok(EntitiesCheckpoint {
+        processed: prev_checkpoint.map(|checkpoint| checkpoint.processed).unwrap_or_default(),
+        total: Some(tx.deref().entries::<tables::StorageChangeSet>()? as u64),
+    })
 }
 
 #[cfg(test)]
@@ -151,7 +179,15 @@ mod tests {
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+        assert_eq!(
+            out,
+            ExecOutput {
+                checkpoint: StageCheckpoint::new(5).with_entities_stage_checkpoint(
+                    EntitiesCheckpoint { processed: 2, total: Some(2) }
+                ),
+                done: true
+            }
+        );
         tx.commit().unwrap();
     }
 

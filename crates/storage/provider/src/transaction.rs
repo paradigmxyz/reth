@@ -380,29 +380,34 @@ where
         Ok(())
     }
 
-    /// Unwind and clear account history indices
+    /// Unwind and clear account history indices.
+    ///
+    /// Returns number of changesets walked.
     pub fn unwind_account_history_indices(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(), TransactionError> {
-        let mut cursor = self.cursor_write::<tables::AccountHistory>()?;
-
+    ) -> Result<usize, TransactionError> {
         let account_changeset = self
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
 
+        let mut changesets = 0;
         let last_indices = account_changeset
             .into_iter()
             // reverse so we can get lowest transition id where we need to unwind account.
             .rev()
             // fold all account and get last transition index
             .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
+                changesets += 1;
+
                 // we just need address and lowest transition id.
                 accounts.insert(account.address, index);
                 accounts
             });
+
         // try to unwind the index
+        let mut cursor = self.cursor_write::<tables::AccountHistory>()?;
         for (address, rem_index) in last_indices {
             let shard_part = unwind_account_history_shards::<DB>(&mut cursor, address, rem_index)?;
 
@@ -416,20 +421,23 @@ where
                 )?;
             }
         }
-        Ok(())
+
+        Ok(changesets)
     }
 
-    /// Unwind and clear storage history indices
+    /// Unwind and clear storage history indices.
+    ///
+    /// Returns number of changesets walked.
     pub fn unwind_storage_history_indices(
         &self,
         range: Range<BlockNumberAddress>,
-    ) -> Result<(), TransactionError> {
-        let mut cursor = self.cursor_write::<tables::StorageHistory>()?;
-
+    ) -> Result<usize, TransactionError> {
         let storage_changesets = self
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
+
+        let mut changesets = 0;
         let last_indices = storage_changesets
             .into_iter()
             // reverse so we can get lowest transition id where we need to unwind account.
@@ -438,11 +446,15 @@ where
             .fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
+                    changesets += 1;
+
                     // we just need address and lowest transition id.
                     accounts.insert((index.address(), storage.key), index.block_number());
                     accounts
                 },
             );
+
+        let mut cursor = self.cursor_write::<tables::StorageHistory>()?;
         for ((address, storage_key), rem_index) in last_indices {
             let shard_part =
                 unwind_storage_history_shards::<DB>(&mut cursor, address, storage_key, rem_index)?;
@@ -457,7 +469,8 @@ where
                 )?;
             }
         }
-        Ok(())
+
+        Ok(changesets)
     }
 
     /// Append blocks and insert its post state.
@@ -517,13 +530,13 @@ where
 
         // account history stage
         {
-            let indices = self.get_account_transition_ids_from_changeset(range.clone())?;
+            let (_, indices) = self.get_account_transition_ids_from_changeset(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
         // storage history stage
         {
-            let indices = self.get_storage_transition_ids_from_changeset(range)?;
+            let (_, indices) = self.get_storage_transition_ids_from_changeset(range)?;
             self.insert_storage_history_index(indices)?;
         }
 
@@ -1157,22 +1170,26 @@ where
         Ok(())
     }
 
-    /// Get all transaction ids where account got changed.
+    /// Returns the number of storage changesets walked and all block numbers where storage got
+    /// changed.
     ///
     /// NOTE: Get inclusive range of blocks.
     pub fn get_storage_transition_ids_from_changeset(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<(Address, H256), Vec<u64>>, TransactionError> {
+    ) -> Result<(usize, BTreeMap<(Address, H256), Vec<u64>>), TransactionError> {
         let storage_changeset = self
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(BlockNumberAddress::range(range))?
             .collect::<Result<Vec<_>, _>>()?;
 
         // fold all storages to one set of changes
+        let mut changesets = 0;
         let storage_changeset_lists = storage_changeset.into_iter().fold(
             BTreeMap::new(),
             |mut storages: BTreeMap<(Address, H256), Vec<u64>>, (index, storage)| {
+                changesets += 1;
+
                 storages
                     .entry((index.address(), storage.key))
                     .or_default()
@@ -1181,33 +1198,37 @@ where
             },
         );
 
-        Ok(storage_changeset_lists)
+        Ok((changesets, storage_changeset_lists))
     }
 
-    /// Get all transaction ids where account got changed.
+    /// Returns the number of account changesets walked and all block numbers where account got
+    /// changed.
     ///
     /// NOTE: Get inclusive range of blocks.
     pub fn get_account_transition_ids_from_changeset(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
+    ) -> Result<(usize, BTreeMap<Address, Vec<u64>>), TransactionError> {
         let account_changesets = self
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
 
-        let account_transtions = account_changesets
+        let mut changesets = 0;
+        let account_transitions = account_changesets
             .into_iter()
             // fold all account to one set of changed accounts
             .fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<Address, Vec<u64>>, (index, account)| {
+                    changesets += 1;
+
                     accounts.entry(account.address).or_default().push(index);
                     accounts
                 },
             );
 
-        Ok(account_transtions)
+        Ok((changesets, account_transitions))
     }
 
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage
