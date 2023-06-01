@@ -77,6 +77,16 @@ pub fn random_signed_tx() -> TransactionSigned {
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
 
+/// Generates a random legacy [Transaction] that is signed, using the input nonce, and input
+/// keypair to sign the transaction.
+pub fn random_signed_tx_with_nonce(key_pair: KeyPair, nonce: u64) -> TransactionSigned {
+    let mut tx = random_tx();
+    tx.set_nonce(nonce);
+    let signature =
+        sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+    TransactionSigned::from_transaction_and_signature(tx, signature)
+}
+
 /// Generate a random block filled with signed transactions (generated using
 /// [random_signed_tx]). If no transaction count is provided, the number of transactions
 /// will be random, otherwise the provided count will be used.

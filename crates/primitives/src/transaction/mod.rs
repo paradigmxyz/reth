@@ -224,6 +224,15 @@ impl Transaction {
             }
         }
     }
+
+    /// This sets the transaction's nonce.
+    pub fn set_nonce(&mut self, nonce: u64) {
+        match self {
+            Transaction::Legacy(tx) => tx.nonce = nonce,
+            Transaction::Eip2930(tx) => tx.nonce = nonce,
+            Transaction::Eip1559(tx) => tx.nonce = nonce,
+        }
+    }
 }
 
 impl Compact for Transaction {
