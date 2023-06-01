@@ -23,8 +23,8 @@ use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
     Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered, H256,
-    U256,
+    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionSigned,
+    TransactionSignedEcRecovered, H256, U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{
@@ -181,6 +181,13 @@ where
             .get::<tables::HeaderTD>(block)?
             .ok_or(ProviderError::TotalDifficultyNotFound { number: block })?;
         Ok(td.into())
+    }
+
+    /// Query the sealed header by number
+    pub fn get_sealed_header(&self, number: BlockNumber) -> Result<SealedHeader, TransactionError> {
+        let header = self.get_header(number)?;
+        let block_hash = self.get_block_hash(number)?;
+        Ok(header.seal(block_hash))
     }
 
     /// Unwind table by some number key.
