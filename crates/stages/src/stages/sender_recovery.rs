@@ -5,9 +5,8 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable, RawValue,
+    DatabaseError, RawKey, RawTable, RawValue,
 };
-use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
@@ -114,7 +113,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             // closure that would recover signer. Used as utility to wrap result
             let recover = |entry: Result<
                 (RawKey<TxNumber>, RawValue<TransactionSignedNoHash>),
-                reth_db::DatabaseError,
+                DatabaseError,
             >,
                            rlp_buf: &mut Vec<u8>|
              -> Result<(u64, H160), Box<StageError>> {
@@ -286,7 +285,7 @@ mod tests {
                     total: Some(total)
                 }))
             }, done: false }) if block_number == expected_progress &&
-                processed == runner.tx.inner().block_body_indices(expected_progress).unwrap().last_tx_num() &&
+                processed == runner.tx.table::<tables::TxSenders>().unwrap().len() as u64 &&
                 total == total_transactions
         );
 
@@ -305,7 +304,7 @@ mod tests {
                     total: Some(total)
                 }))
             }, done: true }) if block_number == previous_stage &&
-                processed == runner.tx.inner().block_body_indices(previous_stage).unwrap().last_tx_num() &&
+                processed == runner.tx.table::<tables::TxSenders>().unwrap().len() as u64 &&
                 total == total_transactions
         );
 
