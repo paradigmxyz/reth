@@ -209,7 +209,7 @@ fn stage_checkpoint<DB: Database>(
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: tx.deref().entries::<tables::TxHashNumber>()? as u64,
-        total: Some(tx.deref().entries::<tables::Transactions>()? as u64),
+        total: tx.deref().entries::<tables::Transactions>()? as u64,
     })
 }
 

@@ -222,12 +222,12 @@ fn execution_checkpoint<DB: Database>(
         // stage checkpoint and add the amount of gas from our range to the checkpoint total.
         Some(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { to, .. },
-            progress: EntitiesCheckpoint { processed, total: Some(total) },
+            progress: EntitiesCheckpoint { processed, total },
         }) if to == start_block - 1 => ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: start_block, to: max_block },
             progress: EntitiesCheckpoint {
                 processed,
-                total: Some(total + calculate_gas_used_from_headers(tx, start_block..=max_block)?),
+                total: total + calculate_gas_used_from_headers(tx, start_block..=max_block)?,
             },
         },
         // If checkpoint block range ends on the same block as our range, we take the previously
@@ -250,7 +250,7 @@ fn execution_checkpoint<DB: Database>(
                 block_range: CheckpointBlockRange { from: start_block, to: max_block },
                 progress: EntitiesCheckpoint {
                     processed,
-                    total: Some(processed + after_checkpoint_block_number),
+                    total: processed + after_checkpoint_block_number,
                 },
             }
         }
@@ -263,9 +263,8 @@ fn execution_checkpoint<DB: Database>(
                 block_range: CheckpointBlockRange { from: start_block, to: max_block },
                 progress: EntitiesCheckpoint {
                     processed,
-                    total: Some(
-                        processed + calculate_gas_used_from_headers(tx, start_block..=max_block)?,
-                    ),
+                    total: processed +
+                        calculate_gas_used_from_headers(tx, start_block..=max_block)?,
                 },
             }
         }
@@ -512,7 +511,7 @@ mod tests {
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
-            progress: EntitiesCheckpoint { processed: 1, total: Some(2) },
+            progress: EntitiesCheckpoint { processed: 1, total: 2 },
         };
         let previous_checkpoint = StageCheckpoint {
             block_number: 0,
@@ -544,7 +543,7 @@ mod tests {
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
-            progress: EntitiesCheckpoint { processed: 1, total: Some(1) },
+            progress: EntitiesCheckpoint { processed: 1, total: 1 },
         };
         let previous_checkpoint = StageCheckpoint {
             block_number: 1,
@@ -557,10 +556,10 @@ mod tests {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
             progress: EntitiesCheckpoint {
                 processed,
-                total: Some(total)
+                total
             }
         }) if processed == previous_stage_checkpoint.progress.processed &&
-            total == previous_stage_checkpoint.progress.total.unwrap() + block.gas_used);
+            total == previous_stage_checkpoint.progress.total + block.gas_used);
     }
 
     #[test]
@@ -578,7 +577,7 @@ mod tests {
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
-            progress: EntitiesCheckpoint { processed: 1, total: Some(1) },
+            progress: EntitiesCheckpoint { processed: 1, total: 1 },
         };
         let previous_checkpoint = StageCheckpoint {
             block_number: 1,
@@ -591,10 +590,10 @@ mod tests {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
             progress: EntitiesCheckpoint {
                 processed,
-                total: Some(total)
+                total
             }
         }) if processed == previous_stage_checkpoint.progress.processed &&
-            total == previous_stage_checkpoint.progress.total.unwrap() + block.gas_used);
+            total == previous_stage_checkpoint.progress.total + block.gas_used);
     }
 
     #[test]
@@ -618,7 +617,7 @@ mod tests {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
             progress: EntitiesCheckpoint {
                 processed: 0,
-                total: Some(total)
+                total
             }
         }) if total == block.gas_used);
     }
@@ -677,7 +676,7 @@ mod tests {
                     },
                     progress: EntitiesCheckpoint {
                         processed,
-                        total: Some(total)
+                        total
                     }
                 }))
             },
@@ -786,7 +785,7 @@ mod tests {
                     },
                     progress: EntitiesCheckpoint {
                         processed: 0,
-                        total: Some(total)
+                        total
                     }
                 }))
             }

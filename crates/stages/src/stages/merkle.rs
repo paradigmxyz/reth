@@ -196,10 +196,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: Some(
-                    (tx.deref().entries::<tables::HashedAccount>()? +
-                        tx.deref().entries::<tables::HashedStorage>()?) as u64,
-                ),
+                total: (tx.deref().entries::<tables::HashedAccount>()? +
+                    tx.deref().entries::<tables::HashedStorage>()?) as u64,
             });
 
             let progress = StateRoot::new(tx.deref_mut())
@@ -251,7 +249,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 // branch we're just hashing all remaining accounts and storage slots we have in the
                 // database.
                 processed: total_hashed_entries,
-                total: Some(total_hashed_entries),
+                total: total_hashed_entries,
             };
 
             (root, entities_checkpoint)
@@ -285,10 +283,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: Some(
-                    (tx.deref().entries::<tables::HashedAccount>()? +
-                        tx.deref().entries::<tables::HashedStorage>()?) as u64,
-                ),
+                total: (tx.deref().entries::<tables::HashedAccount>()? +
+                    tx.deref().entries::<tables::HashedStorage>()?) as u64,
             });
 
         if input.unwind_to == 0 {
@@ -377,7 +373,7 @@ mod tests {
                     block_number,
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
-                        total: Some(total)
+                        total
                     }))
                 },
                 done: true
@@ -417,7 +413,7 @@ mod tests {
                     block_number,
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
-                        total: Some(total)
+                        total
                     }))
                 },
                 done: true
