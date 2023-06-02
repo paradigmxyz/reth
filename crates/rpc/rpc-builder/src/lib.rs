@@ -786,14 +786,15 @@ where
         let EthHandlers { api: eth_api, cache: eth_cache, filter: eth_filter, pubsub: eth_pubsub } =
             self.with_eth(|eth| eth.clone());
 
-        // Create a copy so we can list out all the methods for rpc_ api
+        // Create a copy, so we can list out all the methods for rpc_ api
         let namespaces: Vec<_> = namespaces.collect();
 
         namespaces
             .iter()
+            .copied()
             .map(|namespace| {
                 self.modules
-                    .entry(*namespace)
+                    .entry(namespace)
                     .or_insert_with(|| match namespace {
                         RethRpcModule::Admin => {
                             AdminApi::new(self.network.clone()).into_rpc().into()
@@ -833,7 +834,7 @@ where
                         RethRpcModule::Rpc => RPCApi::new(
                             namespaces
                                 .iter()
-                                .map(|module| (module.to_string(), "1.0".to_owned()))
+                                .map(|module| (module.to_string(), "1.0".to_string()))
                                 .collect(),
                         )
                         .into_rpc()

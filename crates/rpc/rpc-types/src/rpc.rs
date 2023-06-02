@@ -3,17 +3,18 @@ use std::collections::HashMap;
 
 /// Represents the `rpc_modules` response, which returns the
 /// list of all available modules on that transport and their version
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-pub struct RPCModules {
+pub struct RpcModules {
     module_map: HashMap<String, String>,
 }
 
-impl RPCModules {
+impl RpcModules {
     /// Create a new instance of RPCModules
     pub fn new(module_map: HashMap<String, String>) -> Self {
         Self { module_map }
     }
+
     /// Consumes self and returns the inner hashmap mapping module names to their versions
     pub fn into_modules(self) -> HashMap<String, String> {
         self.module_map
@@ -33,8 +34,8 @@ mod tests {
             ("web3".to_owned(), "1.0".to_owned()),
             ("net".to_owned(), "1.0".to_owned()),
         ]);
-        let m = RPCModules::new(module_map);
-        let de_serialized: RPCModules = serde_json::from_str(&s).unwrap();
+        let m = RpcModules::new(module_map);
+        let de_serialized: RpcModules = serde_json::from_str(&s).unwrap();
         assert_eq!(de_serialized, m);
     }
 }
