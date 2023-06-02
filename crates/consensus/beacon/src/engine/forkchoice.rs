@@ -91,7 +91,6 @@ impl ForkchoiceStatus {
                 // This is only returned on `newPayload` accepted would be a valid state here.
                 ForkchoiceStatus::Valid
             }
-            PayloadStatusEnum::InvalidBlockHash { .. } => ForkchoiceStatus::Invalid,
         }
     }
 }
