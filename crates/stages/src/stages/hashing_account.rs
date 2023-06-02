@@ -11,7 +11,10 @@ use reth_db::{
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
     keccak256,
-    stage::{AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId},
+    stage::{
+        AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint,
+        StageId,
+    },
 };
 use reth_provider::Transaction;
 use std::{
@@ -148,7 +151,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 .and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
 
             let start_address = match stage_checkpoint {
-                Some(AccountHashingCheckpoint { address: address @ Some(_), from, to, .. })
+                Some(AccountHashingCheckpoint { address: address @ Some(_), block_range: CheckpointBlockRange { from, to }, .. })
                     // Checkpoint is only valid if the range of transitions didn't change.
                     // An already hashed account may have been changed with the new range,
                     // and therefore should be hashed again.
@@ -227,8 +230,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 let checkpoint = input.checkpoint().with_account_hashing_stage_checkpoint(
                     AccountHashingCheckpoint {
                         address: Some(next_address.key().unwrap()),
-                        from: from_block,
-                        to: to_block,
+                        block_range: CheckpointBlockRange { from: from_block, to: to_block },
                         progress: stage_checkpoint_progress(tx)?,
                     },
                 );
@@ -388,8 +390,10 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Account(
                         AccountHashingCheckpoint {
                             address: Some(address),
-                            from: 11,
-                            to: 20,
+                            block_range: CheckpointBlockRange {
+                                from: 11,
+                                to: 20,
+                            },
                             progress: EntitiesCheckpoint { processed: 5, total: Some(total) }
                         }
                     ))
@@ -413,8 +417,10 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Account(
                         AccountHashingCheckpoint {
                             address: None,
-                            from: 0,
-                            to: 0,
+                            block_range: CheckpointBlockRange {
+                                from: 0,
+                                to: 0,
+                            },
                             progress: EntitiesCheckpoint { processed, total: Some(total) }
                         }
                     ))

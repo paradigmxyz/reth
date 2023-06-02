@@ -5,6 +5,6 @@ pub use id::StageId;
 
 mod checkpoints;
 pub use checkpoints::{
-    AccountHashingCheckpoint, EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint,
-    StageUnitCheckpoint, StorageHashingCheckpoint,
+    AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
+    MerkleCheckpoint, StageCheckpoint, StageUnitCheckpoint, StorageHashingCheckpoint,
 };

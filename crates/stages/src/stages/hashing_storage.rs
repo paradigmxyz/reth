@@ -10,7 +10,10 @@ use reth_db::{
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
     keccak256,
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StorageHashingCheckpoint},
+    stage::{
+        CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint, StageId,
+        StorageHashingCheckpoint,
+    },
     StorageEntry,
 };
 use reth_provider::Transaction;
@@ -73,8 +76,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 Some(StorageHashingCheckpoint {
                          address: address @ Some(_),
                          storage,
-                         from,
-                         to,
+                         block_range: CheckpointBlockRange { from, to },
                          ..
                      })
                 // Checkpoint is only valid if the range of transitions didn't change.
@@ -158,8 +160,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     StorageHashingCheckpoint {
                         address: current_key,
                         storage: current_subkey,
-                        from: from_block,
-                        to: to_block,
+                        block_range: CheckpointBlockRange { from: from_block, to: to_block },
                         progress: stage_checkpoint_progress(tx)?,
                     },
                 );
@@ -353,8 +354,10 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                         address: Some(address),
                         storage: Some(storage),
-                        from: 101,
-                        to: 500,
+                        block_range: CheckpointBlockRange {
+                            from: 101,
+                            to: 500,
+                        },
                         progress: EntitiesCheckpoint {
                             processed: 500,
                             total: Some(total)
@@ -396,8 +399,10 @@ mod tests {
                         StorageHashingCheckpoint {
                             address: Some(address),
                             storage: Some(storage),
-                            from: 101,
-                            to: 500,
+                            block_range: CheckpointBlockRange {
+                                from: 101,
+                                to: 500,
+                            },
                             progress: EntitiesCheckpoint {
                                 processed: 502,
                                 total: Some(total)
@@ -426,8 +431,10 @@ mod tests {
                         StorageHashingCheckpoint {
                             address: None,
                             storage: None,
-                            from: 0,
-                            to: 0,
+                            block_range: CheckpointBlockRange {
+                                from: 0,
+                                to: 0,
+                            },
                             progress: EntitiesCheckpoint {
                                 processed,
                                 total: Some(total)
