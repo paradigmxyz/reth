@@ -152,7 +152,7 @@ pub struct HeadersCheckpoint {
 pub struct IndexHistoryCheckpoint {
     /// Block range which this checkpoint is valid for.
     pub block_range: CheckpointBlockRange,
-    /// Progress measured in gas.
+    /// Progress measured in changesets.
     pub progress: EntitiesCheckpoint,
 }
 
