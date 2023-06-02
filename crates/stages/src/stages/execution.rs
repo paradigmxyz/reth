@@ -240,6 +240,24 @@ fn execution_checkpoint<DB: Database>(
                 progress,
             }
         }
+        // If there's any other non-empty checkpoint, we calculate the remaining amount of total gas
+        // to be processed not including the checkpoint range.
+        Some(ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { from, to, .. },
+            progress: EntitiesCheckpoint { processed, total: Some(total) },
+        }) => {
+            let before_checkpoint_range =
+                calculate_gas_used_from_headers(tx, 0..=from.saturating_sub(1))?;
+            let after_checkpoint_range = calculate_gas_used_from_headers(tx, to + 1..=max_block)?;
+
+            ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total: Some(total + before_checkpoint_range + after_checkpoint_range),
+                },
+            }
+        }
         // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
         // already processed, if there's any.
         _ => {
@@ -492,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_checkpoint_previous() {
+    fn execution_checkpoint_matches() {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let tx = Transaction::new(state_db.as_ref()).unwrap();
 
@@ -571,15 +589,16 @@ mod tests {
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
         };
 
-        let stage_checkpoint = execution_checkpoint(&tx, 2, 2, previous_checkpoint);
+        let stage_checkpoint = execution_checkpoint(&tx, 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
-            block_range: CheckpointBlockRange { from: 2, to: 2 },
+            block_range: CheckpointBlockRange { from: 1, to: 1 },
             progress: EntitiesCheckpoint {
                 processed,
                 total: Some(total)
             }
-        }) if processed == block.gas_used && total == block.gas_used);
+        }) if processed == previous_stage_checkpoint.progress.processed &&
+            total == previous_stage_checkpoint.progress.total.unwrap() + block.gas_used);
     }
 
     #[test]
