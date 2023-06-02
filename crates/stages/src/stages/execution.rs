@@ -230,6 +230,16 @@ fn execution_checkpoint<DB: Database>(
                 total: Some(total + calculate_gas_used_from_headers(tx, start_block..=max_block)?),
             },
         },
+        // If checkpoint block range ends on the same block as our range, we take the previously
+        // used stage checkpoint.
+        Some(ExecutionCheckpoint { block_range: CheckpointBlockRange { to, .. }, progress })
+            if to == max_block =>
+        {
+            ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                progress,
+            }
+        }
         // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
         // already processed, if there's any.
         _ => {
