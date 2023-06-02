@@ -469,19 +469,6 @@ where
                     let header = outcome.into_header();
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=header.number, "canonicalized new head");
 
-                    let pipeline_min_progress = self
-                        .blockchain
-                        .get_stage_checkpoint(StageId::Finish)?
-                        .unwrap_or_default()
-                        .block_number;
-
-                    if pipeline_min_progress < header.number {
-                        debug!(target: "consensus::engine", last_finished=pipeline_min_progress, head_number=header.number, "pipeline run to head required");
-
-                        // TODO(mattsse) ideally sync blockwise
-                        self.sync.set_pipeline_sync_target(state.head_block_hash);
-                    }
-
                     if let Some(attrs) = attrs {
                         let payload_response =
                             self.process_payload_attributes(attrs, header.unseal(), state);
