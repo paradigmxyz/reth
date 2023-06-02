@@ -242,19 +242,15 @@ fn execution_checkpoint<DB: Database>(
         }
         // If there's any other non-empty checkpoint, we calculate the remaining amount of total gas
         // to be processed not including the checkpoint range.
-        Some(ExecutionCheckpoint {
-            block_range: CheckpointBlockRange { from, to, .. },
-            progress: EntitiesCheckpoint { processed, total: Some(total) },
-        }) => {
-            let before_checkpoint_range =
-                calculate_gas_used_from_headers(tx, 0..=from.saturating_sub(1))?;
-            let after_checkpoint_range = calculate_gas_used_from_headers(tx, to + 1..=max_block)?;
+        Some(ExecutionCheckpoint { progress: EntitiesCheckpoint { processed, .. }, .. }) => {
+            let after_checkpoint_block_number =
+                calculate_gas_used_from_headers(tx, checkpoint.block_number + 1..=max_block)?;
 
             ExecutionCheckpoint {
                 block_range: CheckpointBlockRange { from: start_block, to: max_block },
                 progress: EntitiesCheckpoint {
                     processed,
-                    total: Some(total + before_checkpoint_range + after_checkpoint_range),
+                    total: Some(processed + after_checkpoint_block_number),
                 },
             }
         }
