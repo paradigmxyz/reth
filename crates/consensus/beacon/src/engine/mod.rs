@@ -962,11 +962,17 @@ where
     ///
     /// ## Insert Error
     ///
-    /// If the insertion into the tree failed, then the block was well-formed (valid hash) but its
+    /// If the insertion into the tree failed, then the block was well-formed (valid hash), but its
     /// chain is invalid, which means the FCU that triggered the download is invalid. Here we can
     /// stop because there's nothing to do here and the engine needs to wait for another FCU.
     fn on_downloaded_block(&mut self, block: SealedBlock) {
         trace!(target: "consensus::engine", hash=?block.hash, number=%block.number, "Downloaded full block");
+        // check if the block's parent is already marked as invalid
+        if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash).is_some() {
+            // can skip this invalid block
+            return
+        }
+
         match self.blockchain.insert_block_without_senders(block) {
             Ok(status) => {
                 match status {
