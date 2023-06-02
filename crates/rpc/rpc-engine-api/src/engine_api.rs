@@ -213,7 +213,7 @@ where
 
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
     /// layers are using the latest configuration.
-    pub fn exchange_transition_configuration(
+    pub async fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
     ) -> EngineApiResult<TransitionConfiguration> {
@@ -251,7 +251,7 @@ where
             .block_hash(terminal_block_number.as_u64())
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 
-        self.beacon_consensus.transition_configuration_exchanged();
+        self.beacon_consensus.transition_configuration_exchanged().await;
 
         // Transition configuration exchange is successful if block hashes match
         match local_hash {
@@ -414,7 +414,7 @@ where
         config: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration> {
         trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
-        Ok(EngineApi::exchange_transition_configuration(self, config)?)
+        Ok(EngineApi::exchange_transition_configuration(self, config).await?)
     }
 
     /// Handler for `engine_exchangeCapabilitiesV1`
@@ -578,7 +578,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let res = api.exchange_transition_configuration(transition_config.clone());
+            let res = api.exchange_transition_configuration(transition_config.clone()).await;
 
             assert_matches!(
                 res,
@@ -602,7 +602,7 @@ mod tests {
             };
 
             // Unknown block number
-            let res = api.exchange_transition_configuration(transition_config.clone());
+            let res = api.exchange_transition_configuration(transition_config.clone()).await;
 
             assert_matches!(
                res,
@@ -616,7 +616,7 @@ mod tests {
                 execution_terminal_block.clone().unseal(),
             );
 
-            let res = api.exchange_transition_configuration(transition_config.clone());
+            let res = api.exchange_transition_configuration(transition_config.clone()).await;
 
             assert_matches!(
                 res,
@@ -640,7 +640,8 @@ mod tests {
 
             handle.client.add_block(terminal_block.hash(), terminal_block.unseal());
 
-            let config = api.exchange_transition_configuration(transition_config.clone()).unwrap();
+            let config =
+                api.exchange_transition_configuration(transition_config.clone()).await.unwrap();
             assert_eq!(config, transition_config);
         }
     }

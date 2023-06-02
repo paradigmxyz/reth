@@ -1,11 +1,11 @@
 //! Support for handling events emitted by node components.
 
+use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::CanonChainTracker;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,
@@ -18,35 +18,20 @@ use tracing::{debug, info, warn};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(30);
-/// Interval of reporting consensus client state.
-const CONSENSUS_CLIENT_MESSAGE_INTERVAL: Duration = Duration::from_secs(300);
-/// Period of not exchanging transition configurations with consensus client,
-/// after which the warning is issued.
-const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120);
-/// Period of not receiving fork choice updates from consensus client,
-/// after which the warning is issued.
-const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
 /// The current high-level state of the node.
-struct NodeState<CC> {
+struct NodeState {
     /// Connection to the network.
     network: Option<NetworkHandle>,
     /// The stage currently being executed.
     current_stage: Option<StageId>,
     /// The current checkpoint of the executing stage.
     current_checkpoint: StageCheckpoint,
-    /// Canonical Chain tracker.
-    canon_chain: CC,
 }
 
-impl<CC: CanonChainTracker> NodeState<CC> {
-    fn new(network: Option<NetworkHandle>, canon_chain: CC) -> Self {
-        Self {
-            network,
-            current_stage: None,
-            current_checkpoint: StageCheckpoint::new(0),
-            canon_chain,
-        }
+impl NodeState {
+    fn new(network: Option<NetworkHandle>) -> Self {
+        Self { network, current_stage: None, current_checkpoint: StageCheckpoint::new(0) }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -128,6 +113,23 @@ impl<CC: CanonChainTracker> NodeState<CC> {
             }
         }
     }
+
+    fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {
+        match event {
+            ConsensusLayerHealthEvent::NeverSeen => {
+                warn!(target: "reth::cli", "Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
+            }
+            ConsensusLayerHealthEvent::HaveNotSeenInAWhile => {
+                warn!(target: "reth::cli", "Post-merge network, but no beacon client seen in a while. Please launch one to follow the chain!")
+            }
+            ConsensusLayerHealthEvent::NeverReceivedUpdates => {
+                warn!(target: "reth::cli", "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+            }
+            ConsensusLayerHealthEvent::HaveNotReceivedUpdatesInAWhile => {
+                warn!(target: "reth::cli", "Beacon client online, but no consensus updates received in a while. Please fix your beacon client to follow the chain!")
+            }
+        }
+    }
 }
 
 /// A node event.
@@ -139,6 +141,7 @@ pub enum NodeEvent {
     Pipeline(PipelineEvent),
     /// A consensus engine event.
     ConsensusEngine(BeaconConsensusEngineEvent),
+    ConsensusLayerHealth(ConsensusLayerHealthEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -159,41 +162,40 @@ impl From<BeaconConsensusEngineEvent> for NodeEvent {
     }
 }
 
+impl From<ConsensusLayerHealthEvent> for NodeEvent {
+    fn from(event: ConsensusLayerHealthEvent) -> Self {
+        NodeEvent::ConsensusLayerHealth(event)
+    }
+}
+
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events<CC, E>(network: Option<NetworkHandle>, canon_chain: CC, events: E)
+pub async fn handle_events<E>(network: Option<NetworkHandle>, events: E)
 where
-    CC: CanonChainTracker,
     E: Stream<Item = NodeEvent> + Unpin,
 {
-    let state = NodeState::new(network, canon_chain);
+    let state = NodeState::new(network);
 
     let mut info_interval = tokio::time::interval(INFO_MESSAGE_INTERVAL);
     info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    let mut consensus_client_interval = tokio::time::interval(CONSENSUS_CLIENT_MESSAGE_INTERVAL);
-    consensus_client_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-    let handler = EventHandler { state, events, info_interval, consensus_client_interval };
+    let handler = EventHandler { state, events, info_interval };
     handler.await
 }
 
 /// Handles events emitted by the node and logs them accordingly.
 #[pin_project::pin_project]
-struct EventHandler<E, CC> {
-    state: NodeState<CC>,
+struct EventHandler<E> {
+    state: NodeState,
     #[pin]
     events: E,
     #[pin]
     info_interval: Interval,
-    #[pin]
-    consensus_client_interval: Interval,
 }
 
-impl<E, CC> Future for EventHandler<E, CC>
+impl<E> Future for EventHandler<E>
 where
     E: Stream<Item = NodeEvent> + Unpin,
-    CC: CanonChainTracker,
 {
     type Output = ();
 
@@ -209,32 +211,6 @@ where
             info!(target: "reth::cli", connected_peers = this.state.num_connected_peers(), %stage, checkpoint = %this.state.current_checkpoint, "Status");
         }
 
-        // TODO(alexey): do not warn about any of these conditions if `debug.tip` is not empty.
-        if this.consensus_client_interval.poll_tick(cx).is_ready() {
-            match (
-                this.state.canon_chain.last_exchanged_transition_configuration_timestamp(),
-                this.state.canon_chain.last_received_update_timestamp(),
-            ) {
-                (None, _) => {
-                    warn!(target: "reth::cli", "Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
-                }
-                (Some(transition_config), _)
-                    if transition_config.elapsed() > NO_TRANSITION_CONFIG_EXCHANGED_PERIOD =>
-                {
-                    warn!(target: "reth::cli", "Post-merge network, but no beacon client seen in a while. Please launch one to follow the chain!")
-                }
-                (Some(_), None) => {
-                    warn!(target: "reth::cli", "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
-                }
-                (Some(_), Some(update))
-                    if update.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
-                {
-                    warn!(target: "reth::cli", "Beacon client online, but no consensus updates received in a while. Please fix your beacon client to follow the chain!")
-                }
-                _ => (),
-            }
-        }
-
         while let Poll::Ready(Some(event)) = this.events.as_mut().poll_next(cx) {
             match event {
                 NodeEvent::Network(event) => {
@@ -245,6 +221,11 @@ where
                 }
                 NodeEvent::ConsensusEngine(event) => {
                     this.state.handle_consensus_engine_event(event);
+                }
+                // TODO(alexey): do not warn about any of these conditions if `debug.tip` is not
+                //  empty.
+                NodeEvent::ConsensusLayerHealth(event) => {
+                    this.state.handle_consensus_layer_health_event(event)
                 }
             }
         }

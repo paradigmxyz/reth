@@ -70,17 +70,21 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
+    time::Duration,
 };
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::{args::PayloadBuilderArgs, dirs::MaybePlatformPath};
+use crate::{
+    args::PayloadBuilderArgs, dirs::MaybePlatformPath, node::cl_events::ConsensusLayerHealthEvents,
+};
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::bytes::BytesMut;
 use reth_provider::providers::BlockchainProvider;
 use reth_rlp::Encodable;
 
+pub mod cl_events;
 pub mod events;
 
 /// Start the node
@@ -346,10 +350,14 @@ impl Command {
 
         let events = stream_select(
             stream_select(
-                network.event_listener().map(Into::into),
-                beacon_engine_handle.event_listener().map(Into::into),
+                stream_select(
+                    network.event_listener().map(Into::into),
+                    beacon_engine_handle.event_listener().map(Into::into),
+                ),
+                pipeline_events.map(Into::into),
             ),
-            pipeline_events.map(Into::into),
+            ConsensusLayerHealthEvents::new(Duration::from_secs(300), blockchain_db.clone())
+                .map(Into::into),
         );
         ctx.task_executor
             .spawn_critical("events task", events::handle_events(Some(network.clone()), events));

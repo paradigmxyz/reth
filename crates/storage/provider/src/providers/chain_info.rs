@@ -125,6 +125,9 @@ struct ChainInfoInner {
     ///
     /// This is mainly used to track if we're connected to a beacon node.
     last_forkchoice_update: RwLock<Option<Instant>>,
+    /// Timestamp when we exchanged the transition configuration last time.
+    ///
+    /// This is mainly used to track if we're connected to a beacon node.
     last_transition_configuration_exchange: RwLock<Option<Instant>>,
     /// Tracks the number of the `canonical_head`.
     canonical_head_number: AtomicU64,
