@@ -327,14 +327,20 @@ where
         let unwound_headers = tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         let stage_checkpoint =
-            input.checkpoint.entities_stage_checkpoint().map(|checkpoint| EntitiesCheckpoint {
-                processed: checkpoint.processed.saturating_sub(unwound_headers as u64),
-                total: None,
+            input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
+                block_range: stage_checkpoint.block_range,
+                progress: EntitiesCheckpoint {
+                    processed: stage_checkpoint
+                        .progress
+                        .processed
+                        .saturating_sub(unwound_headers as u64),
+                    total: stage_checkpoint.progress.total,
+                },
             });
 
         let mut checkpoint = StageCheckpoint::new(input.unwind_to);
         if let Some(stage_checkpoint) = stage_checkpoint {
-            checkpoint = checkpoint.with_entities_stage_checkpoint(stage_checkpoint);
+            checkpoint = checkpoint.with_headers_stage_checkpoint(stage_checkpoint);
         }
 
         info!(target: "sync::stages::headers", to_block = input.unwind_to, checkpoint = input.unwind_to, is_final_range = true, "Unwind iteration finished");
