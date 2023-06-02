@@ -16,6 +16,11 @@ use std::{
 use tokio::time::Interval;
 use tracing::{debug, info, warn};
 
+const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(30);
+const CONSENSUS_CLIENT_MESSAGE_INTERVAL: Duration = Duration::from_secs(300);
+const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120);
+const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
+
 /// The current high-level state of the node.
 struct NodeState<CC> {
     /// Connection to the network.
@@ -157,10 +162,10 @@ where
 {
     let state = NodeState::new(network, canon_chain);
 
-    let mut info_interval = tokio::time::interval(Duration::from_secs(30));
+    let mut info_interval = tokio::time::interval(INFO_MESSAGE_INTERVAL);
     info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    let mut consensus_client_interval = tokio::time::interval(Duration::from_secs(5 * 60));
+    let mut consensus_client_interval = tokio::time::interval(CONSENSUS_CLIENT_MESSAGE_INTERVAL);
     consensus_client_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let handler = EventHandler { state, events, info_interval, consensus_client_interval };
@@ -198,20 +203,29 @@ where
             info!(target: "reth::cli", connected_peers = this.state.num_connected_peers(), %stage, checkpoint = %this.state.current_checkpoint, "Status");
         }
 
+        // TODO(alexey): do not warn about any of these conditions if `debug.tip` is not empty.
         if this.consensus_client_interval.poll_tick(cx).is_ready() {
-            if this.state.canon_chain.last_exchanged_transition_configuration_timestamp().is_some()
-            {
-                if let Some(last_received_update_timestamp) =
-                    this.state.canon_chain.last_received_update_timestamp()
-                {
-                    if last_received_update_timestamp.elapsed() > Duration::from_secs(2 * 60) {
-                        warn!(target: "reth::cli", "Beacon client online, but no consensus updates received in a while. Please fix your beacon client to follow the chain!")
-                    }
-                } else {
-                    warn!(target: "reth::cli", "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!");
+            match (
+                this.state.canon_chain.last_exchanged_transition_configuration_timestamp(),
+                this.state.canon_chain.last_received_update_timestamp(),
+            ) {
+                (None, _) => {
+                    warn!(target: "reth::cli", "Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
                 }
-            } else {
-                warn!(target: "reth::cli", "Post-merge network, but no beacon client seen. Please launch one to follow the chain!")
+                (Some(transition_config), _)
+                    if transition_config.elapsed() > NO_TRANSITION_CONFIG_EXCHANGED_PERIOD =>
+                {
+                    warn!(target: "reth::cli", "Post-merge network, but no beacon client seen in a while. Please launch one to follow the chain!")
+                }
+                (Some(_), None) => {
+                    warn!(target: "reth::cli", "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+                }
+                (Some(_), Some(update))
+                    if update.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
+                {
+                    warn!(target: "reth::cli", "Beacon client online, but no consensus updates received in a while. Please fix your beacon client to follow the chain!")
+                }
+                _ => (),
             }
         }
 
