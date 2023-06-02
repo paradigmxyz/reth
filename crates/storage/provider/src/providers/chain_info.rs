@@ -20,6 +20,7 @@ impl ChainInfoTracker {
         Self {
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
+                last_transition_configuration_exchange: RwLock::new(None),
                 canonical_head_number: AtomicU64::new(head.number),
                 canonical_head: RwLock::new(head),
                 safe_block: RwLock::new(None),

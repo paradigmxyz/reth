@@ -16,9 +16,15 @@ use std::{
 use tokio::time::Interval;
 use tracing::{debug, info, warn};
 
+/// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(30);
+/// Interval of reporting consensus client state.
 const CONSENSUS_CLIENT_MESSAGE_INTERVAL: Duration = Duration::from_secs(300);
+/// Period of not exchanging transition configurations with consensus client,
+/// after which the warning is issued.
 const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120);
+/// Period of not receiving fork choice updates from consensus client,
+/// after which the warning is issued.
 const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
 /// The current high-level state of the node.
