@@ -131,7 +131,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
             Ok(Some(storage_entry.value))
         } else if changeset_block_number == None {
             // if there is no shards, return empty account.
-            return Ok(None);
+            return Ok(None)
         } else {
             // if changeset is not present that means that there was history shard but we need to
             // use newest value from plain state
