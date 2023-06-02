@@ -247,7 +247,7 @@ mod tests {
                 block_number,
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed: 1,
-                    total: Some(1)
+                    total: 1
                 }))
             }, done: true }) if block_number == previous_stage
         );

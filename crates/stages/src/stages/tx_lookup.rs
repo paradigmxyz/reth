@@ -257,7 +257,7 @@ mod tests {
                 block_number,
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed,
-                    total: Some(total)
+                    total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
                 total == runner.tx.table::<tables::Transactions>().unwrap().len() as u64
@@ -291,7 +291,7 @@ mod tests {
                 block_number,
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed,
-                    total: Some(total)
+                    total
                 }))
             }, done: false }) if block_number == expected_progress &&
                 processed == runner.tx.table::<tables::TxHashNumber>().unwrap().len() as u64 &&
@@ -310,7 +310,7 @@ mod tests {
                 block_number,
                 stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                     processed,
-                    total: Some(total)
+                    total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
                 total == runner.tx.table::<tables::Transactions>().unwrap().len() as u64
