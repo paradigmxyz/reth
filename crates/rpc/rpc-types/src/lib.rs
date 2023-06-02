@@ -11,6 +11,8 @@
 
 mod admin;
 mod eth;
+mod rpc;
 
 pub use admin::*;
 pub use eth::*;
+pub use rpc::*;
