@@ -4,8 +4,8 @@ use reth_metrics::{
 };
 use reth_primitives::{
     stage::{
-        AccountHashingCheckpoint, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint,
-        StageId, StageUnitCheckpoint, StorageHashingCheckpoint,
+        AccountHashingCheckpoint, EntitiesCheckpoint, ExecutionCheckpoint, HeadersCheckpoint,
+        StageCheckpoint, StageId, StageUnitCheckpoint, StorageHashingCheckpoint,
     },
     BlockNumber,
 };
@@ -43,10 +43,9 @@ impl Metrics {
 
         let (processed, total) = match checkpoint.stage_checkpoint {
             Some(
-                StageUnitCheckpoint::Entities(progress @ EntitiesCheckpoint { .. }) |
-                StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress, .. }) |
                 // Only report metrics for hashing stages if `total` is known, otherwise it means
-                // we're unwinding and operating on changesets, rather than accounts or storage slots.
+                // we're unwinding and operating on changesets, rather than accounts or storage
+                // slots.
                 StageUnitCheckpoint::Account(AccountHashingCheckpoint {
                     progress: progress @ EntitiesCheckpoint { total: Some(_), .. },
                     ..
@@ -54,14 +53,14 @@ impl Metrics {
                 StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                     progress: progress @ EntitiesCheckpoint { total: Some(_), .. },
                     ..
-                }),
+                }) |
+                StageUnitCheckpoint::Entities(progress @ EntitiesCheckpoint { .. }) |
+                StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress, .. }) |
+                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress, .. }),
             ) => (progress.processed, progress.total),
-            Some(
-                StageUnitCheckpoint::Transaction(_) |
-                StageUnitCheckpoint::Account(_) |
-                StageUnitCheckpoint::Storage(_),
-            ) |
-            None => (checkpoint.block_number, max_block_number),
+            Some(StageUnitCheckpoint::Account(_) | StageUnitCheckpoint::Storage(_)) | None => {
+                (checkpoint.block_number, max_block_number)
+            }
         };
 
         stage_metrics.entities_processed.set(processed as f64);
