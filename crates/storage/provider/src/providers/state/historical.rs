@@ -64,7 +64,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
                     address,
                 })?;
             Ok(account.info)
-        } else if None == changeset_block_number {
+        } else if changeset_block_number.is_none() {
             // if there is no shard, return empty account.
             Ok(None)
         } else {
@@ -129,9 +129,9 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
                     storage_key,
                 })?;
             Ok(Some(storage_entry.value))
-        } else if changeset_block_number == None {
+        } else if changeset_block_number.is_none() {
             // if there is no shards, return empty account.
-            return Ok(None);
+            return Ok(None)
         } else {
             // if changeset is not present that means that there was history shard but we need to
             // use newest value from plain state

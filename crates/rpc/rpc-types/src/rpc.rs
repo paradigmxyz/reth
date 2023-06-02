@@ -35,7 +35,7 @@ mod tests {
             ("net".to_owned(), "1.0".to_owned()),
         ]);
         let m = RpcModules::new(module_map);
-        let de_serialized: RpcModules = serde_json::from_str(&s).unwrap();
+        let de_serialized: RpcModules = serde_json::from_str(s).unwrap();
         assert_eq!(de_serialized, m);
     }
 }
