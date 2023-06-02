@@ -87,6 +87,9 @@ pub enum PipelineError {
     /// The pipeline encountered a database error.
     #[error("A database error occurred.")]
     Database(#[from] DbError),
+    /// The pipeline encountered an irrecoverable error in one of the stages.
+    #[error("An interface error occurred.")]
+    Interface(#[from] reth_interfaces::Error),
     /// The pipeline encountered an error while trying to send an event.
     #[error("The pipeline encountered an error while trying to send an event.")]
     Channel(#[from] SendError<PipelineEvent>),

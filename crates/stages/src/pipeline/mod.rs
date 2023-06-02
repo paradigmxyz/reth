@@ -6,7 +6,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, ChainSpec, H256,
 };
-use reth_provider::{providers::get_stage_checkpoint, Transaction};
+use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -304,6 +304,8 @@ where
         let stage = &mut self.stages[stage_index];
         let stage_id = stage.id();
         let mut made_progress = false;
+        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let _provider_rw = shareable_db.provider_rw(); //.map_err(PipelineError::Interface)?;
         loop {
             let mut tx = Transaction::new(&self.db)?;
 
