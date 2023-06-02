@@ -480,6 +480,9 @@ where
         // Terminate the sync early if it's reached the maximum user
         // configured block.
         if is_valid_response {
+            // node's fully synced, clear pending requests
+            self.sync.clear_full_block_requests();
+
             // new VALID update that moved the canonical chain forward
             let _ = self.update_canon_chain(&state);
 
@@ -1014,6 +1017,8 @@ where
 
                 // we're no longer syncing
                 self.sync_state_updater.update_sync_state(SyncState::Idle);
+                // clear any active block requests
+                self.sync.clear_full_block_requests();
 
                 // we can update the FCU blocks
                 let _ = self.update_canon_chain(&target);
