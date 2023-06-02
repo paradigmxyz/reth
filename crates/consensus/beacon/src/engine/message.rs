@@ -153,6 +153,7 @@ pub enum BeaconEngineMessage {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
     },
+    TransitionConfigurationExchanged,
     /// Add a new listener for [`BeaconEngineMessage`].
     EventListener(UnboundedSender<BeaconConsensusEngineEvent>),
 }

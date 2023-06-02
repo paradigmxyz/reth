@@ -124,6 +124,13 @@ impl BeaconConsensusEngineHandle {
         rx
     }
 
+    /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
+    pub async fn transition_configuration_exchanged(&self) {
+        let _ = self.to_engine.send(BeaconEngineMessage::TransitionConfigurationExchanged);
+    }
+
     /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
     pub fn event_listener(&self) -> UnboundedReceiverStream<BeaconConsensusEngineEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -1061,6 +1068,9 @@ where
                     this.metrics.new_payload_messages.increment(1);
                     let res = this.on_new_payload(payload);
                     let _ = tx.send(res);
+                }
+                BeaconEngineMessage::TransitionConfigurationExchanged => {
+                    this.blockchain.on_transition_configuration_exchanged();
                 }
                 BeaconEngineMessage::EventListener(tx) => {
                     this.listeners.push_listener(tx);

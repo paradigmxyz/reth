@@ -251,6 +251,8 @@ where
             .block_hash(terminal_block_number.as_u64())
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 
+        self.beacon_consensus.transition_configuration_exchanged();
+
         // Transition configuration exchange is successful if block hashes match
         match local_hash {
             Some(hash) if hash == terminal_block_hash => Ok(TransitionConfiguration {
