@@ -48,7 +48,7 @@ where
         Self { client, chain_spec, beacon_consensus, payload_store }
     }
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
         &self,
@@ -62,7 +62,7 @@ where
         Ok(self.beacon_consensus.new_payload(payload).await?)
     }
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
         payload: ExecutionPayload,
@@ -78,7 +78,7 @@ where
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
     /// withdrawals.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceUpdatedV1>
     ///
     /// Caution: This should not accept the `withdrawals` field
     pub async fn fork_choice_updated_v1(
@@ -99,7 +99,7 @@ where
     /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
     /// but only _after_ shanghai.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     pub async fn fork_choice_updated_v2(
         &self,
         state: ForkchoiceState,
@@ -118,7 +118,7 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_getPayloadV1>
     ///
     /// Caution: This should not return the `withdrawals` field
     ///
@@ -136,7 +136,7 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_getpayloadv2>
     ///
     /// Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
@@ -307,7 +307,7 @@ where
     Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Handler for `engine_newPayloadV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::eth", "Serving engine_newPayloadV1");
@@ -315,14 +315,14 @@ where
     }
 
     /// Handler for `engine_newPayloadV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::eth", "Serving engine_newPayloadV1");
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field
     async fn fork_choice_updated_v1(
@@ -335,7 +335,7 @@ where
     }
 
     /// Handler for `engine_forkchoiceUpdatedV2`
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
@@ -350,7 +350,7 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_getPayloadV1>
     ///
     /// Caution: This should not return the `withdrawals` field
     ///
@@ -366,7 +366,7 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_getpayloadv2>
     ///
     /// Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
@@ -408,7 +408,7 @@ where
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_exchangeTransitionConfigurationV1>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangeTransitionConfigurationV1>
     async fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
