@@ -227,12 +227,10 @@ impl AppendableChain {
         let (block, senders) = block.into_components();
         let block = block.unseal();
 
-        //get state provider.
+        // get the state provider.
         let db = externals.database();
-        // TODO, small perf can check if caonical fork is the latest state.
         let canonical_fork = post_state_data_provider.canonical_fork();
-        let history_provider = db.history_by_block_number(canonical_fork.number)?;
-        let state_provider = history_provider;
+        let state_provider = db.history_by_block_number(canonical_fork.number)?;
 
         let provider = PostStateProvider::new(state_provider, post_state_data_provider);
 
@@ -265,18 +263,16 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        // some checks are done before blocks comes here.
+        // ensure the block is a valid descendant of the parent, according to consensus rules
         externals.consensus.validate_header_against_parent(&block, parent_block)?;
 
         let (block, senders) = block.into_components();
         let block = block.unseal();
 
-        //get state provider.
+        // get the state provider.
         let db = externals.database();
-        // TODO, small perf can check if caonical fork is the latest state.
         let canonical_fork = post_state_data_provider.canonical_fork();
-        let history_provider = db.history_by_block_number(canonical_fork.number)?;
-        let state_provider = history_provider;
+        let state_provider = db.history_by_block_number(canonical_fork.number)?;
 
         let provider = PostStateProvider::new(state_provider, post_state_data_provider);
 

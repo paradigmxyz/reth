@@ -341,7 +341,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// This tries to append the given block to the canonical chain.
     ///
-    /// WARNING: this expects that the block is part of the canonical chain: The block's parent is
+    /// WARNING: this expects that the block extends the canonical chain: The block's parent is
     /// part of the canonical chain (e.g. the block's parent is the latest canonical hash). See also
     /// [Self::is_block_hash_canonical].
     #[instrument(skip_all, target = "blockchain_tree")]
@@ -357,64 +357,65 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // TODO save pending block to database
         // https://github.com/paradigmxyz/reth/issues/1713
 
-        let db = self.externals.database();
-        let provider =
-            db.provider().map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
+        let (block_status, chain) = {
+            let db = self.externals.database();
+            let provider = db
+                .provider()
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
-        // Validate that the block is post merge
-        let parent_td = provider
-            .header_td(&block.parent_hash)
-            .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
-            .ok_or_else(|| {
-                InsertBlockError::tree_error(
-                    BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
-                    block.block.clone(),
-                )
-            })?;
+            // Validate that the block is post merge
+            let parent_td = provider
+                .header_td(&block.parent_hash)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
+                .ok_or_else(|| {
+                    InsertBlockError::tree_error(
+                        BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
+                        block.block.clone(),
+                    )
+                })?;
 
-        // Pass the parent total difficulty to short-circuit unnecessary calculations.
-        if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
-            return Err(InsertBlockError::execution_error(
-                BlockExecutionError::BlockPreMerge { hash: block.hash },
-                block.block,
-            ))
-        }
+            // Pass the parent total difficulty to short-circuit unnecessary calculations.
+            if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO)
+            {
+                return Err(InsertBlockError::execution_error(
+                    BlockExecutionError::BlockPreMerge { hash: block.hash },
+                    block.block,
+                ))
+            }
 
-        let parent_header = provider
-            .header(&block.parent_hash)
-            .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
-            .ok_or_else(|| {
-                InsertBlockError::tree_error(
-                    BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
-                    block.block.clone(),
-                )
-            })?
-            .seal(block.parent_hash);
+            let parent_header = provider
+                .header(&block.parent_hash)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
+                .ok_or_else(|| {
+                    InsertBlockError::tree_error(
+                        BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
+                        block.block.clone(),
+                    )
+                })?
+                .seal(block.parent_hash);
 
-        let canonical_chain = self.canonical_chain();
+            let canonical_chain = self.canonical_chain();
 
-        let (block_status, chain) = if block.parent_hash == canonical_chain.tip().hash {
-            let chain = AppendableChain::new_canonical_head_fork(
-                block,
-                &parent_header,
-                canonical_chain.inner(),
-                parent,
-                &self.externals,
-            )?;
-            (BlockStatus::Valid, chain)
-        } else {
-            let chain = AppendableChain::new_canonical_fork(
-                block,
-                &parent_header,
-                canonical_chain.inner(),
-                parent,
-                &self.externals,
-            )?;
-            (BlockStatus::Accepted, chain)
+            if block.parent_hash == canonical_chain.tip().hash {
+                let chain = AppendableChain::new_canonical_head_fork(
+                    block,
+                    &parent_header,
+                    canonical_chain.inner(),
+                    parent,
+                    &self.externals,
+                )?;
+                (BlockStatus::Valid, chain)
+            } else {
+                let chain = AppendableChain::new_canonical_fork(
+                    block,
+                    &parent_header,
+                    canonical_chain.inner(),
+                    parent,
+                    &self.externals,
+                )?;
+                (BlockStatus::Accepted, chain)
+            }
         };
-
-        // let go of `db` immutable borrow
-        drop(provider);
 
         self.insert_chain(chain);
         self.try_connect_buffered_blocks(block_num_hash);
