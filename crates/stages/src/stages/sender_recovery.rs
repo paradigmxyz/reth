@@ -125,13 +125,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 let tx = transaction.value().expect("value to be formated");
                 tx.transaction.encode_without_signature(rlp_buf);
 
-                let sender =
-                    match tx.signature.recover_signer(keccak256(rlp_buf)) {
-                        Some(sender) => Ok(sender),
-                        None => Err(SenderRecoveryStageError::FailedRecovery(
-                            FailedSenderRecoveryError { tx: tx_id },
-                        )),
-                    }?;
+                let sender = tx.signature.recover_signer(keccak256(rlp_buf)).ok_or(
+                    SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError {
+                        tx: tx_id,
+                    }),
+                )?;
 
                 Ok((tx_id, sender))
             };
