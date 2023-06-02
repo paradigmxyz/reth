@@ -100,6 +100,11 @@ where
         self.pipeline_state.is_idle()
     }
 
+    /// Returns `true` if the pipeline is active.
+    pub(crate) fn is_pipeline_active(&self) -> bool {
+        !self.is_pipeline_idle()
+    }
+
     /// Returns true if there's already a request for the given hash.
     pub(crate) fn is_inflight_request(&self, hash: H256) -> bool {
         self.inflight_full_block_requests.iter().any(|req| *req.hash() == hash)

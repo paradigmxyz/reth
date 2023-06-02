@@ -37,7 +37,25 @@ impl ForkchoiceStateTracker {
         self.last_valid = Some(state);
     }
 
+    /// Returns the [ForkchoiceStatus] of the latest received FCU.
+    pub(crate) fn latest_status(&self) -> Option<ForkchoiceStatus> {
+        self.latest.as_ref().map(|s| s.status)
+    }
+
+    /// Returns whether the latest received FCU is valid: [ForkchoiceStatus::Valid]
+    #[allow(unused)]
+    pub(crate) fn is_latest_valid(&self) -> bool {
+        self.latest_status().map(|s| s.is_valid()).unwrap_or(false)
+    }
+
+    /// Returns the last valid head hash.
+    #[allow(unused)]
+    pub(crate) fn last_valid_head(&self) -> Option<H256> {
+        self.last_valid.as_ref().map(|s| s.head_block_hash)
+    }
+
     /// Returns the head hash of the latest received FCU to which we need to sync.
+    #[allow(unused)]
     pub(crate) fn sync_target(&self) -> Option<H256> {
         self.last_syncing.as_ref().map(|s| s.head_block_hash)
     }
