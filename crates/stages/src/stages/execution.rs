@@ -264,10 +264,14 @@ fn calculate_gas_used_from_headers<DB: Database>(
 ) -> Result<u64, DatabaseError> {
     let mut gas_total = 0;
 
-    for entry in tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
+    let start = Instant::now();
+    for entry in tx.cursor_read::<tables::Headers>()?.walk_range(range.clone())? {
         let (_, Header { gas_used, .. }) = entry?;
         gas_total += gas_used;
     }
+
+    let duration = start.elapsed();
+    trace!(target: "sync::stages::execution", ?range, ?duration, "Time elapsed in calculate_gas_used_from_headers");
 
     Ok(gas_total)
 }
