@@ -2,6 +2,7 @@ use crate::{
     Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256,
 };
 use ethers_core::types::{BlockNumber as EthersBlockNumber, U64};
+use fixed_hash::rustc_hex::FromHexError;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -292,6 +293,32 @@ impl Decodable for BlockHashOrNumber {
             // Any data larger than this which is not caught by the Hash decoding should error and
             // is considered an invalid block number.
             Ok(Self::Number(u64::decode(buf)?))
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to parse `{input}` as integer: {pares_int_error} or as hex: {hex_error}")]
+pub struct ParseBlockHashOrNumberError {
+    input: String,
+    pares_int_error: ParseIntError,
+    hex_error: FromHexError,
+}
+
+impl FromStr for BlockHashOrNumber {
+    type Err = ParseBlockHashOrNumberError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match u64::from_str(s) {
+            Ok(val) => Ok(val.into()),
+            Err(pares_int_error) => match H256::from_str(s) {
+                Ok(val) => Ok(val.into()),
+                Err(hex_error) => Err(ParseBlockHashOrNumberError {
+                    input: s.to_string(),
+                    pares_int_error,
+                    hex_error,
+                }),
+            },
         }
     }
 }

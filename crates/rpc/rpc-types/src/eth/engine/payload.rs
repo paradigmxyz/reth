@@ -352,6 +352,11 @@ pub enum PayloadStatusEnum {
         validation_error: PayloadValidationError,
     },
 
+    InvalidBlockHash {
+        #[serde(rename = "validationError")]
+        validation_error: PayloadValidationError
+    },
+
     /// SYNCING is returned by the engine API in the following calls:
     ///   - newPayloadV1:       if the payload was accepted on top of an active sync
     ///   - forkchoiceUpdateV1: if the new head was seen before, but not part of the chain
@@ -360,10 +365,7 @@ pub enum PayloadStatusEnum {
     /// ACCEPTED is returned by the engine API in the following calls:
     ///   - newPayloadV1: if the payload was accepted, but not processed (side chain)
     Accepted,
-    InvalidBlockHash {
-        #[serde(rename = "validationError")]
-        validation_error: PayloadValidationError,
-    },
+
 }
 
 impl PayloadStatusEnum {
@@ -374,14 +376,12 @@ impl PayloadStatusEnum {
             PayloadStatusEnum::Invalid { .. } => "INVALID",
             PayloadStatusEnum::Syncing => "SYNCING",
             PayloadStatusEnum::Accepted => "ACCEPTED",
-            PayloadStatusEnum::InvalidBlockHash { .. } => "INVALID_BLOCK_HASH",
         }
     }
 
     /// Returns the validation error if the payload status is invalid.
     pub fn validation_error(&self) -> Option<&PayloadValidationError> {
         match self {
-            PayloadStatusEnum::InvalidBlockHash { validation_error } |
             PayloadStatusEnum::Invalid { validation_error } => Some(validation_error),
             _ => None,
         }
@@ -400,11 +400,6 @@ impl PayloadStatusEnum {
     /// Returns true if the payload status is invalid.
     pub fn is_invalid(&self) -> bool {
         matches!(self, PayloadStatusEnum::Invalid { .. })
-    }
-
-    /// Returns true if the payload status is invalid block hash.
-    pub fn is_invalid_block_hash(&self) -> bool {
-        matches!(self, PayloadStatusEnum::InvalidBlockHash { .. })
     }
 }
 

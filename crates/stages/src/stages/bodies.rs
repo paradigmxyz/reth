@@ -11,7 +11,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use reth_primitives::{stage::StageId, StageCheckpoint};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
@@ -203,7 +203,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             }
 
             // Delete the current body value
-            tx.delete::<tables::BlockBodyIndices>(number, None)?;
+            rev_walker.delete_current()?;
         }
 
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");

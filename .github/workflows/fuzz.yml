@@ -61,3 +61,10 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
           flags: fuzz-tests
+
+  fuzz-success:
+    name: fuzz success
+    runs-on: ubuntu-latest
+    needs: all
+    steps:
+      - run: echo Success!

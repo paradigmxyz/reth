@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 pub mod drop;
 pub mod dump;
 pub mod run;
+pub mod unwind;
 
 /// `reth stage` command
 #[derive(Debug, Parser)]
@@ -26,6 +27,8 @@ pub enum Subcommands {
     Drop(drop::Command),
     /// Dumps a stage from a range into a new database.
     Dump(dump::Command),
+    /// Unwinds a certain block range, deleting it from the database.
+    Unwind(unwind::Command),
 }
 
 impl Command {
@@ -35,6 +38,7 @@ impl Command {
             Subcommands::Run(command) => command.execute().await,
             Subcommands::Drop(command) => command.execute().await,
             Subcommands::Dump(command) => command.execute().await,
+            Subcommands::Unwind(command) => command.execute().await,
         }
     }
 }

@@ -6,7 +6,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{consensus::Consensus, provider::ProviderError};
-use reth_primitives::{stage::StageId, StageCheckpoint, U256};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    U256,
+};
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
@@ -75,7 +78,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
             self.consensus
                 .validate_header_with_total_difficulty(&header, td)
-                .map_err(|error| StageError::Validation { block: header.number, error })?;
+                .map_err(|error| StageError::Validation { block: header.seal_slow(), error })?;
             cursor_td.append(block_number, td.into())?;
         }
         info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");

@@ -26,9 +26,9 @@ const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 16 * REPUTATION_UNIT;
 /// The reputation change applies to a peer that has sent a transaction (full or hash) that we
 /// already know about and have already previously received from that peer.
 ///
-/// Note: We weight this very low because it is generally not a problem to get a transaction that we
-/// already know about, so only spammers are affected.
-const ALREADY_SEEN_TRANSACTION_REPUTATION_CHANGE: i32 = REPUTATION_UNIT / 2;
+/// Note: this appears to be quite common in practice, so by default this is 0, which doesn't
+/// apply any changes to the peer's reputation, effectively ignoring it.
+const ALREADY_SEEN_TRANSACTION_REPUTATION_CHANGE: i32 = 0;
 
 /// The reputation change to apply to a peer which violates protocol rules: minimal reputation
 const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;

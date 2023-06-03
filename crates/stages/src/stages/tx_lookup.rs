@@ -8,8 +8,9 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    rpc_utils::keccak256, stage::StageId, BlockNumber, StageCheckpoint, TransactionSignedNoHash,
-    TxNumber, H256,
+    rpc_utils::keccak256,
+    stage::{StageCheckpoint, StageId},
+    BlockNumber, TransactionSignedNoHash, TxNumber, H256,
 };
 use reth_provider::Transaction;
 use thiserror::Error;

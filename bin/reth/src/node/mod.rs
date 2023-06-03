@@ -330,7 +330,6 @@ impl Command {
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
-            Arc::clone(&db),
             client,
             pipeline,
             blockchain_db.clone(),
@@ -342,7 +341,7 @@ impl Command {
             initial_target,
             consensus_engine_tx,
             consensus_engine_rx,
-        );
+        )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select(

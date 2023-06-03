@@ -224,6 +224,33 @@ impl Transaction {
             }
         }
     }
+
+    /// This sets the transaction's nonce.
+    pub fn set_nonce(&mut self, nonce: u64) {
+        match self {
+            Transaction::Legacy(tx) => tx.nonce = nonce,
+            Transaction::Eip2930(tx) => tx.nonce = nonce,
+            Transaction::Eip1559(tx) => tx.nonce = nonce,
+        }
+    }
+
+    /// This sets the transaction's value.
+    pub fn set_value(&mut self, value: u128) {
+        match self {
+            Transaction::Legacy(tx) => tx.value = value,
+            Transaction::Eip2930(tx) => tx.value = value,
+            Transaction::Eip1559(tx) => tx.value = value,
+        }
+    }
+
+    /// This sets the transaction's input field.
+    pub fn set_input(&mut self, input: Bytes) {
+        match self {
+            Transaction::Legacy(tx) => tx.input = input,
+            Transaction::Eip2930(tx) => tx.input = input,
+            Transaction::Eip1559(tx) => tx.input = input,
+        }
+    }
 }
 
 impl Compact for Transaction {

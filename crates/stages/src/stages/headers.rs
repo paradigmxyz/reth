@@ -11,8 +11,8 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, EntitiesCheckpoint, SealedHeader,
-    StageCheckpoint, H256,
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
+    BlockHashOrNumber, BlockNumber, SealedHeader, H256,
 };
 use reth_provider::Transaction;
 use tokio::sync::watch;
@@ -358,7 +358,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::random_header;
-    use reth_primitives::{StageUnitCheckpoint, H256};
+    use reth_primitives::{stage::StageUnitCheckpoint, H256};
     use test_runner::HeadersTestRunner;
 
     mod test_runner {

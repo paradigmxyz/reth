@@ -5,6 +5,7 @@ use thiserror::Error;
 #[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum BlockExecutionError {
+    // === validation errors ===
     #[error("EVM reported invalid transaction ({hash:?}): {message}")]
     EVM { hash: H256, message: String },
     #[error("Failed to recover sender for transaction")]
@@ -20,8 +21,22 @@ pub enum BlockExecutionError {
     },
     #[error("Block gas used {got} is different from expected gas used {expected}.")]
     BlockGasUsed { got: u64, expected: u64 },
+    #[error("Block {hash:?} is pre merge")]
+    BlockPreMerge { hash: H256 },
+    #[error("Missing total difficulty")]
+    MissingTotalDifficulty { hash: H256 },
+
+    // === misc provider error ===
     #[error("Provider error")]
     ProviderError,
+
+    // === transaction errors ===
+    #[error("Transaction error on revert: {inner:?}")]
+    CanonicalRevert { inner: String },
+    #[error("Transaction error on commit: {inner:?}")]
+    CanonicalCommit { inner: String },
+
+    // === tree errors ===
     // TODO(mattsse): move this to tree error
     #[error("Block hash {block_hash} not found in blockchain tree chain")]
     BlockHashNotFoundInChain { block_hash: BlockHash },
@@ -29,14 +44,6 @@ pub enum BlockExecutionError {
         "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
     AppendChainDoesntConnect { chain_tip: BlockNumHash, other_chain_fork: BlockNumHash },
-    #[error("Transaction error on revert: {inner:?}")]
-    CanonicalRevert { inner: String },
-    #[error("Transaction error on commit: {inner:?}")]
-    CanonicalCommit { inner: String },
-    #[error("Block {hash:?} is pre merge")]
-    BlockPreMerge { hash: H256 },
-    #[error("Missing total difficulty")]
-    MissingTotalDifficulty { hash: H256 },
 
     /// Only used for TestExecutor
     ///

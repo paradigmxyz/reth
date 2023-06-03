@@ -44,3 +44,6 @@ pub use chain::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     CanonStateSubscriptions,
 };
+
+mod stage_checkpoint;
+pub use stage_checkpoint::StageCheckpointProvider;
