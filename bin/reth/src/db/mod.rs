@@ -72,9 +72,12 @@ pub enum Subcommands {
 pub struct ListArgs {
     /// The table name
     table: String, // TODO: Convert to enum
-    /// Where to start iterating
+    /// Skip first N entries
     #[arg(long, short, default_value = "0")]
-    start: usize,
+    skip: usize,
+    /// Reverse the order of the entries. If enabled last table entries are read.
+    #[arg(long, short, default_value = "false")]
+    reverse: bool,
     /// How many items to take from the walker
     #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
     len: usize,
@@ -168,12 +171,12 @@ impl Command {
                                     }
 
                                     if args.json {
-                                        let list_result = tool.list::<tables::$table>(args.start, args.len)?.into_iter().collect::<Vec<_>>();
+                                        let list_result = tool.list::<tables::$table>(args.skip, args.len,args.reverse)?.into_iter().collect::<Vec<_>>();
                                         println!("{}", serde_json::to_string_pretty(&list_result)?);
                                         Ok(())
                                     } else {
-                                        tui::DbListTUI::<_, tables::$table>::new(|start, count| {
-                                            tool.list::<tables::$table>(start, count).unwrap()
+                                        tui::DbListTUI::<_, tables::$table>::new(|skip, count| {
+                                            tool.list::<tables::$table>(skip, count, args.reverse).unwrap()
                                         }, $start, $len, total_entries).run()
                                     }
                                 })??
@@ -186,7 +189,7 @@ impl Command {
                     }
                 }
 
-                table_tui!(args.table.as_str(), args.start, args.len => [
+                table_tui!(args.table.as_str(), args.skip, args.len => [
                     CanonicalHeaders,
                     HeaderTD,
                     HeaderNumbers,
