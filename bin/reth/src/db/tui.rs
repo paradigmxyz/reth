@@ -5,7 +5,6 @@ use crossterm::{
 };
 use reth_db::table::Table;
 use std::{
-    collections::BTreeMap,
     io,
     time::{Duration, Instant},
 };
@@ -46,7 +45,7 @@ pub(crate) enum ViewMode {
 #[derive(Default)]
 pub(crate) struct DbListTUI<F, T: Table>
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     /// Fetcher for the next page of items.
     ///
@@ -68,12 +67,12 @@ where
     /// The state of the key list.
     list_state: ListState,
     /// Entries to show in the TUI.
-    entries: BTreeMap<T::Key, T::Value>,
+    entries: Vec<(T::Key, T::Value)>,
 }
 
 impl<F, T: Table> DbListTUI<F, T>
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     /// Create a new database list TUI
     pub(crate) fn new(
@@ -92,7 +91,7 @@ where
             mode: ViewMode::Normal,
             input: String::new(),
             list_state: ListState::default(),
-            entries: BTreeMap::new(),
+            entries: Vec::new(),
         }
     }
 
@@ -133,7 +132,7 @@ where
     /// Fetch the next page of items
     fn next_page(&mut self) {
         if self.skip + self.count >= self.total_entries {
-            return;
+            return
         }
 
         self.skip += self.count;
@@ -143,7 +142,7 @@ where
     /// Fetch the previous page of items
     fn previous_page(&mut self) {
         if self.skip == 0 {
-            return;
+            return
         }
 
         self.skip = self.skip.saturating_sub(self.count);
@@ -198,7 +197,7 @@ fn event_loop<B: Backend, F, T: Table>(
     tick_rate: Duration,
 ) -> io::Result<()>
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     let mut last_tick = Instant::now();
     let mut running = true;
@@ -226,7 +225,7 @@ where
 /// Handle incoming events
 fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     if app.mode == ViewMode::GoToPage {
         if let Event::Key(key) = event {
@@ -249,7 +248,7 @@ where
             }
         }
 
-        return Ok(false);
+        return Ok(false)
     }
 
     match event {
@@ -292,7 +291,7 @@ where
 /// Render the UI
 fn ui<B: Backend, F, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<F, T>)
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -309,9 +308,9 @@ where
         let key_length = format!("{}", app.skip + app.count - 1).len();
 
         let entries: Vec<_> = if app.reverse {
-            app.entries.keys().rev().collect()
+            app.entries.iter().rev().map(|(k, _)| k).collect()
         } else {
-            app.entries.keys().collect()
+            app.entries.iter().map(|(k, _)| k).collect()
         };
 
         let formatted_keys = entries
@@ -336,9 +335,9 @@ where
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
 
         let values = if app.reverse {
-            app.entries.values().rev().collect::<Vec<_>>()
+            app.entries.iter().rev().map(|(_, v)| v).collect::<Vec<_>>()
         } else {
-            app.entries.values().collect::<Vec<_>>()
+            app.entries.iter().map(|(_, v)| v).collect::<Vec<_>>()
         };
         let value_display = Paragraph::new(
             app.list_state

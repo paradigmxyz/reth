@@ -172,6 +172,7 @@ impl Command {
 
                                     if args.json {
                                         let list_result = tool.list::<tables::$table>(args.skip, args.len,args.reverse)?.into_iter().collect::<Vec<_>>();
+                                        println!("LIST RESULT:{list_result:?}");
                                         println!("{}", serde_json::to_string_pretty(&list_result)?);
                                         Ok(())
                                     } else {

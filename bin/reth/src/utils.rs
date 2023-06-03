@@ -12,7 +12,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
-use std::{collections::BTreeMap, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 use tracing::info;
 
 /// Get a single header from network
@@ -70,14 +70,14 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         skip: usize,
         len: usize,
         reverse: bool,
-    ) -> Result<BTreeMap<T::Key, T::Value>> {
+    ) -> Result<Vec<(T::Key, T::Value)>> {
         let data = self.db.view(|tx| {
             let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
             if reverse {
-                cursor.walk_back(None)?.skip(skip).take(len).collect::<Result<BTreeMap<_, _>, _>>()
+                cursor.walk_back(None)?.skip(skip).take(len).collect::<Result<_, _>>()
             } else {
-                cursor.walk(None)?.skip(skip).take(len).collect::<Result<BTreeMap<_, _>, _>>()
+                cursor.walk(None)?.skip(skip).take(len).collect::<Result<_, _>>()
             }
         })?;
 
