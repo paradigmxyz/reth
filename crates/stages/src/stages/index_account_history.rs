@@ -110,7 +110,7 @@ fn stage_checkpoint<DB: Database>(
                 block_range: CheckpointBlockRange::from(range),
                 progress: EntitiesCheckpoint {
                     processed: progress.processed,
-                    total: Some(tx.deref().entries::<tables::AccountChangeSet>()? as u64),
+                    total: tx.deref().entries::<tables::AccountChangeSet>()? as u64,
                 },
             }
         }
@@ -121,7 +121,7 @@ fn stage_checkpoint<DB: Database>(
                     .cursor_read::<tables::AccountChangeSet>()?
                     .walk_range(0..=checkpoint.block_number)?
                     .count() as u64,
-                total: Some(tx.deref().entries::<tables::AccountChangeSet>()? as u64),
+                total: tx.deref().entries::<tables::AccountChangeSet>()? as u64,
             },
         },
     })

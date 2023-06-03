@@ -33,7 +33,7 @@ impl Metrics {
         &mut self,
         stage_id: StageId,
         checkpoint: StageCheckpoint,
-        max_block_number: Option<BlockNumber>,
+        max_block_number: BlockNumber,
     ) {
         let stage_metrics = self
             .stages
@@ -55,8 +55,6 @@ impl Metrics {
         };
 
         stage_metrics.entities_processed.set(processed as f64);
-        if let Some(total) = total {
-            stage_metrics.entities_total.set(total as f64);
-        }
+        stage_metrics.entities_total.set(total as f64);
     }
 }
