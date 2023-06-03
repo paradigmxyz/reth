@@ -2,12 +2,12 @@ use serde::{
     de::{Unexpected, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::ops::Deref;
+use std::{fmt, ops::Deref};
 use sucds::{EliasFano, Searial};
 
 /// Uses EliasFano to hold a list of integers. It provides really good compression with the
 /// capability to access its elements without decoding it.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct IntegerList(pub EliasFano);
 
 impl Deref for IntegerList {
@@ -15,6 +15,13 @@ impl Deref for IntegerList {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl fmt::Debug for IntegerList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let vec: Vec<usize> = self.0.iter(0).collect();
+        write!(f, "IntegerList {:?}", vec)
     }
 }
 
