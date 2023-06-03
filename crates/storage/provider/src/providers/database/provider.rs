@@ -94,6 +94,12 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
+        if let Some(td) = self.chain_spec.final_paris_difficulty(number) {
+            // if this block is higher than the final paris(merge) block, return the final paris
+            // difficulty
+            return Ok(Some(td))
+        }
+
         Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
     }
 
