@@ -326,7 +326,7 @@ impl Serialize for PayloadStatus {
 impl From<PayloadError> for PayloadStatusEnum {
     fn from(error: PayloadError) -> Self {
         match error {
-            PayloadError::BlockHash { consensus, .. } => PayloadStatusEnum::InvalidBlockHash {
+            PayloadError::BlockHash { consensus, .. } => PayloadStatusEnum::Invalid {
                 validation_error: PayloadValidationError::InvalidBlockHash { hash: consensus },
             },
             _ => PayloadStatusEnum::Invalid {
@@ -352,11 +352,6 @@ pub enum PayloadStatusEnum {
         validation_error: PayloadValidationError,
     },
 
-    InvalidBlockHash {
-        #[serde(rename = "validationError")]
-        validation_error: PayloadValidationError,
-    },
-
     /// SYNCING is returned by the engine API in the following calls:
     ///   - newPayloadV1:       if the payload was accepted on top of an active sync
     ///   - forkchoiceUpdateV1: if the new head was seen before, but not part of the chain
@@ -372,7 +367,10 @@ impl PayloadStatusEnum {
     pub fn as_str(&self) -> &'static str {
         match self {
             PayloadStatusEnum::Valid => "VALID",
-            PayloadStatusEnum::Invalid { .. } => "INVALID",
+            PayloadStatusEnum::Invalid { validation_error } => match validation_error {
+                PayloadValidationError::InvalidBlockHash { .. } => "INVALID_BLOCK_HASH",
+                _ => "INVALID",
+            },
             PayloadStatusEnum::Syncing => "SYNCING",
             PayloadStatusEnum::Accepted => "ACCEPTED",
         }
@@ -406,11 +404,6 @@ impl std::fmt::Display for PayloadStatusEnum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PayloadStatusEnum::Invalid { validation_error } => {
-                f.write_str(self.as_str())?;
-                f.write_str(": ")?;
-                f.write_str(validation_error.to_string().as_str())
-            }
-            PayloadStatusEnum::InvalidBlockHash { validation_error } => {
                 f.write_str(self.as_str())?;
                 f.write_str(": ")?;
                 f.write_str(validation_error.to_string().as_str())
@@ -657,21 +650,6 @@ mod tests {
 
     #[test]
     fn serde_payload_status_error_deserialize() {
-        let s = r#"{"status":"INVALID_BLOCK_HASH","latestValidHash":null,"validationError":
-        "invalid block hash: 0x1241835b37d267ed64d1840312ae600b1774e48370b0548c87012a1c681aa54d"}"#;
-
-        let status: PayloadStatus = serde_json::from_str(s).unwrap();
-        assert_eq!(
-            status.status,
-            PayloadStatusEnum::InvalidBlockHash {
-                validation_error: PayloadValidationError::InvalidBlockHash {
-                    hash: H256::from_str(
-                        "0x1241835b37d267ed64d1840312ae600b1774e48370b0548c87012a1c681aa54d"
-                    )
-                    .unwrap(),
-                }
-            }
-        );
         let s = r#"{"status":"INVALID","latestValidHash":null,"validationError":"Failed to decode block"}"#;
         let q = PayloadStatus {
             latest_valid_hash: None,

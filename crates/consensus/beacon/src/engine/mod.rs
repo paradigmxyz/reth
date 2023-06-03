@@ -405,7 +405,7 @@ where
         }
 
         PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-            validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+            validation_error: PayloadValidationError::LinksToRejectedPayload,
         })
         .with_latest_valid_hash(parent_hash)
     }
@@ -441,20 +441,7 @@ where
             header.parent_hash
         };
 
-        // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
-        // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Ok(Some(parent)) = self.load_header(parent_number) {
-            if parent.difficulty != U256::ZERO {
-                latest_valid_hash = H256::zero();
-            }
-        }
-
-        let status = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-            validation_error: PayloadValidationError::LinksToRejectedPayload,
-        })
-        .with_latest_valid_hash(latest_valid_hash);
-
-        // popualte the latest valid hash field
+        // populate the latest valid hash field
         let status = self.prepare_invalid_response(parent_hash);
 
         Some(status)
