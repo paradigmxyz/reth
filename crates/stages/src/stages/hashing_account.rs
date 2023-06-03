@@ -293,7 +293,7 @@ fn stage_checkpoint_progress<DB: Database>(
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: tx.deref().entries::<tables::HashedAccount>()? as u64,
-        total: Some(tx.deref().entries::<tables::PlainAccountState>()? as u64),
+        total: tx.deref().entries::<tables::PlainAccountState>()? as u64,
     })
 }
 
@@ -335,7 +335,7 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Account(AccountHashingCheckpoint {
                         progress: EntitiesCheckpoint {
                             processed,
-                            total: Some(total),
+                            total,
                         },
                         ..
                     })),
@@ -394,7 +394,7 @@ mod tests {
                                 from: 11,
                                 to: 20,
                             },
-                            progress: EntitiesCheckpoint { processed: 5, total: Some(total) }
+                            progress: EntitiesCheckpoint { processed: 5, total }
                         }
                     ))
                 },
@@ -421,7 +421,7 @@ mod tests {
                                 from: 0,
                                 to: 0,
                             },
-                            progress: EntitiesCheckpoint { processed, total: Some(total) }
+                            progress: EntitiesCheckpoint { processed, total }
                         }
                     ))
                 },

@@ -275,9 +275,7 @@ where
                         processed: local_head +
                             (target_block_number.unwrap_or_default() -
                                 tip_block_number.unwrap_or_default()),
-                        total: Some(
-                            target_block_number.expect("No downloaded header for tip found"),
-                        ),
+                        total: target_block_number.expect("No downloaded header for tip found"),
                     },
                 }
             }
@@ -286,7 +284,7 @@ where
         // Total headers can be updated if we received new tip from the network, and need to fill
         // the local gap.
         if let Some(target_block_number) = target_block_number {
-            stage_checkpoint.progress.total = Some(target_block_number);
+            stage_checkpoint.progress.total = target_block_number;
         }
         stage_checkpoint.progress.processed += downloaded_headers.len() as u64;
 
@@ -579,7 +577,7 @@ mod tests {
                 },
                 progress: EntitiesCheckpoint {
                     processed,
-                    total: Some(total),
+                    total,
                 }
             }))
         }, done: true }) if block_number == tip.number &&
@@ -673,7 +671,7 @@ mod tests {
                 },
                 progress: EntitiesCheckpoint {
                     processed,
-                    total: Some(total),
+                    total,
                 }
             }))
         }, done: false }) if block_number == checkpoint &&
@@ -696,7 +694,7 @@ mod tests {
                 },
                 progress: EntitiesCheckpoint {
                     processed,
-                    total: Some(total),
+                    total,
                 }
             }))
         }, done: true }) if block_number == tip.number &&
