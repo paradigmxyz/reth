@@ -391,16 +391,14 @@ where
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
+        let changesets = account_changeset.len();
 
-        let mut changesets = 0;
         let last_indices = account_changeset
             .into_iter()
             // reverse so we can get lowest transition id where we need to unwind account.
             .rev()
             // fold all account and get last transition index
             .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
-                changesets += 1;
-
                 // we just need address and lowest transition id.
                 accounts.insert(account.address, index);
                 accounts
@@ -436,8 +434,8 @@ where
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
+        let changesets = storage_changesets.len();
 
-        let mut changesets = 0;
         let last_indices = storage_changesets
             .into_iter()
             // reverse so we can get lowest transition id where we need to unwind account.
@@ -446,8 +444,6 @@ where
             .fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
-                    changesets += 1;
-
                     // we just need address and lowest transition id.
                     accounts.insert((index.address(), storage.key), index.block_number());
                     accounts
