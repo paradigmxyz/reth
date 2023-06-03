@@ -177,7 +177,7 @@ impl Command {
                                     } else {
                                         tui::DbListTUI::<_, tables::$table>::new(|skip, count| {
                                             tool.list::<tables::$table>(skip, count, args.reverse).unwrap()
-                                        }, $start, $len, args.reverse, total_entries).run()
+                                        }, $start, $len, total_entries).run()
                                     }
                                 })??
                             },)*

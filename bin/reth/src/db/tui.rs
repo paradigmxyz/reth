@@ -56,8 +56,6 @@ where
     skip: usize,
     /// The amount of entries to show per page
     count: usize,
-    /// reverse
-    reverse: bool,
     /// The total number of entries in the database
     total_entries: usize,
     /// The current view mode
@@ -75,18 +73,11 @@ where
     F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     /// Create a new database list TUI
-    pub(crate) fn new(
-        fetch: F,
-        skip: usize,
-        count: usize,
-        reverse: bool,
-        total_entries: usize,
-    ) -> Self {
+    pub(crate) fn new(fetch: F, skip: usize, count: usize, total_entries: usize) -> Self {
         Self {
             fetch,
             skip,
             count,
-            reverse,
             total_entries,
             mode: ViewMode::Normal,
             input: String::new(),
@@ -307,11 +298,7 @@ where
 
         let key_length = format!("{}", app.skip + app.count - 1).len();
 
-        let entries: Vec<_> = if app.reverse {
-            app.entries.iter().rev().map(|(k, _)| k).collect()
-        } else {
-            app.entries.iter().map(|(k, _)| k).collect()
-        };
+        let entries: Vec<_> = app.entries.iter().map(|(k, _)| k).collect();
 
         let formatted_keys = entries
             .into_iter()
@@ -334,11 +321,8 @@ where
             .start_corner(Corner::TopLeft);
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
 
-        let values = if app.reverse {
-            app.entries.iter().rev().map(|(_, v)| v).collect::<Vec<_>>()
-        } else {
-            app.entries.iter().map(|(_, v)| v).collect::<Vec<_>>()
-        };
+        let values = app.entries.iter().map(|(_, v)| v).collect::<Vec<_>>();
+
         let value_display = Paragraph::new(
             app.list_state
                 .selected()
