@@ -153,16 +153,12 @@ pub struct EntitiesCheckpoint {
     /// Number of entities already processed.
     pub processed: u64,
     /// Total entities to be processed.
-    pub total: Option<u64>,
+    pub total: u64,
 }
 
 impl Display for EntitiesCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(total) = self.total {
-            write!(f, "{:.1}%", 100.0 * self.processed as f64 / total as f64)
-        } else {
-            write!(f, "{}", self.processed)
-        }
+        write!(f, "{:.1}%", 100.0 * self.processed as f64 / self.total as f64)
     }
 }
 
@@ -413,7 +409,7 @@ mod tests {
                 block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
                 progress: EntitiesCheckpoint {
                     processed: rng.gen::<u32>() as u64,
-                    total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                    total: u32::MAX as u64 + rng.gen::<u64>(),
                 },
             }),
             StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
@@ -422,25 +418,25 @@ mod tests {
                 block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
                 progress: EntitiesCheckpoint {
                     processed: rng.gen::<u32>() as u64,
-                    total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                    total: u32::MAX as u64 + rng.gen::<u64>(),
                 },
             }),
             StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                 processed: rng.gen::<u32>() as u64,
-                total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                total: u32::MAX as u64 + rng.gen::<u64>(),
             }),
             StageUnitCheckpoint::Execution(ExecutionCheckpoint {
                 block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
                 progress: EntitiesCheckpoint {
                     processed: rng.gen::<u32>() as u64,
-                    total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                    total: u32::MAX as u64 + rng.gen::<u64>(),
                 },
             }),
             StageUnitCheckpoint::Headers(HeadersCheckpoint {
                 block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
                 progress: EntitiesCheckpoint {
                     processed: rng.gen::<u32>() as u64,
-                    total: Some(u32::MAX as u64 + rng.gen::<u64>()),
+                    total: u32::MAX as u64 + rng.gen::<u64>(),
                 },
             }),
         ];

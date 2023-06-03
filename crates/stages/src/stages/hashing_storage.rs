@@ -221,7 +221,7 @@ fn stage_checkpoint_progress<DB: Database>(
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: tx.deref().entries::<tables::HashedStorage>()? as u64,
-        total: Some(tx.deref().entries::<tables::PlainStorageState>()? as u64),
+        total: tx.deref().entries::<tables::PlainStorageState>()? as u64,
     })
 }
 
@@ -281,7 +281,7 @@ mod tests {
                     assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
                         progress: EntitiesCheckpoint {
                             processed,
-                            total: Some(total),
+                            total,
                         },
                         ..
                     }) if processed == previous_checkpoint.progress.processed + 1 &&
@@ -295,7 +295,7 @@ mod tests {
                     assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
                         progress: EntitiesCheckpoint {
                             processed,
-                            total: Some(total),
+                            total,
                         },
                         ..
                     }) if processed == total &&
@@ -360,7 +360,7 @@ mod tests {
                         },
                         progress: EntitiesCheckpoint {
                             processed: 500,
-                            total: Some(total)
+                            total
                         }
                     }))
                 },
@@ -405,7 +405,7 @@ mod tests {
                             },
                             progress: EntitiesCheckpoint {
                                 processed: 502,
-                                total: Some(total)
+                                total
                             }
                         }
                     ))
@@ -437,7 +437,7 @@ mod tests {
                             },
                             progress: EntitiesCheckpoint {
                                 processed,
-                                total: Some(total)
+                                total
                             }
                         }
                     ))
