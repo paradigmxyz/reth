@@ -354,7 +354,7 @@ pub enum PayloadStatusEnum {
 
     InvalidBlockHash {
         #[serde(rename = "validationError")]
-        validation_error: PayloadValidationError
+        validation_error: PayloadValidationError,
     },
 
     /// SYNCING is returned by the engine API in the following calls:
@@ -365,7 +365,6 @@ pub enum PayloadStatusEnum {
     /// ACCEPTED is returned by the engine API in the following calls:
     ///   - newPayloadV1: if the payload was accepted, but not processed (side chain)
     Accepted,
-
 }
 
 impl PayloadStatusEnum {
