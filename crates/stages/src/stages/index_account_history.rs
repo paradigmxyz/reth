@@ -222,7 +222,7 @@ mod tests {
                             from: input.checkpoint().block_number + 1,
                             to: run_to
                         },
-                        progress: EntitiesCheckpoint { processed: 2, total: Some(2) }
+                        progress: EntitiesCheckpoint { processed: 2, total: 2 }
                     }
                 ),
                 done: true
@@ -485,7 +485,7 @@ mod tests {
             stage_checkpoint(&tx.inner(), StageCheckpoint::new(1), &(1..=2)).unwrap(),
             IndexHistoryCheckpoint {
                 block_range: CheckpointBlockRange { from: 1, to: 2 },
-                progress: EntitiesCheckpoint { processed: 2, total: Some(4) }
+                progress: EntitiesCheckpoint { processed: 2, total: 4 }
             }
         );
     }
