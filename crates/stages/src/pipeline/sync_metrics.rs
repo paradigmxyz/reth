@@ -33,7 +33,7 @@ impl Metrics {
         &mut self,
         stage_id: StageId,
         checkpoint: StageCheckpoint,
-        max_block_number: Option<BlockNumber>,
+        max_block_number: BlockNumber,
     ) {
         let stage_metrics = self
             .stages
@@ -44,30 +44,17 @@ impl Metrics {
 
         let (processed, total) = match checkpoint.stage_checkpoint {
             Some(
-                // Only report metrics for hashing stages if `total` is known, otherwise it means
-                // we're unwinding and operating on changesets, rather than accounts or storage
-                // slots.
-                StageUnitCheckpoint::Account(AccountHashingCheckpoint {
-                    progress: progress @ EntitiesCheckpoint { total: Some(_), .. },
-                    ..
-                }) |
-                StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
-                    progress: progress @ EntitiesCheckpoint { total: Some(_), .. },
-                    ..
-                }) |
+                StageUnitCheckpoint::Account(AccountHashingCheckpoint { progress, .. }) |
+                StageUnitCheckpoint::Storage(StorageHashingCheckpoint { progress, .. }) |
                 StageUnitCheckpoint::Entities(progress @ EntitiesCheckpoint { .. }) |
                 StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress, .. }) |
                 StageUnitCheckpoint::Headers(HeadersCheckpoint { progress, .. }) |
                 StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint { progress, .. }),
             ) => (progress.processed, progress.total),
-            Some(StageUnitCheckpoint::Account(_) | StageUnitCheckpoint::Storage(_)) | None => {
-                (checkpoint.block_number, max_block_number)
-            }
+            None => (checkpoint.block_number, max_block_number),
         };
 
         stage_metrics.entities_processed.set(processed as f64);
-        if let Some(total) = total {
-            stage_metrics.entities_total.set(total as f64);
-        }
+        stage_metrics.entities_total.set(total as f64);
     }
 }
