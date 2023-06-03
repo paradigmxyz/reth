@@ -184,6 +184,10 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
         self.provider()?.pending_block()
     }
 
+    fn pending_header(&self) -> Result<Option<SealedHeader>> {
+        self.provider()?.pending_header()
+    }
+
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.provider()?.ommers(id)
     }
