@@ -17,8 +17,8 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    listener::EventListeners, stage::StageId, BlockNumber, Head, Header, SealedBlock, SealedHeader,
-    H256, U256,
+    listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
+    SealedHeader, H256, U256,
 };
 use reth_provider::{
     BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointProvider,
@@ -58,7 +58,7 @@ mod event;
 mod forkchoice;
 pub(crate) mod sync;
 
-use crate::engine::forkchoice::ForkchoiceStateTracker;
+use crate::engine::forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
 pub use event::BeaconConsensusEngineEvent;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
@@ -969,6 +969,7 @@ where
     /// chain is invalid, which means the FCU that triggered the download is invalid. Here we can
     /// stop because there's nothing to do here and the engine needs to wait for another FCU.
     fn on_downloaded_block(&mut self, block: SealedBlock) {
+        let num_hash = block.num_hash();
         trace!(target: "consensus::engine", hash=?block.hash, number=%block.number, "Downloaded full block");
         // check if the block's parent is already marked as invalid
         if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash).is_some() {
@@ -981,11 +982,11 @@ where
                 match status {
                     BlockStatus::Valid => {
                         // block is connected to the current canonical head and is valid.
-                        self.try_make_sync_target_canonical();
+                        self.try_make_sync_target_canonical(num_hash);
                     }
                     BlockStatus::Accepted => {
                         // block is connected to the canonical chain, but not the current head
-                        self.try_make_sync_target_canonical();
+                        self.try_make_sync_target_canonical(num_hash);
                     }
                     BlockStatus::Disconnected { missing_parent } => {
                         // continue downloading the missing parent
@@ -1007,7 +1008,7 @@ where
     /// Note: This will not succeed if the sync target has changed since the block download request
     /// was issued and the new target is still disconnected and additional missing blocks are
     /// downloaded
-    fn try_make_sync_target_canonical(&mut self) {
+    fn try_make_sync_target_canonical(&mut self, inserted: BlockNumHash) {
         if let Some(target) = self.forkchoice_state_tracker.sync_target_state() {
             // optimistically try to make the chain canonical, the sync target might have changed
             // since the block download request was issued (new FCU received)
@@ -1022,6 +1023,16 @@ where
 
                 // we can update the FCU blocks
                 let _ = self.update_canon_chain(&target);
+                return
+            }
+
+            // if the inserted block is the currently targeted `finalized` or `safe` block, we will
+            // attempt to make them canonical, because they are also part of the canonical chain and
+            // their missing block range might already be downloaded (buffered).
+            if let Some(target_hash) =
+                ForkchoiceStateHash::find(&target, inserted.hash).filter(|h| !h.is_head())
+            {
+                let _ = self.blockchain.make_canonical(target_hash.as_ref());
             }
         }
     }
