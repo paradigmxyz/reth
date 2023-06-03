@@ -95,8 +95,8 @@ mod tests {
     use super::*;
     use clap::{Args, Parser};
     use reth_db::{
-        models::{storage_sharded_key::StorageShardedKey, ShardedKey}, HashedAccount, Headers, StorageHistory,
-        SyncStage, AccountHistory,
+        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+        AccountHistory, HashedAccount, Headers, StorageHistory, SyncStage,
     };
     use reth_primitives::{H160, H256};
     use std::str::FromStr;
