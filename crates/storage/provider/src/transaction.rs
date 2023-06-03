@@ -380,17 +380,18 @@ where
         Ok(())
     }
 
-    /// Unwind and clear account history indices
+    /// Unwind and clear account history indices.
+    ///
+    /// Returns number of changesets walked.
     pub fn unwind_account_history_indices(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<(), TransactionError> {
-        let mut cursor = self.cursor_write::<tables::AccountHistory>()?;
-
+    ) -> Result<usize, TransactionError> {
         let account_changeset = self
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
+        let changesets = account_changeset.len();
 
         let last_indices = account_changeset
             .into_iter()
@@ -402,7 +403,9 @@ where
                 accounts.insert(account.address, index);
                 accounts
             });
+
         // try to unwind the index
+        let mut cursor = self.cursor_write::<tables::AccountHistory>()?;
         for (address, rem_index) in last_indices {
             let shard_part = unwind_account_history_shards::<DB>(&mut cursor, address, rem_index)?;
 
@@ -416,20 +419,23 @@ where
                 )?;
             }
         }
-        Ok(())
+
+        Ok(changesets)
     }
 
-    /// Unwind and clear storage history indices
+    /// Unwind and clear storage history indices.
+    ///
+    /// Returns number of changesets walked.
     pub fn unwind_storage_history_indices(
         &self,
         range: Range<BlockNumberAddress>,
-    ) -> Result<(), TransactionError> {
-        let mut cursor = self.cursor_write::<tables::StorageHistory>()?;
-
+    ) -> Result<usize, TransactionError> {
         let storage_changesets = self
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
+        let changesets = storage_changesets.len();
+
         let last_indices = storage_changesets
             .into_iter()
             // reverse so we can get lowest transition id where we need to unwind account.
@@ -443,6 +449,8 @@ where
                     accounts
                 },
             );
+
+        let mut cursor = self.cursor_write::<tables::StorageHistory>()?;
         for ((address, storage_key), rem_index) in last_indices {
             let shard_part =
                 unwind_storage_history_shards::<DB>(&mut cursor, address, storage_key, rem_index)?;
@@ -457,7 +465,8 @@ where
                 )?;
             }
         }
-        Ok(())
+
+        Ok(changesets)
     }
 
     /// Append blocks and insert its post state.
@@ -1180,7 +1189,6 @@ where
                 storages
             },
         );
-
         Ok(storage_changeset_lists)
     }
 
@@ -1196,7 +1204,7 @@ where
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
 
-        let account_transtions = account_changesets
+        let account_transitions = account_changesets
             .into_iter()
             // fold all account to one set of changed accounts
             .fold(
@@ -1206,8 +1214,7 @@ where
                     accounts
                 },
             );
-
-        Ok(account_transtions)
+        Ok(account_transitions)
     }
 
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage

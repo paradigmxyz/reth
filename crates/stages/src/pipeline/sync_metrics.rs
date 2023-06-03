@@ -5,7 +5,8 @@ use reth_metrics::{
 use reth_primitives::{
     stage::{
         AccountHashingCheckpoint, EntitiesCheckpoint, ExecutionCheckpoint, HeadersCheckpoint,
-        StageCheckpoint, StageId, StageUnitCheckpoint, StorageHashingCheckpoint,
+        IndexHistoryCheckpoint, StageCheckpoint, StageId, StageUnitCheckpoint,
+        StorageHashingCheckpoint,
     },
     BlockNumber,
 };
@@ -32,7 +33,7 @@ impl Metrics {
         &mut self,
         stage_id: StageId,
         checkpoint: StageCheckpoint,
-        max_block_number: Option<BlockNumber>,
+        max_block_number: BlockNumber,
     ) {
         let stage_metrics = self
             .stages
@@ -47,14 +48,13 @@ impl Metrics {
                 StageUnitCheckpoint::Storage(StorageHashingCheckpoint { progress, .. }) |
                 StageUnitCheckpoint::Entities(progress @ EntitiesCheckpoint { .. }) |
                 StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress, .. }) |
-                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress, .. }),
-            ) => (progress.processed, Some(progress.total)),
+                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress, .. }) |
+                StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint { progress, .. }),
+            ) => (progress.processed, progress.total),
             None => (checkpoint.block_number, max_block_number),
         };
 
         stage_metrics.entities_processed.set(processed as f64);
-        if let Some(total) = total {
-            stage_metrics.entities_total.set(total as f64);
-        }
+        stage_metrics.entities_total.set(total as f64);
     }
 }

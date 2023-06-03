@@ -146,6 +146,16 @@ pub struct HeadersCheckpoint {
     pub progress: EntitiesCheckpoint,
 }
 
+/// Saves the progress of Index History stages.
+#[main_codec]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct IndexHistoryCheckpoint {
+    /// Block range which this checkpoint is valid for.
+    pub block_range: CheckpointBlockRange,
+    /// Progress measured in changesets.
+    pub progress: EntitiesCheckpoint,
+}
+
 /// Saves the progress of abstract stage iterating over or downloading entities.
 #[main_codec]
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -175,6 +185,12 @@ pub struct CheckpointBlockRange {
 
 impl From<RangeInclusive<BlockNumber>> for CheckpointBlockRange {
     fn from(range: RangeInclusive<BlockNumber>) -> Self {
+        Self { from: *range.start(), to: *range.end() }
+    }
+}
+
+impl From<&RangeInclusive<BlockNumber>> for CheckpointBlockRange {
+    fn from(range: &RangeInclusive<BlockNumber>) -> Self {
         Self { from: *range.start(), to: *range.end() }
     }
 }
@@ -235,6 +251,14 @@ impl StageCheckpoint {
         }
     }
 
+    /// Returns the index history stage checkpoint, if any.
+    pub fn index_history_stage_checkpoint(&self) -> Option<IndexHistoryCheckpoint> {
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::IndexHistory(checkpoint)) => Some(checkpoint),
+            _ => None,
+        }
+    }
+
     /// Sets the block number.
     pub fn with_block_number(mut self, block_number: BlockNumber) -> Self {
         self.block_number = block_number;
@@ -276,6 +300,15 @@ impl StageCheckpoint {
         self.stage_checkpoint = Some(StageUnitCheckpoint::Headers(checkpoint));
         self
     }
+
+    /// Sets the stage checkpoint to index history.
+    pub fn with_index_history_stage_checkpoint(
+        mut self,
+        checkpoint: IndexHistoryCheckpoint,
+    ) -> Self {
+        self.stage_checkpoint = Some(StageUnitCheckpoint::IndexHistory(checkpoint));
+        self
+    }
 }
 
 impl Display for StageCheckpoint {
@@ -290,7 +323,11 @@ impl Display for StageCheckpoint {
                 }) |
                 StageUnitCheckpoint::Entities(entities) |
                 StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }) |
-                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }),
+                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }) |
+                StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
+                    progress: entities,
+                    ..
+                }),
             ) => entities.fmt(f),
             None => write!(f, "{}", self.block_number),
         }
@@ -313,6 +350,8 @@ pub enum StageUnitCheckpoint {
     Execution(ExecutionCheckpoint),
     /// Saves the progress of Headers stage.
     Headers(HeadersCheckpoint),
+    /// Saves the progress of Index History stage.
+    IndexHistory(IndexHistoryCheckpoint),
 }
 
 impl Compact for StageUnitCheckpoint {
@@ -339,6 +378,10 @@ impl Compact for StageUnitCheckpoint {
             }
             StageUnitCheckpoint::Headers(data) => {
                 buf.put_u8(4);
+                1 + data.to_compact(buf)
+            }
+            StageUnitCheckpoint::IndexHistory(data) => {
+                buf.put_u8(5);
                 1 + data.to_compact(buf)
             }
         }
@@ -368,6 +411,10 @@ impl Compact for StageUnitCheckpoint {
             4 => {
                 let (data, buf) = HeadersCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Headers(data), buf)
+            }
+            5 => {
+                let (data, buf) = IndexHistoryCheckpoint::from_compact(&buf[1..], buf.len() - 1);
+                (Self::IndexHistory(data), buf)
             }
             _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
         }

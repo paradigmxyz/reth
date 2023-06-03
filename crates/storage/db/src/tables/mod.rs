@@ -211,7 +211,7 @@ dupsort!(
 table!(
     /// Stores pointers to block changeset with changes for each account key.
     ///
-    /// Last shard key of the storage will contains `u64::MAX` `BlockNumber`,
+    /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
     /// this would allows us small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
@@ -233,7 +233,7 @@ table!(
 table!(
     /// Stores pointers to block number changeset with changes for each storage key.
     ///
-    /// Last shard key of the storage will contains `u64::MAX` `BlockNumber`,
+    /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
     /// this would allows us small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:

@@ -141,7 +141,7 @@ where
             self.metrics.stage_checkpoint(
                 stage_id,
                 get_stage_checkpoint(&tx, stage_id)?.unwrap_or_default(),
-                None,
+                0,
             );
         }
         Ok(())
@@ -270,10 +270,11 @@ where
                     Ok(unwind_output) => {
                         checkpoint = unwind_output.checkpoint;
                         self.metrics.stage_checkpoint(
-                            stage_id, checkpoint,
+                            stage_id,
+                            checkpoint,
                             // We assume it was set in the previous execute iteration, so it
                             // doesn't change when we unwind.
-                            None,
+                            checkpoint.block_number,
                         );
                         tx.save_stage_checkpoint(stage_id, checkpoint)?;
 
@@ -346,7 +347,9 @@ where
                     self.metrics.stage_checkpoint(
                         stage_id,
                         checkpoint,
-                        previous_stage.map(|(_, checkpoint)| checkpoint.block_number),
+                        previous_stage
+                            .map(|(_, checkpoint)| checkpoint.block_number)
+                            .unwrap_or_default(),
                     );
                     tx.save_stage_checkpoint(stage_id, checkpoint)?;
 
