@@ -11,35 +11,36 @@ pub struct CallTraceArena {
 
 impl CallTraceArena {
     /// Pushes a new trace into the arena, returning the trace ID
-    pub(crate) fn push_trace(&mut self, entry: usize, new_trace: CallTrace) -> usize {
-        match new_trace.depth {
-            // The entry node, just update it
-            0 => {
-                self.arena[0].trace = new_trace;
-                0
-            }
-            // We found the parent node, add the new trace as a child
-            _ if self.arena[entry].trace.depth == new_trace.depth - 1 => {
-                let id = self.arena.len();
+    pub(crate) fn push_trace(&mut self, mut entry: usize, new_trace: CallTrace) -> usize {
+        loop {
+            match new_trace.depth {
+                // The entry node, just update it
+                0 => {
+                    self.arena[0].trace = new_trace;
+                    return 0
+                }
+                // We found the parent node, add the new trace as a child
+                _ if self.arena[entry].trace.depth == new_trace.depth - 1 => {
+                    let id = self.arena.len();
 
-                let trace_location = self.arena[entry].children.len();
-                self.arena[entry].ordering.push(LogCallOrder::Call(trace_location));
-                let node = CallTraceNode {
-                    parent: Some(entry),
-                    trace: new_trace,
-                    idx: id,
-                    ..Default::default()
-                };
-                self.arena.push(node);
-                self.arena[entry].children.push(id);
+                    let trace_location = self.arena[entry].children.len();
+                    self.arena[entry].ordering.push(LogCallOrder::Call(trace_location));
+                    let node = CallTraceNode {
+                        parent: Some(entry),
+                        trace: new_trace,
+                        idx: id,
+                        ..Default::default()
+                    };
+                    self.arena.push(node);
+                    self.arena[entry].children.push(id);
 
-                id
+                    return id
+                }
+                _ => {
+                    // We haven't found the parent node, go deeper
+                    entry = *self.arena[entry].children.last().expect("Disconnected trace");
+                }
             }
-            // We haven't found the parent node, go deeper
-            _ => self.push_trace(
-                *self.arena[entry].children.last().expect("Disconnected trace"),
-                new_trace,
-            ),
         }
     }
 }
