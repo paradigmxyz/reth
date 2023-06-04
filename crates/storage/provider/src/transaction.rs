@@ -481,7 +481,7 @@ where
         // Insert the blocks
         for block in blocks {
             let (block, senders) = block.into_components();
-            insert_canonical_block(self.deref_mut(), block, Some(senders)).unwrap();
+            insert_canonical_block(self.deref_mut(), block, Some(senders))?;
         }
 
         // Write state and changesets to the database.
@@ -495,6 +495,16 @@ where
         // Update pipeline progress
         self.update_pipeline_stages(new_tip_number)?;
 
+        Ok(())
+    }
+
+    /// Insert full block and make it canonical.
+    pub fn insert_block(
+        &mut self,
+        block: SealedBlock,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(), TransactionError> {
+        insert_canonical_block(self.deref_mut(), block, senders)?;
         Ok(())
     }
 

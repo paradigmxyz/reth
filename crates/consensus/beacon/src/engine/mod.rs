@@ -1516,10 +1516,7 @@ mod tests {
     fn insert_blocks<'a, DB: Database>(db: &DB, mut blocks: impl Iterator<Item = &'a SealedBlock>) {
         let mut transaction = Transaction::new(db).unwrap();
         blocks
-            .try_for_each(|b| {
-                transaction
-                    .insert_block(SealedBlockWithSenders::new(b.clone(), Vec::default()).unwrap())
-            })
+            .try_for_each(|b| transaction.insert_block(b.clone(), None))
             .expect("failed to insert");
         transaction.commit().unwrap();
     }
