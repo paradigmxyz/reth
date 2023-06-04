@@ -202,7 +202,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
-        if this.info_interval.poll_tick(cx).is_ready() {
+        while this.info_interval.poll_tick(cx).is_ready() {
             let stage = this
                 .state
                 .current_stage
@@ -222,7 +222,7 @@ where
                 NodeEvent::ConsensusEngine(event) => {
                     this.state.handle_consensus_engine_event(event);
                 }
-                // TODO(alexey): do not warn about any of these conditions if `debug.tip` is not
+                // TODO(alexey): do not warn about Consensus Layer health if `debug.tip` is not
                 //  empty.
                 NodeEvent::ConsensusLayerHealth(event) => {
                     this.state.handle_consensus_layer_health_event(event)

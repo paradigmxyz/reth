@@ -34,24 +34,33 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        ready!(this.interval.poll_tick(cx));
+        if this.interval.poll_tick(cx).is_ready() {
+            // this ensures the interval will be polled periodically, see [Interval::poll_tick]
+            let _ = this.interval.poll_tick(cx);
 
-        match (
-            this.canon_chain.last_exchanged_transition_configuration_timestamp(),
-            this.canon_chain.last_received_update_timestamp(),
-        ) {
-            (None, _) => Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen)),
-            (Some(transition_config), _)
-                if transition_config.elapsed() > NO_TRANSITION_CONFIG_EXCHANGED_PERIOD =>
-            {
-                Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotSeenInAWhile))
+            return match (
+                this.canon_chain.last_exchanged_transition_configuration_timestamp(),
+                this.canon_chain.last_received_update_timestamp(),
+            ) {
+                (None, _) => Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen)),
+                (Some(transition_config), _)
+                    if transition_config.elapsed() > NO_TRANSITION_CONFIG_EXCHANGED_PERIOD =>
+                {
+                    Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotSeenInAWhile))
+                }
+                (Some(_), None) => {
+                    Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
+                }
+                (Some(_), Some(update))
+                    if update.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
+                {
+                    Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotReceivedUpdatesInAWhile))
+                }
+                _ => Poll::Pending,
             }
-            (Some(_), None) => Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates)),
-            (Some(_), Some(update)) if update.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD => {
-                Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotReceivedUpdatesInAWhile))
-            }
-            _ => Poll::Pending,
         }
+
+        Poll::Pending
     }
 }
 
