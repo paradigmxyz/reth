@@ -77,7 +77,7 @@ async fn dry_run(
             .execute(
                 &mut tx,
                 reth_stages::ExecInput {
-                    previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(to))),
+                    previous_stage: Some((StageId::Other("Another"), to)),
                     checkpoint: Some(StageCheckpoint::new(from)),
                 },
             )

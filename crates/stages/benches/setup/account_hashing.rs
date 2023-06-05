@@ -40,7 +40,7 @@ fn find_stage_range(db: &Path) -> StageRange {
 
             stage_range = Some((
                 ExecInput {
-                    previous_stage: Some((StageId::Other("Another"), to)),
+                    previous_stage: Some((StageId::Other("Another"), to.block_number)),
                     checkpoint: Some(StageCheckpoint::new(from)),
                 },
                 UnwindInput { unwind_to: from, checkpoint: to, bad_block: None },
@@ -70,7 +70,7 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         path,
         (
             ExecInput {
-                previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(num_blocks))),
+                previous_stage: Some((StageId::Other("Another"), num_blocks)),
                 ..Default::default()
             },
             UnwindInput::default(),
