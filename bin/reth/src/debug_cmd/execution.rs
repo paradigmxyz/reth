@@ -26,7 +26,7 @@ use reth_interfaces::{
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
-use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
+use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase};
 use reth_staged_sync::utils::{
     chainspec::genesis_value_parser,
     init::{init_db, init_genesis},
@@ -37,7 +37,7 @@ use reth_stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
         TotalDifficultyStage,
     },
-    Pipeline, StageSet,
+    Pipeline, PipelineError, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -257,6 +257,8 @@ impl Command {
         }
 
         let mut current_max_block = latest_block_number;
+        let shareable_db = ShareableDatabase::new(db.clone(), self.chain.clone());
+
         while current_max_block < self.to {
             let next_block = current_max_block + 1;
             let target_block = self.to.min(current_max_block + self.interval);
@@ -271,8 +273,10 @@ impl Command {
 
             // Unwind the pipeline without committing.
             {
-                let tx = Transaction::new(db.as_ref())?;
-                tx.take_block_and_execution_range(&self.chain, next_block..=target_block)?;
+                shareable_db
+                    .provider_rw()
+                    .map_err(PipelineError::Interface)?
+                    .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }
 
             // Update latest block

@@ -16,7 +16,8 @@ use reth_primitives::{
     Block, BlockNumber, BlockWithSenders, TransactionSigned, U256,
 };
 use reth_provider::{
-    post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
+    post_state::PostState, BlockExecutor, BlockProvider, ExecutorFactory, HeaderProvider,
+    LatestStateProviderRef, ProviderError, WithdrawalsProvider,
 };
 use std::time::Instant;
 use tracing::*;
@@ -83,19 +84,24 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     // TODO: This should be in the block provider trait once we consolidate
     // SharedDatabase/Transaction
     fn read_block_with_senders<DB: Database>(
-        tx: &Transaction<'_, DB>,
+        provider: &reth_provider::DatabaseProviderRW<'_, DB>,
         block_number: BlockNumber,
     ) -> Result<(BlockWithSenders, U256), StageError> {
-        let header = tx.get_header(block_number)?;
-        let td = tx.get_td(block_number)?;
-        let ommers = tx.get::<tables::BlockOmmers>(block_number)?.unwrap_or_default().ommers;
-        let withdrawals = tx.get::<tables::BlockWithdrawals>(block_number)?.map(|v| v.withdrawals);
+        let header = provider
+            .header_by_number(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        let td = provider
+            .header_td_by_number(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        let ommers = provider.ommers(block_number.into())?.unwrap_or_default();
+        let withdrawals = provider.withdrawals_by_block(block_number.into(), header.timestamp)?;
 
         // Get the block body
-        let body = tx.get::<tables::BlockBodyIndices>(block_number)?.unwrap();
+        let body = provider.block_body_indices(block_number)?;
         let tx_range = body.tx_num_range();
 
         // Get the transactions in the body
+        let tx = provider.tx_ref();
         let (transactions, senders) = if tx_range.is_empty() {
             (Vec::new(), Vec::new())
         } else {
@@ -132,14 +138,15 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let start_block = input.checkpoint().block_number + 1;
         let max_block = input.previous_stage_checkpoint().block_number;
 
         // Build executor
-        let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
+        let mut executor =
+            self.executor_factory.with_sp(LatestStateProviderRef::new(provider.tx_ref()));
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -147,7 +154,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Execute block range
         let mut state = PostState::default();
         for block_number in start_block..=max_block {
-            let (block, td) = Self::read_block_with_senders(tx, block_number)?;
+            let (block, td) = Self::read_block_with_senders::<DB>(provider, block_number)?;
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
@@ -173,7 +180,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Write history periodically to free up memory
             if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
                 info!(target: "sync::stages::execution", ?block_number, "Writing history.");
-                state.write_history_to_db(&**tx)?;
+                state.write_history_to_db(provider.tx_ref())?;
                 info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
                 // gas_since_history_write = 0;
             }
@@ -188,7 +195,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Write remaining changes
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
         let start = Instant::now();
-        state.write_to_db(&**tx)?;
+        state.write_to_db(provider.tx_ref())?;
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 
         let is_final_range = stage_progress == max_block;
@@ -214,7 +221,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Execute the stage
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         // For Ethereum transactions that reaches the max call depth (1024) revm can use more stack
@@ -231,7 +238,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 .stack_size(BIG_STACK_SIZE)
                 .spawn_scoped(scope, || {
                     // execute and store output to results
-                    self.execute_inner(tx, input)
+                    self.execute_inner::<DB>(provider, input)
                 })
                 .expect("Expects that thread name is not null");
             handle.join().expect("Expects for thread to not panic")
@@ -241,80 +248,84 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        // Acquire changeset cursors
-        let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
+        let (range, unwind_to, is_final_range) = {
+            let tx = provider.tx_mut();
+            // Acquire changeset cursors
+            let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+            let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let (range, unwind_to, is_final_range) =
-            input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
+            let (range, unwind_to, is_final_range) = input
+                .unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
-        if range.is_empty() {
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
-        }
-
-        // get all batches for account change
-        // Check if walk and walk_dup would do the same thing
-        let account_changeset_batch =
-            account_changeset.walk_range(range.clone())?.collect::<Result<Vec<_>, _>>()?;
-
-        // revert all changes to PlainState
-        for (_, changeset) in account_changeset_batch.into_iter().rev() {
-            if let Some(account_info) = changeset.info {
-                tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
-            } else {
-                tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
+            if range.is_empty() {
+                return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
             }
-        }
 
-        // get all batches for storage change
-        let storage_changeset_batch = storage_changeset
-            .walk_range(BlockNumberAddress::range(range.clone()))?
-            .collect::<Result<Vec<_>, _>>()?;
+            // get all batches for account change
+            // Check if walk and walk_dup would do the same thing
+            let account_changeset_batch =
+                account_changeset.walk_range(range.clone())?.collect::<Result<Vec<_>, _>>()?;
 
-        // revert all changes to PlainStorage
-        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-        for (key, storage) in storage_changeset_batch.into_iter().rev() {
-            let address = key.address();
-            if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
-                if v.key == storage.key {
-                    plain_storage_cursor.delete_current()?;
+            // revert all changes to PlainState
+            for (_, changeset) in account_changeset_batch.into_iter().rev() {
+                if let Some(account_info) = changeset.info {
+                    tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
+                } else {
+                    tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
                 }
             }
-            if storage.value != U256::ZERO {
-                plain_storage_cursor.upsert(address, storage)?;
-            }
-        }
 
-        // Discard unwinded changesets
-        let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
-        while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
-            if block_num <= unwind_to {
-                break
-            }
-            // delete all changesets
-            rev_acc_changeset_walker.delete_current()?;
-        }
+            // get all batches for storage change
+            let storage_changeset_batch = storage_changeset
+                .walk_range(BlockNumberAddress::range(range.clone()))?
+                .collect::<Result<Vec<_>, _>>()?;
 
-        let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
-        while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
-            if key.block_number() < *range.start() {
-                break
+            // revert all changes to PlainStorage
+            let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+            for (key, storage) in storage_changeset_batch.into_iter().rev() {
+                let address = key.address();
+                if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
+                    if v.key == storage.key {
+                        plain_storage_cursor.delete_current()?;
+                    }
+                }
+                if storage.value != U256::ZERO {
+                    plain_storage_cursor.upsert(address, storage)?;
+                }
             }
-            // delete all changesets
-            rev_storage_changeset_walker.delete_current()?;
-        }
+
+            // Discard unwinded changesets
+            let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
+            while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
+                if block_num <= unwind_to {
+                    break
+                }
+                // delete all changesets
+                rev_acc_changeset_walker.delete_current()?;
+            }
+
+            let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
+            while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
+                if key.block_number() < *range.start() {
+                    break
+                }
+                // delete all changesets
+                rev_storage_changeset_walker.delete_current()?;
+            }
+            (range, unwind_to, is_final_range)
+        };
 
         // Look up the start index for the transaction range
-        let first_tx_num = tx.block_body_indices(*range.start())?.first_tx_num();
+        let first_tx_num = provider.block_body_indices(*range.start())?.first_tx_num();
 
         // Unwind all receipts for transactions in the block range
-        tx.unwind_table_by_num::<tables::Receipts>(first_tx_num)?;
+        provider.unwind_table_by_num::<tables::Receipts>(first_tx_num)?;
         // `unwind_table_by_num` doesn't unwind the provided key, so we need to unwind it manually
-        tx.delete::<tables::Receipts>(first_tx_num, None)?;
+        provider.tx_mut().delete::<tables::Receipts>(first_tx_num, None)?;
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
