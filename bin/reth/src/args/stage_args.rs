@@ -11,5 +11,8 @@ pub enum StageEnum {
     Hashing,
     Merkle,
     TxLookup,
+    // TODO: Combine or remove `History` variant.
     History,
+    AccountHistory,
+    StorageHistory,
 }

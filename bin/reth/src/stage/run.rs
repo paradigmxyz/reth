@@ -19,8 +19,8 @@ use reth_provider::{ShareableDatabase, Transaction};
 use reth_staged_sync::utils::{chainspec::chain_spec_value_parser, init::init_db};
 use reth_stages::{
     stages::{
-        BodyStage, ExecutionStage, ExecutionStageThresholds, MerkleStage, SenderRecoveryStage,
-        TransactionLookupStage,
+        BodyStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, TransactionLookupStage,
     },
     ExecInput, ExecOutput, Stage, UnwindInput,
 };
@@ -93,6 +93,14 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
+
+    /// Commits the changes in the database. WARNING: potentially destructive.
+    ///
+    /// Useful when you want to run diagnostics on the database.
+    // TODO: We should consider allowing to run hooks at the end of the stage run,
+    // e.g. query the DB size, or any table data.
+    #[arg(long, short)]
+    commit: bool,
 }
 
 impl Command {
@@ -197,6 +205,8 @@ impl Command {
                     Box::new(MerkleStage::default_execution()),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
+                StageEnum::AccountHistory => (Box::<IndexAccountHistoryStage>::default(), None),
+                StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
                 _ => return Ok(()),
             };
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
@@ -225,7 +235,11 @@ impl Command {
         while let ExecOutput { checkpoint: stage_progress, done: false } =
             exec_stage.execute(&mut tx, input).await?
         {
-            input.checkpoint = Some(stage_progress)
+            input.checkpoint = Some(stage_progress);
+
+            if self.commit {
+                tx.commit()?;
+            }
         }
 
         Ok(())
