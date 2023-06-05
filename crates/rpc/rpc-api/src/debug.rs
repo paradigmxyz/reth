@@ -52,7 +52,7 @@ pub trait DebugApi {
     async fn debug_trace_block(
         &self,
         rlp_block: Bytes,
-        opts: GethDebugTracingOptions,
+        opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
 
     /// Similar to `debug_traceBlock`, `debug_traceBlockByHash` accepts a block hash and will replay
@@ -62,7 +62,7 @@ pub trait DebugApi {
     async fn debug_trace_block_by_hash(
         &self,
         block: H256,
-        opts: GethDebugTracingOptions,
+        opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
 
     /// Similar to `debug_traceBlockByNumber`, `debug_traceBlockByHash` accepts a block number
@@ -72,7 +72,7 @@ pub trait DebugApi {
     async fn debug_trace_block_by_number(
         &self,
         block: BlockNumberOrTag,
-        opts: GethDebugTracingOptions,
+        opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
 
     /// The `debug_traceTransaction` debugging method will attempt to run the transaction in the
@@ -83,7 +83,7 @@ pub trait DebugApi {
     async fn debug_trace_transaction(
         &self,
         tx_hash: H256,
-        opts: GethDebugTracingOptions,
+        opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTraceFrame>;
 
     /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
@@ -100,6 +100,6 @@ pub trait DebugApi {
         &self,
         request: CallRequest,
         block_number: Option<BlockId>,
-        opts: GethDebugTracingCallOptions,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTraceFrame>;
 }

@@ -120,7 +120,7 @@ where
     #[track_caller]
     pub fn set_tip(&self, tip: H256) {
         let _ = self.tip_tx.as_ref().expect("tip sender is set").send(tip).map_err(|_| {
-            warn!(target: "sync::pipeline", "tip channel closed");
+            warn!(target: "sync::pipeline", "Chain tip channel closed");
         });
     }
 
@@ -314,7 +314,7 @@ where
                     stage = %stage_id,
                     max_block = self.max_block,
                     prev_block = prev_checkpoint.map(|progress| progress.block_number),
-                    "Stage reached maximum block, skipping."
+                    "Stage reached target block, skipping."
                 );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
 
@@ -344,7 +344,7 @@ where
                         progress = checkpoint.block_number,
                         %checkpoint,
                         %done,
-                        "Stage made progress"
+                        "Stage committed progress"
                     );
                     self.metrics.stage_checkpoint(
                         stage_id,
@@ -403,7 +403,7 @@ where
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,
-                            "Stage encountered a non-fatal error: {err}. Retrying"
+                            "Stage encountered a non-fatal error: {err}. Retrying..."
                         );
                         continue
                     };

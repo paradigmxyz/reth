@@ -54,7 +54,7 @@ use std::{
 };
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
@@ -501,7 +501,7 @@ where
                 unreachable!("Not emitted by session")
             }
             PeerMessage::Other(other) => {
-                error!(target : "net", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target : "net", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -514,7 +514,8 @@ where
             }
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
                 if self.handle.mode().is_stake() {
-                    error!(target : "net", "Block propagation is not supported in POS - [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)");
+                    // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
+                    warn!(target : "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
                     return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
@@ -601,7 +602,7 @@ where
                 Poll::Ready(None) => {
                     // This is only possible if the channel was deliberately closed since we always
                     // have an instance of `NetworkHandle`
-                    error!("network message channel closed.");
+                    error!("Network message channel closed.");
                     return Poll::Ready(())
                 }
                 Poll::Ready(Some(msg)) => this.on_handle_message(msg),

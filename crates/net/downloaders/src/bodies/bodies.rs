@@ -24,6 +24,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use tracing::info;
 
 /// The scope for headers downloader metrics.
 pub const BODIES_DOWNLOADER_SCOPE: &str = "downloaders.bodies";
@@ -312,7 +313,7 @@ where
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         // Check if the range is valid.
         if range.is_empty() {
-            tracing::error!(target: "downloaders::bodies", ?range, "Range is invalid");
+            tracing::error!(target: "downloaders::bodies", ?range, "Bodies download range is invalid (empty)");
             return Err(DownloadError::InvalidBodyRange { range })
         }
 
@@ -330,6 +331,7 @@ where
         if is_next_consecutive_range {
             // New range received.
             tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
+            info!(target: "downloaders::bodies", "Downloading bodies {range:?}");
             self.download_range = range;
             return Ok(())
         }
@@ -337,6 +339,7 @@ where
         // The block range is reset. This can happen either after unwind or after the bodies were
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
+        info!(target: "downloaders::bodies", "Downloading bodies {range:?}");
         self.clear();
         self.download_range = range;
         Ok(())

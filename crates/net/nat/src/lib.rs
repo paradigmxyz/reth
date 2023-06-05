@@ -228,14 +228,14 @@ async fn resolve_external_ip_upnp() -> Option<IpAddr> {
     search_gateway(Default::default())
         .await
         .map_err(|err| {
-            warn!(target: "net::nat", ?err, "failed to find upnp gateway");
+            warn!(target: "net::nat", ?err, "Failed to resolve external IP via UPnP: failed to find gateway");
             err
         })
         .ok()?
         .get_external_ip()
         .await
         .map_err(|err| {
-            warn!(target: "net::nat", ?err, "failed to resolve external ip via upnp gateway");
+            warn!(target: "net::nat", ?err, "Failed to resolve external IP via UPnP");
             err
         })
         .ok()
