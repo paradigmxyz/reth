@@ -244,30 +244,39 @@ where
     }
 
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
-        if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
-        {
-            return Ok(Some(TransactionSource::Pool(tx)))
+        // Try to find the transaction on disk
+        let mut resp = self
+            .on_blocking_task(|this| async move {
+                match this.client().transaction_by_hash_with_meta(hash)? {
+                    None => Ok(None),
+                    Some((tx, meta)) => {
+                        let transaction = tx
+                            .into_ecrecovered()
+                            .ok_or(EthApiError::InvalidTransactionSignature)?;
+
+                        let tx = TransactionSource::Block {
+                            transaction,
+                            index: meta.index,
+                            block_hash: meta.block_hash,
+                            block_number: meta.block_number,
+                            base_fee: meta.base_fee,
+                        };
+                        Ok(Some(tx))
+                    }
+                }
+            })
+            .await?;
+
+        if resp.is_none() {
+            // tx not found on disk, check pool
+            if let Some(tx) =
+                self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
+            {
+                resp = Some(TransactionSource::Pool(tx));
+            }
         }
 
-        self.on_blocking_task(|this| async move {
-            match this.client().transaction_by_hash_with_meta(hash)? {
-                None => Ok(None),
-                Some((tx, meta)) => {
-                    let transaction =
-                        tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-
-                    let tx = TransactionSource::Block {
-                        transaction,
-                        index: meta.index,
-                        block_hash: meta.block_hash,
-                        block_number: meta.block_number,
-                        base_fee: meta.base_fee,
-                    };
-                    Ok(Some(tx))
-                }
-            }
-        })
-        .await
+        Ok(resp)
     }
 
     async fn transaction_by_hash_at(
