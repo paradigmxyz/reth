@@ -310,7 +310,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
-
             // Validate the calulated state root
             let target = tx.get_header(input.unwind_to)?;
             self.validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
