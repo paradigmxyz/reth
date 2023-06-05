@@ -1,7 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::Transaction;
 
 /// The finish stage.
 ///
@@ -18,7 +17,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
 
     async fn execute(
         &mut self,
-        _tx: &mut Transaction<'_, DB>,
+        _provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
@@ -26,7 +25,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
 
     async fn unwind(
         &mut self,
-        _tx: &mut Transaction<'_, DB>,
+        _provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })

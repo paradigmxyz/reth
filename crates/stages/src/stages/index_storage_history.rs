@@ -1,7 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, models::BlockNumberAddress};
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::Transaction;
 use std::fmt::Debug;
 use tracing::*;
 
@@ -31,7 +30,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let target = input.previous_stage_checkpoint();
@@ -41,8 +40,8 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             return Ok(ExecOutput::done(target))
         }
 
-        let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;
-        tx.insert_storage_history_index(indices)?;
+        let indices = provider.get_storage_transition_ids_from_changeset(range.clone())?;
+        provider.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
@@ -51,13 +50,13 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
+        provider.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
 
         info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
