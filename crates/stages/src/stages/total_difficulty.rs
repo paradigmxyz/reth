@@ -10,7 +10,6 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     U256,
 };
-use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
 
@@ -50,9 +49,10 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Write total difficulty entries
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        let tx = provider.tx_mut();
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
         let (start_block, end_block) = range.clone().into_inner();
 
@@ -88,13 +88,13 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
+        provider.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
         info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })

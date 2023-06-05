@@ -12,7 +12,6 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     TransactionSignedNoHash, TxNumber, H160,
 };
-use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -48,7 +47,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
@@ -58,10 +57,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let (start_block, end_block) = range.clone().into_inner();
 
         // Look up the start index for the transaction range
-        let first_tx_num = tx.block_body_indices(start_block)?.first_tx_num();
+        let first_tx_num = provider.block_body_indices(start_block)?.first_tx_num();
 
         // Look up the end index for transaction range (inclusive)
-        let last_tx_num = tx.block_body_indices(end_block)?.last_tx_num();
+        let last_tx_num = provider.block_body_indices(end_block)?.last_tx_num();
 
         // No transactions to walk over
         if first_tx_num > last_tx_num {
@@ -71,6 +70,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 done: is_final_range,
             })
         }
+        let tx = provider.tx_mut();
 
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
@@ -147,15 +147,15 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = tx.block_body_indices(unwind_to)?.last_tx_num();
-        tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
+        let latest_tx_id = provider.block_body_indices(unwind_to)?.last_tx_num();
+        provider.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })

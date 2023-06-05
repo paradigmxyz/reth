@@ -12,7 +12,6 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, TransactionSignedNoHash, TxNumber, H256,
 };
-use reth_provider::Transaction;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::*;
@@ -51,9 +50,10 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Write transaction hash -> id entries
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        let tx = provider.tx_mut();
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
         if range.is_empty() {
             return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
@@ -151,9 +151,10 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        let tx = provider.tx_mut();
         let (range, unwind_to, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
