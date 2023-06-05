@@ -119,14 +119,14 @@ impl NodeState {
             ConsensusLayerHealthEvent::NeverSeen => {
                 warn!(target: "reth::cli", "Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
             }
-            ConsensusLayerHealthEvent::HaveNotSeenInAWhile => {
-                warn!(target: "reth::cli", "Post-merge network, but no beacon client seen in a while. Please launch one to follow the chain!")
+            ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
+                warn!(target: "reth::cli", ?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
             }
             ConsensusLayerHealthEvent::NeverReceivedUpdates => {
                 warn!(target: "reth::cli", "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
             }
-            ConsensusLayerHealthEvent::HaveNotReceivedUpdatesInAWhile => {
-                warn!(target: "reth::cli", "Beacon client online, but no consensus updates received in a while. Please fix your beacon client to follow the chain!")
+            ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
+                warn!(target: "reth::cli", ?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
             }
         }
     }
@@ -141,6 +141,7 @@ pub enum NodeEvent {
     Pipeline(PipelineEvent),
     /// A consensus engine event.
     ConsensusEngine(BeaconConsensusEngineEvent),
+    /// A Consensus Layer health event.
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
 }
 

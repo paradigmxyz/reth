@@ -1,8 +1,10 @@
+//! Events related to Consensus Layer health.
+
 use futures::Stream;
 use reth_provider::CanonChainTracker;
 use std::{
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
     time::Duration,
 };
 use tokio::time::Interval;
@@ -14,12 +16,15 @@ const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120)
 /// after which the warning is issued.
 const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
+/// A Stream of [ConsensusLayerHealthEvent].
 pub struct ConsensusLayerHealthEvents<CC> {
     interval: Interval,
     canon_chain: CC,
 }
 
 impl<CC> ConsensusLayerHealthEvents<CC> {
+    /// Creates a new [ConsensusLayerHealthEvents] with the given interval and
+    /// a canonical chain tracker.
     pub fn new(interval: Duration, canon_chain: CC) -> Self {
         Self { interval: tokio::time::interval(interval), canon_chain }
     }
@@ -46,7 +51,9 @@ where
                 (Some(transition_config), _)
                     if transition_config.elapsed() > NO_TRANSITION_CONFIG_EXCHANGED_PERIOD =>
                 {
-                    Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotSeenInAWhile))
+                    Poll::Ready(Some(ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(
+                        transition_config.elapsed(),
+                    )))
                 }
                 (Some(_), None) => {
                     Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
@@ -54,7 +61,9 @@ where
                 (Some(_), Some(update))
                     if update.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
                 {
-                    Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotReceivedUpdatesInAWhile))
+                    Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
+                        update.elapsed(),
+                    )))
                 }
                 _ => Poll::Pending,
             }
@@ -64,10 +73,16 @@ where
     }
 }
 
+/// Event that is triggered when Consensus Layer health is degraded from the
+/// Execution Layer point of view.
 #[derive(Debug)]
 pub enum ConsensusLayerHealthEvent {
+    /// Consensus Layer client was never seen.
     NeverSeen,
-    HaveNotSeenInAWhile,
+    /// Consensus Layer client has not been seen for a while.
+    HasNotBeenSeenForAWhile(Duration),
+    /// Updates from the Consensus Layer client were never received.
     NeverReceivedUpdates,
-    HaveNotReceivedUpdatesInAWhile,
+    /// Updates from the Consensus Layer client have not been received for a while.
+    HaveNotReceivedUpdatesForAWhile(Duration),
 }
