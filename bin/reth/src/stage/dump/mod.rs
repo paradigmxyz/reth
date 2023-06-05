@@ -8,7 +8,7 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
+use reth_staged_sync::utils::init::init_db;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -22,6 +22,7 @@ mod execution;
 use execution::dump_execution_stage;
 
 mod merkle;
+use crate::args::utils::genesis_value_parser;
 use merkle::dump_merkle_stage;
 
 /// `reth dump-stage` command

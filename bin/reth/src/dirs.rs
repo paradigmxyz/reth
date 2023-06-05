@@ -1,6 +1,6 @@
 //! reth data directories.
+use crate::utils::parse_path;
 use reth_primitives::Chain;
-use reth_staged_sync::utils::parse_path;
 use std::{
     env::VarError,
     fmt::{Debug, Display, Formatter},
