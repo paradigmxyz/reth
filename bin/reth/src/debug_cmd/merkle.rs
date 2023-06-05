@@ -1,19 +1,25 @@
 //! Command for debugging merkle trie calculation.
 use crate::dirs::{DataDirPath, MaybePlatformPath};
 use clap::Parser;
-use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
+use reth_db::{
+    cursor::DbCursorRO,
+    mdbx::{Env, WriteMap},
+    tables,
+    transaction::DbTx,
+};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     ChainSpec,
 };
-use reth_provider::Transaction;
+use reth_provider::ShareableDatabase;
+use reth_revm::Factory;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage,
     },
-    ExecInput, Stage,
+    ExecInput, PipelineError,
 };
 use std::sync::Arc;
 
@@ -65,10 +71,11 @@ impl Command {
         std::fs::create_dir_all(&db_path)?;
 
         let db = Arc::new(init_db(db_path)?);
-        let mut tx = Transaction::new(db.as_ref())?;
+        let shareable_db = ShareableDatabase::new(db.clone(), self.chain.clone());
+        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
         let execution_checkpoint_block =
-            tx.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
+            provider_rw.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
         assert!(execution_checkpoint_block < self.to, "Nothing to run");
 
         // Check if any of hashing or merkle stages aren't on the same block number as
@@ -76,7 +83,7 @@ impl Command {
         let should_reset_stages =
             [StageId::AccountHashing, StageId::StorageHashing, StageId::MerkleExecute]
                 .into_iter()
-                .map(|stage_id| tx.get_stage_checkpoint(stage_id))
+                .map(|stage_id| provider_rw.get_stage_checkpoint(stage_id))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .map(Option::unwrap_or_default)
@@ -108,24 +115,22 @@ impl Command {
                     None
                 };
 
-            execution_stage
-                .execute(
-                    &mut tx,
-                    ExecInput {
-                        previous_stage: Some((
-                            StageId::SenderRecovery,
-                            StageCheckpoint::new(block),
-                        )),
-                        checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
-                    },
-                )
-                .await?;
+            <ExecutionStage<Factory> as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
+                &mut execution_stage,
+                &mut provider_rw,
+                ExecInput {
+                    previous_stage: Some((StageId::SenderRecovery, StageCheckpoint::new(block))),
+                    checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
+                },
+            )
+            .await?;
 
             let mut account_hashing_done = false;
             while !account_hashing_done {
-                let output = account_hashing_stage
-                    .execute(
-                        &mut tx,
+                let output =
+                    <AccountHashingStage as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
+                        &mut account_hashing_stage,
+                        &mut provider_rw,
                         ExecInput {
                             previous_stage: Some((StageId::Execution, StageCheckpoint::new(block))),
                             checkpoint: progress.map(StageCheckpoint::new),
@@ -137,9 +142,10 @@ impl Command {
 
             let mut storage_hashing_done = false;
             while !storage_hashing_done {
-                let output = storage_hashing_stage
-                    .execute(
-                        &mut tx,
+                let output =
+                    <StorageHashingStage as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
+                        &mut storage_hashing_stage,
+                        &mut provider_rw,
                         ExecInput {
                             previous_stage: Some((
                                 StageId::AccountHashing,
@@ -152,9 +158,10 @@ impl Command {
                 storage_hashing_done = output.done;
             }
 
-            let incremental_result = merkle_stage
-                .execute(
-                    &mut tx,
+            let incremental_result =
+                <MerkleStage as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
+                    &mut merkle_stage,
+                    &mut provider_rw,
                     ExecInput {
                         previous_stage: Some((
                             StageId::StorageHashing,
@@ -167,11 +174,13 @@ impl Command {
 
             if incremental_result.is_err() {
                 tracing::warn!(target: "reth::cli", block, "Incremental calculation failed, retrying from scratch");
-                let incremental_account_trie = tx
+                let incremental_account_trie = provider_rw
+                    .tx_ref()
                     .cursor_read::<tables::AccountsTrie>()?
                     .walk_range(..)?
                     .collect::<Result<Vec<_>, _>>()?;
-                let incremental_storage_trie = tx
+                let incremental_storage_trie = provider_rw
+                    .tx_ref()
                     .cursor_dup_read::<tables::StoragesTrie>()?
                     .walk_range(..)?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -181,18 +190,26 @@ impl Command {
                     checkpoint: None,
                 };
                 loop {
-                    let clean_result = merkle_stage.execute(&mut tx, clean_input).await;
+                    let clean_result =
+                        <MerkleStage as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
+                            &mut merkle_stage,
+                            &mut provider_rw,
+                            clean_input,
+                        )
+                        .await;
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
                     if clean_result.unwrap().done {
                         break
                     }
                 }
 
-                let clean_account_trie = tx
+                let clean_account_trie = provider_rw
+                    .tx_ref()
                     .cursor_read::<tables::AccountsTrie>()?
                     .walk_range(..)?
                     .collect::<Result<Vec<_>, _>>()?;
-                let clean_storage_trie = tx
+                let clean_storage_trie = provider_rw
+                    .tx_ref()
                     .cursor_dup_read::<tables::StoragesTrie>()?
                     .walk_range(..)?
                     .collect::<Result<Vec<_>, _>>()?;

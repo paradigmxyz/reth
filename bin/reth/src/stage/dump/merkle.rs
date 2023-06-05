@@ -6,15 +6,16 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, MAINNET,
 };
-use reth_provider::Transaction;
+use reth_provider::{DatabaseProvider, ShareableDatabase};
+use reth_revm::Factory;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage,
     },
-    Stage, UnwindInput,
+    UnwindInput,
 };
-use std::{ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
@@ -51,7 +52,9 @@ async fn unwind_and_copy<DB: Database>(
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
     let (from, to) = range;
-    let mut unwind_tx = Transaction::new(db_tool.db)?;
+    let mut provider =
+        DatabaseProvider::new_rw(db_tool.db.tx_mut()?, std::sync::Arc::new(MAINNET.clone()));
+
     let unwind = UnwindInput {
         unwind_to: from,
         checkpoint: StageCheckpoint::new(tip_block_number),
@@ -63,10 +66,27 @@ async fn unwind_and_copy<DB: Database>(
     };
 
     // Unwind hashes all the way to FROM
-    StorageHashingStage::default().unwind(&mut unwind_tx, unwind).await.unwrap();
-    AccountHashingStage::default().unwind(&mut unwind_tx, unwind).await.unwrap();
+    <StorageHashingStage as reth_stages::Stage<DB>>::unwind(
+        &mut StorageHashingStage::default(),
+        &mut provider,
+        unwind,
+    )
+    .await
+    .unwrap();
+    <AccountHashingStage as reth_stages::Stage<DB>>::unwind(
+        &mut AccountHashingStage::default(),
+        &mut provider,
+        unwind,
+    )
+    .await
+    .unwrap();
 
-    MerkleStage::default_unwind().unwind(&mut unwind_tx, unwind).await?;
+    <MerkleStage as reth_stages::Stage<DB>>::unwind(
+        &mut MerkleStage::default_unwind(),
+        &mut provider,
+        unwind,
+    )
+    .await?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
@@ -78,59 +98,62 @@ async fn unwind_and_copy<DB: Database>(
         },
     );
 
-    exec_stage
-        .unwind(
-            &mut unwind_tx,
-            UnwindInput {
-                unwind_to: to,
-                checkpoint: StageCheckpoint::new(tip_block_number),
-                bad_block: None,
-            },
-        )
-        .await?;
+    <ExecutionStage<Factory> as reth_stages::Stage<DB>>::unwind(
+        &mut exec_stage,
+        &mut provider,
+        UnwindInput {
+            unwind_to: to,
+            checkpoint: StageCheckpoint::new(tip_block_number),
+            bad_block: None,
+        },
+    )
+    .await?;
 
     // Bring hashes to TO
-    AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&mut unwind_tx, execute_input)
-        .await
-        .unwrap();
-    StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&mut unwind_tx, execute_input)
-        .await
-        .unwrap();
+    <AccountHashingStage as reth_stages::Stage<DB>>::execute(
+        &mut AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX },
+        &mut provider,
+        execute_input,
+    )
+    .await
+    .unwrap();
+    <StorageHashingStage as reth_stages::Stage<DB>>::execute(
+        &mut StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX },
+        &mut provider,
+        execute_input,
+    )
+    .await
+    .unwrap();
 
-    let unwind_inner_tx = unwind_tx.deref_mut();
+    let unwind_inner_tx = provider.into_tx();
 
     // TODO optimize we can actually just get the entries we need
-    output_db.update(|tx| tx.import_dupsort::<tables::StorageChangeSet, _>(unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_dupsort::<tables::StorageChangeSet, _>(&unwind_inner_tx))??;
 
-    output_db.update(|tx| tx.import_table::<tables::HashedAccount, _>(unwind_inner_tx))??;
-    output_db.update(|tx| tx.import_dupsort::<tables::HashedStorage, _>(unwind_inner_tx))??;
-    output_db.update(|tx| tx.import_table::<tables::AccountsTrie, _>(unwind_inner_tx))??;
-    output_db.update(|tx| tx.import_dupsort::<tables::StoragesTrie, _>(unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_table::<tables::HashedAccount, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_dupsort::<tables::HashedStorage, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_table::<tables::AccountsTrie, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_dupsort::<tables::StoragesTrie, _>(&unwind_inner_tx))??;
 
-    unwind_tx.drop()?;
+    drop(unwind_inner_tx);
 
     Ok(())
 }
 
 /// Try to re-execute the stage straightaway
-async fn dry_run(
-    output_db: reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
-    to: u64,
-    from: u64,
-) -> eyre::Result<()> {
+async fn dry_run<DB: Database>(output_db: DB, to: u64, from: u64) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
-
-    let mut tx = Transaction::new(&output_db)?;
+    let shareable_db = ShareableDatabase::new(output_db, std::sync::Arc::new(MAINNET.clone()));
+    let mut provider = shareable_db.provider_rw()?;
     let mut exec_output = false;
     while !exec_output {
-        exec_output = MerkleStage::Execution {
-            clean_threshold: u64::MAX, /* Forces updating the root instead of calculating from
-                                        * scratch */
-        }
-        .execute(
-            &mut tx,
+        exec_output = <MerkleStage as reth_stages::Stage<DB>>::execute(
+            &mut MerkleStage::Execution {
+                clean_threshold: u64::MAX, /* Forces updating the root instead of calculating
+                                            * from
+                                            * scratch */
+            },
+            &mut provider,
             reth_stages::ExecInput {
                 previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(to))),
                 checkpoint: Some(StageCheckpoint::new(from)),
@@ -140,7 +163,7 @@ async fn dry_run(
         .done;
     }
 
-    tx.drop()?;
+    drop(provider.into_tx());
 
     info!(target: "reth::cli", "Success.");
 
