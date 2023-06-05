@@ -6,19 +6,22 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_interfaces::db::DatabaseError;
 use reth_metrics::{
     metrics::{self, Gauge},
     Metrics,
 };
 use reth_primitives::{
     constants::MGAS_TO_GAS,
-    stage::{StageCheckpoint, StageId},
-    Block, BlockNumber, BlockWithSenders, TransactionSigned, U256,
+    stage::{
+        CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
+    },
+    Block, BlockNumber, BlockWithSenders, Header, TransactionSigned, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
-use std::time::Instant;
+use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
 
 /// Execution stage metrics.
@@ -143,6 +146,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Progress tracking
         let mut stage_progress = start_block;
+        let mut stage_checkpoint =
+            execution_checkpoint(tx, start_block, max_block, input.checkpoint())?;
 
         // Execute block range
         let mut state = PostState::default();
@@ -169,6 +174,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Merge state changes
             state.extend(block_state);
             stage_progress = block_number;
+            stage_checkpoint.progress.processed += block.gas_used;
 
             // Write history periodically to free up memory
             if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
@@ -193,8 +199,97 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let is_final_range = stage_progress == max_block;
         info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(stage_progress), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(stage_progress)
+                .with_execution_stage_checkpoint(stage_checkpoint),
+            done: is_final_range,
+        })
     }
+}
+
+fn execution_checkpoint<DB: Database>(
+    tx: &Transaction<'_, DB>,
+    start_block: BlockNumber,
+    max_block: BlockNumber,
+    checkpoint: StageCheckpoint,
+) -> Result<ExecutionCheckpoint, DatabaseError> {
+    Ok(match checkpoint.execution_stage_checkpoint() {
+        // If checkpoint block range fully matches our range,
+        // we take the previously used stage checkpoint as-is.
+        Some(stage_checkpoint @ ExecutionCheckpoint { block_range, .. })
+            if block_range == CheckpointBlockRange::from(start_block..=max_block) =>
+        {
+            stage_checkpoint
+        }
+        // If checkpoint block range precedes our range seamlessly, we take the previously used
+        // stage checkpoint and add the amount of gas from our range to the checkpoint total.
+        Some(ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { to, .. },
+            progress: EntitiesCheckpoint { processed, total },
+        }) if to == start_block - 1 => ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { from: start_block, to: max_block },
+            progress: EntitiesCheckpoint {
+                processed,
+                total: total + calculate_gas_used_from_headers(tx, start_block..=max_block)?,
+            },
+        },
+        // If checkpoint block range ends on the same block as our range, we take the previously
+        // used stage checkpoint.
+        Some(ExecutionCheckpoint { block_range: CheckpointBlockRange { to, .. }, progress })
+            if to == max_block =>
+        {
+            ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                progress,
+            }
+        }
+        // If there's any other non-empty checkpoint, we calculate the remaining amount of total gas
+        // to be processed not including the checkpoint range.
+        Some(ExecutionCheckpoint { progress: EntitiesCheckpoint { processed, .. }, .. }) => {
+            let after_checkpoint_block_number =
+                calculate_gas_used_from_headers(tx, checkpoint.block_number + 1..=max_block)?;
+
+            ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total: processed + after_checkpoint_block_number,
+                },
+            }
+        }
+        // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
+        // already processed, if there's any.
+        _ => {
+            let processed = calculate_gas_used_from_headers(tx, 0..=start_block - 1)?;
+
+            ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total: processed +
+                        calculate_gas_used_from_headers(tx, start_block..=max_block)?,
+                },
+            }
+        }
+    })
+}
+
+fn calculate_gas_used_from_headers<DB: Database>(
+    tx: &Transaction<'_, DB>,
+    range: RangeInclusive<BlockNumber>,
+) -> Result<u64, DatabaseError> {
+    let mut gas_total = 0;
+
+    let start = Instant::now();
+    for entry in tx.cursor_read::<tables::Headers>()?.walk_range(range.clone())? {
+        let (_, Header { gas_used, .. }) = entry?;
+        gas_total += gas_used;
+    }
+
+    let duration = start.elapsed();
+    trace!(target: "sync::stages::execution", ?range, ?duration, "Time elapsed in calculate_gas_used_from_headers");
+
+    Ok(gas_total)
 }
 
 /// The size of the stack used by the executor.
@@ -290,14 +385,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         // Discard unwinded changesets
-        let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
-        while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
-            if block_num <= unwind_to {
-                break
-            }
-            // delete all changesets
-            rev_acc_changeset_walker.delete_current()?;
-        }
+        tx.unwind_table_by_num::<tables::AccountChangeSet>(unwind_to)?;
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
@@ -311,13 +399,31 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         // Look up the start index for the transaction range
         let first_tx_num = tx.block_body_indices(*range.start())?.first_tx_num();
 
+        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
+
         // Unwind all receipts for transactions in the block range
-        tx.unwind_table_by_num::<tables::Receipts>(first_tx_num)?;
-        // `unwind_table_by_num` doesn't unwind the provided key, so we need to unwind it manually
-        tx.delete::<tables::Receipts>(first_tx_num, None)?;
+        let mut cursor = tx.cursor_write::<tables::Receipts>()?;
+        let mut reverse_walker = cursor.walk_back(None)?;
+
+        while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
+            if tx_number < first_tx_num {
+                break
+            }
+            reverse_walker.delete_current()?;
+
+            if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+                stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
+            }
+        }
+
+        let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
+            StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
+        } else {
+            StageCheckpoint::new(unwind_to)
+        };
 
         info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
+        Ok(UnwindOutput { checkpoint })
     }
 }
 
@@ -371,13 +477,14 @@ impl ExecutionStageThresholds {
 mod tests {
     use super::*;
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
+    use assert_matches::assert_matches;
     use reth_db::{
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
         models::AccountBeforeTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, SealedBlock,
-        StorageEntry, H160, H256, U256,
+        hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
+        ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_revm::Factory;
@@ -398,6 +505,124 @@ mod tests {
                 max_changesets: None,
             },
         )
+    }
+
+    #[test]
+    fn execution_checkpoint_matches() {
+        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let tx = Transaction::new(state_db.as_ref()).unwrap();
+
+        let previous_stage_checkpoint = ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { from: 0, to: 0 },
+            progress: EntitiesCheckpoint { processed: 1, total: 2 },
+        };
+        let previous_checkpoint = StageCheckpoint {
+            block_number: 0,
+            stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
+        };
+
+        let stage_checkpoint = execution_checkpoint(
+            &tx,
+            previous_stage_checkpoint.block_range.from,
+            previous_stage_checkpoint.block_range.to,
+            previous_checkpoint,
+        );
+
+        assert_eq!(stage_checkpoint, Ok(previous_stage_checkpoint));
+    }
+
+    #[test]
+    fn execution_checkpoint_precedes() {
+        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let mut tx = Transaction::new(state_db.as_ref()).unwrap();
+
+        let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
+        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
+        let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
+        tx.commit().unwrap();
+
+        let previous_stage_checkpoint = ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { from: 0, to: 0 },
+            progress: EntitiesCheckpoint { processed: 1, total: 1 },
+        };
+        let previous_checkpoint = StageCheckpoint {
+            block_number: 1,
+            stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
+        };
+
+        let stage_checkpoint = execution_checkpoint(&tx, 1, 1, previous_checkpoint);
+
+        assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { from: 1, to: 1 },
+            progress: EntitiesCheckpoint {
+                processed,
+                total
+            }
+        }) if processed == previous_stage_checkpoint.progress.processed &&
+            total == previous_stage_checkpoint.progress.total + block.gas_used);
+    }
+
+    #[test]
+    fn execution_checkpoint_recalculate_full_previous_some() {
+        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let mut tx = Transaction::new(state_db.as_ref()).unwrap();
+
+        let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
+        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
+        let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
+        tx.commit().unwrap();
+
+        let previous_stage_checkpoint = ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { from: 0, to: 0 },
+            progress: EntitiesCheckpoint { processed: 1, total: 1 },
+        };
+        let previous_checkpoint = StageCheckpoint {
+            block_number: 1,
+            stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
+        };
+
+        let stage_checkpoint = execution_checkpoint(&tx, 1, 1, previous_checkpoint);
+
+        assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { from: 1, to: 1 },
+            progress: EntitiesCheckpoint {
+                processed,
+                total
+            }
+        }) if processed == previous_stage_checkpoint.progress.processed &&
+            total == previous_stage_checkpoint.progress.total + block.gas_used);
+    }
+
+    #[test]
+    fn execution_checkpoint_recalculate_full_previous_none() {
+        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let mut tx = Transaction::new(state_db.as_ref()).unwrap();
+
+        let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
+        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
+        let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
+        tx.commit().unwrap();
+
+        let previous_checkpoint = StageCheckpoint { block_number: 1, stage_checkpoint: None };
+
+        let stage_checkpoint = execution_checkpoint(&tx, 1, 1, previous_checkpoint);
+
+        assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { from: 1, to: 1 },
+            progress: EntitiesCheckpoint {
+                processed: 0,
+                total
+            }
+        }) if total == block.gas_used);
     }
 
     #[tokio::test]
@@ -444,7 +669,22 @@ mod tests {
         let mut execution_stage = stage();
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
-        assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(1), done: true });
+        assert_matches!(output, ExecOutput {
+            checkpoint: StageCheckpoint {
+                block_number: 1,
+                stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                    block_range: CheckpointBlockRange {
+                        from: 1,
+                        to: 1,
+                    },
+                    progress: EntitiesCheckpoint {
+                        processed,
+                        total
+                    }
+                }))
+            },
+            done: true
+        } if processed == total && total == block.gas_used);
         let tx = tx.deref_mut();
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
@@ -526,19 +766,33 @@ mod tests {
 
         // execute
         let mut execution_stage = stage();
-        let _ = execution_stage.execute(&mut tx, input).await.unwrap();
+        let result = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
 
         let mut stage = stage();
-        let o = stage
+        let result = stage
             .unwind(
                 &mut tx,
-                UnwindInput { checkpoint: StageCheckpoint::new(1), unwind_to: 0, bad_block: None },
+                UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
             )
             .await
             .unwrap();
 
-        assert_eq!(o, UnwindOutput { checkpoint: StageCheckpoint::new(0) });
+        assert_matches!(result, UnwindOutput {
+            checkpoint: StageCheckpoint {
+                block_number: 0,
+                stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                    block_range: CheckpointBlockRange {
+                        from: 1,
+                        to: 1,
+                    },
+                    progress: EntitiesCheckpoint {
+                        processed: 0,
+                        total
+                    }
+                }))
+            }
+        } if total == block.gas_used);
 
         // assert unwind stage
         let db_tx = tx.deref();

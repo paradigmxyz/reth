@@ -253,30 +253,29 @@ where
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut stage_progress = tx.get_stage_checkpoint(stage_id)?.unwrap_or_default();
-            if stage_progress.block_number < to {
-                debug!(target: "sync::pipeline", from = %stage_progress, %to, "Unwind point too far for stage");
+            let mut checkpoint = tx.get_stage_checkpoint(stage_id)?.unwrap_or_default();
+            if checkpoint.block_number < to {
+                debug!(target: "sync::pipeline", from = %checkpoint, %to, "Unwind point too far for stage");
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
                 continue
             }
 
-            debug!(target: "sync::pipeline", from = %stage_progress, %to, ?bad_block, "Starting unwind");
-            while stage_progress.block_number > to {
-                let input = UnwindInput { checkpoint: stage_progress, unwind_to: to, bad_block };
+            debug!(target: "sync::pipeline", from = %checkpoint, %to, ?bad_block, "Starting unwind");
+            while checkpoint.block_number > to {
+                let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
                 let output = stage.unwind(&mut tx, input).await;
                 match output {
                     Ok(unwind_output) => {
-                        stage_progress = unwind_output.checkpoint;
+                        checkpoint = unwind_output.checkpoint;
                         self.metrics.stage_checkpoint(
-                            stage_id,
-                            stage_progress,
+                            stage_id, checkpoint,
                             // We assume it was set in the previous execute iteration, so it
                             // doesn't change when we unwind.
                             None,
                         );
-                        tx.save_stage_checkpoint(stage_id, stage_progress)?;
+                        tx.save_stage_checkpoint(stage_id, checkpoint)?;
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
@@ -304,6 +303,7 @@ where
         let stage = &mut self.stages[stage_index];
         let stage_id = stage.id();
         let mut made_progress = false;
+
         loop {
             let mut tx = Transaction::new(&self.db)?;
 

@@ -170,7 +170,7 @@ table!(
 
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
-    (  Transactions ) TxNumber | TransactionSignedNoHash
+    ( Transactions ) TxNumber | TransactionSignedNoHash
 );
 
 table!(
@@ -211,7 +211,7 @@ dupsort!(
 table!(
     /// Stores pointers to block changeset with changes for each account key.
     ///
-    /// Last shard key of the storage will contains `u64::MAX` `BlockNumber`,
+    /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
     /// this would allows us small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
@@ -233,7 +233,7 @@ table!(
 table!(
     /// Stores pointers to block number changeset with changes for each storage key.
     ///
-    /// Last shard key of the storage will contains `u64::MAX` `BlockNumber`,
+    /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
     /// this would allows us small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
@@ -293,7 +293,7 @@ dupsort!(
 );
 
 table!(
-    /// Stores the transaction sender for each transaction.
+    /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
     ( TxSenders ) TxNumber | Address

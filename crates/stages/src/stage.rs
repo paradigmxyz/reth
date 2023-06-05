@@ -14,14 +14,14 @@ use std::{
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
-    /// The stage that was run before the current stage and the progress it reached.
+    /// The stage that was run before the current stage and the checkpoint it reached.
     pub previous_stage: Option<(StageId, StageCheckpoint)>,
-    /// The progress of this stage the last time it was executed.
+    /// The checkpoint of this stage the last time it was executed.
     pub checkpoint: Option<StageCheckpoint>,
 }
 
 impl ExecInput {
-    /// Return the progress of the stage or default.
+    /// Return the checkpoint of the stage or default.
     pub fn checkpoint(&self) -> StageCheckpoint {
         self.checkpoint.unwrap_or_default()
     }
@@ -63,7 +63,7 @@ impl ExecInput {
 /// Stage unwind input, see [Stage::unwind].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
-    /// The current highest progress of the stage.
+    /// The current highest checkpoint of the stage.
     pub checkpoint: StageCheckpoint,
     /// The block to unwind to.
     pub unwind_to: BlockNumber,
@@ -114,7 +114,7 @@ impl ExecOutput {
 /// The output of a stage unwinding.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwindOutput {
-    /// The block at which the stage has unwound to.
+    /// The checkpoint at which the stage has unwound to.
     pub checkpoint: StageCheckpoint,
 }
 

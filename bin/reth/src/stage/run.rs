@@ -15,16 +15,17 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     ChainSpec,
 };
-use reth_provider::{ShareableDatabase, Transaction};
+use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
-        BodyStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
-        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, TransactionLookupStage,
+        AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     ExecInput, ExecOutput, Stage, UnwindInput,
 };
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{any::Any, net::SocketAddr, ops::Deref, path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth stage` command
@@ -183,9 +184,7 @@ impl Command {
 
                     (Box::new(stage), None)
                 }
-                StageEnum::Senders => {
-                    (Box::new(SenderRecoveryStage { commit_threshold: batch_size }), None)
-                }
+                StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
                 StageEnum::Execution => {
                     let factory = reth_revm::Factory::new(self.chain.clone());
                     (
@@ -201,6 +200,12 @@ impl Command {
                     )
                 }
                 StageEnum::TxLookup => (Box::new(TransactionLookupStage::new(batch_size)), None),
+                StageEnum::AccountHashing => {
+                    (Box::new(AccountHashingStage::new(1, batch_size)), None)
+                }
+                StageEnum::StorageHashing => {
+                    (Box::new(StorageHashingStage::new(1, batch_size)), None)
+                }
                 StageEnum::Merkle => (
                     Box::new(MerkleStage::default_execution()),
                     Some(Box::new(MerkleStage::default_unwind())),
@@ -209,18 +214,16 @@ impl Command {
                 StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
                 _ => return Ok(()),
             };
+        if let Some(unwind_stage) = &unwind_stage {
+            assert!(exec_stage.type_id() == unwind_stage.type_id());
+        }
+
+        let checkpoint = get_stage_checkpoint(tx.deref(), exec_stage.id())?.unwrap_or_default();
+
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
-        let mut input = ExecInput {
-            previous_stage: Some((
-                StageId::Other("No Previous Stage"),
-                StageCheckpoint::new(self.to),
-            )),
-            checkpoint: Some(StageCheckpoint::new(self.from)),
-        };
-
         let mut unwind = UnwindInput {
-            checkpoint: StageCheckpoint::new(self.to),
+            checkpoint: checkpoint.with_block_number(self.to),
             unwind_to: self.from,
             bad_block: None,
         };
@@ -231,6 +234,14 @@ impl Command {
                 unwind.checkpoint = unwind_output.checkpoint;
             }
         }
+
+        let mut input = ExecInput {
+            previous_stage: Some((
+                StageId::Other("No Previous Stage"),
+                StageCheckpoint::new(self.to),
+            )),
+            checkpoint: Some(checkpoint.with_block_number(self.from)),
+        };
 
         while let ExecOutput { checkpoint: stage_progress, done: false } =
             exec_stage.execute(&mut tx, input).await?
