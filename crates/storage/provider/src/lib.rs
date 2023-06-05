@@ -11,11 +11,11 @@
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountProvider, BlockExecutor, BlockHashProvider, BlockIdProvider, BlockNumProvider,
-    BlockProvider, BlockProviderIdExt, BlockSource, BlockchainTreePendingStateProvider,
-    CanonChainTracker, CanonStateNotification, CanonStateNotificationSender,
-    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, ExecutorFactory,
-    HeaderProvider, PostStateDataProvider, ReceiptProvider, ReceiptProviderIdExt,
+    AccountExtProvider, AccountProvider, BlockExecutor, BlockHashProvider, BlockIdProvider,
+    BlockNumProvider, BlockProvider, BlockProviderIdExt, BlockSource,
+    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
+    CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
+    ExecutorFactory, HeaderProvider, PostStateDataProvider, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointProvider, StateProvider, StateProviderBox, StateProviderFactory,
     StateRootProvider, TransactionsProvider, WithdrawalsProvider,
 };
@@ -23,8 +23,8 @@ pub use traits::{
 /// Provider trait implementations.
 pub mod providers;
 pub use providers::{
-    DatabaseProvider, HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
-    LatestStateProviderRef, ShareableDatabase,
+    DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
+    HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ShareableDatabase,
 };
 
 /// Execution result
