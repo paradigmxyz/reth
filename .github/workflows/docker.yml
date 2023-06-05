@@ -11,7 +11,7 @@ env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
   DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
-  DOCKER_USERNAME: ${{ github.repository_owner }}
+  DOCKER_USERNAME: ${{ github.actor }}
 
 jobs:
   build:
