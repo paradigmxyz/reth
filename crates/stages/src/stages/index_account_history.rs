@@ -92,15 +92,15 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     }
 }
 
-// The function proceeds as follows:
-// 1. It first checks if the checkpoint has an `IndexHistoryCheckpoint` that matches the given
-// block range. If it does, the function returns that checkpoint.
-// 2. If the checkpoint's block range end matches the current checkpoint's block number, it creates
-// a new `IndexHistoryCheckpoint` with the given block range and updates the progress with the
-// current progress.
-// 3. If none of the above conditions are met, it creates a new `IndexHistoryCheckpoint` with the
-// given block range and calculates the progress by counting the number of processed entries in the
-// `AccountChangeSet` table within the given block range.
+/// The function proceeds as follows:
+/// 1. It first checks if the checkpoint has an [IndexHistoryCheckpoint] that matches the given
+/// block range. If it does, the function returns that checkpoint.
+/// 2. If the checkpoint's block range end matches the current checkpoint's block number, it creates
+/// a new [IndexHistoryCheckpoint] with the given block range and updates the progress with the
+/// current progress.
+/// 3. If none of the above conditions are met, it creates a new [IndexHistoryCheckpoint] with the
+/// given block range and calculates the progress by counting the number of processed entries in the
+/// [tables::AccountChangeSet] table within the given block range.
 fn stage_checkpoint<DB: Database>(
     tx: &Transaction<'_, DB>,
     checkpoint: StageCheckpoint,
