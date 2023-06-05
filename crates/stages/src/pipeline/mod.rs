@@ -6,7 +6,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, ChainSpec, H256,
 };
-use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
+use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -248,14 +248,17 @@ where
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let mut tx = Transaction::new(&self.db)?;
+        let shareable_db: ShareableDatabase<&DB> =
+            ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut stage_progress = tx.get_stage_checkpoint(stage_id)?.unwrap_or_default();
+            let mut stage_progress =
+                provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
             if stage_progress.block_number < to {
                 debug!(target: "sync::pipeline", from = %stage_progress, %to, "Unwind point too far for stage");
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
@@ -267,7 +270,7 @@ where
                 let input = UnwindInput { checkpoint: stage_progress, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
-                let output = stage.unwind(&mut tx, input).await;
+                let output = stage.unwind(&mut provider_rw, input).await;
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.checkpoint;
@@ -278,12 +281,14 @@ where
                             // doesn't change when we unwind.
                             None,
                         );
-                        tx.save_stage_checkpoint(stage_id, stage_progress)?;
+                        provider_rw.save_stage_checkpoint(stage_id, stage_progress)?;
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
-                        tx.commit()?;
+                        provider_rw.commit()?;
+                        provider_rw =
+                            shareable_db.provider_rw().map_err(PipelineError::Interface)?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -304,12 +309,11 @@ where
         let stage = &mut self.stages[stage_index];
         let stage_id = stage.id();
         let mut made_progress = false;
-        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
-        let _provider_rw = shareable_db.provider_rw(); //.map_err(PipelineError::Interface)?;
+        let shareable_db: ShareableDatabase<&DB> =
+            ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
         loop {
-            let mut tx = Transaction::new(&self.db)?;
-
-            let prev_checkpoint = tx.get_stage_checkpoint(stage_id)?;
+            let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
@@ -333,7 +337,10 @@ where
             self.listeners.notify(PipelineEvent::Running { stage_id, checkpoint: prev_checkpoint });
 
             match stage
-                .execute(&mut tx, ExecInput { previous_stage, checkpoint: prev_checkpoint })
+                .execute(
+                    &mut provider_rw,
+                    ExecInput { previous_stage, checkpoint: prev_checkpoint },
+                )
                 .await
             {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
@@ -352,12 +359,13 @@ where
                         checkpoint,
                         previous_stage.map(|(_, checkpoint)| checkpoint.block_number),
                     );
-                    tx.save_stage_checkpoint(stage_id, checkpoint)?;
+                    provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });
 
                     // TODO: Make the commit interval configurable
-                    tx.commit()?;
+                    provider_rw.commit()?;
+                    provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
                     if done {
                         let stage_progress = checkpoint.block_number;

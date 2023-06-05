@@ -49,6 +49,9 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
     Download(#[from] DownloadError),
+    /// Internal error
+    #[error(transparent)]
+    Internal(#[from] reth_interfaces::Error),
     /// The stage encountered a recoverable error.
     ///
     /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
