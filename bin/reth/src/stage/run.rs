@@ -205,8 +205,8 @@ impl Command {
                     Box::new(MerkleStage::default_execution()),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
-                StageEnum::AccountHistory => (Box::new(IndexAccountHistoryStage::default()), None),
-                StageEnum::StorageHistory => (Box::new(IndexStorageHistoryStage::default()), None),
+                StageEnum::AccountHistory => (Box::<IndexAccountHistoryStage>::default(), None),
+                StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
                 _ => return Ok(()),
             };
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
