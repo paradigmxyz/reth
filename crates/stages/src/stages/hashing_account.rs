@@ -137,7 +137,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     ) -> Result<ExecOutput, StageError> {
         let range = input.next_block_range();
         if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
+            return Ok(ExecOutput::done(*range.end()))
         }
         let (from_block, to_block) = range.into_inner();
 
@@ -252,12 +252,11 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
         // so no checkpoint is needed.
-        let checkpoint = input.previous_stage_checkpoint().with_account_hashing_stage_checkpoint(
-            AccountHashingCheckpoint {
+        let checkpoint = StageCheckpoint::new(input.previous_stage_checkpoint_block_number())
+            .with_account_hashing_stage_checkpoint(AccountHashingCheckpoint {
                 progress: stage_checkpoint_progress(tx)?,
                 ..Default::default()
-            },
-        );
+            });
 
         info!(target: "sync::stages::hashing_account", checkpoint = %checkpoint, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { checkpoint, done: true })
@@ -318,7 +317,7 @@ mod tests {
         runner.set_clean_threshold(1);
 
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -359,7 +358,7 @@ mod tests {
         runner.set_commit_threshold(5);
 
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -539,7 +538,7 @@ mod tests {
                 Ok(AccountHashingStage::seed(
                     &mut self.tx.inner(),
                     SeedOpts {
-                        blocks: 1..=input.previous_stage_checkpoint().block_number,
+                        blocks: 1..=input.previous_stage_checkpoint_block_number(),
                         accounts: 0..10,
                         txs: 0..3,
                     },

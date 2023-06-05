@@ -1,11 +1,7 @@
 use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_primitives::{
-    listener::EventListeners,
-    stage::{StageCheckpoint, StageId},
-    BlockNumber, H256,
-};
+use reth_primitives::{listener::EventListeners, stage::StageId, BlockNumber, H256};
 use reth_provider::{providers::get_stage_checkpoint, Transaction};
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -228,7 +224,7 @@ where
 
             previous_stage = Some((
                 stage_id,
-                get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default(),
+                get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default().block_number,
             ));
         }
 
@@ -295,7 +291,7 @@ where
 
     async fn execute_stage_to_completion(
         &mut self,
-        previous_stage: Option<(StageId, StageCheckpoint)>,
+        previous_stage: Option<(StageId, BlockNumber)>,
         stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
         let total_stages = self.stages.len();
@@ -353,7 +349,7 @@ where
                     self.metrics.stage_checkpoint(
                         stage_id,
                         checkpoint,
-                        previous_stage.map(|(_, checkpoint)| checkpoint.block_number),
+                        self.max_block.or(previous_stage.map(|(_, block_number)| block_number)),
                     );
                     tx.save_stage_checkpoint(stage_id, checkpoint)?;
 
@@ -437,6 +433,7 @@ mod tests {
     use reth_interfaces::{
         consensus, provider::ProviderError, test_utils::generators::random_header,
     };
+    use reth_primitives::stage::StageCheckpoint;
     use tokio_stream::StreamExt;
 
     #[test]

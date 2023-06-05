@@ -60,7 +60,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     ) -> Result<ExecOutput, StageError> {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
         if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
+            return Ok(ExecOutput::done(*range.end()))
         }
         let (start_block, end_block) = range.clone().into_inner();
 
@@ -224,13 +224,13 @@ mod tests {
         // Set up the runner
         let runner = SenderRecoveryTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
         let non_empty_block_number = stage_progress + 10;
-        let blocks = (stage_progress..=input.previous_stage_checkpoint().block_number)
+        let blocks = (stage_progress..=input.previous_stage_checkpoint_block_number())
             .map(|number| {
                 random_block(number, None, Some((number == non_empty_block_number) as u8), None)
             })
@@ -264,7 +264,7 @@ mod tests {
         runner.set_threshold(threshold);
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
         let first_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -291,7 +291,7 @@ mod tests {
 
         // Execute second time
         let second_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(expected_progress)),
         };
         let result = runner.execute(second_input).await.unwrap();
@@ -366,7 +366,7 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
-            let end = input.previous_stage_checkpoint().block_number;
+            let end = input.previous_stage_checkpoint_block_number();
 
             let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;

@@ -115,10 +115,7 @@ impl Command {
                 .execute(
                     &mut tx,
                     ExecInput {
-                        previous_stage: Some((
-                            StageId::SenderRecovery,
-                            StageCheckpoint::new(block),
-                        )),
+                        previous_stage: Some((StageId::SenderRecovery, block)),
                         checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
                     },
                 )
@@ -130,7 +127,7 @@ impl Command {
                     .execute(
                         &mut tx,
                         ExecInput {
-                            previous_stage: Some((StageId::Execution, StageCheckpoint::new(block))),
+                            previous_stage: Some((StageId::Execution, block)),
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
@@ -144,10 +141,7 @@ impl Command {
                     .execute(
                         &mut tx,
                         ExecInput {
-                            previous_stage: Some((
-                                StageId::AccountHashing,
-                                StageCheckpoint::new(block),
-                            )),
+                            previous_stage: Some((StageId::AccountHashing, block)),
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
@@ -159,10 +153,7 @@ impl Command {
                 .execute(
                     &mut tx,
                     ExecInput {
-                        previous_stage: Some((
-                            StageId::StorageHashing,
-                            StageCheckpoint::new(block),
-                        )),
+                        previous_stage: Some((StageId::StorageHashing, block)),
                         checkpoint: progress.map(StageCheckpoint::new),
                     },
                 )
@@ -180,7 +171,7 @@ impl Command {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let clean_input = ExecInput {
-                    previous_stage: Some((StageId::StorageHashing, StageCheckpoint::new(block))),
+                    previous_stage: Some((StageId::StorageHashing, block)),
                     checkpoint: None,
                 };
                 loop {
