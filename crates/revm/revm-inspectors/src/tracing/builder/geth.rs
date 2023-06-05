@@ -33,8 +33,8 @@ impl GethTraceBuilder {
         storage: &mut HashMap<Address, BTreeMap<H256, H256>>,
         struct_logs: &mut Vec<StructLog>,
     ) {
-        // A stack all the steps of the trace and all its children's steps
-        // This is used to process the steps in the order they appear in the transactions
+        // A stack with all the steps of the trace and all its children's steps.
+        // This is used to process the steps in the order they appear in the transactions.
         // Steps are grouped by their Call Trace Node, in order to process them all in the order
         // they appear in the transaction, we need to process steps of call nodes when they appear.
         // When we find a call step, we push all the steps of the child trace on the stack, so they
