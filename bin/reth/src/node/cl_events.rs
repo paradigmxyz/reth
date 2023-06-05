@@ -9,10 +9,12 @@ use std::{
 };
 use tokio::time::Interval;
 
-/// Period of not exchanging transition configurations with consensus client,
+/// Interval of checking Consensus Layer client health.
+const CHECK_INTERVAL: Duration = Duration::from_secs(300);
+/// Period of not exchanging transition configurations with Consensus Layer client,
 /// after which the warning is issued.
 const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120);
-/// Period of not receiving fork choice updates from consensus client,
+/// Period of not receiving fork choice updates from Consensus Layer client,
 /// after which the warning is issued.
 const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
@@ -23,10 +25,9 @@ pub struct ConsensusLayerHealthEvents<CC> {
 }
 
 impl<CC> ConsensusLayerHealthEvents<CC> {
-    /// Creates a new [ConsensusLayerHealthEvents] with the given interval and
-    /// a canonical chain tracker.
-    pub fn new(interval: Duration, canon_chain: CC) -> Self {
-        Self { interval: tokio::time::interval(interval), canon_chain }
+    /// Creates a new [ConsensusLayerHealthEvents] with the given canonical chain tracker.
+    pub fn new(canon_chain: CC) -> Self {
+        Self { interval: tokio::time::interval(CHECK_INTERVAL), canon_chain }
     }
 }
 

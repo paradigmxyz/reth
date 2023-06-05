@@ -70,7 +70,6 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
-    time::Duration,
 };
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
@@ -356,8 +355,7 @@ impl Command {
                 ),
                 pipeline_events.map(Into::into),
             ),
-            ConsensusLayerHealthEvents::new(Duration::from_secs(300), blockchain_db.clone())
-                .map(Into::into),
+            ConsensusLayerHealthEvents::new(blockchain_db.clone()).map(Into::into),
         );
         ctx.task_executor
             .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
