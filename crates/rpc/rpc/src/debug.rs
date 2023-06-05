@@ -9,7 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256, U256};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256};
 use reth_provider::{BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProviderBox};
 use reth_revm::{
     database::{State, SubState},
@@ -317,7 +317,7 @@ where
             self.inner.eth_api.inspect_call_at(call, at, state_overrides, &mut inspector).await?;
         let gas_used = res.result.gas_used();
 
-        let frame = inspector.into_geth_builder().geth_traces(U256::from(gas_used), config);
+        let frame = inspector.into_geth_builder().geth_traces(gas_used, config);
 
         Ok(frame.into())
     }
@@ -549,7 +549,7 @@ fn trace_transaction(
     let (res, _) = inspect(db, env, &mut inspector)?;
     let gas_used = res.result.gas_used();
 
-    let frame = inspector.into_geth_builder().geth_traces(U256::from(gas_used), config);
+    let frame = inspector.into_geth_builder().geth_traces(gas_used, config);
 
     Ok((frame.into(), res.state))
 }

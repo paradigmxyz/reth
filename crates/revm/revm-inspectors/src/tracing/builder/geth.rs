@@ -4,9 +4,8 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, JsonU256, H256, U256};
+use reth_primitives::{Address, H256};
 use reth_rpc_types::trace::geth::*;
-
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
@@ -85,7 +84,7 @@ impl GethTraceBuilder {
     pub fn geth_traces(
         &self,
         // TODO(mattsse): This should be the total gas used, or gas used by last CallTrace?
-        receipt_gas_used: U256,
+        receipt_gas_used: u64,
         opts: GethDefaultTracingOptions,
     ) -> DefaultFrame {
         if self.nodes.is_empty() {
@@ -102,7 +101,7 @@ impl GethTraceBuilder {
         DefaultFrame {
             // If the top-level trace succeeded, then it was a success
             failed: !main_trace.success,
-            gas: JsonU256(receipt_gas_used),
+            gas: receipt_gas_used,
             return_value: main_trace.output.clone().into(),
             struct_logs,
         }
