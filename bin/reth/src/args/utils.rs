@@ -101,7 +101,6 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::utils::{chain_spec_value_parser, genesis_value_parser, parse_socket_address};
     use proptest::prelude::Rng;
     use secp256k1::rand::thread_rng;
 
