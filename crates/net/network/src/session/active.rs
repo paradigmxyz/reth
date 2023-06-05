@@ -37,7 +37,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 
 /// Constants for timeout updating
 

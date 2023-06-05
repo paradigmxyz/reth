@@ -91,7 +91,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, warn};
+use tracing::debug;
 
 mod best;
 mod events;

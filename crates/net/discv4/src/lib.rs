@@ -54,7 +54,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 pub mod error;
 mod proto;

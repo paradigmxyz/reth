@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 /// Contains the connectivity related state of the network.
 ///
