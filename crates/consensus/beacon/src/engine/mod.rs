@@ -1100,7 +1100,7 @@ where
                             None => {
                                 // This is only possible if the node was run with `debug.tip`
                                 // argument and without CL.
-                                warn!(target: "consensus::engine", "No forkchoice state available");
+                                warn!(target: "consensus::engine", "No fork choice state available");
                                 return None
                             }
                         };
@@ -1132,7 +1132,7 @@ where
                             match self.restore_tree_if_possible(sync_target_state) {
                                 Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
                                 Err(error) => {
-                                    error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
+                                    error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
                                     return Some(Err(error.into()))
                                 }
                             };

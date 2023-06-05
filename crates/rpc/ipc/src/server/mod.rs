@@ -22,7 +22,7 @@ use tokio::{
     sync::{oneshot, watch, OwnedSemaphorePermit},
 };
 use tower::{layer::util::Identity, Service};
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 // re-export so can be used during builder setup
 pub use parity_tokio_ipc::Endpoint;
@@ -97,12 +97,12 @@ impl IpcServer {
         stop_handle: StopHandle,
         on_ready: oneshot::Sender<Result<(), String>>,
     ) -> io::Result<()> {
-        trace!( endpoint=?self.endpoint.path(), "starting ipc server" );
+        trace!( endpoint = ?self.endpoint.path(), "starting ipc server");
 
         if cfg!(unix) {
             // ensure the file does not exist
             if std::fs::remove_file(self.endpoint.path()).is_ok() {
-                warn!( endpoint=?self.endpoint.path(), "removed existing file");
+                debug!(endpoint = ?self.endpoint.path(), "removed existing IPC endpoint file");
             }
         }
 
@@ -142,7 +142,7 @@ impl IpcServer {
                     let conn = match connection_guard.try_acquire() {
                         Some(conn) => conn,
                         None => {
-                            warn!("Too many connections. Please try again later.");
+                            warn!("Too many IPC connections. Please try again later.");
                             connections.add(ipc.reject_connection().boxed());
                             continue
                         }
@@ -181,7 +181,7 @@ impl IpcServer {
                     id = id.wrapping_add(1);
                 }
                 Err(MonitoredError::Selector(err)) => {
-                    tracing::error!("Error while awaiting a new connection: {:?}", err);
+                    tracing::error!("Error while awaiting a new IPC connection: {:?}", err);
                 }
                 Err(MonitoredError::Shutdown) => break,
             }
@@ -315,7 +315,7 @@ async fn spawn_connection<S, T>(
                             }
                         },
                         Some(Err(e)) => {
-                             tracing::warn!("Request failed: {:?}", e);
+                             tracing::warn!("IPC request failed: {:?}", e);
                              break
                         }
                         None => {
@@ -338,7 +338,7 @@ async fn spawn_connection<S, T>(
 
             // send item over ipc
             if let Err(err) = conn.send(item).await {
-                warn!("Failed to send response: {:?}", err);
+                warn!("Failed to send IPC response: {:?}", err);
                 break
             }
         }

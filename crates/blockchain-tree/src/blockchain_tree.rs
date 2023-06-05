@@ -621,20 +621,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         if let Err(e) =
             self.externals.consensus.validate_header_with_total_difficulty(block, U256::MAX)
         {
-            info!(
-                "Failed to validate header for TD related check with error: {e:?}, block:{:?}",
-                block
+            error!(
+                ?block,
+                "Failed to validate total difficulty for block {}: {e:?}", block.header.hash
             );
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
-            info!("Failed to validate header with error: {e:?}, block:{:?}", block);
+            error!(?block, "Failed to validate header {}: {e:?}", block.header.hash);
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_block(block) {
-            info!("Failed to validate blocks with error: {e:?}, block:{:?}", block);
+            error!(?block, "Failed to validate block {}: {e:?}", block.header.hash);
             return Err(e)
         }
 
@@ -868,7 +868,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // If block is already canonical don't return error.
         if let Some(header) = self.find_canonical_header(block_hash)? {
-            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
+            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             let td = self
                 .externals
                 .database()
@@ -882,7 +882,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
-            info!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
+            error!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
             // TODO: better error
             return Err(BlockExecutionError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
@@ -1032,7 +1032,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let tip = tx.tip_number()?;
         let revert_range = (revert_until + 1)..=tip;
-        info!(target: "blockchain_tree", "Revert canonical chain range: {:?}", revert_range);
+        info!(target: "blockchain_tree", "Unwinding canonical chain blocks: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
             .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)

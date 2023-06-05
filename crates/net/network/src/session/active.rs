@@ -37,7 +37,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 
 /// Constants for timeout updating
 
@@ -265,7 +265,7 @@ impl ActiveSession {
                 unreachable!("Not emitted by network")
             }
             PeerMessage::Other(other) => {
-                error!(target : "net::session", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target : "net::session", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -283,7 +283,7 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
-                error!(target : "net", ?err, "Failed to respond to received request");
+                debug!(target : "net", ?err, "Failed to respond to received request");
             }
         }
     }
@@ -395,7 +395,7 @@ impl ActiveSession {
                 self.poll_disconnect(cx)
             }
             Err(err) => {
-                error!(target: "net::session", ?err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
+                debug!(target: "net::session", ?err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
                 self.close_on_error(err);
                 Poll::Ready(())
             }
@@ -474,7 +474,7 @@ impl Future for ActiveSession {
                         progress = true;
                         match cmd {
                             SessionCommand::Disconnect { reason } => {
-                                info!(target: "net::session", ?reason, remote_peer_id=?this.remote_peer_id, "session received disconnect command");
+                                info!(target: "net::session", ?reason, remote_peer_id=?this.remote_peer_id, "Received disconnect command for session");
                                 let reason =
                                     reason.unwrap_or(DisconnectReason::DisconnectRequested);
 
@@ -519,7 +519,7 @@ impl Future for ActiveSession {
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                     };
                     if let Err(err) = res {
-                        error!(target: "net::session", ?err,  remote_peer_id=?this.remote_peer_id, "failed to send message");
+                        debug!(target: "net::session", ?err,  remote_peer_id=?this.remote_peer_id, "failed to send message");
                         // notify the manager
                         this.close_on_error(err);
                         return Poll::Ready(())
@@ -573,7 +573,7 @@ impl Future for ActiveSession {
                                         progress = true;
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
-                                        error!(target: "net::session", ?error, msg=?message,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
+                                        debug!(target: "net::session", ?error, msg=?message,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
                                         this.close_on_error(error);
                                         return Poll::Ready(())
                                     }
