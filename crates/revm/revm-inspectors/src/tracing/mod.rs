@@ -101,6 +101,7 @@ impl TracingInspector {
     /// Starts tracking a new trace.
     ///
     /// Invoked on [Inspector::call].
+    #[allow(clippy::too_many_arguments)]
     fn start_trace_on_call(
         &mut self,
         depth: usize,
@@ -109,6 +110,7 @@ impl TracingInspector {
         value: U256,
         kind: CallKind,
         caller: Address,
+        is_precompile: bool,
     ) {
         self.trace_stack.push(self.traces.push_trace(
             0,
@@ -121,6 +123,7 @@ impl TracingInspector {
                 status: InstructionResult::Continue,
                 caller,
                 last_call_return_value: self.last_call_return_data.clone(),
+                is_precompile,
                 ..Default::default()
             },
         ));
@@ -318,6 +321,10 @@ where
             _ => (inputs.context.caller, inputs.context.address),
         };
 
+        // TODO(mattsse): check if this call is a precompile and `depth > 0 && value == 0`
+
+        let is_precompile = false;
+
         self.start_trace_on_call(
             data.journaled_state.depth() as usize,
             to,
@@ -325,6 +332,7 @@ where
             inputs.transfer.value,
             inputs.context.scheme.into(),
             from,
+            is_precompile,
         );
 
         (InstructionResult::Continue, Gas::new(0), Bytes::new())
@@ -367,6 +375,7 @@ where
             inputs.value,
             inputs.scheme.into(),
             inputs.caller,
+            false
         );
 
         (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::default())
