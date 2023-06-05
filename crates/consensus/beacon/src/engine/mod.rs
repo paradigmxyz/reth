@@ -83,7 +83,7 @@ impl BeaconConsensusEngineHandle {
 
     /// Sends a new payload message to the beacon consensus engine and waits for a response.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
@@ -95,7 +95,7 @@ impl BeaconConsensusEngineHandle {
 
     /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     pub async fn fork_choice_updated(
         &self,
         state: ForkchoiceState,
@@ -122,6 +122,13 @@ impl BeaconConsensusEngineHandle {
             tx,
         });
         rx
+    }
+
+    /// Sends a transition configuration exchagne message to the beacon consensus engine.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
+    pub async fn transition_configuration_exchanged(&self) {
+        let _ = self.to_engine.send(BeaconEngineMessage::TransitionConfigurationExchanged);
     }
 
     /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
@@ -1176,6 +1183,9 @@ where
                     this.metrics.new_payload_messages.increment(1);
                     let res = this.on_new_payload(payload);
                     let _ = tx.send(res);
+                }
+                BeaconEngineMessage::TransitionConfigurationExchanged => {
+                    this.blockchain.on_transition_configuration_exchanged();
                 }
                 BeaconEngineMessage::EventListener(tx) => {
                     this.listeners.push_listener(tx);
