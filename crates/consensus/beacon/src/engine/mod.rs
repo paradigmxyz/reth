@@ -490,9 +490,6 @@ where
             // node's fully synced, clear pending requests
             self.sync.clear_full_block_requests();
 
-            // new VALID update that moved the canonical chain forward
-            let _ = self.update_canon_chain(&state);
-
             let tip_number = self.blockchain.canonical_tip().number;
             if self.sync.has_reached_max_block(tip_number) {
                 return true
@@ -534,14 +531,24 @@ where
 
         let status = match self.blockchain.make_canonical(&state.head_block_hash) {
             Ok(outcome) => {
-                let header = outcome.into_header();
-                debug!(target: "consensus::engine", hash=?state.head_block_hash, number=header.number, "canonicalized new head");
+                if !outcome.is_already_canonical() {
+                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
+
+                    // new VALID update that moved the canonical chain forward
+                    let _ = self.update_canon_chain(&state);
+                } else {
+                    debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
+                }
 
                 if let Some(attrs) = attrs {
                     // the CL requested to build a new payload on top of this new VALID head
-                    let payload_response =
-                        self.process_payload_attributes(attrs, header.unseal(), state);
-                    trace!(target: "consensus::engine", status = ?payload_response, ?state, "Returning forkchoice status ");
+                    let payload_response = self.process_payload_attributes(
+                        attrs,
+                        outcome.into_header().unseal(),
+                        state,
+                    );
+
+                    trace!(target: "consensus::engine", status = ?payload_response, ?state, "Returning forkchoice status");
                     return Ok(payload_response)
                 }
 
