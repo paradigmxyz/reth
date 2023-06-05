@@ -223,8 +223,6 @@ where
                 NodeEvent::ConsensusEngine(event) => {
                     this.state.handle_consensus_engine_event(event);
                 }
-                // TODO(alexey): do not warn about Consensus Layer health if `debug.tip` is not
-                //  empty.
                 NodeEvent::ConsensusLayerHealth(event) => {
                     this.state.handle_consensus_layer_health_event(event)
                 }
