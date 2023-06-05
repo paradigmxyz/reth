@@ -508,7 +508,7 @@ where
         Ok(())
     }
 
-    /// Rad account and storage changesets and
+    /// Read account/storage changesets and update account/storage history indices.
     pub fn calculate_history_indices(
         &mut self,
         range: RangeInclusive<BlockNumber>,
