@@ -10,9 +10,9 @@ use reth_db::{
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::Transaction;
-use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::{ops::RangeInclusive, sync::Arc};
 
+use crate::args::utils::genesis_value_parser;
 use reth_db::cursor::DbCursorRO;
 
 /// `reth stage unwind` command

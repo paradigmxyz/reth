@@ -51,11 +51,7 @@ use reth_provider::{
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-    parse_socket_address,
-};
+use reth_staged_sync::utils::init::{init_db, init_genesis};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -74,7 +70,13 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::{args::PayloadBuilderArgs, dirs::MaybePlatformPath};
+use crate::{
+    args::{
+        utils::{genesis_value_parser, parse_socket_address},
+        PayloadBuilderArgs,
+    },
+    dirs::MaybePlatformPath,
+};
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::bytes::BytesMut;
