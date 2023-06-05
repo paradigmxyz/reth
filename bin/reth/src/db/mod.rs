@@ -1,7 +1,8 @@
 //! Database debugging tool
 use crate::{
+    args::utils::genesis_value_parser,
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::{genesis_value_parser, DbTool},
+    utils::DbTool,
 };
 use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};

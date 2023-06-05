@@ -1,4 +1,4 @@
-use crate::{utils::parse_duration_from_secs, version::default_extradata};
+use crate::{args::utils::parse_duration_from_secs, version::default_extradata};
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,

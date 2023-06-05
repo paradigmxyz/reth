@@ -1,8 +1,12 @@
 //! P2P Debugging tool
 use crate::{
-    args::{get_secret_key, DiscoveryArgs},
+    args::{
+        get_secret_key,
+        utils::{chain_spec_value_parser, hash_or_num_value_parser},
+        DiscoveryArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::{chain_spec_value_parser, get_single_header, hash_or_num_value_parser},
+    utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};

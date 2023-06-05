@@ -2,10 +2,9 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::{get_secret_key, NetworkArgs, StageEnum},
+    args::{get_secret_key, utils::chain_spec_value_parser, NetworkArgs, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
-    utils::chain_spec_value_parser,
     version::SHORT_VERSION,
 };
 use clap::Parser;

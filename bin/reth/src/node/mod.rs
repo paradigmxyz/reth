@@ -6,7 +6,7 @@ use crate::{
     dirs::DataDirPath,
     prometheus_exporter,
     runner::CliContext,
-    utils::{genesis_value_parser, get_single_header, parse_socket_address},
+    utils::get_single_header,
     version::SHORT_VERSION,
 };
 use clap::Parser;
@@ -70,7 +70,13 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::{args::PayloadBuilderArgs, dirs::MaybePlatformPath};
+use crate::{
+    args::{
+        utils::{genesis_value_parser, parse_socket_address},
+        PayloadBuilderArgs,
+    },
+    dirs::MaybePlatformPath,
+};
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::bytes::BytesMut;

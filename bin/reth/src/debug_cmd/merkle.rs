@@ -1,7 +1,7 @@
 //! Command for debugging merkle trie calculation.
 use crate::{
+    args::utils::genesis_value_parser,
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::genesis_value_parser,
 };
 use clap::Parser;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};

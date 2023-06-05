@@ -1,6 +1,6 @@
 use crate::{
+    args::utils::genesis_value_parser,
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::genesis_value_parser,
 };
 use clap::Parser;
 use reth_primitives::ChainSpec;

@@ -1,7 +1,7 @@
 //! Database debugging tool
 use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::{genesis_value_parser, DbTool},
+    utils::DbTool,
 };
 use clap::Parser;
 use reth_db::{
@@ -22,6 +22,7 @@ mod execution;
 use execution::dump_execution_stage;
 
 mod merkle;
+use crate::args::utils::genesis_value_parser;
 use merkle::dump_merkle_stage;
 
 /// `reth dump-stage` command

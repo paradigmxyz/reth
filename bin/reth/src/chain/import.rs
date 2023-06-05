@@ -8,7 +8,7 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 
-use crate::utils::genesis_value_parser;
+use crate::args::utils::genesis_value_parser;
 use reth_config::Config;
 use reth_db::database::Database;
 use reth_downloaders::{
