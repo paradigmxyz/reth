@@ -976,7 +976,7 @@ where
             return
         }
 
-        match self.blockchain.insert_block_without_senders(block) {
+        match self.blockchain.insert_block_without_senders(block.clone()) {
             Ok(status) => {
                 match status {
                     BlockStatus::Valid => {
@@ -995,6 +995,10 @@ where
             }
             Err(err) => {
                 debug!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
+                if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
+                    // non-internal error kinds occurr if the payload is invalid
+                    self.invalid_headers.insert(block.header);
+                }
             }
         }
     }
