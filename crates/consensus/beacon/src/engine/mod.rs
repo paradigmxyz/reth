@@ -480,6 +480,9 @@ where
         // Terminate the sync early if it's reached the maximum user
         // configured block.
         if is_valid_response {
+            // node's fully synced, clear pending requests
+            self.sync.clear_full_block_requests();
+
             let tip_number = self.blockchain.canonical_tip().number;
             if self.sync.has_reached_max_block(tip_number) {
                 return true
@@ -1021,6 +1024,8 @@ where
 
                 // we're no longer syncing
                 self.sync_state_updater.update_sync_state(SyncState::Idle);
+                // clear any active block requests
+                self.sync.clear_full_block_requests();
 
                 // we can update the FCU blocks
                 let _ = self.update_canon_chain(&target);

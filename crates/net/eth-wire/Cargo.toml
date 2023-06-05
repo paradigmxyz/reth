@@ -20,7 +20,7 @@ reth-rlp = { path = "../../rlp", features = ["alloc", "derive", "std", "ethereum
 reth-metrics = { path = "../../metrics" }
 
 # used for Chain and builders
-ethers-core = { version = "2.0.4", default-features = false}
+ethers-core = { version = "2.0.7", default-features = false}
 
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-util = { version = "0.7.4", features = ["io", "codec"] }
@@ -40,7 +40,7 @@ proptest-derive = { version = "0.3", optional = true }
 [dev-dependencies]
 reth-primitives = { path = "../../primitives", features = ["arbitrary"] }
 reth-tracing = { path = "../../tracing" }
-ethers-core = { version = "2.0.4", default-features = false}
+ethers-core = { version = "2.0.7", default-features = false}
 
 test-fuzz = "3.0.4"
 tokio-util = { version = "0.7.4", features = ["io", "codec"] }

@@ -2,7 +2,7 @@
 
 use eyre::{Result, WrapErr};
 use reth_db::{
-    cursor::{DbCursorRO, Walker},
+    cursor::DbCursorRO,
     database::Database,
     table::Table,
     transaction::{DbTx, DbTxMut},
@@ -12,7 +12,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
-use std::{collections::BTreeMap, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 use tracing::info;
 
 /// Get a single header from network
@@ -67,22 +67,21 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// entries into a [`HashMap`][std::collections::HashMap].
     pub fn list<T: Table>(
         &mut self,
-        start: usize,
+        skip: usize,
         len: usize,
-    ) -> Result<BTreeMap<T::Key, T::Value>> {
+        reverse: bool,
+    ) -> Result<Vec<(T::Key, T::Value)>> {
         let data = self.db.view(|tx| {
             let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
-            // TODO: Upstream this in the DB trait.
-            let start_walker = cursor.current().transpose();
-            let walker = Walker::new(&mut cursor, start_walker);
-
-            walker.skip(start).take(len).collect::<Vec<_>>()
+            if reverse {
+                cursor.walk_back(None)?.skip(skip).take(len).collect::<Result<_, _>>()
+            } else {
+                cursor.walk(None)?.skip(skip).take(len).collect::<Result<_, _>>()
+            }
         })?;
 
-        data.into_iter()
-            .collect::<Result<BTreeMap<T::Key, T::Value>, _>>()
-            .map_err(|e| eyre::eyre!(e))
+        data.map_err(|e| eyre::eyre!(e))
     }
 
     /// Grabs the content of the table for the given key
