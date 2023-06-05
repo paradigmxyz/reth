@@ -27,10 +27,9 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
 use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-};
+use reth_staged_sync::utils::init::{init_db, init_genesis};
+
+use crate::args::utils::genesis_value_parser;
 use reth_stages::{
     sets::DefaultStages,
     stages::{

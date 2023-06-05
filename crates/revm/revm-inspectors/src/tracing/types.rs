@@ -11,10 +11,10 @@ use reth_rpc_types::trace::{
     },
 };
 use revm::interpreter::{
-    CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::btree_map::Entry;
+use std::collections::{btree_map::Entry, VecDeque};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -196,6 +196,43 @@ pub(crate) struct CallTraceNode {
 }
 
 impl CallTraceNode {
+    /// Pushes all steps onto the stack in reverse order
+    /// so that the first step is on top of the stack
+    pub(crate) fn push_steps_on_stack<'a>(
+        &'a self,
+        stack: &mut VecDeque<CallTraceStepStackItem<'a>>,
+    ) {
+        stack.extend(self.call_step_stack().into_iter().rev());
+    }
+
+    /// Returns a list of all steps in this trace in the order they were executed
+    ///
+    /// If the step is a call, the id of the child trace is set.
+    pub(crate) fn call_step_stack(&self) -> Vec<CallTraceStepStackItem<'_>> {
+        let mut stack = Vec::with_capacity(self.trace.steps.len());
+        let mut child_id = 0;
+        for step in self.trace.steps.iter() {
+            let mut item = CallTraceStepStackItem { trace_node: self, step, call_child_id: None };
+
+            // If the opcode is a call, put the child trace on the stack
+            match step.op.u8() {
+                opcode::CREATE |
+                opcode::CREATE2 |
+                opcode::DELEGATECALL |
+                opcode::CALL |
+                opcode::STATICCALL |
+                opcode::CALLCODE => {
+                    let call_id = self.children[child_id];
+                    item.call_child_id = Some(call_id);
+                    child_id += 1;
+                }
+                _ => {}
+            }
+            stack.push(item);
+        }
+        stack
+    }
+
     /// Returns the kind of call the trace belongs to
     pub(crate) fn kind(&self) -> CallKind {
         self.trace.kind
@@ -354,6 +391,15 @@ impl CallTraceNode {
 
         call_frame
     }
+}
+
+pub(crate) struct CallTraceStepStackItem<'a> {
+    /// The trace node that contains this step
+    pub(crate) trace_node: &'a CallTraceNode,
+    /// The step that this stack item represents
+    pub(crate) step: &'a CallTraceStep,
+    /// The index of the child call in the CallArena if this step's opcode is a call
+    pub(crate) call_child_id: Option<usize>,
 }
 
 /// Ordering enum for calls and logs

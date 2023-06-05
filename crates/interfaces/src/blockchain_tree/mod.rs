@@ -120,7 +120,7 @@ pub enum BlockStatus {
     /// If block validation is valid and block extends canonical chain.
     /// In BlockchainTree sense it forks on canonical tip.
     Valid,
-    /// If the block is valid, but it does not extend canonical chain
+    /// If the block is valid, but it does not extend canonical chain.
     /// (It is side chain) or hasn't been fully validated but ancestors of a payload are known.
     Accepted,
     /// If blocks is not connected to canonical chain.

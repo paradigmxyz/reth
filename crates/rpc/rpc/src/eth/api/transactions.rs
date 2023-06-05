@@ -196,23 +196,22 @@ where
         f(state)
     }
 
-    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
-        // TODO handle Pending state's env
-        match at {
-            BlockId::Number(BlockNumberOrTag::Pending) => {
-                // This should perhaps use the latest env settings and update block specific
-                // settings like basefee/number
-                Err(EthApiError::Unsupported("pending state not implemented yet"))
+    async fn evm_env_at(&self, mut at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
+        if at.is_pending() {
+            if let Some(pending) = self.client().pending_header()? {
+                let mut cfg = CfgEnv::default();
+                let mut block_env = BlockEnv::default();
+                self.client().fill_block_env_with_header(&mut block_env, &pending.header)?;
+                self.client().fill_cfg_env_with_header(&mut cfg, &pending.header)?;
+                return Ok((cfg, block_env, pending.hash.into()))
             }
-            hash_or_num => {
-                let block_hash = self
-                    .client()
-                    .block_hash_for_id(hash_or_num)?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
-                Ok((cfg, env, block_hash.into()))
-            }
+            // No pending block, use latest
+            at = BlockId::Number(BlockNumberOrTag::Latest);
         }
+        let block_hash =
+            self.client().block_hash_for_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
+        Ok((cfg, env, block_hash.into()))
     }
 
     async fn evm_env_for_raw_block(&self, header: &Header) -> EthResult<(CfgEnv, BlockEnv)> {
@@ -244,30 +243,39 @@ where
     }
 
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
-        if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
-        {
-            return Ok(Some(TransactionSource::Pool(tx)))
+        // Try to find the transaction on disk
+        let mut resp = self
+            .on_blocking_task(|this| async move {
+                match this.client().transaction_by_hash_with_meta(hash)? {
+                    None => Ok(None),
+                    Some((tx, meta)) => {
+                        let transaction = tx
+                            .into_ecrecovered()
+                            .ok_or(EthApiError::InvalidTransactionSignature)?;
+
+                        let tx = TransactionSource::Block {
+                            transaction,
+                            index: meta.index,
+                            block_hash: meta.block_hash,
+                            block_number: meta.block_number,
+                            base_fee: meta.base_fee,
+                        };
+                        Ok(Some(tx))
+                    }
+                }
+            })
+            .await?;
+
+        if resp.is_none() {
+            // tx not found on disk, check pool
+            if let Some(tx) =
+                self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
+            {
+                resp = Some(TransactionSource::Pool(tx));
+            }
         }
 
-        self.on_blocking_task(|this| async move {
-            match this.client().transaction_by_hash_with_meta(hash)? {
-                None => Ok(None),
-                Some((tx, meta)) => {
-                    let transaction =
-                        tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-
-                    let tx = TransactionSource::Block {
-                        transaction,
-                        index: meta.index,
-                        block_hash: meta.block_hash,
-                        block_number: meta.block_number,
-                        base_fee: meta.base_fee,
-                    };
-                    Ok(Some(tx))
-                }
-            }
-        })
-        .await
+        Ok(resp)
     }
 
     async fn transaction_by_hash_at(

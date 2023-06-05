@@ -1,10 +1,13 @@
 //! Geth trace builder
 
-use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
+use crate::tracing::{
+    types::{CallTraceNode, CallTraceStepStackItem},
+    TracingInspectorConfig,
+};
 use reth_primitives::{Address, JsonU256, H256, U256};
 use reth_rpc_types::trace::geth::*;
-use revm::interpreter::opcode;
-use std::collections::{BTreeMap, HashMap};
+
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
 #[derive(Clone, Debug)]
@@ -21,19 +24,29 @@ impl GethTraceBuilder {
         Self { nodes, _config }
     }
 
-    /// Recursively fill in the geth trace by going through the traces
-    ///
-    /// TODO rewrite this iteratively
-    fn add_to_geth_trace(
+    /// Fill in the geth trace with all steps of the trace and its children traces in the order they
+    /// appear in the transaction.
+    fn fill_geth_trace(
         &self,
-        storage: &mut HashMap<Address, BTreeMap<H256, H256>>,
-        trace_node: &CallTraceNode,
-        struct_logs: &mut Vec<StructLog>,
+        main_trace_node: &CallTraceNode,
         opts: &GethDefaultTracingOptions,
+        storage: &mut HashMap<Address, BTreeMap<H256, H256>>,
+        struct_logs: &mut Vec<StructLog>,
     ) {
-        let mut child_id = 0;
+        // A stack with all the steps of the trace and all its children's steps.
+        // This is used to process the steps in the order they appear in the transactions.
+        // Steps are grouped by their Call Trace Node, in order to process them all in the order
+        // they appear in the transaction, we need to process steps of call nodes when they appear.
+        // When we find a call step, we push all the steps of the child trace on the stack, so they
+        // are processed next. The very next step is the last item on the stack
+        let mut step_stack = VecDeque::with_capacity(main_trace_node.trace.steps.len());
+
+        main_trace_node.push_steps_on_stack(&mut step_stack);
+
         // Iterate over the steps inside the given trace
-        for step in trace_node.trace.steps.iter() {
+        while let Some(CallTraceStepStackItem { trace_node, step, call_child_id }) =
+            step_stack.pop_back()
+        {
             let mut log: StructLog = step.into();
 
             // Fill in memory and storage depending on the options
@@ -59,23 +72,11 @@ impl GethTraceBuilder {
             // Add step to geth trace
             struct_logs.push(log);
 
-            // If the opcode is a call, the descend into child trace
-            match step.op.u8() {
-                opcode::CREATE |
-                opcode::CREATE2 |
-                opcode::DELEGATECALL |
-                opcode::CALL |
-                opcode::STATICCALL |
-                opcode::CALLCODE => {
-                    self.add_to_geth_trace(
-                        storage,
-                        &self.nodes[trace_node.children[child_id]],
-                        struct_logs,
-                        opts,
-                    );
-                    child_id += 1;
-                }
-                _ => {}
+            // If the step is a call, we first push all the steps of the child trace on the stack,
+            // so they are processed next
+            if let Some(call_child_id) = call_child_id {
+                let child_trace = &self.nodes[call_child_id];
+                child_trace.push_steps_on_stack(&mut step_stack);
             }
         }
     }
@@ -96,7 +97,7 @@ impl GethTraceBuilder {
 
         let mut struct_logs = Vec::new();
         let mut storage = HashMap::new();
-        self.add_to_geth_trace(&mut storage, main_trace_node, &mut struct_logs, &opts);
+        self.fill_geth_trace(main_trace_node, &opts, &mut storage, &mut struct_logs);
 
         DefaultFrame {
             // If the top-level trace succeeded, then it was a success

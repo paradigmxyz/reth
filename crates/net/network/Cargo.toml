@@ -63,7 +63,7 @@ secp256k1 = { version = "0.27.0", features = [
 ] }
 
 enr = { version = "0.8.1", features = ["rust-secp256k1"], optional = true }
-ethers-core = { version = "2.0.4", default-features = false, optional = true }
+ethers-core = { version = "2.0.7", default-features = false, optional = true }
 tempfile = { version = "3.3", optional = true }
 
 [dev-dependencies]
@@ -79,10 +79,10 @@ reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
 
-ethers-core = { version = "2.0.4", default-features = false}
-ethers-providers = {version = "2.0.4", default-features = false }
-ethers-signers = {version = "2.0.4", default-features = false }
-ethers-middleware = {version = "2.0.4", default-features = false }
+ethers-core = { version = "2.0.7", default-features = false}
+ethers-providers = {version = "2.0.7", default-features = false }
+ethers-signers = {version = "2.0.7", default-features = false }
+ethers-middleware = {version = "2.0.7", default-features = false }
 
 enr = { version = "0.8.1", features = ["serde", "rust-secp256k1"] }
 

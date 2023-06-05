@@ -62,6 +62,10 @@ impl BlockProvider for NoopProvider {
         Ok(None)
     }
 
+    fn pending_header(&self) -> Result<Option<SealedHeader>> {
+        Ok(None)
+    }
+
     fn ommers(&self, _id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         Ok(None)
     }

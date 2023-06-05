@@ -10,9 +10,9 @@ use reth_db::{
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::Transaction;
-use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::{ops::RangeInclusive, sync::Arc};
 
+use crate::args::utils::genesis_value_parser;
 use reth_db::cursor::DbCursorRO;
 
 /// `reth stage unwind` command
@@ -109,7 +109,7 @@ impl Subcommands {
                     .ok_or_else(|| eyre::eyre!("Block hash not found in database: {hash:?}"))?,
                 BlockHashOrNumber::Number(num) => *num,
             },
-            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount),
+            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount) + 1,
         };
         Ok(target..=last.0)
     }
