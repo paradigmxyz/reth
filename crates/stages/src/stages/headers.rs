@@ -14,7 +14,6 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     BlockHashOrNumber, BlockNumber, SealedHeader, H256,
 };
-use reth_provider::Transaction;
 use tokio::sync::watch;
 use tracing::*;
 
@@ -63,7 +62,7 @@ where
 
     fn is_stage_done<DB: Database>(
         &self,
-        tx: &Transaction<'_, DB>,
+        tx: &<DB as reth_db::database::DatabaseGAT<'_>>::TXMut,
         checkpoint: u64,
     ) -> Result<bool, StageError> {
         let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
@@ -79,7 +78,7 @@ where
     /// See also [SyncTarget]
     async fn get_sync_gap<DB: Database>(
         &mut self,
-        tx: &Transaction<'_, DB>,
+        tx: &<DB as reth_db::database::DatabaseGAT<'_>>::TXMut,
         checkpoint: u64,
     ) -> Result<SyncGap, StageError> {
         // Create a cursor over canonical header hashes
@@ -144,7 +143,7 @@ where
     /// Note: this writes the headers with rising block numbers.
     fn write_headers<DB: Database>(
         &self,
-        tx: &Transaction<'_, DB>,
+        tx: &<DB as reth_db::database::DatabaseGAT<'_>>::TXMut,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
         trace!(target: "sync::stages::headers", len = headers.len(), "writing headers");
@@ -190,13 +189,14 @@ where
     /// starting from the tip of the chain
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        let tx = provider.tx_mut();
         let current_checkpoint = input.checkpoint();
 
         // Lookup the head and tip of the sync range
-        let gap = self.get_sync_gap(tx, current_checkpoint.block_number).await?;
+        let gap = self.get_sync_gap::<DB>(tx, current_checkpoint.block_number).await?;
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
@@ -277,7 +277,7 @@ where
         // Write the headers to db
         self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
 
-        if self.is_stage_done(tx, current_checkpoint.block_number)? {
+        if self.is_stage_done::<DB>(tx, current_checkpoint.block_number)? {
             let checkpoint = current_checkpoint.block_number.max(
                 tx.cursor_read::<tables::CanonicalHeaders>()?
                     .last()?
@@ -300,15 +300,15 @@ where
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block
-        tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+        provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,
         )?;
-        tx.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        let unwound_headers = tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        let unwound_headers = provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         let stage_checkpoint =
             input.checkpoint.entities_stage_checkpoint().map(|checkpoint| EntitiesCheckpoint {
