@@ -10,19 +10,20 @@ use crate::{
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
+use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     ChainSpec,
 };
-use reth_provider::{ShareableDatabase, Transaction};
+use reth_provider::ShareableDatabase;
 use reth_staged_sync::utils::{chainspec::chain_spec_value_parser, init::init_db};
 use reth_stages::{
     stages::{
         BodyStage, ExecutionStage, ExecutionStageThresholds, MerkleStage, SenderRecoveryStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, UnwindInput,
+    ExecInput, ExecOutput, PipelineError, Stage, UnwindInput,
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -114,7 +115,8 @@ impl Command {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
-        let mut tx = Transaction::new(db.as_ref())?;
+        let shareable_db = ShareableDatabase::new(db.clone(), self.chain.clone());
+        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -123,82 +125,79 @@ impl Command {
 
         let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
 
-        let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
-            match self.stage {
-                StageEnum::Bodies => {
-                    let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        let (mut exec_stage, mut unwind_stage): (
+            Box<dyn Stage<Arc<Env<WriteMap>>>>,
+            Option<Box<dyn Stage<Arc<Env<WriteMap>>>>>,
+        ) = match self.stage {
+            StageEnum::Bodies => {
+                let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
-                    let mut config = config;
-                    config.peers.connect_trusted_nodes_only = self.network.trusted_only;
-                    if !self.network.trusted_peers.is_empty() {
-                        self.network.trusted_peers.iter().for_each(|peer| {
-                            config.peers.trusted_nodes.insert(*peer);
-                        });
-                    }
+                let mut config = config;
+                config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+                if !self.network.trusted_peers.is_empty() {
+                    self.network.trusted_peers.iter().for_each(|peer| {
+                        config.peers.trusted_nodes.insert(*peer);
+                    });
+                }
 
-                    let network_secret_path = self
-                        .network
-                        .p2p_secret_key
-                        .clone()
-                        .unwrap_or_else(|| data_dir.p2p_secret_path());
-                    let p2p_secret_key = get_secret_key(&network_secret_path)?;
+                let network_secret_path = self
+                    .network
+                    .p2p_secret_key
+                    .clone()
+                    .unwrap_or_else(|| data_dir.p2p_secret_path());
+                let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
-                    let default_peers_path = data_dir.known_peers_path();
+                let default_peers_path = data_dir.known_peers_path();
 
-                    let network = self
-                        .network
-                        .network_config(
-                            &config,
-                            self.chain.clone(),
-                            p2p_secret_key,
-                            default_peers_path,
+                let network = self
+                    .network
+                    .network_config(&config, self.chain.clone(), p2p_secret_key, default_peers_path)
+                    .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
+                    .start_network()
+                    .await?;
+                let fetch_client = Arc::new(network.fetch_client().await?);
+
+                let stage = BodyStage {
+                    downloader: BodiesDownloaderBuilder::default()
+                        .with_stream_batch_size(batch_size as usize)
+                        .with_request_limit(config.stages.bodies.downloader_request_limit)
+                        .with_max_buffered_blocks(
+                            config.stages.bodies.downloader_max_buffered_blocks,
                         )
-                        .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
-                        .start_network()
-                        .await?;
-                    let fetch_client = Arc::new(network.fetch_client().await?);
+                        .with_concurrent_requests_range(
+                            config.stages.bodies.downloader_min_concurrent_requests..=
+                                config.stages.bodies.downloader_max_concurrent_requests,
+                        )
+                        .build(fetch_client, consensus.clone(), db.clone()),
+                    consensus: consensus.clone(),
+                };
 
-                    let stage = BodyStage {
-                        downloader: BodiesDownloaderBuilder::default()
-                            .with_stream_batch_size(batch_size as usize)
-                            .with_request_limit(config.stages.bodies.downloader_request_limit)
-                            .with_max_buffered_blocks(
-                                config.stages.bodies.downloader_max_buffered_blocks,
-                            )
-                            .with_concurrent_requests_range(
-                                config.stages.bodies.downloader_min_concurrent_requests..=
-                                    config.stages.bodies.downloader_max_concurrent_requests,
-                            )
-                            .build(fetch_client, consensus.clone(), db.clone()),
-                        consensus: consensus.clone(),
-                    };
-
-                    (Box::new(stage), None)
-                }
-                StageEnum::Senders => {
-                    (Box::new(SenderRecoveryStage { commit_threshold: batch_size }), None)
-                }
-                StageEnum::Execution => {
-                    let factory = reth_revm::Factory::new(self.chain.clone());
-                    (
-                        Box::new(ExecutionStage::new(
-                            factory,
-                            ExecutionStageThresholds {
-                                max_blocks: Some(batch_size),
-                                max_changes: None,
-                                max_changesets: None,
-                            },
-                        )),
-                        None,
-                    )
-                }
-                StageEnum::TxLookup => (Box::new(TransactionLookupStage::new(batch_size)), None),
-                StageEnum::Merkle => (
-                    Box::new(MerkleStage::default_execution()),
-                    Some(Box::new(MerkleStage::default_unwind())),
-                ),
-                _ => return Ok(()),
-            };
+                (Box::new(stage), None)
+            }
+            StageEnum::Senders => {
+                (Box::new(SenderRecoveryStage { commit_threshold: batch_size }), None)
+            }
+            StageEnum::Execution => {
+                let factory = reth_revm::Factory::new(self.chain.clone());
+                (
+                    Box::new(ExecutionStage::new(
+                        factory,
+                        ExecutionStageThresholds {
+                            max_blocks: Some(batch_size),
+                            max_changes: None,
+                            max_changesets: None,
+                        },
+                    )),
+                    None,
+                )
+            }
+            StageEnum::TxLookup => (Box::new(TransactionLookupStage::new(batch_size)), None),
+            StageEnum::Merkle => (
+                Box::new(MerkleStage::default_execution()),
+                Some(Box::new(MerkleStage::default_unwind())),
+            ),
+            _ => return Ok(()),
+        };
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
         let mut input = ExecInput {
@@ -217,13 +216,13 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&mut tx, unwind).await?;
+                let unwind_output = unwind_stage.unwind(&mut provider_rw, unwind).await?;
                 unwind.checkpoint = unwind_output.checkpoint;
             }
         }
 
         while let ExecOutput { checkpoint: stage_progress, done: false } =
-            exec_stage.execute(&mut tx, input).await?
+            exec_stage.execute(&mut provider_rw, input).await?
         {
             input.checkpoint = Some(stage_progress)
         }
