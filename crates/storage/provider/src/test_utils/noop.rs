@@ -4,6 +4,7 @@ use crate::{
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
 };
+use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -39,6 +40,10 @@ impl BlockNumProvider for NoopProvider {
         Ok(0)
     }
 
+    fn last_block_number(&self) -> Result<BlockNumber> {
+        Ok(0)
+    }
+
     fn block_number(&self, _hash: H256) -> Result<Option<BlockNumber>> {
         Ok(None)
     }
@@ -57,7 +62,15 @@ impl BlockProvider for NoopProvider {
         Ok(None)
     }
 
+    fn pending_header(&self) -> Result<Option<SealedHeader>> {
+        Ok(None)
+    }
+
     fn ommers(&self, _id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
+
+    fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 }

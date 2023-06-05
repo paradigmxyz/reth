@@ -31,30 +31,83 @@ pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     _phantom: PhantomData<&'a TX>,
 }
 
+pub enum HistoryInfo {
+    NotWritten,
+    InChangeset(u64),
+    InPlainState,
+}
+
 impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     /// Create new StateProvider from history transaction number
     pub fn new(tx: &'b TX, block_number: BlockNumber) -> Self {
         Self { tx, block_number, _phantom: PhantomData {} }
     }
+
+    /// Lookup an account in the AccountHistory table
+    pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
+        // history key to search IntegerList of block number changesets.
+        let history_key = ShardedKey::new(address, self.block_number);
+        let mut cursor = self.tx.cursor_read::<tables::AccountHistory>()?;
+
+        if let Some(chunk) =
+            cursor.seek(history_key)?.filter(|(key, _)| key.key == address).map(|x| x.1 .0)
+        {
+            let chunk = chunk.enable_rank();
+            let rank = chunk.rank(self.block_number as usize);
+            if rank == 0 && !cursor.prev()?.is_some_and(|(key, _)| key.key == address) {
+                return Ok(HistoryInfo::NotWritten)
+            }
+            if rank < chunk.len() {
+                Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
+            } else {
+                Ok(HistoryInfo::InPlainState)
+            }
+        } else {
+            Ok(HistoryInfo::NotWritten)
+        }
+    }
+
+    /// Lookup a storage key in the StorageHistory table
+    pub fn storage_history_lookup(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> Result<HistoryInfo> {
+        // history key to search IntegerList of block number changesets.
+        let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
+        let mut cursor = self.tx.cursor_read::<tables::StorageHistory>()?;
+
+        if let Some(chunk) = cursor
+            .seek(history_key)?
+            .filter(|(key, _)| key.address == address && key.sharded_key.key == storage_key)
+            .map(|x| x.1 .0)
+        {
+            let chunk = chunk.enable_rank();
+            let rank = chunk.rank(self.block_number as usize);
+            if rank == 0 &&
+                !cursor.prev()?.is_some_and(|(key, _)| {
+                    key.address == address && key.sharded_key.key == storage_key
+                })
+            {
+                return Ok(HistoryInfo::NotWritten)
+            }
+            if rank < chunk.len() {
+                Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
+            } else {
+                Ok(HistoryInfo::InPlainState)
+            }
+        } else {
+            Ok(HistoryInfo::NotWritten)
+        }
+    }
 }
+
 impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
-        // history key to search IntegerList of block number changesets.
-        let history_key = ShardedKey::new(address, self.block_number);
-
-        let changeset_block_number = self
-            .tx
-            .cursor_read::<tables::AccountHistory>()?
-            .seek(history_key)?
-            .filter(|(key, _)| key.key == address)
-            .map(|(_, list)| {
-                list.0.enable_rank().successor(self.block_number as usize).map(|i| i as u64)
-            });
-
-        // if changeset of the block is present we are getting value from that changeset
-        if let Some(Some(changeset_block_number)) = changeset_block_number {
-            let account = self
+        match self.account_history_lookup(address)? {
+            HistoryInfo::NotWritten => Ok(None),
+            HistoryInfo::InChangeset(changeset_block_number) => Ok(self
                 .tx
                 .cursor_dup_read::<tables::AccountChangeSet>()?
                 .seek_by_key_subkey(changeset_block_number, address)?
@@ -62,12 +115,9 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
                 .ok_or(ProviderError::AccountChangesetNotFound {
                     block_number: changeset_block_number,
                     address,
-                })?;
-            Ok(account.info)
-        } else {
-            // if changeset is not present that means that there was history shard but we need to
-            // use newest value from plain state. Or zero if none.
-            Ok(self.tx.get::<tables::PlainAccountState>(address)?)
+                })?
+                .info),
+            HistoryInfo::InPlainState => Ok(self.tx.get::<tables::PlainAccountState>(address)?),
         }
     }
 }
@@ -101,40 +151,27 @@ impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get storage.
     fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
-        // history key to search IntegerList of block changesets.
-        let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-
-        let changeset_block_number = self
-            .tx
-            .cursor_read::<tables::StorageHistory>()?
-            .seek(history_key)?
-            .filter(|(key, _)| key.address == address && key.sharded_key.key == storage_key)
-            .map(|(_, list)| {
-                list.0.enable_rank().successor(self.block_number as usize).map(|i| i as u64)
-            });
-
-        // if changeset transition id is present we are getting value from changeset
-        if let Some(Some(changeset_block_number)) = changeset_block_number {
-            let storage_entry = self
-                .tx
-                .cursor_dup_read::<tables::StorageChangeSet>()?
-                .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .ok_or(ProviderError::StorageChangesetNotFound {
-                    block_number: changeset_block_number,
-                    address,
-                    storage_key,
-                })?;
-            Ok(Some(storage_entry.value))
-        } else {
-            // if changeset is not present that means that there was history shard but we need to
-            // use newest value from plain state
-            Ok(self
+        match self.storage_history_lookup(address, storage_key)? {
+            HistoryInfo::NotWritten => Ok(None),
+            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
+                self.tx
+                    .cursor_dup_read::<tables::StorageChangeSet>()?
+                    .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
+                    .filter(|entry| entry.key == storage_key)
+                    .ok_or(ProviderError::StorageChangesetNotFound {
+                        block_number: changeset_block_number,
+                        address,
+                        storage_key,
+                    })?
+                    .value,
+            )),
+            HistoryInfo::InPlainState => Ok(self
                 .tx
                 .cursor_dup_read::<tables::PlainStorageState>()?
                 .seek_by_key_subkey(address, storage_key)?
                 .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value))
+                .map(|entry| entry.value)
+                .or(Some(StorageValue::ZERO))),
         }
     }
 
@@ -195,6 +232,7 @@ mod tests {
     use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
+    const HIGHER_ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000005"));
     const STORAGE: H256 =
         H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
 
@@ -211,12 +249,17 @@ mod tests {
 
         tx.put::<tables::AccountHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: 7 },
-            BlockNumberList::new([3, 7]).unwrap(),
+            BlockNumberList::new([1, 3, 7]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::AccountHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
             BlockNumberList::new([10, 15]).unwrap(),
+        )
+        .unwrap();
+        tx.put::<tables::AccountHistory>(
+            ShardedKey { key: HIGHER_ADDRESS, highest_block_number: u64::MAX },
+            BlockNumberList::new([4]).unwrap(),
         )
         .unwrap();
 
@@ -226,10 +269,19 @@ mod tests {
         let acc_at7 = Account { nonce: 7, balance: U256::ZERO, bytecode_hash: None };
         let acc_at3 = Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None };
 
+        let higher_acc_plain = Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None };
+
         // setup
+        tx.put::<tables::AccountChangeSet>(1, AccountBeforeTx { address: ADDRESS, info: None })
+            .unwrap();
         tx.put::<tables::AccountChangeSet>(
             3,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at3) },
+        )
+        .unwrap();
+        tx.put::<tables::AccountChangeSet>(
+            4,
+            AccountBeforeTx { address: HIGHER_ADDRESS, info: None },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSet>(
@@ -250,13 +302,15 @@ mod tests {
 
         // setup plain state
         tx.put::<tables::PlainAccountState>(ADDRESS, acc_plain).unwrap();
+        tx.put::<tables::PlainAccountState>(HIGHER_ADDRESS, higher_acc_plain).unwrap();
         tx.commit().unwrap();
 
         let tx = db.tx().unwrap();
 
         // run
+        assert_eq!(HistoricalStateProviderRef::new(&tx, 1).basic_account(ADDRESS), Ok(None));
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 2).basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
@@ -287,6 +341,12 @@ mod tests {
             HistoricalStateProviderRef::new(&tx, 16).basic_account(ADDRESS),
             Ok(Some(acc_plain))
         );
+
+        assert_eq!(HistoricalStateProviderRef::new(&tx, 1).basic_account(HIGHER_ADDRESS), Ok(None));
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 1000).basic_account(HIGHER_ADDRESS),
+            Ok(Some(higher_acc_plain))
+        );
     }
 
     #[test]
@@ -310,7 +370,17 @@ mod tests {
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
+        tx.put::<tables::StorageHistory>(
+            StorageShardedKey {
+                address: HIGHER_ADDRESS,
+                sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
+            },
+            BlockNumberList::new([4]).unwrap(),
+        )
+        .unwrap();
 
+        let higher_entry_plain = StorageEntry { key: STORAGE, value: U256::from(1000) };
+        let higher_entry_at4 = StorageEntry { key: STORAGE, value: U256::from(0) };
         let entry_plain = StorageEntry { key: STORAGE, value: U256::from(100) };
         let entry_at15 = StorageEntry { key: STORAGE, value: U256::from(15) };
         let entry_at10 = StorageEntry { key: STORAGE, value: U256::from(10) };
@@ -319,25 +389,21 @@ mod tests {
 
         // setup
         tx.put::<tables::StorageChangeSet>((3, ADDRESS).into(), entry_at3).unwrap();
+        tx.put::<tables::StorageChangeSet>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
         tx.put::<tables::StorageChangeSet>((7, ADDRESS).into(), entry_at7).unwrap();
         tx.put::<tables::StorageChangeSet>((10, ADDRESS).into(), entry_at10).unwrap();
         tx.put::<tables::StorageChangeSet>((15, ADDRESS).into(), entry_at15).unwrap();
 
         // setup plain state
         tx.put::<tables::PlainStorageState>(ADDRESS, entry_plain).unwrap();
+        tx.put::<tables::PlainStorageState>(HIGHER_ADDRESS, higher_entry_plain).unwrap();
         tx.commit().unwrap();
 
         let tx = db.tx().unwrap();
 
         // run
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 0).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at3.value))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 3).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at3.value))
-        );
+        assert_eq!(HistoricalStateProviderRef::new(&tx, 0).storage(ADDRESS, STORAGE), Ok(None));
+        assert_eq!(HistoricalStateProviderRef::new(&tx, 3).storage(ADDRESS, STORAGE), Ok(None));
         assert_eq!(
             HistoricalStateProviderRef::new(&tx, 4).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
@@ -361,6 +427,14 @@ mod tests {
         assert_eq!(
             HistoricalStateProviderRef::new(&tx, 16).storage(ADDRESS, STORAGE),
             Ok(Some(entry_plain.value))
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 1).storage(HIGHER_ADDRESS, STORAGE),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            Ok(Some(higher_entry_plain.value))
         );
     }
 }

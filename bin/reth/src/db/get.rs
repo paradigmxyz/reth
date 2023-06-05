@@ -95,8 +95,8 @@ mod tests {
     use super::*;
     use clap::{Args, Parser};
     use reth_db::{
-        models::storage_sharded_key::StorageShardedKey, HashedAccount, Headers, StorageHistory,
-        SyncStage,
+        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+        AccountHistory, HashedAccount, Headers, StorageHistory, SyncStage,
     };
     use reth_primitives::{H160, H256};
     use std::str::FromStr;
@@ -144,6 +144,18 @@ mod tests {
                     "0x0000000000000000000000000000000000000000000000000000000000000003"
                 )
                 .unwrap(),
+                18446744073709551615
+            )
+        );
+    }
+
+    #[test]
+    fn parse_json_key_for_account_history() {
+        let args = CommandParser::<Command>::parse_from(["reth", "AccountHistory", r#"{ "key": "0x4448e1273fd5a8bfdb9ed111e96889c960eee145", "highest_block_number": 18446744073709551615 }"#]).args;
+        assert_eq!(
+            args.table_key::<AccountHistory>().unwrap(),
+            ShardedKey::new(
+                H160::from_str("0x4448e1273fd5a8bfdb9ed111e96889c960eee145").unwrap(),
                 18446744073709551615
             )
         );

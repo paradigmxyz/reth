@@ -45,7 +45,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     }
 
     fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError> {
-        trace!(target: "blockchain_tree", ?block, "Inserting block");
+        trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
         self.tree.write().insert_block(block)
     }
 
@@ -106,6 +106,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         }
 
         None
+    }
+
+    fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders> {
+        trace!(target: "blockchain_tree", ?hash, "Returning lowest buffered ancestor");
+        self.tree.read().lowest_buffered_ancestor(&hash).cloned()
     }
 
     fn canonical_tip(&self) -> BlockNumHash {

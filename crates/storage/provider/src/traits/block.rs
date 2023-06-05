@@ -1,6 +1,7 @@
 use crate::{
     BlockIdProvider, BlockNumProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
 };
+use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, Header, SealedBlock, SealedHeader, H256,
@@ -63,6 +64,12 @@ pub trait BlockProvider:
     /// and the caller does not know the hash.
     fn pending_block(&self) -> Result<Option<SealedBlock>>;
 
+    /// Returns the pending block header if available
+    ///
+    /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
+    /// provider and the caller does not know the hash.
+    fn pending_header(&self) -> Result<Option<SealedHeader>>;
+
     /// Returns the ommers/uncle headers of the given block from the database.
     ///
     /// Returns `None` if block is not found.
@@ -81,6 +88,11 @@ pub trait BlockProvider:
     fn block_by_number(&self, num: u64) -> Result<Option<Block>> {
         self.block(num.into())
     }
+
+    /// Returns the block body indices with matching number from database.
+    ///
+    /// Returns `None` if block is not found.
+    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>>;
 }
 
 /// Trait extension for `BlockProvider`, for types that implement `BlockId` conversion.

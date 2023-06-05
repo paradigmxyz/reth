@@ -17,12 +17,12 @@ where
 {
     type Compressed = Vec<u8>;
 
-    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-        buf.put_slice(&parity_scale_codec::Encode::encode(&self))
-    }
-
     fn compress(self) -> Self::Compressed {
         parity_scale_codec::Encode::encode(&self)
+    }
+
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+        buf.put_slice(&parity_scale_codec::Encode::encode(&self))
     }
 }
 
