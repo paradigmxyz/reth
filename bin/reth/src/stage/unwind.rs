@@ -9,7 +9,7 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::Transaction;
+use reth_provider::DatabaseProvider;
 use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::{ops::RangeInclusive, sync::Arc};
 
@@ -68,13 +68,13 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        let mut tx = Transaction::new(&db)?;
+        let provider = DatabaseProvider::new_rw(db.tx_mut()?, self.chain.clone());
 
-        let blocks_and_execution = tx
+        let blocks_and_execution = provider
             .take_block_and_execution_range(&self.chain, range)
             .map_err(|err| eyre::eyre!("Transaction error on unwind: {err:?}"))?;
 
-        tx.commit()?;
+        provider.commit()?;
 
         println!("Unwound {} blocks", blocks_and_execution.len());
 
