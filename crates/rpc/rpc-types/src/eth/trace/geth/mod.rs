@@ -64,8 +64,8 @@ pub struct StructLog {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<Vec<String>>,
     /// Size of memory.
-    #[serde(rename = "memSize")]
-    pub memory_size: u64,
+    #[serde(default, rename = "memSize", skip_serializing_if = "Option::is_none")]
+    pub memory_size: Option<u64>,
     /// EVM stack
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<Vec<U256>>,
@@ -325,4 +325,16 @@ pub struct GethDebugTracingCallOptions {
     /// The block overrides to apply
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block_overrides: Option<BlockOverrides>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // <https://etherscan.io/tx/0xd01212e8ab48d2fd2ea9c4f33f8670fd1cf0cfb09d2e3c6ceddfaf54152386e5>
+    #[test]
+    fn serde_default_frame() {
+        let input = include_str!("../../../../test_data/default/structlogs_01.json");
+        let _frame: DefaultFrame = serde_json::from_str(input).unwrap();
+    }
 }

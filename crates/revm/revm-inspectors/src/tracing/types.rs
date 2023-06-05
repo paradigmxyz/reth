@@ -481,7 +481,7 @@ impl From<&CallTraceStep> for StructLog {
             // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
             return_data: None,
             storage: None,
-            memory_size: step.memory_size as u64,
+            memory_size: Some(step.memory_size as u64),
         }
     }
 }
