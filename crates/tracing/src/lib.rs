@@ -44,7 +44,7 @@ where
 {
     // TODO: Auto-detect
     let with_ansi = std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(true);
-    let with_target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(false);
+    let with_target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(true);
 
     let filter =
         EnvFilter::builder().with_default_directive(default_directive.into()).from_env_lossy();

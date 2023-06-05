@@ -72,7 +72,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let range = input.next_block_range();
         if range.is_empty() {
             let (from, to) = range.into_inner();
-            info!(target: "sync::stages::bodies", from, "Target block already reached");
+            info!(target: "sync::stages::bodies", from, "Target block already downloaded, skipping.");
             return Ok(ExecOutput::done(StageCheckpoint::new(to)))
         }
 

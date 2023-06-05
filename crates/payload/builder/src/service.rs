@@ -217,7 +217,7 @@ where
                         trace!(%id, "payload job finished");
                     }
                     Poll::Ready(Err(err)) => {
-                        warn!(?err, ?id, "payload job failed; resolving payload");
+                        warn!(?err, ?id, "Payload builder job failed; resolving payload");
                         this.metrics.inc_failed_jobs();
                         this.metrics.set_active_jobs(this.payload_jobs.len());
                     }
@@ -240,7 +240,7 @@ where
                         let mut res = Ok(id);
 
                         if this.contains_payload(id) {
-                            warn!(%id, parent = ?attr.parent, "payload job already in progress");
+                            warn!(%id, parent = ?attr.parent, "Payload job already in progress, ignoring.");
                         } else {
                             // no job for this payload yet, create one
                             match this.generator.new_payload_job(attr) {
@@ -251,7 +251,7 @@ where
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();
-                                    warn!(?err, %id, "failed to create payload job");
+                                    warn!(?err, %id, "Failed to create payload builder job");
                                     res = Err(err);
                                 }
                             }

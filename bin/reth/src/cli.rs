@@ -108,7 +108,7 @@ pub struct Logs {
     journald: bool,
 
     /// The filter to use for logs written to the log file.
-    #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "debug")]
+    #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "error")]
     filter: String,
 }
 
@@ -166,7 +166,7 @@ impl Verbosity {
                 _ => Level::TRACE,
             };
 
-            format!("reth::cli={level}").parse().unwrap()
+            format!("{level}").parse().unwrap()
         }
     }
 }
