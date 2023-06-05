@@ -6,7 +6,7 @@ use crate::{
     dirs::DataDirPath,
     prometheus_exporter,
     runner::CliContext,
-    utils::get_single_header,
+    utils::{genesis_value_parser, get_single_header, parse_socket_address},
     version::SHORT_VERSION,
 };
 use clap::Parser;
@@ -51,11 +51,7 @@ use reth_provider::{
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-    parse_socket_address,
-};
+use reth_staged_sync::utils::init::{init_db, init_genesis};
 use reth_stages::{
     prelude::*,
     stages::{

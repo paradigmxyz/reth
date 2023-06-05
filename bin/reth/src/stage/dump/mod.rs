@@ -1,14 +1,14 @@
 //! Database debugging tool
 use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::DbTool,
+    utils::{genesis_value_parser, DbTool},
 };
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
+use reth_staged_sync::utils::init::init_db;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 

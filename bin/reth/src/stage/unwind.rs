@@ -1,6 +1,9 @@
 //! Unwinding a certain block range
 
-use crate::dirs::{DataDirPath, MaybePlatformPath};
+use crate::{
+    dirs::{DataDirPath, MaybePlatformPath},
+    utils::genesis_value_parser,
+};
 use clap::{Parser, Subcommand};
 use reth_db::{
     database::Database,
@@ -10,7 +13,6 @@ use reth_db::{
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::Transaction;
-use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::{ops::RangeInclusive, sync::Arc};
 
 use reth_db::cursor::DbCursorRO;

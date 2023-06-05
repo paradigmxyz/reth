@@ -1,7 +1,7 @@
 //! Database debugging tool
 use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::DbTool,
+    utils::{genesis_value_parser, DbTool},
 };
 use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
@@ -9,7 +9,6 @@ use eyre::WrapErr;
 use human_bytes::human_bytes;
 use reth_db::{database::Database, tables};
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::sync::Arc;
 use tracing::error;
 

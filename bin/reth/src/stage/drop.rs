@@ -2,7 +2,7 @@
 use crate::{
     args::StageEnum,
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::DbTool,
+    utils::{genesis_value_parser, DbTool},
 };
 use clap::Parser;
 use reth_db::{
@@ -12,7 +12,7 @@ use reth_db::{
     transaction::DbTxMut,
 };
 use reth_primitives::{stage::StageId, ChainSpec};
-use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
+use reth_staged_sync::utils::init::insert_genesis_state;
 use std::sync::Arc;
 use tracing::info;
 

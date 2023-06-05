@@ -5,6 +5,7 @@ use crate::{
     args::{get_secret_key, NetworkArgs, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
+    utils::chain_spec_value_parser,
     version::SHORT_VERSION,
 };
 use clap::Parser;
@@ -16,7 +17,7 @@ use reth_primitives::{
     ChainSpec,
 };
 use reth_provider::{ShareableDatabase, Transaction};
-use reth_staged_sync::utils::{chainspec::chain_spec_value_parser, init::init_db};
+use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
         BodyStage, ExecutionStage, ExecutionStageThresholds, MerkleStage, SenderRecoveryStage,
