@@ -12,7 +12,6 @@ env:
   CARGO_TERM_COLOR: always
   DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
   DOCKER_USERNAME: ${{ github.repository_owner }}
-  DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build:
@@ -32,7 +31,7 @@ jobs:
 
       - name: Log in to Docker
         run: |
-          echo "${DOCKER_PASSWORD}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
 
       - name: Set up Docker builder
         run: |
