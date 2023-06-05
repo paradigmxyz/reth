@@ -523,6 +523,14 @@ where
         self.chain_info.last_forkchoice_update_received_at()
     }
 
+    fn on_transition_configuration_exchanged(&self) {
+        self.chain_info.on_transition_configuration_exchanged();
+    }
+
+    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
+        self.chain_info.last_transition_configuration_exchanged_at()
+    }
+
     fn set_canonical_head(&self, header: SealedHeader) {
         self.chain_info.set_canonical_head(header);
     }
