@@ -104,7 +104,7 @@ where
     ) -> Self {
         // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {
-            warn!(prev_percentile=?oracle_config.percentile, "Invalid configured gas price percentile, using 100 instead");
+            warn!(prev_percentile = ?oracle_config.percentile, "Invalid configured gas price percentile, assuming 100.");
             oracle_config.percentile = 100;
         }
 

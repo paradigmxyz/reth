@@ -277,19 +277,19 @@ impl RpcServerArgs {
         let server_config = self.rpc_server_config();
         let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
             if let Some(url) = handle.ipc_endpoint() {
-                info!(target: "reth::cli", url=%url, "IPC server started");
+                info!(target: "reth::cli", url=%url, "RPC IPC server started");
             }
             if let Some(addr) = handle.http_local_addr() {
-                info!(target: "reth::cli", url=%addr, "HTTP server started");
+                info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
             }
             if let Some(addr) = handle.ws_local_addr() {
-                info!(target: "reth::cli", url=%addr, "WS server started");
+                info!(target: "reth::cli", url=%addr, "RPC WS server started");
             }
             handle
         });
 
         let launch_auth = auth_module.start_server(auth_config).inspect(|_| {
-            info!(target: "reth::cli", "Started Auth server");
+            info!(target: "reth::cli", "RPC auth server started");
         });
 
         // launch servers concurrently

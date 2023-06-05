@@ -98,7 +98,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                         }
                         Err(err) => {
                             let (addresses, err) = *err;
-                            warn!(
+                            debug!(
                                 ?err,
                                 "failed to load missing changed accounts at new tip: {:?}",
                                 new_tip.hash
