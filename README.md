@@ -43,7 +43,7 @@ See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how 
 
 ### Build & Test
 
-Rust minimum required version to build this project is 1.65.0 published 02.11.2022. 
+Rust minimum required version to build this project is 1.70.0 published 01.06.2023. 
 
 See the book for detailed instructions on how to build from [source](https://paradigmxyz.github.io/reth/installation/source.html).
 
