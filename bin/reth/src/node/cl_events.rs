@@ -4,7 +4,7 @@ use futures::Stream;
 use reth_provider::CanonChainTracker;
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use tokio::time::Interval;
@@ -37,9 +37,8 @@ impl Stream for ConsensusLayerHealthEvents {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        if this.interval.poll_tick(cx).is_ready() {
-            // this ensures the interval will be polled periodically, see [Interval::poll_tick]
-            let _ = this.interval.poll_tick(cx);
+        loop {
+            ready!(this.interval.poll_tick(cx));
 
             return match (
                 this.canon_chain.last_exchanged_transition_configuration_timestamp(),
@@ -63,11 +62,9 @@ impl Stream for ConsensusLayerHealthEvents {
                         update.elapsed(),
                     )))
                 }
-                _ => Poll::Pending,
+                _ => continue,
             }
         }
-
-        Poll::Pending
     }
 }
 
