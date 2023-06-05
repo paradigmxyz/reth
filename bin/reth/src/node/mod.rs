@@ -352,7 +352,10 @@ impl Command {
             beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if self.debug.tip.is_none() {
-                Either::Left(ConsensusLayerHealthEvents::new(blockchain_db.clone()).map(Into::into))
+                Either::Left(
+                    ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
+                        .map(Into::into),
+                )
             } else {
                 Either::Right(stream::empty())
             }

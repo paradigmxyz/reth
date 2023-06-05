@@ -19,22 +19,19 @@ const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120)
 const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
 /// A Stream of [ConsensusLayerHealthEvent].
-pub struct ConsensusLayerHealthEvents<CC> {
+pub struct ConsensusLayerHealthEvents {
     interval: Interval,
-    canon_chain: CC,
+    canon_chain: Box<dyn CanonChainTracker>,
 }
 
-impl<CC> ConsensusLayerHealthEvents<CC> {
+impl ConsensusLayerHealthEvents {
     /// Creates a new [ConsensusLayerHealthEvents] with the given canonical chain tracker.
-    pub fn new(canon_chain: CC) -> Self {
+    pub fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
         Self { interval: tokio::time::interval(CHECK_INTERVAL), canon_chain }
     }
 }
 
-impl<CC> Stream for ConsensusLayerHealthEvents<CC>
-where
-    CC: CanonChainTracker + Unpin,
-{
+impl Stream for ConsensusLayerHealthEvents {
     type Item = ConsensusLayerHealthEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
