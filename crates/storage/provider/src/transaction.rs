@@ -480,7 +480,8 @@ where
 
         // Insert the blocks
         for block in blocks {
-            self.insert_block(block)?;
+            let (block, senders) = block.into_components();
+            insert_canonical_block(self.deref_mut(), block, Some(senders))?;
         }
 
         // Write state and changesets to the database.
@@ -489,6 +490,8 @@ where
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 
+        self.calculate_history_indices(first_number..=last_block_number)?;
+
         // Update pipeline progress
         self.update_pipeline_stages(new_tip_number)?;
 
@@ -496,23 +499,20 @@ where
     }
 
     /// Insert full block and make it canonical.
-    ///
-    /// This inserts the block and builds history related indexes. Once all blocks in a chain have
-    /// been committed, the state root needs to be inserted separately with
-    /// [`Transaction::insert_hashes`].
-    ///
-    /// # Note
-    ///
-    /// This assumes that we are using beacon consensus and that the block is post-merge, which
-    /// means that the block will have no block reward.
-    /// TODO do multi block insertion.
-    pub fn insert_block(&mut self, block: SealedBlockWithSenders) -> Result<(), TransactionError> {
-        // Header, Body, SenderRecovery, TD, TxLookup stages
-        let (block, senders) = block.into_components();
-        let range = block.number..=block.number;
+    pub fn insert_block(
+        &mut self,
+        block: SealedBlock,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(), TransactionError> {
+        insert_canonical_block(self.deref_mut(), block, senders)?;
+        Ok(())
+    }
 
-        insert_canonical_block(self.deref_mut(), block, Some(senders)).unwrap();
-
+    /// Read account/storage changesets and update account/storage history indices.
+    pub fn calculate_history_indices(
+        &mut self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<(), TransactionError> {
         // account history stage
         {
             let indices = self.get_account_transition_ids_from_changeset(range.clone())?;
@@ -1430,8 +1430,12 @@ mod test {
         insert_canonical_block, test_utils::blocks::*, ShareableDatabase, Transaction,
         TransactionsProvider,
     };
-    use reth_db::mdbx::test_utils::create_test_rw_db;
-    use reth_primitives::{ChainSpecBuilder, MAINNET};
+    use reth_db::{
+        mdbx::test_utils::create_test_rw_db,
+        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+        tables,
+    };
+    use reth_primitives::{ChainSpecBuilder, IntegerList, H160, MAINNET, U256};
     use std::{ops::DerefMut, sync::Arc};
 
     #[test]
@@ -1451,11 +1455,28 @@ mod test {
         let (block1, exec_res1) = data.blocks[0].clone();
         let (block2, exec_res2) = data.blocks[1].clone();
 
+        let acc1_shard_key = ShardedKey::new(H160([0x60; 20]), u64::MAX);
+        let acc2_shard_key = ShardedKey::new(H160([0x61; 20]), u64::MAX);
+        let storage1_shard_key =
+            StorageShardedKey::new(H160([0x60; 20]), U256::from(5).into(), u64::MAX);
+
         insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None).unwrap();
 
         assert_genesis_block(&tx, data.genesis);
 
         tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
+
+        assert_eq!(
+            tx.table::<tables::AccountHistory>().unwrap(),
+            vec![
+                (acc1_shard_key.clone(), IntegerList::new(vec![1]).unwrap()),
+                (acc2_shard_key.clone(), IntegerList::new(vec![1]).unwrap())
+            ]
+        );
+        assert_eq!(
+            tx.table::<tables::StorageHistory>().unwrap(),
+            vec![(storage1_shard_key.clone(), IntegerList::new(vec![1]).unwrap())]
+        );
 
         // get one block
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
@@ -1469,8 +1490,25 @@ mod test {
         assert_eq!(take, vec![(block1.clone(), exec_res1.clone())]);
         assert_genesis_block(&tx, genesis.clone());
 
+        // check if history is empty.
+        assert_eq!(tx.table::<tables::AccountHistory>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::StorageHistory>().unwrap(), vec![]);
+
         tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
         tx.append_blocks_with_post_state(vec![block2.clone()], exec_res2.clone()).unwrap();
+
+        // check history of two blocks
+        assert_eq!(
+            tx.table::<tables::AccountHistory>().unwrap(),
+            vec![
+                (acc1_shard_key, IntegerList::new(vec![1, 2]).unwrap()),
+                (acc2_shard_key, IntegerList::new(vec![1]).unwrap())
+            ]
+        );
+        assert_eq!(
+            tx.table::<tables::StorageHistory>().unwrap(),
+            vec![(storage1_shard_key, IntegerList::new(vec![1, 2]).unwrap())]
+        );
         tx.commit().unwrap();
 
         // Check that transactions map onto blocks correctly.
