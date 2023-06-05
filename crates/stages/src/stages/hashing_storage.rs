@@ -12,7 +12,6 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId, StorageHashingCheckpoint},
     StorageEntry,
 };
-use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
@@ -43,9 +42,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        let tx = provider.tx_mut();
         let range = input.next_block_range();
         if range.is_empty() {
             return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
@@ -159,12 +159,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         } else {
             // Aggregate all changesets and and make list of storages that have been
             // changed.
-            let lists = tx.get_addresses_and_keys_of_changed_storages(from_block..=to_block)?;
+            let lists =
+                provider.get_addresses_and_keys_of_changed_storages(from_block..=to_block)?;
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
-            let storages = tx.get_plainstate_storages(lists.into_iter())?;
-            tx.insert_storage_for_hashing(storages.into_iter())?;
+            let storages = provider.get_plainstate_storages(lists.into_iter())?;
+            provider.insert_storage_for_hashing(storages.into_iter())?;
         }
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
@@ -178,13 +179,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
+        provider.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
         info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
