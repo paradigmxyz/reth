@@ -5,7 +5,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber,
 };
-use reth_provider::Transaction;
+use reth_provider::DatabaseProviderRW;
 use std::{
     cmp::{max, min},
     ops::RangeInclusive,
@@ -140,14 +140,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 }
