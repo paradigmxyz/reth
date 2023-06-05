@@ -415,40 +415,40 @@ where
     async fn debug_trace_block(
         &self,
         rlp_block: Bytes,
-        opts: GethDebugTracingOptions,
+        opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_raw_block(self, rlp_block, opts).await?)
+        Ok(DebugApi::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceBlockByHash`
     async fn debug_trace_block_by_hash(
         &self,
         block: H256,
-        opts: GethDebugTracingOptions,
+        opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_block(self, block.into(), opts).await?)
+        Ok(DebugApi::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceBlockByNumber`
     async fn debug_trace_block_by_number(
         &self,
         block: BlockNumberOrTag,
-        opts: GethDebugTracingOptions,
+        opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_block(self, block.into(), opts).await?)
+        Ok(DebugApi::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceTransaction`
     async fn debug_trace_transaction(
         &self,
         tx_hash: H256,
-        opts: GethDebugTracingOptions,
+        opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTraceFrame> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts).await?)
+        Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceCall`
@@ -456,10 +456,11 @@ where
         &self,
         request: CallRequest,
         block_number: Option<BlockId>,
-        opts: GethDebugTracingCallOptions,
+        opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTraceFrame> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call(self, request, block_number, opts).await?)
+        Ok(DebugApi::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
+            .await?)
     }
 }
 
