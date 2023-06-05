@@ -76,6 +76,10 @@ impl<'a> DbTx<'a> for TxMock {
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
         todo!()
     }
+
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
+        todo!()
+    }
 }
 
 impl<'a> DbTxMut<'a> for TxMock {

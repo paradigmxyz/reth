@@ -6,13 +6,15 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    DatabaseError,
 };
 use reth_primitives::{
     rpc_utils::keccak256,
-    stage::{StageCheckpoint, StageId},
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     BlockNumber, TransactionSignedNoHash, TxNumber, H256,
 };
 use reth_provider::Transaction;
+use std::ops::Deref;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::*;
@@ -145,7 +147,11 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { done: is_final_range, checkpoint: StageCheckpoint::new(end_block) })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(end_block)
+                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -179,7 +185,10 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_to)
+                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+        })
     }
 }
 
@@ -195,6 +204,15 @@ impl From<TransactionLookupStageError> for StageError {
     }
 }
 
+fn stage_checkpoint<DB: Database>(
+    tx: &Transaction<'_, DB>,
+) -> Result<EntitiesCheckpoint, DatabaseError> {
+    Ok(EntitiesCheckpoint {
+        processed: tx.deref().entries::<tables::TxHashNumber>()? as u64,
+        total: tx.deref().entries::<tables::Transactions>()? as u64,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,7 +222,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
-    use reth_primitives::{BlockNumber, SealedBlock, H256};
+    use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
 
     // Implement stage test suite.
     stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
@@ -235,8 +253,14 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
-                if block_number == previous_stage
+            Ok(ExecOutput {checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: true }) if block_number == previous_stage && processed == total &&
+                total == runner.tx.table::<tables::Transactions>().unwrap().len() as u64
         );
 
         // Validate the stage execution
@@ -263,8 +287,15 @@ mod tests {
         let expected_progress = stage_progress + threshold;
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: false })
-                if block_number == expected_progress
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: false }) if block_number == expected_progress &&
+                processed == runner.tx.table::<tables::TxHashNumber>().unwrap().len() as u64 &&
+                total == runner.tx.table::<tables::Transactions>().unwrap().len() as u64
         );
 
         // Execute second time
@@ -275,8 +306,14 @@ mod tests {
         let result = runner.execute(second_input).await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
-                if block_number == previous_stage
+            Ok(ExecOutput {checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: true }) if block_number == previous_stage && processed == total &&
+                total == runner.tx.table::<tables::Transactions>().unwrap().len() as u64
         );
 
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
@@ -340,7 +377,7 @@ mod tests {
             let stage_progress = input.checkpoint().block_number;
             let end = input.previous_stage_checkpoint().block_number;
 
-            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(stage_progress + 1..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }

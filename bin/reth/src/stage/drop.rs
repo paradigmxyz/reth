@@ -63,6 +63,13 @@ impl Command {
 
         tool.db.update(|tx| {
             match &self.stage {
+                StageEnum::Senders => {
+                    tx.clear::<tables::TxSenders>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::SenderRecovery.to_string(),
+                        Default::default(),
+                    )?;
+                }
                 StageEnum::Execution => {
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;
@@ -75,6 +82,20 @@ impl Command {
                         Default::default(),
                     )?;
                     insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
+                }
+                StageEnum::AccountHashing => {
+                    tx.clear::<tables::HashedAccount>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::AccountHashing.to_string(),
+                        Default::default(),
+                    )?;
+                }
+                StageEnum::StorageHashing => {
+                    tx.clear::<tables::HashedStorage>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::StorageHashing.to_string(),
+                        Default::default(),
+                    )?;
                 }
                 StageEnum::Hashing => {
                     // Clear hashed accounts

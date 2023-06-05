@@ -3,7 +3,11 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives::{
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StageUnitCheckpoint},
+    stage::{
+        AccountHashingCheckpoint, EntitiesCheckpoint, ExecutionCheckpoint, HeadersCheckpoint,
+        IndexHistoryCheckpoint, StageCheckpoint, StageId, StageUnitCheckpoint,
+        StorageHashingCheckpoint,
+    },
     BlockNumber,
 };
 use std::collections::HashMap;
@@ -39,13 +43,19 @@ impl Metrics {
         stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
         let (processed, total) = match checkpoint.stage_checkpoint {
-            Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint { processed, total })) => {
-                (processed, total)
-            }
-            _ => (checkpoint.block_number, max_block_number),
+            Some(
+                StageUnitCheckpoint::Account(AccountHashingCheckpoint { progress, .. }) |
+                StageUnitCheckpoint::Storage(StorageHashingCheckpoint { progress, .. }) |
+                StageUnitCheckpoint::Entities(progress @ EntitiesCheckpoint { .. }) |
+                StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress, .. }) |
+                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress, .. }) |
+                StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint { progress, .. }),
+            ) => (progress.processed, Some(progress.total)),
+            None => (checkpoint.block_number, max_block_number),
         };
 
         stage_metrics.entities_processed.set(processed as f64);
+
         if let Some(total) = total {
             stage_metrics.entities_total.set(total as f64);
         }

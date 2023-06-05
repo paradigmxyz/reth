@@ -1,11 +1,14 @@
 use crate::{
     trie::{hash_builder::HashBuilderState, StoredSubNode},
-    Address, BlockNumber, TxNumber, H256,
+    Address, BlockNumber, H256,
 };
 use bytes::{Buf, BufMut};
 use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{Display, Formatter},
+    ops::RangeInclusive,
+};
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -101,26 +104,56 @@ impl Compact for MerkleCheckpoint {
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct AccountHashingCheckpoint {
-    /// The next account to start hashing from
+    /// The next account to start hashing from.
     pub address: Option<Address>,
-    /// Start transition id
-    pub from: u64,
-    /// Last transition id
-    pub to: u64,
+    /// Block range which this checkpoint is valid for.
+    pub block_range: CheckpointBlockRange,
+    /// Progress measured in accounts.
+    pub progress: EntitiesCheckpoint,
 }
 
 /// Saves the progress of StorageHashing stage.
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct StorageHashingCheckpoint {
-    /// The next account to start hashing from
+    /// The next account to start hashing from.
     pub address: Option<Address>,
-    /// The next storage slot to start hashing from
+    /// The next storage slot to start hashing from.
     pub storage: Option<H256>,
-    /// Start transition id
-    pub from: u64,
-    /// Last transition id
-    pub to: u64,
+    /// Block range which this checkpoint is valid for.
+    pub block_range: CheckpointBlockRange,
+    /// Progress measured in storage slots.
+    pub progress: EntitiesCheckpoint,
+}
+
+/// Saves the progress of Execution stage.
+#[main_codec]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct ExecutionCheckpoint {
+    /// Block range which this checkpoint is valid for.
+    pub block_range: CheckpointBlockRange,
+    /// Progress measured in gas.
+    pub progress: EntitiesCheckpoint,
+}
+
+/// Saves the progress of Headers stage.
+#[main_codec]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct HeadersCheckpoint {
+    /// Block range which this checkpoint is valid for.
+    pub block_range: CheckpointBlockRange,
+    /// Progress measured in gas.
+    pub progress: EntitiesCheckpoint,
+}
+
+/// Saves the progress of Index History stages.
+#[main_codec]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct IndexHistoryCheckpoint {
+    /// Block range which this checkpoint is valid for.
+    pub block_range: CheckpointBlockRange,
+    /// Progress measured in changesets.
+    pub progress: EntitiesCheckpoint,
 }
 
 /// Saves the progress of abstract stage iterating over or downloading entities.
@@ -130,16 +163,35 @@ pub struct EntitiesCheckpoint {
     /// Number of entities already processed.
     pub processed: u64,
     /// Total entities to be processed.
-    pub total: Option<u64>,
+    pub total: u64,
 }
 
 impl Display for EntitiesCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(total) = self.total {
-            write!(f, "{:.1}%", 100.0 * self.processed as f64 / total as f64)
-        } else {
-            write!(f, "{}", self.processed)
-        }
+        write!(f, "{:.1}%", 100.0 * self.processed as f64 / self.total as f64)
+    }
+}
+
+/// Saves the block range. Usually, it's used to check the validity of some stage checkpoint across
+/// multiple executions.
+#[main_codec]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct CheckpointBlockRange {
+    /// The first block of the range, inclusive.
+    pub from: BlockNumber,
+    /// The last block of the range, inclusive.
+    pub to: BlockNumber,
+}
+
+impl From<RangeInclusive<BlockNumber>> for CheckpointBlockRange {
+    fn from(range: RangeInclusive<BlockNumber>) -> Self {
+        Self { from: *range.start(), to: *range.end() }
+    }
+}
+
+impl From<&RangeInclusive<BlockNumber>> for CheckpointBlockRange {
+    fn from(range: &RangeInclusive<BlockNumber>) -> Self {
+        Self { from: *range.start(), to: *range.end() }
     }
 }
 
@@ -183,6 +235,36 @@ impl StageCheckpoint {
         }
     }
 
+    /// Returns the execution stage checkpoint, if any.
+    pub fn execution_stage_checkpoint(&self) -> Option<ExecutionCheckpoint> {
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::Execution(checkpoint)) => Some(checkpoint),
+            _ => None,
+        }
+    }
+
+    /// Returns the headers stage checkpoint, if any.
+    pub fn headers_stage_checkpoint(&self) -> Option<HeadersCheckpoint> {
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::Headers(checkpoint)) => Some(checkpoint),
+            _ => None,
+        }
+    }
+
+    /// Returns the index history stage checkpoint, if any.
+    pub fn index_history_stage_checkpoint(&self) -> Option<IndexHistoryCheckpoint> {
+        match self.stage_checkpoint {
+            Some(StageUnitCheckpoint::IndexHistory(checkpoint)) => Some(checkpoint),
+            _ => None,
+        }
+    }
+
+    /// Sets the block number.
+    pub fn with_block_number(mut self, block_number: BlockNumber) -> Self {
+        self.block_number = block_number;
+        self
+    }
+
     /// Sets the stage checkpoint to account hashing.
     pub fn with_account_hashing_stage_checkpoint(
         mut self,
@@ -206,13 +288,48 @@ impl StageCheckpoint {
         self.stage_checkpoint = Some(StageUnitCheckpoint::Entities(checkpoint));
         self
     }
+
+    /// Sets the stage checkpoint to execution.
+    pub fn with_execution_stage_checkpoint(mut self, checkpoint: ExecutionCheckpoint) -> Self {
+        self.stage_checkpoint = Some(StageUnitCheckpoint::Execution(checkpoint));
+        self
+    }
+
+    /// Sets the stage checkpoint to headers.
+    pub fn with_headers_stage_checkpoint(mut self, checkpoint: HeadersCheckpoint) -> Self {
+        self.stage_checkpoint = Some(StageUnitCheckpoint::Headers(checkpoint));
+        self
+    }
+
+    /// Sets the stage checkpoint to index history.
+    pub fn with_index_history_stage_checkpoint(
+        mut self,
+        checkpoint: IndexHistoryCheckpoint,
+    ) -> Self {
+        self.stage_checkpoint = Some(StageUnitCheckpoint::IndexHistory(checkpoint));
+        self
+    }
 }
 
 impl Display for StageCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::Entities(stage_checkpoint)) => stage_checkpoint.fmt(f),
-            _ => write!(f, "{}", self.block_number),
+            Some(
+                StageUnitCheckpoint::Account(AccountHashingCheckpoint {
+                    progress: entities, ..
+                }) |
+                StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+                    progress: entities, ..
+                }) |
+                StageUnitCheckpoint::Entities(entities) |
+                StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }) |
+                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }) |
+                StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
+                    progress: entities,
+                    ..
+                }),
+            ) => entities.fmt(f),
+            None => write!(f, "{}", self.block_number),
         }
     }
 }
@@ -223,14 +340,18 @@ impl Display for StageCheckpoint {
 #[derive_arbitrary(compact)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum StageUnitCheckpoint {
-    /// Saves the progress of transaction-indexed stages.
-    Transaction(TxNumber),
     /// Saves the progress of AccountHashing stage.
     Account(AccountHashingCheckpoint),
     /// Saves the progress of StorageHashing stage.
     Storage(StorageHashingCheckpoint),
     /// Saves the progress of abstract stage iterating over or downloading entities.
     Entities(EntitiesCheckpoint),
+    /// Saves the progress of Execution stage.
+    Execution(ExecutionCheckpoint),
+    /// Saves the progress of Headers stage.
+    Headers(HeadersCheckpoint),
+    /// Saves the progress of Index History stage.
+    IndexHistory(IndexHistoryCheckpoint),
 }
 
 impl Compact for StageUnitCheckpoint {
@@ -239,20 +360,28 @@ impl Compact for StageUnitCheckpoint {
         B: BufMut + AsMut<[u8]>,
     {
         match self {
-            StageUnitCheckpoint::Transaction(data) => {
+            StageUnitCheckpoint::Account(data) => {
                 buf.put_u8(0);
                 1 + data.to_compact(buf)
             }
-            StageUnitCheckpoint::Account(data) => {
+            StageUnitCheckpoint::Storage(data) => {
                 buf.put_u8(1);
                 1 + data.to_compact(buf)
             }
-            StageUnitCheckpoint::Storage(data) => {
+            StageUnitCheckpoint::Entities(data) => {
                 buf.put_u8(2);
                 1 + data.to_compact(buf)
             }
-            StageUnitCheckpoint::Entities(data) => {
+            StageUnitCheckpoint::Execution(data) => {
                 buf.put_u8(3);
+                1 + data.to_compact(buf)
+            }
+            StageUnitCheckpoint::Headers(data) => {
+                buf.put_u8(4);
+                1 + data.to_compact(buf)
+            }
+            StageUnitCheckpoint::IndexHistory(data) => {
+                buf.put_u8(5);
                 1 + data.to_compact(buf)
             }
         }
@@ -264,20 +393,28 @@ impl Compact for StageUnitCheckpoint {
     {
         match buf[0] {
             0 => {
-                let (data, buf) = TxNumber::from_compact(&buf[1..], buf.len() - 1);
-                (Self::Transaction(data), buf)
-            }
-            1 => {
                 let (data, buf) = AccountHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Account(data), buf)
             }
-            2 => {
+            1 => {
                 let (data, buf) = StorageHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Storage(data), buf)
             }
-            3 => {
+            2 => {
                 let (data, buf) = EntitiesCheckpoint::from_compact(&buf[1..], buf.len() - 1);
                 (Self::Entities(data), buf)
+            }
+            3 => {
+                let (data, buf) = ExecutionCheckpoint::from_compact(&buf[1..], buf.len() - 1);
+                (Self::Execution(data), buf)
+            }
+            4 => {
+                let (data, buf) = HeadersCheckpoint::from_compact(&buf[1..], buf.len() - 1);
+                (Self::Headers(data), buf)
+            }
+            5 => {
+                let (data, buf) = IndexHistoryCheckpoint::from_compact(&buf[1..], buf.len() - 1);
+                (Self::IndexHistory(data), buf)
             }
             _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
         }
@@ -314,17 +451,40 @@ mod tests {
     fn stage_unit_checkpoint_roundtrip() {
         let mut rng = rand::thread_rng();
         let checkpoints = vec![
-            StageUnitCheckpoint::Transaction(rng.gen()),
             StageUnitCheckpoint::Account(AccountHashingCheckpoint {
                 address: Some(Address::from_low_u64_be(rng.gen())),
-                from: rng.gen(),
-                to: rng.gen(),
+                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
+                progress: EntitiesCheckpoint {
+                    processed: rng.gen::<u32>() as u64,
+                    total: u32::MAX as u64 + rng.gen::<u64>(),
+                },
             }),
             StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                 address: Some(Address::from_low_u64_be(rng.gen())),
                 storage: Some(H256::from_low_u64_be(rng.gen())),
-                from: rng.gen(),
-                to: rng.gen(),
+                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
+                progress: EntitiesCheckpoint {
+                    processed: rng.gen::<u32>() as u64,
+                    total: u32::MAX as u64 + rng.gen::<u64>(),
+                },
+            }),
+            StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                processed: rng.gen::<u32>() as u64,
+                total: u32::MAX as u64 + rng.gen::<u64>(),
+            }),
+            StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
+                progress: EntitiesCheckpoint {
+                    processed: rng.gen::<u32>() as u64,
+                    total: u32::MAX as u64 + rng.gen::<u64>(),
+                },
+            }),
+            StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
+                progress: EntitiesCheckpoint {
+                    processed: rng.gen::<u32>() as u64,
+                    total: u32::MAX as u64 + rng.gen::<u64>(),
+                },
             }),
         ];
 

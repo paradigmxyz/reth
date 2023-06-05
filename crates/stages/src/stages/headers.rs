@@ -11,7 +11,9 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
+    stage::{
+        CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
+    },
     BlockHashOrNumber, BlockNumber, SealedHeader, H256,
 };
 use reth_provider::Transaction;
@@ -249,30 +251,42 @@ where
             None
         };
 
-        let mut stage_checkpoint = current_checkpoint
-            .entities_stage_checkpoint()
-            .unwrap_or(EntitiesCheckpoint {
-            // If for some reason (e.g. due to DB migration) we don't have `processed`
-            // in the middle of headers sync, set it to the local head block number +
-            // number of block already filled in the gap.
-            processed: local_head +
-                (target_block_number.unwrap_or_default() - tip_block_number.unwrap_or_default()),
-            // Shouldn't fail because on the first iteration, we download the header for missing
-            // tip, and use its block number.
-            total: target_block_number.or_else(|| {
-                warn!(target: "sync::stages::headers", ?tip, "No downloaded header for tip found");
-                // Safe, because `Display` impl for `EntitiesCheckpoint` will fallback to displaying
-                // just `processed`
-                None
-            }),
-        });
+        let mut stage_checkpoint = match current_checkpoint.headers_stage_checkpoint() {
+            // If checkpoint block range matches our range, we take the previously used
+            // stage checkpoint as-is.
+            Some(stage_checkpoint)
+                if stage_checkpoint.block_range.from == input.checkpoint().block_number =>
+            {
+                stage_checkpoint
+            }
+            // Otherwise, we're on the first iteration of new gap sync, so we recalculate the number
+            // of already processed and total headers.
+            // `target_block_number` is guaranteed to be `Some`, because on the first iteration
+            // we download the header for missing tip and use its block number.
+            _ => {
+                HeadersCheckpoint {
+                    block_range: CheckpointBlockRange {
+                        from: input.checkpoint().block_number,
+                        to: target_block_number.expect("No downloaded header for tip found"),
+                    },
+                    progress: EntitiesCheckpoint {
+                        // Set processed to the local head block number + number
+                        // of block already filled in the gap.
+                        processed: local_head +
+                            (target_block_number.unwrap_or_default() -
+                                tip_block_number.unwrap_or_default()),
+                        total: target_block_number.expect("No downloaded header for tip found"),
+                    },
+                }
+            }
+        };
 
         // Total headers can be updated if we received new tip from the network, and need to fill
         // the local gap.
         if let Some(target_block_number) = target_block_number {
-            stage_checkpoint.total = Some(target_block_number);
+            stage_checkpoint.progress.total = target_block_number;
         }
-        stage_checkpoint.processed += downloaded_headers.len() as u64;
+        stage_checkpoint.progress.processed += downloaded_headers.len() as u64;
 
         // Write the headers to db
         self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
@@ -286,12 +300,12 @@ where
             );
             Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(checkpoint)
-                    .with_entities_stage_checkpoint(stage_checkpoint),
+                    .with_headers_stage_checkpoint(stage_checkpoint),
                 done: true,
             })
         } else {
             Ok(ExecOutput {
-                checkpoint: current_checkpoint.with_entities_stage_checkpoint(stage_checkpoint),
+                checkpoint: current_checkpoint.with_headers_stage_checkpoint(stage_checkpoint),
                 done: false,
             })
         }
@@ -311,14 +325,20 @@ where
         let unwound_headers = tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         let stage_checkpoint =
-            input.checkpoint.entities_stage_checkpoint().map(|checkpoint| EntitiesCheckpoint {
-                processed: checkpoint.processed.saturating_sub(unwound_headers as u64),
-                total: None,
+            input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
+                block_range: stage_checkpoint.block_range,
+                progress: EntitiesCheckpoint {
+                    processed: stage_checkpoint
+                        .progress
+                        .processed
+                        .saturating_sub(unwound_headers as u64),
+                    total: stage_checkpoint.progress.total,
+                },
             });
 
         let mut checkpoint = StageCheckpoint::new(input.unwind_to);
         if let Some(stage_checkpoint) = stage_checkpoint {
-            checkpoint = checkpoint.with_entities_stage_checkpoint(stage_checkpoint);
+            checkpoint = checkpoint.with_headers_stage_checkpoint(stage_checkpoint);
         }
 
         info!(target: "sync::stages::headers", to_block = input.unwind_to, checkpoint = input.unwind_to, is_final_range = true, "Unwind iteration finished");
@@ -550,14 +570,20 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!( result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
-            stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                processed,
-                total: Some(total),
+            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                block_range: CheckpointBlockRange {
+                    from,
+                    to
+                },
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total,
+                }
             }))
-        }, done: true }) if block_number == tip.number
+        }, done: true }) if block_number == tip.number &&
+            from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
-            && processed == checkpoint + headers.len() as u64 - 1
-            && total == tip.number);
+            processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 
@@ -638,13 +664,19 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
-            stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                processed,
-                total: Some(total),
+            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                block_range: CheckpointBlockRange {
+                    from,
+                    to
+                },
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total,
+                }
             }))
         }, done: false }) if block_number == checkpoint &&
-            processed == checkpoint + 500 &&
-            total == tip.number);
+            from == checkpoint && to == previous_stage &&
+            processed == checkpoint + 500 && total == tip.number);
 
         runner.client.clear().await;
         runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
@@ -655,14 +687,20 @@ mod tests {
 
         assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
-            stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                processed,
-                total: Some(total),
+            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                block_range: CheckpointBlockRange {
+                    from,
+                    to
+                },
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total,
+                }
             }))
-        }, done: true }) if block_number == tip.number
+        }, done: true }) if block_number == tip.number &&
+            from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
-            && processed == checkpoint + headers.len() as u64 - 1
-            && total == tip.number);
+            processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 }
