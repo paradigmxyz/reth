@@ -137,7 +137,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     ) -> Result<ExecOutput, StageError> {
         let range = input.next_block_range();
         if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
+            return Ok(ExecOutput::done(input.checkpoint().with_block_number(*range.end())))
         }
         let (from_block, to_block) = range.into_inner();
 

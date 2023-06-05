@@ -45,11 +45,10 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let target = input.previous_stage_checkpoint();
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
-            return Ok(ExecOutput::done(target))
+            return Ok(ExecOutput::done(input.checkpoint().with_block_number(*range.end())))
         }
 
         let mut stage_checkpoint = stage_checkpoint(tx, input.checkpoint(), &range)?;

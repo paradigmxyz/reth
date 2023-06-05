@@ -73,7 +73,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         if range.is_empty() {
             let (from, to) = range.into_inner();
             info!(target: "sync::stages::bodies", from, "Target block already reached");
-            return Ok(ExecOutput::done(StageCheckpoint::new(to)))
+            return Ok(ExecOutput::done(input.checkpoint().with_block_number(to)))
         }
 
         // Update the header range on the downloader
