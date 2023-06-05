@@ -3,8 +3,8 @@ use reth_db::{
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
+    DatabaseError,
 };
-use reth_interfaces::Result;
 use reth_primitives::{Address, SealedBlock};
 
 /// Insert block data into corresponding tables. Used mainly for testing & internal tooling.
@@ -22,7 +22,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block: SealedBlock,
     senders: Option<Vec<Address>>,
-) -> Result<StoredBlockBodyIndices> {
+) -> Result<StoredBlockBodyIndices, DatabaseError> {
     let block_number = block.number;
     tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
     // Put header with canonical hashes.
@@ -98,6 +98,6 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block: SealedBlock,
     senders: Option<Vec<Address>>,
-) -> Result<StoredBlockBodyIndices> {
+) -> Result<StoredBlockBodyIndices, DatabaseError> {
     insert_block(tx, block, senders)
 }
