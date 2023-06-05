@@ -196,23 +196,22 @@ where
         f(state)
     }
 
-    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
-        // TODO handle Pending state's env
-        match at {
-            BlockId::Number(BlockNumberOrTag::Pending) => {
-                // This should perhaps use the latest env settings and update block specific
-                // settings like basefee/number
-                Err(EthApiError::Unsupported("pending state not implemented yet"))
+    async fn evm_env_at(&self, mut at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
+        if at.is_pending() {
+            if let Some(pending) = self.client().pending_header()? {
+                let mut cfg = CfgEnv::default();
+                let mut block_env = BlockEnv::default();
+                self.client().fill_block_env_with_header(&mut block_env, &pending.header)?;
+                self.client().fill_cfg_env_with_header(&mut cfg, &pending.header)?;
+                return Ok((cfg, block_env, pending.hash.into()))
             }
-            hash_or_num => {
-                let block_hash = self
-                    .client()
-                    .block_hash_for_id(hash_or_num)?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
-                Ok((cfg, env, block_hash.into()))
-            }
+            // No pending block, use latest
+            at = BlockId::Number(BlockNumberOrTag::Latest);
         }
+        let block_hash =
+            self.client().block_hash_for_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
+        Ok((cfg, env, block_hash.into()))
     }
 
     async fn evm_env_for_raw_block(&self, header: &Header) -> EthResult<(CfgEnv, BlockEnv)> {
