@@ -19,7 +19,7 @@ use reth_eth_wire::{
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
-use reth_metrics::common::metered_sender::MeteredSender;
+use reth_metrics::common::mpsc::MeteredSender;
 use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
 use std::{
