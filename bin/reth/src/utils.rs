@@ -12,14 +12,17 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
-use std::{path::Path, time::Duration};
+use std::{
+    env::VarError,
+    path::{Path, PathBuf},
+};
 use tracing::info;
 
 /// Get a single header from network
 pub async fn get_single_header<Client>(
     client: Client,
     id: BlockHashOrNumber,
-) -> eyre::Result<SealedHeader>
+) -> Result<SealedHeader>
 where
     Client: HeadersClient,
 {
@@ -104,8 +107,8 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     }
 }
 
-/// Helper to parse a [Duration] from seconds
-pub fn parse_duration_from_secs(arg: &str) -> Result<Duration, std::num::ParseIntError> {
-    let seconds = arg.parse()?;
-    Ok(Duration::from_secs(seconds))
+/// Parses a user-specified path with support for environment variables and common shorthands (e.g.
+/// ~ for the user's home directory).
+pub fn parse_path(value: &str) -> Result<PathBuf, shellexpand::LookupError<VarError>> {
+    shellexpand::full(value).map(|path| PathBuf::from(path.into_owned()))
 }

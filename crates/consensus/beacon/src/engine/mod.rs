@@ -1238,9 +1238,7 @@ mod tests {
         test_utils::{NoopFullBlockClient, TestConsensus},
     };
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{
-        stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET,
-    };
+    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
         providers::BlockchainProvider, test_utils::TestExecutorFactory, ShareableDatabase,
         Transaction,
@@ -1516,10 +1514,7 @@ mod tests {
     fn insert_blocks<'a, DB: Database>(db: &DB, mut blocks: impl Iterator<Item = &'a SealedBlock>) {
         let mut transaction = Transaction::new(db).unwrap();
         blocks
-            .try_for_each(|b| {
-                transaction
-                    .insert_block(SealedBlockWithSenders::new(b.clone(), Vec::default()).unwrap())
-            })
+            .try_for_each(|b| transaction.insert_block(b.clone(), None))
             .expect("failed to insert");
         transaction.commit().unwrap();
     }
