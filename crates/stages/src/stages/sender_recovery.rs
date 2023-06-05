@@ -148,37 +148,27 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Iterate over channels and append the sender in the order that they are received.
         for mut channel in channels {
             while let Some(recovered) = channel.recv().await {
-                let (tx_id, sender) = recovered.map_err(|boxed| match *boxed {
-                    SenderRecoveryStageError::FailedRecovery(err) => {
-                        // we need this so we can report the bad block
-                        let mut tx_block_cursor = match tx.cursor_read::<tables::TransactionBlock>()
-                        {
-                            Ok(cursor) => cursor,
-                            Err(e) => return e.into(),
-                        };
+                let (tx_id, sender) = match recovered {
+                    Ok(result) => result,
+                    Err(error) => {
+                        match *error {
+                            SenderRecoveryStageError::FailedRecovery(err) => {
+                                // get the block number for the bad transaction
+                                let block_number = tx
+                                    .get::<tables::TransactionBlock>(err.tx)?
+                                    .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
 
-                        // get the block number for the bad transaction
-                        // TODO: remove expect
-                        let block_number =
-                            match tx_block_cursor.seek(err.tx).map(|b| b.map(|(_, bn)| bn)) {
-                                Ok(Some(num)) => num,
-                                Ok(None) => {
-                                    return ProviderError::BlockNumberForTransactionIndexNotFound
-                                        .into()
-                                }
-                                Err(e) => return e.into(),
-                            };
-
-                        // fetch the sealed header so we can use it in the sender recovery unwind
-                        let sealed_header = match tx.get_sealed_header(block_number) {
-                            Ok(header_hash) => header_hash,
-                            Err(e) => return e.into(),
-                        };
-
-                        FailedSenderRecoveryError::with_block(sealed_header)
+                                // fetch the sealed header so we can use it in the sender recovery
+                                // unwind
+                                let sealed_header = tx.get_sealed_header(block_number)?;
+                                return Err(
+                                    FailedSenderRecoveryError::with_block(sealed_header).into()
+                                )
+                            }
+                            SenderRecoveryStageError::StageError(err) => return Err(err.into()),
+                        }
                     }
-                    SenderRecoveryStageError::StageError(err) => err,
-                })?;
+                };
                 senders_cursor.append(tx_id, sender)?;
             }
         }
