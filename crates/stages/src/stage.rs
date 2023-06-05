@@ -14,8 +14,8 @@ use std::{
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
-    /// The stage that was run before the current stage and the checkpoint it reached.
-    pub previous_stage: Option<(StageId, StageCheckpoint)>,
+    /// The stage that was run before the current stage and the block number it reached.
+    pub previous_stage: Option<(StageId, BlockNumber)>,
     /// The checkpoint of this stage the last time it was executed.
     pub checkpoint: Option<StageCheckpoint>,
 }
@@ -27,8 +27,8 @@ impl ExecInput {
     }
 
     /// Return the progress of the previous stage or default.
-    pub fn previous_stage_checkpoint(&self) -> StageCheckpoint {
-        self.previous_stage.map(|(_, checkpoint)| checkpoint).unwrap_or_default()
+    pub fn previous_stage_checkpoint_block_number(&self) -> BlockNumber {
+        self.previous_stage.map(|(_, block_number)| block_number).unwrap_or_default()
     }
 
     /// Return next block range that needs to be executed.
@@ -51,7 +51,7 @@ impl ExecInput {
         let current_block = self.checkpoint();
         // +1 is to skip present block and always start from block number 1, not 0.
         let start = current_block.block_number + 1;
-        let target = self.previous_stage_checkpoint().block_number;
+        let target = self.previous_stage_checkpoint_block_number();
 
         let end = min(target, current_block.block_number.saturating_add(threshold));
 
@@ -105,9 +105,9 @@ pub struct ExecOutput {
 }
 
 impl ExecOutput {
-    /// Mark the stage as done, checkpointing at the given place.
-    pub fn done(checkpoint: StageCheckpoint) -> Self {
-        Self { checkpoint, done: true }
+    /// Mark the stage as done, checkpointing at the given block number.
+    pub fn done(block_number: BlockNumber) -> Self {
+        Self { checkpoint: StageCheckpoint::new(block_number), done: true }
     }
 }
 

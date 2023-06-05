@@ -45,7 +45,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
+            return Ok(ExecOutput::done(*range.end()))
         }
 
         let mut stage_checkpoint = stage_checkpoint(tx, input.checkpoint(), &range)?;
@@ -206,10 +206,8 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(run_to))),
-            ..Default::default()
-        };
+        let input =
+            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();

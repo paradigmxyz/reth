@@ -59,7 +59,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     ) -> Result<ExecOutput, StageError> {
         let range = input.next_block_range();
         if range.is_empty() {
-            return Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
+            return Ok(ExecOutput::done(*range.end()))
         }
         let (from_block, to_block) = range.into_inner();
 
@@ -181,12 +181,11 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
         // so no checkpoint is needed.
-        let checkpoint = input.previous_stage_checkpoint().with_storage_hashing_stage_checkpoint(
-            StorageHashingCheckpoint {
+        let checkpoint = StageCheckpoint::new(input.previous_stage_checkpoint_block_number())
+            .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
                 progress: stage_checkpoint_progress(tx)?,
                 ..Default::default()
-            },
-        );
+            });
 
         info!(target: "sync::stages::hashing_storage", checkpoint = %checkpoint, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { checkpoint, done: true })
@@ -263,7 +262,7 @@ mod tests {
         runner.set_commit_threshold(1);
 
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -323,7 +322,7 @@ mod tests {
         runner.set_commit_threshold(500);
 
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -488,7 +487,7 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number + 1;
-            let end = input.previous_stage_checkpoint().block_number;
+            let end = input.previous_stage_checkpoint_block_number();
 
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
