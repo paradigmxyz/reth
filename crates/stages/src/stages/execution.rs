@@ -297,7 +297,7 @@ fn calculate_gas_used_from_headers<DB: Database>(
     }
 
     let duration = start.elapsed();
-    trace!(target: "sync::stages::execution", ?range, ?duration, "Time elapsed in calculate_gas_used_from_headers::<DB>");
+    trace!(target: "sync::stages::execution", ?range, ?duration, "Time elapsed in calculate_gas_used_from_headers");
 
     Ok(gas_total)
 }
