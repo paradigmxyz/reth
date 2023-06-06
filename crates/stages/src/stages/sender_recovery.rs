@@ -37,7 +37,7 @@ impl SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 500_000 }
+        Self { commit_threshold: 50_000 }
     }
 }
 
@@ -257,18 +257,18 @@ mod tests {
         let mut runner = SenderRecoveryTestRunner::default();
         runner.set_threshold(threshold);
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
+
+        // Manually seed once with full input range
+        let seed = random_block_range(stage_progress..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+        runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner.tx.insert_senders_for_block(stage_progress).expect("failed to insert senders");
+
+        let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
+
         let first_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
-
-        // Manually seed once with full input range
-        let stage_progress = first_input.checkpoint().block_number;
-        let end = first_input.previous_stage_checkpoint_block_number();
-        let seed = random_block_range(stage_progress..=end, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
-        runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
-
-        let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
 
         // Execute first time
         let result = runner.execute(first_input).await.unwrap();
@@ -308,10 +308,7 @@ mod tests {
             result.as_ref().unwrap(),
             &ExecOutput {
                 checkpoint: StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
-                    EntitiesCheckpoint {
-                        processed: runner.tx.table::<tables::TxSenders>().unwrap().len() as u64,
-                        total: total_transactions
-                    }
+                    EntitiesCheckpoint { processed: total_transactions, total: total_transactions }
                 ),
                 done: true
             }
