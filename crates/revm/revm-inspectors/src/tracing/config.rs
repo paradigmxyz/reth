@@ -14,6 +14,8 @@ pub struct TracingInspectorConfig {
     pub record_stack_snapshots: bool,
     /// Whether to record state diffs.
     pub record_state_diff: bool,
+    /// Whether to ignore precompile calls.
+    pub exclude_precompile_calls: bool,
 }
 
 impl TracingInspectorConfig {
@@ -24,6 +26,7 @@ impl TracingInspectorConfig {
             record_memory_snapshots: true,
             record_stack_snapshots: true,
             record_state_diff: false,
+            exclude_precompile_calls: false,
         }
     }
 
@@ -36,6 +39,7 @@ impl TracingInspectorConfig {
             record_memory_snapshots: false,
             record_stack_snapshots: false,
             record_state_diff: false,
+            exclude_precompile_calls: true,
         }
     }
 
@@ -48,6 +52,7 @@ impl TracingInspectorConfig {
             record_memory_snapshots: true,
             record_stack_snapshots: true,
             record_state_diff: true,
+            exclude_precompile_calls: false,
         }
     }
 
@@ -59,6 +64,14 @@ impl TracingInspectorConfig {
             record_state_diff: !config.disable_storage.unwrap_or_default(),
             ..Self::default_geth()
         }
+    }
+
+    /// Configure whether calls to precompiles should be ignored.
+    ///
+    /// If set to `true`, calls to precompiles without value transfers will be ignored.
+    pub fn set_exclude_precompile_calls(mut self, exclude_precompile_calls: bool) -> Self {
+        self.exclude_precompile_calls = exclude_precompile_calls;
+        self
     }
 
     /// Configure whether individual opcode level steps should be recorded
