@@ -62,8 +62,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             return Ok(ExecOutput::done(input.checkpoint().block_number))
         }
 
-        let (tx_range, end_block, is_final_range) =
+        let (tx_range, block_range, is_final_range) =
             input.next_block_range_with_transaction_threshold(tx, self.commit_threshold)?;
+        let end_block = *block_range.end();
 
         // No transactions to walk over
         if tx_range.is_empty() {

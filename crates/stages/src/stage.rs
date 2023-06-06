@@ -77,7 +77,7 @@ impl ExecInput {
         &self,
         tx: &Transaction<'_, DB>,
         tx_threshold: u64,
-    ) -> Result<(RangeInclusive<TxNumber>, BlockNumber, bool), StageError> {
+    ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
         let start_block = self.next_block();
         let start_block_body = tx
             .get::<tables::BlockBodyIndices>(start_block)?
@@ -93,12 +93,13 @@ impl ExecInput {
             let (block, body) = entry?;
             last_tx_number = body.last_tx_num();
             end_block_number = block;
-            let tx_count = (first_tx_number..=last_tx_number).count() as u64; // +1 to include the first tx
+            let tx_count = (first_tx_number..=last_tx_number).count() as u64;
             if tx_count > tx_threshold {
                 break
             }
         }
-        Ok((first_tx_number..=last_tx_number, end_block_number, end_block_number >= target_block))
+        let is_final_range = end_block_number >= target_block;
+        Ok((first_tx_number..=last_tx_number, start_block..=end_block_number, is_final_range))
     }
 }
 
