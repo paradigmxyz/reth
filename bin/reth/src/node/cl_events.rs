@@ -7,7 +7,7 @@ use std::{
     task::{ready, Context, Poll},
     time::Duration,
 };
-use tokio::time::Interval;
+use tokio::time::{Instant, Interval};
 
 /// Interval of checking Consensus Layer client health.
 const CHECK_INTERVAL: Duration = Duration::from_secs(300);
@@ -26,11 +26,9 @@ pub struct ConsensusLayerHealthEvents {
 
 impl ConsensusLayerHealthEvents {
     /// Creates a new [ConsensusLayerHealthEvents] with the given canonical chain tracker.
-    pub async fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
-        let mut interval = tokio::time::interval(CHECK_INTERVAL);
-        // Skip the first tick that's ready immediately after initialization to prevent the false
-        // `ConsensusLayerHealthEvent::NeverSeen` event.
-        interval.tick().await;
+    pub fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
+        // Skip the first tick to prevent the false `ConsensusLayerHealthEvent::NeverSeen` event.
+        let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);
         Self { interval, canon_chain }
     }
 }
