@@ -106,29 +106,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
             let chunk: Vec<_> = chunk.collect();
 
-            // closure that would recover signer. Used as utility to wrap result
-            let recover = |entry: Result<
-                (RawKey<TxNumber>, RawValue<TransactionSignedNoHash>),
-                DatabaseError,
-            >,
-                           rlp_buf: &mut Vec<u8>|
-             -> Result<(u64, H160), Box<SenderRecoveryStageError>> {
-                let (tx_id, transaction) =
-                    entry.map_err(|e| Box::new(SenderRecoveryStageError::StageError(e.into())))?;
-                let tx_id = tx_id.key().expect("key to be formated");
-
-                let tx = transaction.value().expect("value to be formated");
-                tx.transaction.encode_without_signature(rlp_buf);
-
-                let sender = tx.signature.recover_signer(keccak256(rlp_buf)).ok_or(
-                    SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError {
-                        tx: tx_id,
-                    }),
-                )?;
-
-                Ok((tx_id, sender))
-            };
-
             // Spawn the sender recovery task onto the global rayon pool
             // This task will send the results through the channel after it recovered the senders.
             rayon::spawn(move || {
@@ -203,8 +180,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 fn recover_sender(
     entry: Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
     rlp_buf: &mut Vec<u8>,
-) -> Result<(u64, H160), Box<StageError>> {
-    let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
+) -> Result<(u64, H160), Box<SenderRecoveryStageError>> {
+    let (tx_id, transaction) =
+        entry.map_err(|e| Box::new(SenderRecoveryStageError::StageError(e.into())))?;
     let tx_id = tx_id.key().expect("key to be formated");
 
     let tx = transaction.value().expect("value to be formated");
@@ -213,7 +191,7 @@ fn recover_sender(
     let sender = tx
         .signature
         .recover_signer(keccak256(rlp_buf))
-        .ok_or(StageError::from(SenderRecoveryStageError::SenderRecovery { tx: tx_id }))?;
+        .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
 
     Ok((tx_id, sender))
 }
