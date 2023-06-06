@@ -79,10 +79,10 @@ fn main() {
     mdbx.push("libmdbx");
 
     let mut cc_builder = cc::Build::new();
-    cc_builder
-        .flag_if_supported("-Wno-unused-parameter")
-        .flag_if_supported("-Wbad-function-cast")
-        .flag_if_supported("-Wuninitialized");
+    cc_builder.flag_if_supported("-Wno-unused-parameter").flag_if_supported("-Wuninitialized");
+
+    #[cfg(not(target_os = "linux"))]
+    cc_builder.flag_if_supported("-Wbad-function-cast");
 
     let flags = format!("{:?}", cc_builder.get_compiler().cflags_env());
     cc_builder.define("MDBX_BUILD_FLAGS", flags.as_str()).define("MDBX_TXN_CHECKOWNER", "0");
