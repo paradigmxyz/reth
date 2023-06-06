@@ -70,7 +70,7 @@ pub struct StructLog {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<Vec<U256>>,
     /// Last call's return data. Enabled via enableReturnData
-    #[serde(default, rename = "refund", skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "returnData", skip_serializing_if = "Option::is_none")]
     pub return_data: Option<Bytes>,
     /// Storage slots of current contract read from and written to. Only emitted for SLOAD and
     /// SSTORE. Disabled via disableStorage
