@@ -1,6 +1,9 @@
 //! Error handling for the blockchain tree
 
-use crate::{consensus::ConsensusError, executor::BlockExecutionError};
+use crate::{
+    consensus::ConsensusError,
+    executor::{BlockExecutionError, BlockValidationError},
+};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
 /// Various error cases that can occur when a block violates tree assumptions.
@@ -173,7 +176,12 @@ impl InsertBlockErrorKind {
 
     /// Returns true if this is a block pre merge error.
     pub fn is_block_pre_merge(&self) -> bool {
-        matches!(self, InsertBlockErrorKind::Execution(BlockExecutionError::BlockPreMerge { .. }))
+        matches!(
+            self,
+            InsertBlockErrorKind::Execution(BlockExecutionError::Validation(
+                BlockValidationError::BlockPreMerge { .. }
+            ))
+        )
     }
 
     /// Returns true if the error is an execution error
