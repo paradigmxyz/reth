@@ -17,4 +17,5 @@ pub enum StageEnum {
     History,
     AccountHistory,
     StorageHistory,
+    TotalDifficulty,
 }
