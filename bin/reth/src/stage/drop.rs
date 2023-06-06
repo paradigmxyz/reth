@@ -12,7 +12,7 @@ use reth_db::{
     transaction::DbTxMut,
 };
 use reth_primitives::{stage::StageId, ChainSpec};
-use reth_staged_sync::utils::init::insert_genesis_state;
+use reth_staged_sync::utils::init::{insert_genesis_header, insert_genesis_state};
 use std::sync::Arc;
 use tracing::info;
 
@@ -70,6 +70,7 @@ impl Command {
                     tx.clear::<tables::BlockOmmers>()?;
                     tx.clear::<tables::BlockWithdrawals>()?;
                     tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
+                    insert_genesis_header::<Env<WriteMap>>(tx, self.chain)?;
                 }
                 StageEnum::Senders => {
                     tx.clear::<tables::TxSenders>()?;
@@ -154,6 +155,7 @@ impl Command {
                         StageId::TotalDifficulty.to_string(),
                         Default::default(),
                     )?;
+                    insert_genesis_header::<Env<WriteMap>>(tx, self.chain)?;
                 }
                 _ => {
                     info!("Nothing to do for stage {:?}", self.stage);
