@@ -42,6 +42,7 @@ pub struct BlockTraceResult {
 pub struct DefaultFrame {
     pub failed: bool,
     pub gas: u64,
+    #[serde(serialize_with = "reth_primitives::serde_helper::serialize_hex_string_no_prefix")]
     pub return_value: Bytes,
     pub struct_logs: Vec<StructLog>,
 }
