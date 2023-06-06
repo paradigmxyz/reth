@@ -1,10 +1,11 @@
 [package]
 name = "reth-rpc"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = """
 Reth RPC implementation
 """
@@ -16,19 +17,20 @@ reth-rpc-api = { path = "../rpc-api" }
 reth-rlp = { path = "../../rlp" }
 reth-rpc-types = { path = "../rpc-types" }
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
-reth-transaction-pool = { path = "../../transaction-pool", features = [
-    "test-utils",
-] }
+reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
 reth-network-api = { path = "../../net/network-api", features = ["test-utils"] }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-revm = { path = "../../revm" }
 reth-tasks = { path = "../../tasks" }
 
 # eth
-revm = { version = "3", features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
-ethers-core = { version = "2.0.7", features = ["eip712"]}
+revm = { version = "3", features = [
+    "optional_block_gas_limit",
+    "optional_eip3607",
+    "optional_no_base_fee",
+] }
+ethers-core = { version = "2.0.7", features = ["eip712"] }
 revm-primitives = { version = "1.1", features = ["serde"] }
-
 
 # rpc
 jsonrpsee = { version = "0.18" }
@@ -46,11 +48,7 @@ tokio-util = "0.7"
 pin-project = "1.0"
 
 bytes = "1.4"
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery"
-] }
+secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
