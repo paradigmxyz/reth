@@ -259,9 +259,8 @@ mod tests {
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
 
         // Manually seed once with full input range
-        let seed = random_block_range(stage_progress..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+        let seed = random_block_range(stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
-        runner.tx.insert_senders_for_block(stage_progress).expect("failed to insert senders");
 
         let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
 
@@ -275,7 +274,6 @@ mod tests {
         let mut tx_count = 0;
         let expected_progress = seed
             .iter()
-            .skip(1) // the seed includes the block that is considered already processed
             .find(|x| {
                 tx_count += x.body.len();
                 tx_count as u64 > threshold

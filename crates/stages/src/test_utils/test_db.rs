@@ -13,8 +13,7 @@ use reth_db::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry,
-    TransactionSignedNoHash, H256, U256,
+    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
 };
 use reth_provider::Transaction;
 use std::{
@@ -250,27 +249,6 @@ impl TestTransaction {
                     Ok(())
                 })
             })
-        })
-    }
-
-    /// Insert senders of transactions into the corresponding tables.
-    pub fn insert_senders_for_block(&self, block_number: BlockNumber) -> Result<(), DbError> {
-        self.commit(|tx| {
-            let block = tx.get::<tables::BlockBodyIndices>(block_number)?.expect("exists");
-            let mut rlp_buf = Vec::with_capacity(128);
-            let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
-            for entry in
-                tx.cursor_read::<tables::Transactions>()?.walk_range(block.tx_num_range())?
-            {
-                let (id, TransactionSignedNoHash { signature, transaction }) = entry?;
-                transaction.encode_without_signature(&mut rlp_buf);
-                let signer = signature
-                    .recover_signer(keccak256(&rlp_buf))
-                    .expect("failed to recover signer");
-                senders_cursor.append(id, signer)?;
-                rlp_buf.clear();
-            }
-            Ok(())
         })
     }
 
