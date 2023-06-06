@@ -85,7 +85,7 @@ mod tests {
     fn auth_header_not_available() {
         let headers = HeaderMap::new();
         let token = get_bearer(&headers);
-        assert!(matches!(token, None));
+        assert!(token.is_none());
     }
 
     #[test]
@@ -95,6 +95,6 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::AUTHORIZATION, bearer.parse().unwrap());
         let token = get_bearer(&headers);
-        assert!(matches!(token, None));
+        assert!(token.is_none());
     }
 }
