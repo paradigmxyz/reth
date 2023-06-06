@@ -13,7 +13,7 @@ description = "revm inspector implementations used by reth"
 reth-primitives = { path = "../../primitives" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 
-revm = { version = "3" }
+revm = { workspace = true }
 # remove from reth and reexport from revm
 hashbrown = "0.13"
 

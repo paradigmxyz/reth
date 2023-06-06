@@ -18,7 +18,7 @@ reth-revm-inspectors = { path = "./revm-inspectors" }
 reth-consensus-common = { path = "../consensus/common" }
 
 # revm
-revm = { version = "3" }
+revm = { workspace = true }
 
 # common
 tracing = { workspace = true }
