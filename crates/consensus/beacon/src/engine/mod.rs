@@ -1,5 +1,5 @@
 use crate::{
-    engine::{message::OnForkChoiceUpdated, metrics::Metrics},
+    engine::{message::OnForkChoiceUpdated, metrics::EngineMetrics},
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt, TryFutureExt};
@@ -232,7 +232,7 @@ where
     /// invalid.
     invalid_headers: InvalidHeaderCache,
     /// Consensus engine metrics.
-    metrics: Metrics,
+    metrics: EngineMetrics,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -318,7 +318,7 @@ where
             payload_builder,
             listeners: EventListeners::default(),
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
-            metrics: Metrics::default(),
+            metrics: EngineMetrics::default(),
         };
 
         let maybe_pipeline_target = match target {
