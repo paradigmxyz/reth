@@ -116,7 +116,7 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
     },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
+    NetApi, RPCApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -570,6 +570,8 @@ pub enum RethRpcModule {
     Txpool,
     /// `web3_` module
     Web3,
+    /// `rpc_` module
+    Rpc,
 }
 
 // === impl RethRpcModule ===
@@ -783,7 +785,13 @@ where
     ) -> Vec<Methods> {
         let EthHandlers { api: eth_api, cache: eth_cache, filter: eth_filter, pubsub: eth_pubsub } =
             self.with_eth(|eth| eth.clone());
+
+        // Create a copy, so we can list out all the methods for rpc_ api
+        let namespaces: Vec<_> = namespaces.collect();
+
         namespaces
+            .iter()
+            .copied()
             .map(|namespace| {
                 self.modules
                     .entry(namespace)
@@ -823,6 +831,14 @@ where
                         RethRpcModule::Txpool => {
                             TxPoolApi::new(self.pool.clone()).into_rpc().into()
                         }
+                        RethRpcModule::Rpc => RPCApi::new(
+                            namespaces
+                                .iter()
+                                .map(|module| (module.to_string(), "1.0".to_string()))
+                                .collect(),
+                        )
+                        .into_rpc()
+                        .into(),
                     })
                     .clone()
             })
@@ -1649,6 +1665,7 @@ mod tests {
                 "net" =>  RethRpcModule::Net,
                 "trace" =>  RethRpcModule::Trace,
                 "web3" =>  RethRpcModule::Web3,
+                "rpc" => RethRpcModule::Rpc,
             );
     }
 

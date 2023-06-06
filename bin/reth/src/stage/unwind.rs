@@ -1,8 +1,12 @@
 //! Unwinding a certain block range
 
-use crate::dirs::{DataDirPath, MaybePlatformPath};
+use crate::{
+    args::utils::genesis_value_parser,
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 use clap::{Parser, Subcommand};
 use reth_db::{
+    cursor::DbCursorRO,
     database::Database,
     mdbx::{Env, WriteMap},
     tables,
@@ -10,10 +14,7 @@ use reth_db::{
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::DatabaseProvider;
-use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::{ops::RangeInclusive, sync::Arc};
-
-use reth_db::cursor::DbCursorRO;
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -109,7 +110,7 @@ impl Subcommands {
                     .ok_or_else(|| eyre::eyre!("Block hash not found in database: {hash:?}"))?,
                 BlockHashOrNumber::Number(num) => *num,
             },
-            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount),
+            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount) + 1,
         };
         Ok(target..=last.0)
     }

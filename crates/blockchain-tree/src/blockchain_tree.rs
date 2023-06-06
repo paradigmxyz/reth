@@ -341,7 +341,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// This tries to append the given block to the canonical chain.
     ///
-    /// WARNING: this expects that the block is part of the canonical chain: The block's parent is
+    /// WARNING: this expects that the block extends the canonical chain: The block's parent is
     /// part of the canonical chain (e.g. the block's parent is the latest canonical hash). See also
     /// [Self::is_block_hash_canonical].
     #[instrument(skip_all, target = "blockchain_tree")]
@@ -357,64 +357,65 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // TODO save pending block to database
         // https://github.com/paradigmxyz/reth/issues/1713
 
-        let db = self.externals.database();
-        let provider =
-            db.provider().map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
+        let (block_status, chain) = {
+            let db = self.externals.database();
+            let provider = db
+                .provider()
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
-        // Validate that the block is post merge
-        let parent_td = provider
-            .header_td(&block.parent_hash)
-            .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
-            .ok_or_else(|| {
-                InsertBlockError::tree_error(
-                    BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
-                    block.block.clone(),
-                )
-            })?;
+            // Validate that the block is post merge
+            let parent_td = provider
+                .header_td(&block.parent_hash)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
+                .ok_or_else(|| {
+                    InsertBlockError::tree_error(
+                        BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
+                        block.block.clone(),
+                    )
+                })?;
 
-        // Pass the parent total difficulty to short-circuit unnecessary calculations.
-        if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
-            return Err(InsertBlockError::execution_error(
-                BlockExecutionError::BlockPreMerge { hash: block.hash },
-                block.block,
-            ))
-        }
+            // Pass the parent total difficulty to short-circuit unnecessary calculations.
+            if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO)
+            {
+                return Err(InsertBlockError::execution_error(
+                    BlockExecutionError::BlockPreMerge { hash: block.hash },
+                    block.block,
+                ))
+            }
 
-        let parent_header = provider
-            .header(&block.parent_hash)
-            .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
-            .ok_or_else(|| {
-                InsertBlockError::tree_error(
-                    BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
-                    block.block.clone(),
-                )
-            })?
-            .seal(block.parent_hash);
+            let parent_header = provider
+                .header(&block.parent_hash)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
+                .ok_or_else(|| {
+                    InsertBlockError::tree_error(
+                        BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash },
+                        block.block.clone(),
+                    )
+                })?
+                .seal(block.parent_hash);
 
-        let canonical_chain = self.canonical_chain();
+            let canonical_chain = self.canonical_chain();
 
-        let (block_status, chain) = if block.parent_hash == canonical_chain.tip().hash {
-            let chain = AppendableChain::new_canonical_head_fork(
-                block,
-                &parent_header,
-                canonical_chain.inner(),
-                parent,
-                &self.externals,
-            )?;
-            (BlockStatus::Valid, chain)
-        } else {
-            let chain = AppendableChain::new_canonical_fork(
-                block,
-                &parent_header,
-                canonical_chain.inner(),
-                parent,
-                &self.externals,
-            )?;
-            (BlockStatus::Accepted, chain)
+            if block.parent_hash == canonical_chain.tip().hash {
+                let chain = AppendableChain::new_canonical_head_fork(
+                    block,
+                    &parent_header,
+                    canonical_chain.inner(),
+                    parent,
+                    &self.externals,
+                )?;
+                (BlockStatus::Valid, chain)
+            } else {
+                let chain = AppendableChain::new_canonical_fork(
+                    block,
+                    &parent_header,
+                    canonical_chain.inner(),
+                    parent,
+                    &self.externals,
+                )?;
+                (BlockStatus::Accepted, chain)
+            }
         };
-
-        // let go of `db` immutable borrow
-        drop(provider);
 
         self.insert_chain(chain);
         self.try_connect_buffered_blocks(block_num_hash);
@@ -620,20 +621,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         if let Err(e) =
             self.externals.consensus.validate_header_with_total_difficulty(block, U256::MAX)
         {
-            info!(
-                "Failed to validate header for TD related check with error: {e:?}, block:{:?}",
-                block
+            error!(
+                ?block,
+                "Failed to validate total difficulty for block {}: {e:?}", block.header.hash
             );
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
-            info!("Failed to validate header with error: {e:?}, block:{:?}", block);
+            error!(?block, "Failed to validate header {}: {e:?}", block.header.hash);
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_block(block) {
-            info!("Failed to validate blocks with error: {e:?}, block:{:?}", block);
+            error!(?block, "Failed to validate block {}: {e:?}", block.header.hash);
             return Err(e)
         }
 
@@ -867,7 +868,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // If block is already canonical don't return error.
         if let Some(header) = self.find_canonical_header(block_hash)? {
-            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
+            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             let td = self
                 .externals
                 .database()
@@ -881,7 +882,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
-            info!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
+            error!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
             // TODO: better error
             return Err(BlockExecutionError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
@@ -1038,7 +1039,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let tip = provider.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
-        info!(target: "blockchain_tree", "Revert canonical chain range: {:?}", revert_range);
+        info!(target: "blockchain_tree", "Unwinding canonical chain blocks: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider
             .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)

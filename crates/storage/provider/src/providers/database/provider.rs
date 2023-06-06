@@ -339,7 +339,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ) -> std::result::Result<(), TransactionError> {
         let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
 
-        // Aggregate all transition changesets and and make list of account that have been changed.
+        // Aggregate all transition changesets and make a list of accounts that have been changed.
         self.tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
@@ -371,6 +371,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                     Ok(())
                 },
             )?;
+
         Ok(())
     }
 
@@ -420,21 +421,23 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                     Ok(())
                 },
             )?;
+
         Ok(())
     }
 
-    /// Unwind and clear account history indices
+    /// Unwind and clear account history indices.
+    ///
+    /// Returns number of changesets walked.
     pub fn unwind_account_history_indices(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<(), TransactionError> {
-        let mut cursor = self.tx.cursor_write::<tables::AccountHistory>()?;
-
+    ) -> std::result::Result<usize, TransactionError> {
         let account_changeset = self
             .tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let changesets = account_changeset.len();
 
         let last_indices = account_changeset
             .into_iter()
@@ -447,6 +450,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 accounts
             });
         // try to unwind the index
+        let mut cursor = self.tx.cursor_write::<tables::AccountHistory>()?;
         for (address, rem_index) in last_indices {
             let shard_part = unwind_account_history_shards::<TX>(&mut cursor, address, rem_index)?;
 
@@ -460,21 +464,24 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 )?;
             }
         }
-        Ok(())
+
+        Ok(changesets)
     }
 
-    /// Unwind and clear storage history indices
+    /// Unwind and clear storage history indices.
+    ///
+    /// Returns number of changesets walked.
     pub fn unwind_storage_history_indices(
         &self,
         range: Range<BlockNumberAddress>,
-    ) -> std::result::Result<(), TransactionError> {
-        let mut cursor = self.tx.cursor_write::<tables::StorageHistory>()?;
-
+    ) -> std::result::Result<usize, TransactionError> {
         let storage_changesets = self
             .tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let changesets = storage_changesets.len();
+
         let last_indices = storage_changesets
             .into_iter()
             // reverse so we can get lowest transition id where we need to unwind account.
@@ -488,6 +495,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                     accounts
                 },
             );
+
+        let mut cursor = self.tx.cursor_write::<tables::StorageHistory>()?;
         for ((address, storage_key), rem_index) in last_indices {
             let shard_part =
                 unwind_storage_history_shards::<TX>(&mut cursor, address, storage_key, rem_index)?;
@@ -502,94 +511,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 )?;
             }
         }
-        Ok(())
-    }
 
-    /// Return range of blocks and its execution result
-    fn get_take_block_range<const TAKE: bool>(
-        &self,
-        chain_spec: &ChainSpec,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> std::result::Result<Vec<SealedBlockWithSenders>, TransactionError> {
-        // For block we need Headers, Bodies, Uncles, withdrawals, Transactions, Signers
-
-        let block_headers = self.get_or_take::<tables::Headers, TAKE>(range.clone())?;
-        if block_headers.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        let block_header_hashes =
-            self.get_or_take::<tables::CanonicalHeaders, TAKE>(range.clone())?;
-        let block_ommers = self.get_or_take::<tables::BlockOmmers, TAKE>(range.clone())?;
-        let block_withdrawals =
-            self.get_or_take::<tables::BlockWithdrawals, TAKE>(range.clone())?;
-
-        let block_tx = self.get_take_block_transaction_range::<TAKE>(range.clone())?;
-
-        if TAKE {
-            // rm HeaderTD
-            self.get_or_take::<tables::HeaderTD, TAKE>(range)?;
-            // rm HeaderNumbers
-            let mut header_number_cursor = self.tx.cursor_write::<tables::HeaderNumbers>()?;
-            for (_, hash) in block_header_hashes.iter() {
-                if header_number_cursor.seek_exact(*hash)?.is_some() {
-                    header_number_cursor.delete_current()?;
-                }
-            }
-        }
-
-        // merge all into block
-        let block_header_iter = block_headers.into_iter();
-        let block_header_hashes_iter = block_header_hashes.into_iter();
-        let block_tx_iter = block_tx.into_iter();
-
-        // Ommers can be empty for some blocks
-        let mut block_ommers_iter = block_ommers.into_iter();
-        let mut block_withdrawals_iter = block_withdrawals.into_iter();
-        let mut block_ommers = block_ommers_iter.next();
-        let mut block_withdrawals = block_withdrawals_iter.next();
-
-        let mut blocks = Vec::new();
-        for ((main_block_number, header), (_, header_hash), (_, tx)) in izip!(
-            block_header_iter.into_iter(),
-            block_header_hashes_iter.into_iter(),
-            block_tx_iter.into_iter()
-        ) {
-            let header = header.seal(header_hash);
-
-            let (body, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
-
-            // Ommers can be missing
-            let mut ommers = Vec::new();
-            if let Some((block_number, _)) = block_ommers.as_ref() {
-                if *block_number == main_block_number {
-                    ommers = block_ommers.take().unwrap().1.ommers;
-                    block_ommers = block_ommers_iter.next();
-                }
-            };
-
-            // withdrawal can be missing
-            let shanghai_is_active =
-                chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp);
-            let mut withdrawals = Some(Vec::new());
-            if shanghai_is_active {
-                if let Some((block_number, _)) = block_withdrawals.as_ref() {
-                    if *block_number == main_block_number {
-                        withdrawals = Some(block_withdrawals.take().unwrap().1.withdrawals);
-                        block_withdrawals = block_withdrawals_iter.next();
-                    }
-                }
-            } else {
-                withdrawals = None
-            }
-
-            blocks.push(SealedBlockWithSenders {
-                block: SealedBlock { header, body, ommers, withdrawals },
-                senders,
-            })
-        }
-
-        Ok(blocks)
+        Ok(changesets)
     }
 
     /// Traverse over changesets and plain state and recreate the [`PostState`]s for the given range
@@ -756,7 +679,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
         }
 
-        // iterate over block body and create Executionstd::result::Result
+        // iterate over block body and create ExecutionResult
         let mut receipt_iter = receipts.into_iter();
 
         // loop break if we are at the end of the blocks.
@@ -863,8 +786,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 .collect::<std::result::Result<Vec<_>, _>>()
         }
     }
+
     /// Get requested blocks transaction with signer
-    pub fn get_take_block_transaction_range<const TAKE: bool>(
+    fn get_take_block_transaction_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> std::result::Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError>
@@ -942,6 +866,93 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(block_tx)
     }
 
+    /// Return range of blocks and its execution result
+    fn get_take_block_range<const TAKE: bool>(
+        &self,
+        chain_spec: &ChainSpec,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> std::result::Result<Vec<SealedBlockWithSenders>, TransactionError> {
+        // For block we need Headers, Bodies, Uncles, withdrawals, Transactions, Signers
+
+        let block_headers = self.get_or_take::<tables::Headers, TAKE>(range.clone())?;
+        if block_headers.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let block_header_hashes =
+            self.get_or_take::<tables::CanonicalHeaders, TAKE>(range.clone())?;
+        let block_ommers = self.get_or_take::<tables::BlockOmmers, TAKE>(range.clone())?;
+        let block_withdrawals =
+            self.get_or_take::<tables::BlockWithdrawals, TAKE>(range.clone())?;
+
+        let block_tx = self.get_take_block_transaction_range::<TAKE>(range.clone())?;
+
+        if TAKE {
+            // rm HeaderTD
+            self.get_or_take::<tables::HeaderTD, TAKE>(range)?;
+            // rm HeaderNumbers
+            let mut header_number_cursor = self.tx.cursor_write::<tables::HeaderNumbers>()?;
+            for (_, hash) in block_header_hashes.iter() {
+                if header_number_cursor.seek_exact(*hash)?.is_some() {
+                    header_number_cursor.delete_current()?;
+                }
+            }
+        }
+
+        // merge all into block
+        let block_header_iter = block_headers.into_iter();
+        let block_header_hashes_iter = block_header_hashes.into_iter();
+        let block_tx_iter = block_tx.into_iter();
+
+        // Ommers can be empty for some blocks
+        let mut block_ommers_iter = block_ommers.into_iter();
+        let mut block_withdrawals_iter = block_withdrawals.into_iter();
+        let mut block_ommers = block_ommers_iter.next();
+        let mut block_withdrawals = block_withdrawals_iter.next();
+
+        let mut blocks = Vec::new();
+        for ((main_block_number, header), (_, header_hash), (_, tx)) in izip!(
+            block_header_iter.into_iter(),
+            block_header_hashes_iter.into_iter(),
+            block_tx_iter.into_iter()
+        ) {
+            let header = header.seal(header_hash);
+
+            let (body, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
+
+            // Ommers can be missing
+            let mut ommers = Vec::new();
+            if let Some((block_number, _)) = block_ommers.as_ref() {
+                if *block_number == main_block_number {
+                    ommers = block_ommers.take().unwrap().1.ommers;
+                    block_ommers = block_ommers_iter.next();
+                }
+            };
+
+            // withdrawal can be missing
+            let shanghai_is_active =
+                chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp);
+            let mut withdrawals = Some(Vec::new());
+            if shanghai_is_active {
+                if let Some((block_number, _)) = block_withdrawals.as_ref() {
+                    if *block_number == main_block_number {
+                        withdrawals = Some(block_withdrawals.take().unwrap().1.withdrawals);
+                        block_withdrawals = block_withdrawals_iter.next();
+                    }
+                }
+            } else {
+                withdrawals = None
+            }
+
+            blocks.push(SealedBlockWithSenders {
+                block: SealedBlock { header, body, ommers, withdrawals },
+                senders,
+            })
+        }
+
+        Ok(blocks)
+    }
+
     /// Update all pipeline sync stage progress.
     pub fn update_pipeline_stages(
         &self,
@@ -956,13 +967,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         Ok(())
     }
-    /// Get the stage checkpoint.
-    pub fn get_stage_checkpoint(
-        &self,
-        id: StageId,
-    ) -> std::result::Result<Option<StageCheckpoint>, DatabaseError> {
-        get_stage_checkpoint(&self.tx, id)
-    }
+
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage
     pub fn insert_storage_history_index(
         &self,
@@ -1039,6 +1044,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
         }
         Ok(())
+    }
+
+    /// Get the stage checkpoint.
+    pub fn get_stage_checkpoint(
+        &self,
+        id: StageId,
+    ) -> std::result::Result<Option<StageCheckpoint>, DatabaseError> {
+        get_stage_checkpoint(&self.tx, id)
     }
 
     /// Save stage checkpoint.
@@ -1296,14 +1309,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         // Insert the blocks
         for block in blocks {
-            self.insert_block(block)?;
+            let (block, senders) = block.into_components();
+            insert_canonical_block(self.tx_mut(), block, Some(senders))?;
         }
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(&self.tx)?;
+        state.write_to_db(self.tx_mut())?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
+
+        self.calculate_history_indices(first_number..=last_block_number)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(new_tip_number)?;
@@ -1312,26 +1328,20 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 
     /// Insert full block and make it canonical.
-    ///
-    /// This inserts the block and builds history related indexes. Once all blocks in a chain have
-    /// been committed, the state root needs to be inserted separately with
-    /// [`Transaction::insert_hashes`].
-    ///
-    /// # Note
-    ///
-    /// This assumes that we are using beacon consensus and that the block is post-merge, which
-    /// means that the block will have no block reward.
-    /// TODO do multi block insertion.
     pub fn insert_block(
         &mut self,
-        block: SealedBlockWithSenders,
+        block: SealedBlock,
+        senders: Option<Vec<Address>>,
     ) -> std::result::Result<(), TransactionError> {
-        // Header, Body, SenderRecovery, TD, TxLookup stages
-        let (block, senders) = block.into_components();
-        let range = block.number..=block.number;
+        insert_canonical_block(self.tx_mut(), block, senders)?;
+        Ok(())
+    }
 
-        insert_canonical_block(&self.tx, block, Some(senders)).unwrap();
-
+    /// Read account/storage changesets and update account/storage history indices.
+    pub fn calculate_history_indices(
+        &mut self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> std::result::Result<(), TransactionError> {
         // account history stage
         {
             let indices = self.get_account_transition_ids_from_changeset(range.clone())?;
@@ -1449,6 +1459,12 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
+        if let Some(td) = self.chain_spec.final_paris_difficulty(number) {
+            // if this block is higher than the final paris(merge) block, return the final paris
+            // difficulty
+            return Ok(Some(td))
+        }
+
         Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
     }
 
@@ -1552,6 +1568,10 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
     }
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
+        Ok(None)
+    }
+
+    fn pending_header(&self) -> Result<Option<SealedHeader>> {
         Ok(None)
     }
 

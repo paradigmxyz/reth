@@ -127,7 +127,7 @@ mod tests {
         runner.set_threshold(threshold);
 
         let first_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -145,7 +145,7 @@ mod tests {
 
         // Execute second time
         let second_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(expected_progress)),
         };
         let result = runner.execute(second_input).await.unwrap();
@@ -208,7 +208,7 @@ mod tests {
             })?;
 
             // use previous progress as seed size
-            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default().block_number + 1;
+            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
 
             if start + 1 >= end {
                 return Ok(Vec::default())

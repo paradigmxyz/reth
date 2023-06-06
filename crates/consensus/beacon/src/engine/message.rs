@@ -7,7 +7,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId, PayloadStatus,
+    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use std::{
     future::Future,
@@ -42,6 +42,15 @@ impl OnForkChoiceUpdated {
     /// Returns the determined status of the received ForkchoiceState.
     pub(crate) fn forkchoice_status(&self) -> ForkchoiceStatus {
         self.forkchoice_status
+    }
+
+    /// Creates a new instance of `OnForkChoiceUpdated` for the `SYNCING` state
+    pub(crate) fn syncing() -> Self {
+        let status = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
+        Self {
+            forkchoice_status: ForkchoiceStatus::from_payload_status(&status.status),
+            fut: Either::Left(futures::future::ready(Ok(ForkchoiceUpdated::new(status)))),
+        }
     }
 
     /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update succeeded and no
@@ -153,6 +162,8 @@ pub enum BeaconEngineMessage {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
     },
+    /// Message with exchanged transition configuration.
+    TransitionConfigurationExchanged,
     /// Add a new listener for [`BeaconEngineMessage`].
     EventListener(UnboundedSender<BeaconConsensusEngineEvent>),
 }

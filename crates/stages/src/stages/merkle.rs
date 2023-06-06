@@ -1,10 +1,14 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_codecs::Compact;
-use reth_db::{database::Database, tables, transaction::DbTxMut};
+use reth_db::{
+    database::Database,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_interfaces::consensus;
 use reth_primitives::{
     hex,
-    stage::{MerkleCheckpoint, StageCheckpoint, StageId},
+    stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
     BlockNumber, SealedHeader, H256,
 };
@@ -72,7 +76,7 @@ impl MerkleStage {
         if got == expected.state_root {
             Ok(())
         } else {
-            warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Block's root state failed verification");
+            warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
             Err(StageError::Validation {
                 block: expected.clone(),
                 error: consensus::ConsensusError::BodyStateRootDiff {
@@ -140,7 +144,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let threshold = match self {
             MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput { checkpoint: input.previous_stage_checkpoint(), done: true })
+                return Ok(ExecOutput::done(input.previous_stage_checkpoint_block_number()))
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
@@ -149,20 +153,22 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let range = input.next_block_range();
         let (from_block, to_block) = range.clone().into_inner();
-        let current_block = input.previous_stage_checkpoint().block_number;
+        let current_block = input.previous_stage_checkpoint_block_number();
 
         let block = provider
             .header_by_number(current_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(current_block.into()))?;
         let block_root = block.state_root;
 
-        let mut checkpoint = self.get_execution_checkpoint::<DB>(&provider)?;
+        let mut checkpoint = self.get_execution_checkpoint::<DB>(provider)?;
 
-        let trie_root = if range.is_empty() {
-            block_root
+        let (trie_root, entities_checkpoint) = if range.is_empty() {
+            (block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
         } else if to_block - from_block > threshold || from_block == 1 {
             // if there are more blocks than threshold it is faster to rebuild the trie
-            if let Some(checkpoint) = checkpoint.as_ref().filter(|c| c.target_block == to_block) {
+            let mut entities_checkpoint = if let Some(checkpoint) =
+                checkpoint.as_ref().filter(|c| c.target_block == to_block)
+            {
                 debug!(
                     target: "sync::stages::merkle::exec",
                     current = ?current_block,
@@ -171,6 +177,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
                     "Continuing inner merkle checkpoint"
                 );
+
+                input.checkpoint().entities_stage_checkpoint()
             } else {
                 debug!(
                     target: "sync::stages::merkle::exec",
@@ -181,20 +189,30 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 );
                 // Reset the checkpoint and clear trie tables
                 checkpoint = None;
-                self.save_execution_checkpoint::<DB>(&provider, None)?;
-
+                self.save_execution_checkpoint::<DB>(provider, None)?;
                 let tx = provider.tx_mut();
                 tx.clear::<tables::AccountsTrie>()?;
                 tx.clear::<tables::StoragesTrie>()?;
-            }
 
-            let progress = StateRoot::new(provider.tx_mut())
+                None
+            }
+            .unwrap_or(EntitiesCheckpoint {
+                processed: 0,
+                total: (provider.tx_ref().entries::<tables::HashedAccount>()? +
+                    provider.tx_ref().entries::<tables::HashedStorage>()?)
+                    as u64,
+            });
+
+            let tx = provider.tx_mut();
+
+            let progress = StateRoot::new(tx)
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
             match progress {
-                StateRootProgress::Progress(state, updates) => {
-                    updates.flush(provider.tx_mut())?;
+                StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
+                    updates.flush(tx)?;
+
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
                         state.last_account_key,
@@ -202,30 +220,58 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
                         state.hash_builder.into(),
                     );
-                    self.save_execution_checkpoint::<DB>(&provider, Some(checkpoint))?;
-                    return Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
+                    self.save_execution_checkpoint::<DB>(provider, Some(checkpoint))?;
+
+                    entities_checkpoint.processed += hashed_entries_walked as u64;
+
+                    return Ok(ExecOutput {
+                        checkpoint: input
+                            .checkpoint()
+                            .with_entities_stage_checkpoint(entities_checkpoint),
+                        done: false,
+                    })
                 }
-                StateRootProgress::Complete(root, updates) => {
-                    updates.flush(provider.tx_mut())?;
-                    root
+                StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
+                    updates.flush(tx)?;
+
+                    entities_checkpoint.processed += hashed_entries_walked as u64;
+
+                    (root, entities_checkpoint)
                 }
             }
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block, target = ?to_block, "Updating trie");
             let (root, updates) =
-                StateRoot::incremental_root_with_updates(provider.tx_mut(), range)
+                StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
-            updates.flush(provider.tx_mut())?;
-            root
+            updates.flush(provider.tx_ref())?;
+
+            let total_hashed_entries = (provider.tx_ref().entries::<tables::HashedAccount>()? +
+                provider.tx_ref().entries::<tables::HashedStorage>()?)
+                as u64;
+
+            let entities_checkpoint = EntitiesCheckpoint {
+                // This is fine because `range` doesn't have an upper bound, so in this `else`
+                // branch we're just hashing all remaining accounts and storage slots we have in the
+                // database.
+                processed: total_hashed_entries,
+                total: total_hashed_entries,
+            };
+
+            (root, entities_checkpoint)
         };
 
         // Reset the checkpoint
-        self.save_execution_checkpoint::<DB>(&provider, None)?;
+        self.save_execution_checkpoint::<DB>(provider, None)?;
 
         self.validate_state_root(trie_root, block.seal_slow(), to_block)?;
 
         info!(target: "sync::stages::merkle::exec", stage_progress = to_block, is_final_range = true, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(to_block), done: true })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(to_block)
+                .with_entities_stage_checkpoint(entities_checkpoint),
+            done: true,
+        })
     }
 
     /// Unwind the stage.
@@ -241,18 +287,30 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
 
+        let mut entities_checkpoint =
+            input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
+                processed: 0,
+                total: (tx.entries::<tables::HashedAccount>()? +
+                    tx.entries::<tables::HashedStorage>()?) as u64,
+            });
+
         if input.unwind_to == 0 {
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
             info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+
+            entities_checkpoint.processed = 0;
+
+            return Ok(UnwindOutput {
+                checkpoint: StageCheckpoint::new(input.unwind_to)
+                    .with_entities_stage_checkpoint(entities_checkpoint),
+            })
         }
 
         // Unwind trie only if there are transitions
         if !range.is_empty() {
-            let (block_root, updates) =
-                StateRoot::incremental_root_with_updates(provider.tx_mut(), range)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calulated state root
             let target = provider
@@ -262,6 +320,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
             // Validation passed, apply unwind changes to the database.
             updates.flush(provider.tx_mut())?;
+
+            // TODO(alexey): update entities checkpoint
         } else {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }
@@ -287,7 +347,9 @@ mod tests {
     use reth_interfaces::test_utils::generators::{
         random_block, random_block_range, random_contract_account_range, random_transition_range,
     };
-    use reth_primitives::{keccak256, SealedBlock, StorageEntry, H256, U256};
+    use reth_primitives::{
+        keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, H256, U256,
+    };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 
@@ -302,7 +364,7 @@ mod tests {
         let mut runner = MerkleTestRunner::default();
         // set low threshold so we hash the whole storage
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -314,8 +376,20 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
-                if block_number == previous_stage
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                },
+                done: true
+            }) if block_number == previous_stage && processed == total &&
+                total == (
+                    runner.tx.table::<tables::HashedAccount>().unwrap().len() +
+                    runner.tx.table::<tables::HashedStorage>().unwrap().len()
+                ) as u64
         );
 
         // Validate the stage execution
@@ -330,7 +404,7 @@ mod tests {
         // Set up the runner
         let mut runner = MerkleTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -342,8 +416,20 @@ mod tests {
         let result = rx.await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, .. }, done: true })
-                if block_number == previous_stage
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                },
+                done: true
+            }) if block_number == previous_stage && processed == total &&
+                total == (
+                    runner.tx.table::<tables::HashedAccount>().unwrap().len() +
+                    runner.tx.table::<tables::HashedStorage>().unwrap().len()
+                ) as u64
         );
 
         // Validate the stage execution
@@ -380,7 +466,7 @@ mod tests {
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
-            let end = input.previous_stage_checkpoint().block_number;
+            let end = input.previous_stage_checkpoint_block_number();
 
             let num_of_accounts = 31;
             let accounts = random_contract_account_range(&mut (0..num_of_accounts))
@@ -463,6 +549,11 @@ mod tests {
     }
 
     impl UnwindStageTestRunner for MerkleTestRunner {
+        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+            // The unwind is validated within the stage
+            Ok(())
+        }
+
         fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             let target_block = input.unwind_to + 1;
 
@@ -532,11 +623,6 @@ mod tests {
                     Ok(())
                 })
                 .unwrap();
-            Ok(())
-        }
-
-        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
-            // The unwind is validated within the stage
             Ok(())
         }
     }

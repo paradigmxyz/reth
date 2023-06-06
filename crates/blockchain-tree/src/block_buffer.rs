@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn clean_chain_of_childres() {
+    fn clean_chain_of_children() {
         let main_parent = BlockNumHash::new(9, BlockHash::random());
         let block1 = create_block(10, main_parent.hash);
         let block2 = create_block(11, block1.hash);

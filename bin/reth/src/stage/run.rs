@@ -2,7 +2,7 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::{get_secret_key, NetworkArgs, StageEnum},
+    args::{get_secret_key, utils::chain_spec_value_parser, NetworkArgs, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
     version::SHORT_VERSION,
@@ -12,20 +12,18 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    ChainSpec,
-};
-use reth_provider::ShareableDatabase;
-use reth_staged_sync::utils::{chainspec::chain_spec_value_parser, init::init_db};
+use reth_primitives::{stage::StageId, ChainSpec};
+use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase};
+use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
-        BodyStage, ExecutionStage, ExecutionStageThresholds, MerkleStage, SenderRecoveryStage,
-        TransactionLookupStage,
+        AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     ExecInput, ExecOutput, PipelineError, Stage, UnwindInput,
 };
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth stage` command
@@ -94,6 +92,14 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
+
+    /// Commits the changes in the database. WARNING: potentially destructive.
+    ///
+    /// Useful when you want to run diagnostics on the database.
+    // TODO: We should consider allowing to run hooks at the end of the stage run,
+    // e.g. query the DB size, or any table data.
+    #[arg(long, short)]
+    commit: bool,
 }
 
 impl Command {
@@ -174,9 +180,7 @@ impl Command {
 
                 (Box::new(stage), None)
             }
-            StageEnum::Senders => {
-                (Box::new(SenderRecoveryStage { commit_threshold: batch_size }), None)
-            }
+            StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
             StageEnum::Execution => {
                 let factory = reth_revm::Factory::new(self.chain.clone());
                 (
@@ -192,24 +196,27 @@ impl Command {
                 )
             }
             StageEnum::TxLookup => (Box::new(TransactionLookupStage::new(batch_size)), None),
+            StageEnum::AccountHashing => (Box::new(AccountHashingStage::new(1, batch_size)), None),
+            StageEnum::StorageHashing => (Box::new(StorageHashingStage::new(1, batch_size)), None),
             StageEnum::Merkle => (
                 Box::new(MerkleStage::default_execution()),
                 Some(Box::new(MerkleStage::default_unwind())),
             ),
+            StageEnum::AccountHistory => (Box::<IndexAccountHistoryStage>::default(), None),
+            StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
             _ => return Ok(()),
         };
+        if let Some(unwind_stage) = &unwind_stage {
+            assert!(exec_stage.type_id() == unwind_stage.type_id());
+        }
+
+        let checkpoint =
+            get_stage_checkpoint(provider_rw.tx_ref(), exec_stage.id())?.unwrap_or_default();
+
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
-        let mut input = ExecInput {
-            previous_stage: Some((
-                StageId::Other("No Previous Stage"),
-                StageCheckpoint::new(self.to),
-            )),
-            checkpoint: Some(StageCheckpoint::new(self.from)),
-        };
-
         let mut unwind = UnwindInput {
-            checkpoint: StageCheckpoint::new(self.to),
+            checkpoint: checkpoint.with_block_number(self.to),
             unwind_to: self.from,
             bad_block: None,
         };
@@ -221,10 +228,20 @@ impl Command {
             }
         }
 
+        let mut input = ExecInput {
+            previous_stage: Some((StageId::Other("No Previous Stage"), self.to)),
+            checkpoint: Some(checkpoint.with_block_number(self.from)),
+        };
+
         while let ExecOutput { checkpoint: stage_progress, done: false } =
             exec_stage.execute(&mut provider_rw, input).await?
         {
-            input.checkpoint = Some(stage_progress)
+            input.checkpoint = Some(stage_progress);
+
+            if self.commit {
+                provider_rw.commit()?;
+                provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+            }
         }
 
         Ok(())

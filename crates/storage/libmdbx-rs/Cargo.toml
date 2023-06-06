@@ -1,11 +1,12 @@
 [package]
 name = "reth-libmdbx"
 version = "0.1.6"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 license = "Apache-2.0"
 description = "Idiomatic and safe MDBX wrapper with good licence"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+homepage.workspace = true
+repository.workspace = true
 
 [lib]
 name = "reth_libmdbx"

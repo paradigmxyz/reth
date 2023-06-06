@@ -91,7 +91,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::debug;
 
 mod best;
 mod events;
@@ -343,7 +343,7 @@ where
             Ok(()) => true,
             Err(err) => {
                 if matches!(err, mpsc::error::TrySendError::Full(_)) {
-                    warn!(
+                    debug!(
                         target: "txpool",
                         "[{:?}] failed to send pending tx; channel full",
                         ready,
@@ -364,7 +364,7 @@ where
             Ok(()) => true,
             Err(err) => {
                 if matches!(err, mpsc::error::TrySendError::Full(_)) {
-                    warn!(
+                    debug!(
                         target: "txpool",
                         "skipping transaction on full transaction listener",
                     );

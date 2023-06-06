@@ -1,5 +1,8 @@
 //! Command for debugging merkle trie calculation.
-use crate::dirs::{DataDirPath, MaybePlatformPath};
+use crate::{
+    args::utils::genesis_value_parser,
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO,
@@ -13,7 +16,7 @@ use reth_primitives::{
 };
 use reth_provider::ShareableDatabase;
 use reth_revm::Factory;
-use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
+use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
@@ -119,7 +122,7 @@ impl Command {
                 &mut execution_stage,
                 &mut provider_rw,
                 ExecInput {
-                    previous_stage: Some((StageId::SenderRecovery, StageCheckpoint::new(block))),
+                    previous_stage: Some((StageId::SenderRecovery, block)),
                     checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
                 },
             )
@@ -132,7 +135,7 @@ impl Command {
                         &mut account_hashing_stage,
                         &mut provider_rw,
                         ExecInput {
-                            previous_stage: Some((StageId::Execution, StageCheckpoint::new(block))),
+                            previous_stage: Some((StageId::Execution, block)),
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
@@ -147,10 +150,7 @@ impl Command {
                         &mut storage_hashing_stage,
                         &mut provider_rw,
                         ExecInput {
-                            previous_stage: Some((
-                                StageId::AccountHashing,
-                                StageCheckpoint::new(block),
-                            )),
+                            previous_stage: Some((StageId::AccountHashing, block)),
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
@@ -163,10 +163,7 @@ impl Command {
                     &mut merkle_stage,
                     &mut provider_rw,
                     ExecInput {
-                        previous_stage: Some((
-                            StageId::StorageHashing,
-                            StageCheckpoint::new(block),
-                        )),
+                        previous_stage: Some((StageId::StorageHashing, block)),
                         checkpoint: progress.map(StageCheckpoint::new),
                     },
                 )
@@ -186,7 +183,7 @@ impl Command {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let clean_input = ExecInput {
-                    previous_stage: Some((StageId::StorageHashing, StageCheckpoint::new(block))),
+                    previous_stage: Some((StageId::StorageHashing, block)),
                     checkpoint: None,
                 };
                 loop {

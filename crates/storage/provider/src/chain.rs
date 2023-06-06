@@ -82,8 +82,8 @@ impl Chain {
     /// Get the block at which this chain forked.
     #[track_caller]
     pub fn fork_block(&self) -> ForkBlock {
-        let tip = self.first();
-        ForkBlock { number: tip.number.saturating_sub(1), hash: tip.parent_hash }
+        let first = self.first();
+        ForkBlock { number: first.number.saturating_sub(1), hash: first.parent_hash }
     }
 
     /// Get the block number at which this chain forked.

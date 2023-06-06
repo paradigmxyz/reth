@@ -1,11 +1,11 @@
 [package]
 name = "reth"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
-build = "build.rs"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 # reth
@@ -17,7 +17,7 @@ reth-provider = { path = "../../crates/storage/provider", features = ["test-util
 reth-revm = { path = "../../crates/revm" }
 reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
 reth-staged-sync = { path = "../../crates/staged-sync" }
-reth-stages = { path = "../../crates/stages"}
+reth-stages = { path = "../../crates/stages" }
 reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../crates/transaction-pool" }
 reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
@@ -40,11 +40,7 @@ reth-metrics = { path = "../../crates/metrics" }
 jemallocator = { version = "0.5.0", optional = true }
 
 # crypto
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
 
 # tracing
 tracing = { workspace = true }
@@ -56,7 +52,7 @@ serde_json = "1.0"
 shellexpand = "3.0.0"
 dirs-next = "2.0.0"
 confy = "0.5"
-toml = {version = "0.7", features = ["display"]}
+toml = { version = "0.7", features = ["display"] }
 
 # metrics
 metrics-exporter-prometheus = "0.11.0"

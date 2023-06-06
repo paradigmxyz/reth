@@ -230,6 +230,10 @@ where
         Ok(self.tree.pending_block())
     }
 
+    fn pending_header(&self) -> Result<Option<SealedHeader>> {
+        Ok(self.tree.pending_header())
+    }
+
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.database.provider()?.ommers(id)
     }
@@ -517,6 +521,14 @@ where
 
     fn last_received_update_timestamp(&self) -> Option<Instant> {
         self.chain_info.last_forkchoice_update_received_at()
+    }
+
+    fn on_transition_configuration_exchanged(&self) {
+        self.chain_info.on_transition_configuration_exchanged();
+    }
+
+    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
+        self.chain_info.last_transition_configuration_exchanged_at()
     }
 
     fn set_canonical_head(&self, header: SealedHeader) {

@@ -206,10 +206,10 @@ mod tests {
     fn from_hex() {
         let key = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
         let secret: Result<JwtSecret, _> = JwtSecret::from_hex(key);
-        assert!(matches!(secret, Ok(_)));
+        assert!(secret.is_ok());
 
         let secret: Result<JwtSecret, _> = JwtSecret::from_hex(key);
-        assert!(matches!(secret, Ok(_)));
+        assert!(secret.is_ok());
     }
 
     #[test]
@@ -234,7 +234,7 @@ mod tests {
         let hex: String =
             "0x7365637265747365637265747365637265747365637265747365637265747365".into();
         let result = JwtSecret::from_hex(hex);
-        assert!(matches!(result, Ok(_)));
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -359,7 +359,7 @@ mod tests {
         let fpath = Path::new("secret2.hex");
         write(fpath, "invalid hex");
         let result = JwtSecret::from_file(fpath);
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err());
         delete(fpath);
     }
 
@@ -367,7 +367,7 @@ mod tests {
     fn provided_file_not_exists() {
         let fpath = Path::new("secret3.hex");
         let result = JwtSecret::from_file(fpath);
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err());
         assert!(!exists(fpath));
     }
 

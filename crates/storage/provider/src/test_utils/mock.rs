@@ -276,11 +276,11 @@ impl BlockNumProvider for MockEthProvider {
 }
 
 impl BlockIdProvider for MockEthProvider {
-    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 
-    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 
@@ -303,6 +303,10 @@ impl BlockProvider for MockEthProvider {
     }
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
+        Ok(None)
+    }
+
+    fn pending_header(&self) -> Result<Option<SealedHeader>> {
         Ok(None)
     }
 

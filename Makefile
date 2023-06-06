@@ -1,6 +1,6 @@
 # Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
 
-GIT_TAG := $(shell git describe --tags --candidates 1)
+GIT_TAG := $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
 
 BUILD_PATH = "target"
@@ -23,6 +23,9 @@ CARGO_INSTALL_EXTRA_FLAGS ?=
 EF_TESTS_TAG := v12.2
 EF_TESTS_URL := https://github.com/ethereum/tests/archive/refs/tags/$(EF_TESTS_TAG).tar.gz
 EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
+
+# The docker image name
+DOCKER_IMAGE_NAME ?= ghcr.io/paradigmxyz/reth
 
 # Builds and installs the reth binary.
 #
@@ -103,6 +106,42 @@ $(EF_TESTS_DIR):
 # Runs Ethereum Foundation tests
 ef-tests: $(EF_TESTS_DIR)
 	cargo nextest run -p ef-tests --features ef-tests
+
+# Builds and pushes a cross-arch Docker image tagged with the latest git tag and `latest`
+#
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+docker-build-latest:
+	$(call build_docker_image,$(GIT_TAG),latest)
+
+# Builds and pushes cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`
+#
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --name cross-builder`
+docker-build-nightly:
+	$(call build_docker_image,$(GIT_TAG)-nightly,latest-nightly)
+
+# Create a cross-arch Docker image with the given tags and push it
+define build_docker_image
+	$(MAKE) build-x86_64-unknown-linux-gnu
+	mkdir -p $(BIN_DIR)/amd64
+	cp $(BUILD_PATH)/x86_64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/amd64/reth
+
+	$(MAKE) build-aarch64-unknown-linux-gnu
+	mkdir -p $(BIN_DIR)/arm64
+	cp $(BUILD_PATH)/aarch64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/arm64/reth
+
+	docker buildx build --file ./Dockerfile.cross . \
+		--platform linux/amd64,linux/arm64 \
+		--tag $(DOCKER_IMAGE_NAME):$(1) \
+		--tag $(DOCKER_IMAGE_NAME):$(2) \
+		--provenance=false \
+		--push
+endef
 
 # Performs a `cargo` clean and removes the binary and test vectors directories
 clean:

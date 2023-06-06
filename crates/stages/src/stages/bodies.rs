@@ -71,8 +71,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let range = input.next_block_range();
         if range.is_empty() {
             let (from, to) = range.into_inner();
-            info!(target: "sync::stages::bodies", from, "Target block already reached");
-            return Ok(ExecOutput::done(StageCheckpoint::new(to)))
+            info!(target: "sync::stages::bodies", from, "Target block already downloaded, skipping.");
+            return Ok(ExecOutput::done(to))
         }
 
         // Update the header range on the downloader
@@ -232,7 +232,7 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
@@ -262,7 +262,7 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
@@ -294,7 +294,7 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
@@ -314,7 +314,7 @@ mod tests {
 
         // Execute again on top of the previous run
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(first_run_checkpoint),
         };
         let rx = runner.execute(input);
@@ -340,7 +340,7 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
@@ -498,7 +498,7 @@ mod tests {
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.checkpoint().block_number;
-                let end = input.previous_stage_checkpoint().block_number;
+                let end = input.previous_stage_checkpoint_block_number();
                 let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {

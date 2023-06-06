@@ -125,7 +125,7 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                     }
                     Poll::Ready(Some(range)) => {
                         if let Err(err) = this.downloader.set_download_range(range) {
-                            tracing::error!(target: "downloaders::bodies", ?err, "Failed to set download range");
+                            tracing::error!(target: "downloaders::bodies", ?err, "Failed to set bodies download range");
 
                             match ready!(this.bodies_tx.poll_reserve(cx)) {
                                 Ok(()) => {

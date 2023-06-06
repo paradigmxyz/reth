@@ -64,6 +64,12 @@ pub trait BlockProvider:
     /// and the caller does not know the hash.
     fn pending_block(&self) -> Result<Option<SealedBlock>>;
 
+    /// Returns the pending block header if available
+    ///
+    /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
+    /// provider and the caller does not know the hash.
+    fn pending_header(&self) -> Result<Option<SealedHeader>>;
+
     /// Returns the ommers/uncle headers of the given block from the database.
     ///
     /// Returns `None` if block is not found.

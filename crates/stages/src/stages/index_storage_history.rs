@@ -1,7 +1,16 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::{database::Database, models::BlockNumberAddress};
-use reth_primitives::stage::{StageCheckpoint, StageId};
-use std::fmt::Debug;
+use reth_db::{
+    cursor::DbCursorRO, database::Database, models::BlockNumberAddress, tables, transaction::DbTx,
+    DatabaseError,
+};
+use reth_primitives::{
+    stage::{
+        CheckpointBlockRange, EntitiesCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageId,
+    },
+    BlockNumber,
+};
+use reth_provider::DatabaseProviderRW;
+use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::*;
 
 /// Stage is indexing history the account changesets generated in
@@ -33,18 +42,28 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let target = input.previous_stage_checkpoint();
+        let target = input.previous_stage_checkpoint_block_number();
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         if range.is_empty() {
             return Ok(ExecOutput::done(target))
         }
 
+        let mut stage_checkpoint = stage_checkpoint::<DB>(provider, input.checkpoint(), &range)?;
+
         let indices = provider.get_storage_transition_ids_from_changeset(range.clone())?;
+        let changesets = indices.values().map(|blocks| blocks.len() as u64).sum::<u64>();
+
         provider.insert_storage_history_index(indices)?;
 
+        stage_checkpoint.progress.processed += changesets;
+
         info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(*range.end())
+                .with_index_history_stage_checkpoint(stage_checkpoint),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -56,16 +75,72 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         let (range, unwind_progress, is_final_range) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
+        let changesets =
+            provider.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
+
+        let checkpoint =
+            if let Some(mut stage_checkpoint) = input.checkpoint.index_history_stage_checkpoint() {
+                stage_checkpoint.progress.processed -= changesets as u64;
+                StageCheckpoint::new(unwind_progress)
+                    .with_index_history_stage_checkpoint(stage_checkpoint)
+            } else {
+                StageCheckpoint::new(unwind_progress)
+            };
 
         info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        Ok(UnwindOutput { checkpoint })
     }
+}
+
+/// The function proceeds as follows:
+/// 1. It first checks if the checkpoint has an [IndexHistoryCheckpoint] that matches the given
+/// block range. If it does, the function returns that checkpoint.
+/// 2. If the checkpoint's block range end matches the current checkpoint's block number, it creates
+/// a new [IndexHistoryCheckpoint] with the given block range and updates the progress with the
+/// current progress.
+/// 3. If none of the above conditions are met, it creates a new [IndexHistoryCheckpoint] with the
+/// given block range and calculates the progress by counting the number of processed entries in the
+/// [tables::StorageChangeSet] table within the given block range.
+fn stage_checkpoint<DB: Database>(
+    provider: &DatabaseProviderRW<'_, DB>,
+    checkpoint: StageCheckpoint,
+    range: &RangeInclusive<BlockNumber>,
+) -> Result<IndexHistoryCheckpoint, DatabaseError> {
+    Ok(match checkpoint.index_history_stage_checkpoint() {
+        Some(stage_checkpoint @ IndexHistoryCheckpoint { block_range, .. })
+            if block_range == CheckpointBlockRange::from(range) =>
+        {
+            stage_checkpoint
+        }
+        Some(IndexHistoryCheckpoint { block_range, progress })
+            if block_range.to == checkpoint.block_number =>
+        {
+            IndexHistoryCheckpoint {
+                block_range: CheckpointBlockRange::from(range),
+                progress: EntitiesCheckpoint {
+                    processed: progress.processed,
+                    total: provider.tx_ref().entries::<tables::StorageChangeSet>()? as u64,
+                },
+            }
+        }
+        _ => IndexHistoryCheckpoint {
+            block_range: CheckpointBlockRange::from(range),
+            progress: EntitiesCheckpoint {
+                processed: provider
+                    .tx_ref()
+                    .cursor_read::<tables::StorageChangeSet>()?
+                    .walk_range(BlockNumberAddress::range(0..=checkpoint.block_number))?
+                    .count() as u64,
+                total: provider.tx_ref().entries::<tables::StorageChangeSet>()? as u64,
+            },
+        },
+    })
 }
 
 #[cfg(test)]
 mod tests {
 
+    use assert_matches::assert_matches;
     use std::collections::BTreeMap;
 
     use super::*;
@@ -143,14 +218,26 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(run_to))),
-            ..Default::default()
-        };
+        let input =
+            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+        assert_eq!(
+            out,
+            ExecOutput {
+                checkpoint: StageCheckpoint::new(5).with_index_history_stage_checkpoint(
+                    IndexHistoryCheckpoint {
+                        block_range: CheckpointBlockRange {
+                            from: input.checkpoint().block_number + 1,
+                            to: run_to
+                        },
+                        progress: EntitiesCheckpoint { processed: 2, total: 2 }
+                    }
+                ),
+                done: true
+            }
+        );
         tx.commit().unwrap();
     }
 
@@ -222,10 +309,7 @@ mod tests {
     async fn insert_index_to_full_shard() {
         // init
         let tx = TestTransaction::default();
-        let _input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(5))),
-            ..Default::default()
-        };
+        let _input = ExecInput { previous_stage: Some((PREV_STAGE_ID, 5)), ..Default::default() };
 
         // change does not matter only that account is present in changeset.
         let full_list = vec![3; NUM_OF_INDICES_IN_SHARD];
@@ -366,6 +450,66 @@ mod tests {
                 (shard(2), full_list.clone()),
                 (shard(u64::MAX), vec![2, 3])
             ])
+        );
+    }
+
+    #[test]
+    fn stage_checkpoint_recalculation() {
+        let tx = TestTransaction::default();
+
+        tx.commit(|tx| {
+            tx.put::<tables::StorageChangeSet>(
+                BlockNumberAddress((1, H160(hex!("0000000000000000000000000000000000000001")))),
+                storage(H256(hex!(
+                    "0000000000000000000000000000000000000000000000000000000000000001"
+                ))),
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSet>(
+                BlockNumberAddress((1, H160(hex!("0000000000000000000000000000000000000001")))),
+                storage(H256(hex!(
+                    "0000000000000000000000000000000000000000000000000000000000000002"
+                ))),
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSet>(
+                BlockNumberAddress((1, H160(hex!("0000000000000000000000000000000000000002")))),
+                storage(H256(hex!(
+                    "0000000000000000000000000000000000000000000000000000000000000001"
+                ))),
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSet>(
+                BlockNumberAddress((2, H160(hex!("0000000000000000000000000000000000000001")))),
+                storage(H256(hex!(
+                    "0000000000000000000000000000000000000000000000000000000000000001"
+                ))),
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSet>(
+                BlockNumberAddress((2, H160(hex!("0000000000000000000000000000000000000001")))),
+                storage(H256(hex!(
+                    "0000000000000000000000000000000000000000000000000000000000000002"
+                ))),
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSet>(
+                BlockNumberAddress((2, H160(hex!("0000000000000000000000000000000000000002")))),
+                storage(H256(hex!(
+                    "0000000000000000000000000000000000000000000000000000000000000001"
+                ))),
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        assert_matches!(
+            stage_checkpoint(&tx.inner(), StageCheckpoint::new(1), &(1..=2)).unwrap(),
+            IndexHistoryCheckpoint {
+                block_range: CheckpointBlockRange { from: 1, to: 2 },
+                progress: EntitiesCheckpoint { processed: 3, total: 6 }
+            }
         );
     }
 }

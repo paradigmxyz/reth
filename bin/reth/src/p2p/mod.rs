@@ -1,6 +1,10 @@
 //! P2P Debugging tool
 use crate::{
-    args::{get_secret_key, DiscoveryArgs},
+    args::{
+        get_secret_key,
+        utils::{chain_spec_value_parser, hash_or_num_value_parser},
+        DiscoveryArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
 };
@@ -12,7 +16,6 @@ use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ShareableDatabase;
-use reth_staged_sync::utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser};
 use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command

@@ -11,6 +11,13 @@ pub trait CanonChainTracker: Send + Sync {
     /// ([CanonChainTracker::on_forkchoice_update_received])
     fn last_received_update_timestamp(&self) -> Option<Instant>;
 
+    /// Notify the tracker about a transition configuration exchange.
+    fn on_transition_configuration_exchanged(&self);
+
+    /// Returns the last time a transition configuration was exchanged with the CL
+    /// ([CanonChainTracker::on_transition_configuration_exchanged])
+    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant>;
+
     /// Sets the canonical head of the chain.
     fn set_canonical_head(&self, header: SealedHeader);
 

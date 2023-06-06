@@ -12,7 +12,7 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
-use futures::{pin_mut, stream::select as stream_select, StreamExt};
+use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine};
@@ -51,11 +51,7 @@ use reth_provider::{
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-    parse_socket_address,
-};
+use reth_staged_sync::utils::init::{init_db, init_genesis};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -74,13 +70,21 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use crate::{args::PayloadBuilderArgs, dirs::MaybePlatformPath};
+use crate::{
+    args::{
+        utils::{genesis_value_parser, parse_socket_address},
+        PayloadBuilderArgs,
+    },
+    dirs::MaybePlatformPath,
+    node::cl_events::ConsensusLayerHealthEvents,
+};
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::bytes::BytesMut;
 use reth_provider::providers::BlockchainProvider;
 use reth_rlp::Encodable;
 
+pub mod cl_events;
 pub mod events;
 
 /// Start the node
@@ -341,15 +345,21 @@ impl Command {
             initial_target,
             consensus_engine_tx,
             consensus_engine_rx,
-        );
+        )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        let events = stream_select(
-            stream_select(
-                network.event_listener().map(Into::into),
-                beacon_engine_handle.event_listener().map(Into::into),
-            ),
+        let events = stream_select!(
+            network.event_listener().map(Into::into),
+            beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
+            if self.debug.tip.is_none() {
+                Either::Left(
+                    ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
+                        .map(Into::into),
+                )
+            } else {
+                Either::Right(stream::empty())
+            }
         );
         ctx.task_executor
             .spawn_critical("events task", events::handle_events(Some(network.clone()), events));

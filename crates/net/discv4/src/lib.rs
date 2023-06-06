@@ -54,7 +54,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 pub mod error;
 mod proto;
@@ -322,10 +322,10 @@ impl Discv4 {
 
     fn send_to_service(&self, cmd: Discv4Command) {
         let _ = self.to_service.try_send(cmd).map_err(|err| {
-            warn!(
+            debug!(
                 target : "discv4",
                 %err,
-                "dropping command",
+                "channel capacity reached, dropping command",
             )
         });
     }
@@ -503,10 +503,10 @@ impl Discv4Service {
     /// discovery
     pub fn set_external_ip_addr(&mut self, external_ip: IpAddr) {
         if self.local_node_record.address != external_ip {
-            info!(target : "discv4",  ?external_ip, "Updating external ip");
+            debug!(target : "discv4",  ?external_ip, "Updating external ip");
             self.local_node_record.address = external_ip;
             let _ = self.local_eip_868_enr.set_ip(external_ip, &self.secret_key);
-            info!(target : "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
+            debug!(target : "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
         }
     }
 
@@ -857,10 +857,10 @@ impl Discv4Service {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(target : "discv4",  r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
-            warn!(
+            debug!(
                 target : "discv4",
                 %err,
-                "drop outgoing packet",
+                "dropped outgoing packet",
             );
         });
         hash
@@ -1589,7 +1589,7 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
 pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
     let send = |event: IngressEvent| async {
         let _ = tx.send(event).await.map_err(|err| {
-            warn!(
+            debug!(
                 target : "discv4",
                  %err,
                 "failed send incoming packet",

@@ -8,8 +8,13 @@ pub enum StageEnum {
     Bodies,
     Senders,
     Execution,
+    AccountHashing,
+    StorageHashing,
     Hashing,
     Merkle,
     TxLookup,
+    // TODO: Combine or remove `History` variant.
     History,
+    AccountHistory,
+    StorageHistory,
 }

@@ -76,6 +76,10 @@ impl<'a> DbTx<'a> for TxMock {
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
         todo!()
     }
+
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
+        todo!()
+    }
 }
 
 impl<'a> DbTxMut<'a> for TxMock {
@@ -91,6 +95,10 @@ impl<'a> DbTxMut<'a> for TxMock {
         todo!()
     }
 
+    fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
+        todo!()
+    }
+
     fn cursor_write<T: Table>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
@@ -100,10 +108,6 @@ impl<'a> DbTxMut<'a> for TxMock {
     fn cursor_dup_write<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
-        todo!()
-    }
-
-    fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
         todo!()
     }
 }

@@ -1,6 +1,6 @@
 //! Database debugging tool
 use crate::{
-    args::StageEnum,
+    args::{utils::genesis_value_parser, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
@@ -12,7 +12,7 @@ use reth_db::{
     transaction::DbTxMut,
 };
 use reth_primitives::{stage::StageId, ChainSpec};
-use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
+use reth_staged_sync::utils::init::insert_genesis_state;
 use std::sync::Arc;
 use tracing::info;
 
@@ -63,6 +63,13 @@ impl Command {
 
         tool.db.update(|tx| {
             match &self.stage {
+                StageEnum::Senders => {
+                    tx.clear::<tables::TxSenders>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::SenderRecovery.to_string(),
+                        Default::default(),
+                    )?;
+                }
                 StageEnum::Execution => {
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;
@@ -75,6 +82,20 @@ impl Command {
                         Default::default(),
                     )?;
                     insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
+                }
+                StageEnum::AccountHashing => {
+                    tx.clear::<tables::HashedAccount>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::AccountHashing.to_string(),
+                        Default::default(),
+                    )?;
+                }
+                StageEnum::StorageHashing => {
+                    tx.clear::<tables::HashedStorage>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::StorageHashing.to_string(),
+                        Default::default(),
+                    )?;
                 }
                 StageEnum::Hashing => {
                     // Clear hashed accounts

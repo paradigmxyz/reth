@@ -1143,7 +1143,7 @@ impl PeersConfig {
             return Ok(self)
         };
         let reader = match std::fs::File::open(file_path.as_ref()) {
-            Ok(file) => std::io::BufReader::new(file),
+            Ok(file) => io::BufReader::new(file),
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
             Err(e) => Err(e)?,
         };

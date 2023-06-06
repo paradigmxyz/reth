@@ -61,7 +61,7 @@ async fn unwind_and_copy<DB: Database>(
         bad_block: None,
     };
     let execute_input = reth_stages::ExecInput {
-        previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(to))),
+        previous_stage: Some((StageId::Other("Another"), to)),
         checkpoint: Some(StageCheckpoint::new(from)),
     };
 
@@ -155,7 +155,7 @@ async fn dry_run<DB: Database>(output_db: DB, to: u64, from: u64) -> eyre::Resul
             },
             &mut provider,
             reth_stages::ExecInput {
-                previous_stage: Some((StageId::Other("Another"), StageCheckpoint::new(to))),
+                previous_stage: Some((StageId::Other("Another"), to)),
                 checkpoint: Some(StageCheckpoint::new(from)),
             },
         )
