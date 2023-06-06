@@ -552,7 +552,7 @@ mod tests {
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
                 if let Some(output) = output {
-                    let start_block = input.checkpoint().block_number + 1;
+                    let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
                     if start_block > end_block {
                         return Ok(())
