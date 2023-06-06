@@ -63,6 +63,14 @@ impl Command {
 
         tool.db.update(|tx| {
             match &self.stage {
+                StageEnum::Bodies => {
+                    tx.clear::<tables::BlockBodyIndices>()?;
+                    tx.clear::<tables::Transactions>()?;
+                    tx.clear::<tables::TransactionBlock>()?;
+                    tx.clear::<tables::BlockOmmers>()?;
+                    tx.clear::<tables::BlockWithdrawals>()?;
+                    tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
+                }
                 StageEnum::Senders => {
                     tx.clear::<tables::TxSenders>()?;
                     tx.put::<tables::SyncStage>(
@@ -137,6 +145,13 @@ impl Command {
                     )?;
                     tx.put::<tables::SyncStage>(
                         StageId::IndexStorageHistory.to_string(),
+                        Default::default(),
+                    )?;
+                }
+                StageEnum::TotalDifficulty => {
+                    tx.clear::<tables::HeaderTD>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::TotalDifficulty.to_string(),
                         Default::default(),
                     )?;
                 }
