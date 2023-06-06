@@ -161,11 +161,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                                 // fetch the sealed header so we can use it in the sender recovery
                                 // unwind
                                 let sealed_header = tx.get_sealed_header(block_number)?;
-                                return Err(
-                                    FailedSenderRecoveryError::with_block(sealed_header).into()
-                                )
+                                return Err(StageError::Validation {
+                                    block: sealed_header,
+                                    error:
+                                        consensus::ConsensusError::TransactionSignerRecoveryError,
+                                })
                             }
-                            SenderRecoveryStageError::StageError(err) => return Err(err.into()),
+                            SenderRecoveryStageError::StageError(err) => return Err(err),
                         }
                     }
                 };
@@ -211,7 +213,6 @@ fn stage_checkpoint<DB: Database>(
     })
 }
 
-// TODO(onbjerg): Should unwind
 #[derive(Error, Debug)]
 #[error(transparent)]
 enum SenderRecoveryStageError {
@@ -222,23 +223,11 @@ enum SenderRecoveryStageError {
     StageError(#[from] StageError),
 }
 
-// TODO(onbjerg): Should unwind
 #[derive(Error, Debug)]
 #[error("Sender recovery failed for transaction {tx}.")]
 struct FailedSenderRecoveryError {
     /// The transaction that failed sender recovery
     tx: TxNumber,
-}
-
-impl FailedSenderRecoveryError {
-    /// Creates a [StageError] populated with a transaction sender recovery error with the given
-    /// block.
-    fn with_block(block: SealedHeader) -> StageError {
-        StageError::Validation {
-            block,
-            error: consensus::ConsensusError::TransactionSignerRecoveryError,
-        }
-    }
 }
 
 #[cfg(test)]
