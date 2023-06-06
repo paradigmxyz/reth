@@ -316,6 +316,28 @@ pub struct GethDefaultTracingOptions {
     pub limit: Option<u64>,
 }
 
+impl GethDefaultTracingOptions {
+    /// Returns `true` if return data capture is enabled
+    pub fn is_return_data_enabled(&self) -> bool {
+        self.enable_return_data.unwrap_or(false)
+    }
+
+    /// Returns `true` if memory capture is enabled
+    pub fn is_memory_enabled(&self) -> bool {
+        self.enable_memory.unwrap_or(false)
+    }
+
+    /// Returns `true` if stack capture is enabled
+    pub fn is_stack_enabled(&self) -> bool {
+        !self.disable_stack.unwrap_or(false)
+    }
+
+    /// Returns `true` if storage capture is enabled
+    pub fn is_storage_enabled(&self) -> bool {
+        !self.disable_storage.unwrap_or(false)
+    }
+}
+
 /// Bindings for additional `debug_traceCall` options
 ///
 /// See <https://geth.ethereum.org/docs/rpc/ns-debug#debug_tracecall>
