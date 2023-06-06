@@ -1,15 +1,16 @@
 [package]
 name = "reth-staged-sync"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Puts together all the Reth stages in a unified abstraction"
 
 [dependencies]
 # reth
-reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
+reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 reth-discv4 = { path = "../../crates/net/discv4" }
 reth-network-api = { path = "../../crates/net/network-api" }
 reth-network = { path = "../../crates/net/network", features = ["serde"] }
@@ -31,11 +32,7 @@ tracing = { workspace = true }
 
 # crypto
 rand = { version = "0.8", optional = true }
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
 
 # errors
 thiserror = "1"
@@ -44,14 +41,22 @@ thiserror = "1"
 enr = { version = "0.8.1", features = ["serde", "rust-secp256k1"], optional = true }
 
 # ethers
-ethers-core = { version = "2.0.7", default-features = false, optional = true}
-ethers-providers = { version = "2.0.7", features = ["ws"], default-features = false, optional = true }
+ethers-core = { version = "2.0.7", default-features = false, optional = true }
+ethers-providers = { version = "2.0.7", features = [
+    "ws",
+], default-features = false, optional = true }
 ethers-middleware = { version = "2.0.7", default-features = false, optional = true }
 ethers-signers = { version = "2.0.7", default-features = false, optional = true }
 
 # async / futures
 async-trait = { version = "0.1", optional = true }
-tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"], optional = true }
+tokio = { version = "1", features = [
+    "io-util",
+    "net",
+    "macros",
+    "rt-multi-thread",
+    "time",
+], optional = true }
 
 # misc
 hex = { version = "0.4", optional = true }
@@ -70,11 +75,7 @@ futures = "0.3"
 tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 
 # crypto
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
 
 confy = "0.5"
 
@@ -93,6 +94,6 @@ test-utils = [
     "dep:ethers-signers",
     "dep:ethers-providers",
     "dep:ethers-middleware",
-    "dep:async-trait"
+    "dep:async-trait",
 ]
 geth-tests = []

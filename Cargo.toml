@@ -43,13 +43,20 @@ members = [
     "crates/tasks",
     "crates/transaction-pool",
     "crates/trie",
-    "testing/ef-tests"
+    "testing/ef-tests",
 ]
 default-members = ["bin/reth"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
 resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.70" # Remember to update .clippy.toml and README.md
+license = "MIT OR Apache-2.0"
+homepage = "https://paradigmxyz.github.io/reth"
+repository = "https://github.com/paradigmxyz/reth"
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
@@ -65,7 +72,6 @@ incremental = false
 [patch.crates-io]
 # patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
 ruint = { git = "https://github.com/paradigmxyz/uint" }
-
 
 [workspace.dependencies]
 tracing = "^0.1.0"

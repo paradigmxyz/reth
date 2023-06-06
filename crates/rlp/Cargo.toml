@@ -1,10 +1,12 @@
 [package]
 name = "reth-rlp"
 version = "0.1.2"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 license = "Apache-2.0"
 description = "Fast RLP serialization library"
-repository = "https://github.com/paradigmxyz/reth"
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 arrayvec = { version = "0.7", default-features = false }
@@ -22,7 +24,7 @@ reth-rlp = { path = ".", package = "reth-rlp", features = [
     "std",
     "ethnum",
     "ethereum-types",
-    "smol_str"
+    "smol_str",
 ] }
 criterion = "0.4.0"
 hex-literal = "0.3"
