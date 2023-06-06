@@ -17,8 +17,7 @@ use reth_tracing::{
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
-    // This should be a good point to display the hardfork information
-    let hardfork = MAINNET.hardforks();
+    display_hardforks_on_startup();
 
     let opt = Cli::parse();
 
@@ -207,7 +206,6 @@ mod tests {
     #[test]
     fn test_parse_help_all_subcommands() {
         display_hardforks_on_startup();
-
         let reth = Cli::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"])
