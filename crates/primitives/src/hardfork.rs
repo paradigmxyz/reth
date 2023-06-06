@@ -103,6 +103,9 @@ mod tests {
 
     #[test]
     fn check_hardfork_from_str() {
+
+        println!("{}", Hardfork);
+
         let hardfork_str = [
             "frOntier",
             "homEstead",

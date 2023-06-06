@@ -8,6 +8,7 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
+use reth_primitives::MAINNET;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
@@ -16,6 +17,10 @@ use reth_tracing::{
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
+
+    // This should be a good point to display the hardfork information 
+    let hardfork = MAINNET.hardforks(); 
+
     let opt = Cli::parse();
 
     let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
@@ -171,6 +176,28 @@ impl Verbosity {
     }
 }
 
+/**
+ * Display hardfork information on startup
+ * 
+ * Example:
+ * Hardforks:
+ *   - Homestead: Block 0
+ *   - London: Block 1
+ *   - Paris: TTD 1000
+ *   - Shanghai: Timestamp 203023214012
+ * 
+ *  */ 
+
+fn display_hardforks_on_startup() {
+
+    let hardfork = MAINNET.hardforks(); 
+
+    println!("Hardforks:");
+    for (k,v) in &*hardfork{
+        println!("{}: {}", k, v);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +208,9 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
+
+        display_hardforks_on_startup();
+
         let reth = Cli::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"])

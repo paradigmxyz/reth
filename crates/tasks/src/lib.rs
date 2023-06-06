@@ -167,6 +167,10 @@ impl TaskManager {
             metrics: Default::default(),
         }
     }
+
+    pub fn shutdown(){
+        
+    }
 }
 
 /// An endless future that resolves if a critical task panicked.

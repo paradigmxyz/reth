@@ -11,6 +11,7 @@ use hex_literal::hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Display;
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
@@ -601,6 +602,12 @@ pub enum ForkCondition {
     /// The fork is never activated
     #[default]
     Never,
+}
+
+impl Display for ForkCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
 }
 
 impl ForkCondition {
