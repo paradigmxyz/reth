@@ -122,7 +122,6 @@ impl TracingInspector {
                 value,
                 status: InstructionResult::Continue,
                 caller,
-                last_call_return_value: self.last_call_return_data.clone(),
                 maybe_precompile,
                 ..Default::default()
             },
@@ -150,8 +149,10 @@ impl TracingInspector {
         trace.status = status;
         trace.success = success;
         trace.gas_used = gas_used;
-        trace.output = output.clone();
-        self.last_call_return_data = Some(output);
+
+        if self.config.record_call_return_data {
+            trace.output = Some(output.clone());
+        }
 
         if let Some(address) = created_address {
             // A new contract was created via CREATE
