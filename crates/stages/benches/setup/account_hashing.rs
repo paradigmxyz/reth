@@ -40,7 +40,7 @@ fn find_stage_range(db: &Path) -> StageRange {
 
             stage_range = Some((
                 ExecInput {
-                    previous_stage: Some((StageId::Other("Another"), to.block_number)),
+                    target: Some(to.block_number),
                     checkpoint: Some(StageCheckpoint::new(from)),
                 },
                 UnwindInput { unwind_to: from, checkpoint: to, bad_block: None },
@@ -66,14 +66,5 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         let mut tx = tx.inner();
         let _accounts = AccountHashingStage::seed(&mut tx, opts);
     }
-    (
-        path,
-        (
-            ExecInput {
-                previous_stage: Some((StageId::Other("Another"), num_blocks)),
-                ..Default::default()
-            },
-            UnwindInput::default(),
-        ),
-    )
+    (path, (ExecInput { target: Some(num_blocks), ..Default::default() }, UnwindInput::default()))
 }

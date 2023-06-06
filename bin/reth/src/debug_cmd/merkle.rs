@@ -115,7 +115,7 @@ impl Command {
                 .execute(
                     &mut tx,
                     ExecInput {
-                        previous_stage: Some((StageId::SenderRecovery, block)),
+                        target: Some(block),
                         checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
                     },
                 )
@@ -127,7 +127,7 @@ impl Command {
                     .execute(
                         &mut tx,
                         ExecInput {
-                            previous_stage: Some((StageId::Execution, block)),
+                            target: Some(block),
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
@@ -141,7 +141,7 @@ impl Command {
                     .execute(
                         &mut tx,
                         ExecInput {
-                            previous_stage: Some((StageId::AccountHashing, block)),
+                            target: Some(block),
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
@@ -153,7 +153,7 @@ impl Command {
                 .execute(
                     &mut tx,
                     ExecInput {
-                        previous_stage: Some((StageId::StorageHashing, block)),
+                        target: Some(block),
                         checkpoint: progress.map(StageCheckpoint::new),
                     },
                 )
@@ -170,10 +170,7 @@ impl Command {
                     .walk_range(..)?
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let clean_input = ExecInput {
-                    previous_stage: Some((StageId::StorageHashing, block)),
-                    checkpoint: None,
-                };
+                let clean_input = ExecInput { target: Some(block), checkpoint: None };
                 loop {
                     let clean_result = merkle_stage.execute(&mut tx, clean_input).await;
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");

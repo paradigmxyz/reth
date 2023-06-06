@@ -139,7 +139,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let start_block = input.checkpoint().block_number + 1;
-        let max_block = input.previous_stage_checkpoint_block_number();
+        let max_block = input.previous_stage_block_number();
 
         // Build executor
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
@@ -476,7 +476,7 @@ impl ExecutionStageThresholds {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
+    use crate::test_utils::TestTransaction;
     use assert_matches::assert_matches;
     use reth_db::{
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
@@ -632,7 +632,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, 1)),
+            target: Some(1),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };
@@ -736,7 +736,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, 1)),
+            target: Some(1),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };
@@ -822,7 +822,7 @@ mod tests {
         let test_tx = TestTransaction::default();
         let mut tx = test_tx.inner();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, 1)),
+            target: Some(1),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };
