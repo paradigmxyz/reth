@@ -1,8 +1,8 @@
+//! Geth tracing types
 #![allow(missing_docs)]
 
 use crate::{state::StateOverride, BlockOverrides};
-/// Geth tracing types
-use reth_primitives::{Bytes, JsonU256, H256, U256};
+use reth_primitives::{Bytes, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -41,7 +41,7 @@ pub struct BlockTraceResult {
 #[serde(rename_all = "camelCase")]
 pub struct DefaultFrame {
     pub failed: bool,
-    pub gas: JsonU256,
+    pub gas: u64,
     pub return_value: Bytes,
     pub struct_logs: Vec<StructLog>,
 }
