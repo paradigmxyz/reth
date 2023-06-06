@@ -16,7 +16,7 @@ reth-network-api = { path = "../net/network-api" }
 reth-eth-wire = { path = "../net/eth-wire" }
 
 # eth
-revm-primitives = "1.1"
+revm-primitives = { workspace = true }
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 
 # async

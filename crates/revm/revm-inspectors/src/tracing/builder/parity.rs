@@ -124,6 +124,11 @@ impl ParityTraceBuilder {
         let mut diff = StateDiff::default();
 
         for (node, trace_address) in self.nodes.iter().zip(trace_addresses) {
+            // skip precompiles
+            if node.is_precompile() {
+                continue
+            }
+
             if with_traces {
                 let trace = node.parity_transaction_trace(trace_address);
                 traces.push(trace);
@@ -145,6 +150,7 @@ impl ParityTraceBuilder {
         self.nodes
             .into_iter()
             .zip(trace_addresses)
+            .filter(|(node, _)| !node.is_precompile())
             .map(|(node, trace_address)| node.parity_transaction_trace(trace_address))
     }
 

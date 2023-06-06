@@ -502,6 +502,17 @@ dependencies = [
 
 [[package]]
 name = "bstr"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba3569f383e8f1598449f1a423e72e99569137b47740b1da11ef19af3d5c3223"
+dependencies = [
+ "lazy_static",
+ "memchr",
+ "regex-automata",
+]
+
+[[package]]
+name = "bstr"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ffdb39cb703212f3c11973452c2861b972f757b021158f3516ba10f2fa8b2c1"
@@ -845,6 +856,18 @@ dependencies = [
  "serde",
  "thiserror",
  "toml 0.5.11",
+]
+
+[[package]]
+name = "console"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c926e00cc70edefdc64d3a5ff31cc65bb97a3460097762bd23afb4d8145fccf8"
+dependencies = [
+ "encode_unicode",
+ "lazy_static",
+ "libc",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -1608,6 +1631,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "encode_unicode"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2309,7 +2338,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "029d74589adefde59de1a0c4f4732695c32805624aec7b68d91503d4dba79afc"
 dependencies = [
  "aho-corasick 0.7.20",
- "bstr",
+ "bstr 1.3.0",
  "fnv",
  "log",
  "regex",
@@ -5363,6 +5392,7 @@ dependencies = [
  "reth-rlp",
  "serde",
  "serde_json",
+ "similar-asserts",
  "thiserror",
  "tokio",
 ]
@@ -5508,8 +5538,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f293f351c4c203d321744e54ed7eed3d2b6eef4c140228910dde3ac9a5ea8031"
+source = "git+https://github.com/bluealloy/revm/?branch=release/v25#88337924f4d16ed1f5e4cde12a03d0cb755cd658"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -5519,8 +5548,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a53980a26f9b5a66d13511c35074d4b53631e157850a1d7cf1af4efc2c2b72c9"
+source = "git+https://github.com/bluealloy/revm/?branch=release/v25#88337924f4d16ed1f5e4cde12a03d0cb755cd658"
 dependencies = [
  "derive_more",
  "enumn",
@@ -5530,9 +5558,8 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a3eabf08ea9e4063f5531b8735e29344d9d6eaebaa314c58253f6c17fcdf2d"
+version = "2.0.3"
+source = "git+https://github.com/bluealloy/revm/?branch=release/v25#88337924f4d16ed1f5e4cde12a03d0cb755cd658"
 dependencies = [
  "k256 0.13.1",
  "num",
@@ -5548,8 +5575,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "304d998f466ffef72d76c7f20b05bf08a96801736a6fb1fdef47d49a292618df"
+source = "git+https://github.com/bluealloy/revm/?branch=release/v25#88337924f4d16ed1f5e4cde12a03d0cb755cd658"
 dependencies = [
  "arbitrary",
  "auto_impl",
@@ -6241,6 +6267,26 @@ checksum = "5e1788eed21689f9cf370582dfc467ef36ed9c707f073528ddafa8d83e3b8500"
 dependencies = [
  "digest 0.10.6",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "similar"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "420acb44afdae038210c99e69aae24109f32f15500aa708e81d46c9f29d55fcf"
+dependencies = [
+ "bstr 0.2.17",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "similar-asserts"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbf644ad016b75129f01a34a355dcb8d66a5bc803e417c7a77cc5d5ee9fa0f18"
+dependencies = [
+ "console",
+ "similar",
 ]
 
 [[package]]
@@ -7713,9 +7759,9 @@ dependencies = [
 
 [[package]]
 name = "xml-rs"
-version = "0.8.4"
+version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2d7d3948613f75c98fd9328cfdcc45acc4d360655289d0a7d4ec931392200a3"
+checksum = "52839dc911083a8ef63efa4d039d1f58b5e409f923e44c80828f206f66e5541c"
 
 [[package]]
 name = "xmltree"

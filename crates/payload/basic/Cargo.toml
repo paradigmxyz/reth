@@ -20,7 +20,7 @@ reth-tasks = { path = "../../tasks" }
 reth-metrics = { path = "../../metrics" }
 
 ## ethereum
-revm = { version = "3" }
+revm = { workspace = true }
 
 ## async
 tokio = { version = "1", features = ["sync", "time"] }
