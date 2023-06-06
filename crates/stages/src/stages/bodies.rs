@@ -219,6 +219,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     }
 }
 
+// TODO(alexey): ideally, we want to measure Bodies stage progress in bytes, but it's hard to know
+//  beforehand how many bytes we need to download. So the good solution would be to measure the
+//  progress in gas as a proxy to size. Execution stage uses a similar approach.
 fn stage_checkpoint<DB: Database>(
     tx: &Transaction<'_, DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
