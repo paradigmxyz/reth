@@ -1,10 +1,11 @@
 [package]
 name = "reth-dns-discovery"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Support for EIP-1459 Node Discovery via DNS"
 
 [dependencies]
@@ -14,12 +15,7 @@ reth-net-common = { path = "../common" }
 reth-rlp = { path = "../../rlp" }
 
 # ethereum
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-    "serde"
-] }
+secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { version = "0.8.1", default-features = false, features = ["rust-secp256k1"] }
 
 # async/futures

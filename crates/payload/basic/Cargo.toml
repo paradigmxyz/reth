@@ -1,10 +1,11 @@
 [package]
 name = "reth-basic-payload-builder"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "A basic payload builder for reth that uses the txpool API to build payloads."
 
 [dependencies]

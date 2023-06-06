@@ -1,10 +1,11 @@
 [package]
 name = "reth-transaction-pool"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = """
 Transaction pool implementation
 """
@@ -12,12 +13,12 @@ Transaction pool implementation
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
-    "aquamarine"
+    "aquamarine",
 ]
 
 [dependencies]
 # reth
-reth-primitives = { path  = "../primitives" }
+reth-primitives = { path = "../primitives" }
 reth-provider = { path = "../storage/provider" }
 reth-interfaces = { path = "../interfaces" }
 reth-rlp = { path = "../rlp" }
@@ -45,7 +46,6 @@ paste = { version = "1.0", optional = true }
 [dev-dependencies]
 paste = "1.0"
 rand = "0.8"
-
 
 [features]
 default = ["serde"]

@@ -1,10 +1,11 @@
 [package]
 name = "reth-network"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = """
 Ethereum network support
 """
@@ -12,7 +13,7 @@ Ethereum network support
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
-    "aquamarine"
+    "aquamarine",
 ]
 
 [dependencies]
@@ -29,7 +30,7 @@ reth-rlp = { path = "../../rlp" }
 reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
-reth-provider = { path = "../../storage/provider"}
+reth-provider = { path = "../../storage/provider" }
 reth-metrics = { path = "../../metrics", features = ["common"] }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 
@@ -56,11 +57,7 @@ async-trait = "0.1"
 linked_hash_set = "0.1"
 linked-hash-map = "0.5.6"
 rand = "0.8"
-secp256k1 = { version = "0.27.0", features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
 
 enr = { version = "0.8.1", features = ["rust-secp256k1"], optional = true }
 ethers-core = { version = "2.0.7", default-features = false, optional = true }
@@ -79,10 +76,10 @@ reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
 
-ethers-core = { version = "2.0.7", default-features = false}
-ethers-providers = {version = "2.0.7", default-features = false }
-ethers-signers = {version = "2.0.7", default-features = false }
-ethers-middleware = {version = "2.0.7", default-features = false }
+ethers-core = { version = "2.0.7", default-features = false }
+ethers-providers = { version = "2.0.7", default-features = false }
+ethers-signers = { version = "2.0.7", default-features = false }
+ethers-middleware = { version = "2.0.7", default-features = false }
 
 enr = { version = "0.8.1", features = ["serde", "rust-secp256k1"] }
 
