@@ -191,7 +191,7 @@ fn display_hardforks_on_startup() {
 
     println!("Hardforks:");
     for (k, v) in &*hardfork {
-        println!("{}: {}", k, v);
+        println!("      {}      : {}", k, v);
     }
 }
 
