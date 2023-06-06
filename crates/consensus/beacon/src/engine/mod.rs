@@ -1009,6 +1009,10 @@ where
             }
             Err(err) => {
                 debug!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
+                if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
+                    // non-internal error kinds occurr if the payload is invalid
+                    self.invalid_headers.insert(err.into_block().header);
+                }
             }
         }
     }

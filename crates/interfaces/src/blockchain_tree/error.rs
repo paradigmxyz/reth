@@ -65,6 +65,12 @@ impl InsertBlockError {
         Self::new(block, InsertBlockErrorKind::Execution(error))
     }
 
+    /// Consumes the error and returns the block that resulted in the error
+    #[inline]
+    pub fn into_block(self) -> SealedBlock {
+        self.inner.block
+    }
+
     /// Returns the error kind
     #[inline]
     pub fn kind(&self) -> &InsertBlockErrorKind {
