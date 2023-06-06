@@ -3,7 +3,7 @@
 use crate::tracing::utils::convert_memory;
 use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
 use reth_rpc_types::trace::{
-    geth::{CallFrame, CallLogFrame, StructLog},
+    geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
         Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
         CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TraceResult,
@@ -423,73 +423,88 @@ pub(crate) struct RawLog {
 
 /// Represents a tracked call step during execution
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CallTraceStep {
+pub(crate) struct CallTraceStep {
     // Fields filled in `step`
     /// Call depth
-    pub depth: u64,
+    pub(crate) depth: u64,
     /// Program counter before step execution
-    pub pc: usize,
+    pub(crate) pc: usize,
     /// Opcode to be executed
-    pub op: OpCode,
+    pub(crate) op: OpCode,
     /// Current contract address
-    pub contract: Address,
+    pub(crate) contract: Address,
     /// Stack before step execution
-    pub stack: Stack,
+    pub(crate) stack: Stack,
     /// Memory before step execution
-    pub memory: Memory,
+    pub(crate) memory: Memory,
     /// Size of memory
-    pub memory_size: usize,
+    pub(crate) memory_size: usize,
     /// Remaining gas before step execution
-    pub gas: u64,
+    pub(crate) gas: u64,
     /// Gas refund counter before step execution
-    pub gas_refund_counter: u64,
+    pub(crate) gas_refund_counter: u64,
     // Fields filled in `step_end`
     /// Gas cost of step execution
-    pub gas_cost: u64,
+    pub(crate) gas_cost: u64,
     /// Change of the contract state after step execution (effect of the SLOAD/SSTORE instructions)
-    pub storage_change: Option<StorageChange>,
+    pub(crate) storage_change: Option<StorageChange>,
     /// Final status of the call
-    pub status: InstructionResult,
+    pub(crate) status: InstructionResult,
 }
 
 // === impl CallTraceStep ===
 
 impl CallTraceStep {
+    /// Converts this step into a geth [StructLog]
+    ///
+    /// This sets memory and stack capture based on the `opts` parameter.
+    pub(crate) fn convert_to_geth_struct_log(&self, opts: &GethDefaultTracingOptions) -> StructLog {
+        let mut log = StructLog {
+            depth: self.depth,
+            error: self.as_error(),
+            gas: self.gas,
+            gas_cost: self.gas_cost,
+            op: self.op.to_string(),
+            pc: self.pc as u64,
+            refund_counter: (self.gas_refund_counter > 0).then_some(self.gas_refund_counter),
+            // Filled, if not disabled manually
+            stack: None,
+            // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
+            return_data: None,
+            // Filled via trace object
+            storage: None,
+            // Only enabled if `opts.enable_memory` is true
+            memory: None,
+            // This is None in the rpc response
+            memory_size: None,
+        };
+
+        if opts.is_stack_enabled() {
+            log.stack = Some(self.stack.data().clone());
+        }
+
+        if opts.is_memory_enabled() {
+            log.memory = Some(convert_memory(self.memory.data()));
+        }
+
+        log
+    }
+
     // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
-    pub fn is_error(&self) -> bool {
+    pub(crate) fn is_error(&self) -> bool {
         self.status as u8 >= InstructionResult::Revert as u8
     }
 
     /// Returns the error message if it is an erroneous result.
-    pub fn as_error(&self) -> Option<String> {
+    pub(crate) fn as_error(&self) -> Option<String> {
         self.is_error().then(|| format!("{:?}", self.status))
-    }
-}
-
-impl From<&CallTraceStep> for StructLog {
-    fn from(step: &CallTraceStep) -> Self {
-        StructLog {
-            depth: step.depth,
-            error: step.as_error(),
-            gas: step.gas,
-            gas_cost: step.gas_cost,
-            memory: Some(convert_memory(step.memory.data())),
-            op: step.op.to_string(),
-            pc: step.pc as u64,
-            refund_counter: (step.gas_refund_counter > 0).then_some(step.gas_refund_counter),
-            stack: Some(step.stack.data().clone()),
-            // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
-            return_data: None,
-            storage: None,
-            memory_size: Some(step.memory_size as u64),
-        }
     }
 }
 
 /// Represents a storage change during execution
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StorageChange {
-    pub key: U256,
-    pub value: U256,
-    pub had_value: Option<U256>,
+pub(crate) struct StorageChange {
+    pub(crate) key: U256,
+    pub(crate) value: U256,
+    pub(crate) had_value: Option<U256>,
 }
