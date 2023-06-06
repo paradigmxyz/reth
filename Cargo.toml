@@ -74,4 +74,9 @@ incremental = false
 ruint = { git = "https://github.com/paradigmxyz/uint" }
 
 [workspace.dependencies]
+## eth
+revm = { version = "3" }
+revm-primitives = "1.1"
+
+## misc
 tracing = "^0.1.0"

@@ -18,7 +18,7 @@ reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-metrics = { path = "../../metrics" }
 
 ## ethereum
-revm-primitives = "1.1"
+revm-primitives = { workspace = true }
 
 ## async
 tokio = { version = "1", features = ["sync"] }

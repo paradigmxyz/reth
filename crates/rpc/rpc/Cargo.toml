@@ -24,13 +24,13 @@ reth-revm = { path = "../../revm" }
 reth-tasks = { path = "../../tasks" }
 
 # eth
-revm = { version = "3", features = [
+revm = { workspace = true, features = [
     "optional_block_gas_limit",
     "optional_eip3607",
     "optional_no_base_fee",
 ] }
 ethers-core = { version = "2.0.7", features = ["eip712"] }
-revm-primitives = { version = "1.1", features = ["serde"] }
+revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
 jsonrpsee = { version = "0.18" }
