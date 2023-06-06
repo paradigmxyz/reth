@@ -1,0 +1,12 @@
+# This image is meant to enable cross-architecture builds.
+# It assumes the reth binary has already been compiled for `$TARGETPLATFORM` and is
+# locatable in `./dist/bin/$TARGETARCH`
+FROM --platform=$TARGETPLATFORM ubuntu:22.04
+
+# Filled by docker buildx
+ARG TARGETARCH
+
+COPY ./dist/bin/$TARGETARCH/reth /usr/local/bin/reth
+
+EXPOSE 30303 30303/udp 9000 8545 8546
+ENTRYPOINT ["/usr/local/bin/reth", "node"]

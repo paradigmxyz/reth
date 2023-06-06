@@ -93,15 +93,15 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     }
 }
 
-// The function proceeds as follows:
-// 1. It first checks if the checkpoint has an `IndexHistoryCheckpoint` that matches the given
-// block range. If it does, the function returns that checkpoint.
-// 2. If the checkpoint's block range end matches the current checkpoint's block number, it creates
-// a new `IndexHistoryCheckpoint` with the given block range and updates the progress with the
-// current progress.
-// 3. If none of the above conditions are met, it creates a new `IndexHistoryCheckpoint` with the
-// given block range and calculates the progress by counting the number of processed entries in the
-// `StorageChangeSet` table within the given block range.
+/// The function proceeds as follows:
+/// 1. It first checks if the checkpoint has an [IndexHistoryCheckpoint] that matches the given
+/// block range. If it does, the function returns that checkpoint.
+/// 2. If the checkpoint's block range end matches the current checkpoint's block number, it creates
+/// a new [IndexHistoryCheckpoint] with the given block range and updates the progress with the
+/// current progress.
+/// 3. If none of the above conditions are met, it creates a new [IndexHistoryCheckpoint] with the
+/// given block range and calculates the progress by counting the number of processed entries in the
+/// [tables::StorageChangeSet] table within the given block range.
 fn stage_checkpoint<DB: Database>(
     tx: &Transaction<'_, DB>,
     checkpoint: StageCheckpoint,
@@ -218,10 +218,8 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(run_to))),
-            ..Default::default()
-        };
+        let input =
+            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
@@ -311,10 +309,7 @@ mod tests {
     async fn insert_index_to_full_shard() {
         // init
         let tx = TestTransaction::default();
-        let _input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(5))),
-            ..Default::default()
-        };
+        let _input = ExecInput { previous_stage: Some((PREV_STAGE_ID, 5)), ..Default::default() };
 
         // change does not matter only that account is present in changeset.
         let full_list = vec![3; NUM_OF_INDICES_IN_SHARD];

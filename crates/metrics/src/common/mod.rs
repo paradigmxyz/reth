@@ -1,1 +1,1 @@
-pub mod metered_sender;
+pub mod mpsc;

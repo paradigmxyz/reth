@@ -29,14 +29,14 @@ impl AuthValidator for JwtAuthValidator {
             Some(jwt) => match self.secret.validate(jwt) {
                 Ok(_) => Ok(()),
                 Err(e) => {
-                    error!(target = "engine::jwt-validator", "{e}");
+                    error!(target = "engine::jwt-validator", "Invalid JWT: {e}");
                     let response = err_response(e);
                     Err(response)
                 }
             },
             None => {
                 let e = JwtError::MissingOrInvalidAuthorizationHeader;
-                error!(target = "engine::jwt-validator", "{e}");
+                error!(target = "engine::jwt-validator", "Invalid JWT: {e}");
                 let response = err_response(e);
                 Err(response)
             }

@@ -20,6 +20,7 @@ impl ChainInfoTracker {
         Self {
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
+                last_transition_configuration_exchange: RwLock::new(None),
                 canonical_head_number: AtomicU64::new(head.number),
                 canonical_head: RwLock::new(head),
                 safe_block: RwLock::new(None),
@@ -40,9 +41,18 @@ impl ChainInfoTracker {
     }
 
     /// Returns the instant when we received the latest forkchoice update.
-    #[allow(unused)]
     pub(crate) fn last_forkchoice_update_received_at(&self) -> Option<Instant> {
         *self.inner.last_forkchoice_update.read()
+    }
+
+    /// Update the timestamp when we exchanged a transition configuration.
+    pub(crate) fn on_transition_configuration_exchanged(&self) {
+        self.inner.last_transition_configuration_exchange.write().replace(Instant::now());
+    }
+
+    /// Returns the instant when we exchanged the transition configuration last time.
+    pub(crate) fn last_transition_configuration_exchanged_at(&self) -> Option<Instant> {
+        *self.inner.last_transition_configuration_exchange.read()
     }
 
     /// Returns the canonical head of the chain.
@@ -115,6 +125,10 @@ struct ChainInfoInner {
     ///
     /// This is mainly used to track if we're connected to a beacon node.
     last_forkchoice_update: RwLock<Option<Instant>>,
+    /// Timestamp when we exchanged the transition configuration last time.
+    ///
+    /// This is mainly used to track if we're connected to a beacon node.
+    last_transition_configuration_exchange: RwLock<Option<Instant>>,
     /// Tracks the number of the `canonical_head`.
     canonical_head_number: AtomicU64,
     /// The canonical head of the chain.

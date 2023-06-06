@@ -446,8 +446,7 @@ mod tests {
                 self.tx.commit(|tx| tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into()))?;
 
                 // use previous checkpoint as seed size
-                let end =
-                    input.previous_stage.map(|(_, num)| num).unwrap_or_default().block_number + 1;
+                let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
 
                 if start + 1 >= end {
                     return Ok(Vec::default())
@@ -555,7 +554,7 @@ mod tests {
         let mut runner = HeadersTestRunner::with_linear_downloader();
         let (checkpoint, previous_stage) = (1000, 1200);
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(checkpoint)),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
@@ -649,7 +648,7 @@ mod tests {
         // pick range that's larger than the configured headers batch size
         let (checkpoint, previous_stage) = (600, 1200);
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, StageCheckpoint::new(previous_stage))),
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(checkpoint)),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");

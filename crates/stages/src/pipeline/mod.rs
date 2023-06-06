@@ -1,11 +1,7 @@
 use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_primitives::{
-    listener::EventListeners,
-    stage::{StageCheckpoint, StageId},
-    BlockNumber, H256,
-};
+use reth_primitives::{listener::EventListeners, stage::StageId, BlockNumber, H256};
 use reth_provider::{providers::get_stage_checkpoint, Transaction};
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -124,7 +120,7 @@ where
     #[track_caller]
     pub fn set_tip(&self, tip: H256) {
         let _ = self.tip_tx.as_ref().expect("tip sender is set").send(tip).map_err(|_| {
-            warn!(target: "sync::pipeline", "tip channel closed");
+            warn!(target: "sync::pipeline", "Chain tip channel closed");
         });
     }
 
@@ -228,7 +224,7 @@ where
 
             previous_stage = Some((
                 stage_id,
-                get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default(),
+                get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default().block_number,
             ));
         }
 
@@ -295,7 +291,7 @@ where
 
     async fn execute_stage_to_completion(
         &mut self,
-        previous_stage: Option<(StageId, StageCheckpoint)>,
+        previous_stage: Option<(StageId, BlockNumber)>,
         stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
         let total_stages = self.stages.len();
@@ -318,7 +314,7 @@ where
                     stage = %stage_id,
                     max_block = self.max_block,
                     prev_block = prev_checkpoint.map(|progress| progress.block_number),
-                    "Stage reached maximum block, skipping."
+                    "Stage reached target block, skipping."
                 );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
 
@@ -348,12 +344,12 @@ where
                         progress = checkpoint.block_number,
                         %checkpoint,
                         %done,
-                        "Stage made progress"
+                        "Stage committed progress"
                     );
                     self.metrics.stage_checkpoint(
                         stage_id,
                         checkpoint,
-                        previous_stage.map(|(_, checkpoint)| checkpoint.block_number),
+                        self.max_block.or(previous_stage.map(|(_, block_number)| block_number)),
                     );
                     tx.save_stage_checkpoint(stage_id, checkpoint)?;
 
@@ -407,7 +403,7 @@ where
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,
-                            "Stage encountered a non-fatal error: {err}. Retrying"
+                            "Stage encountered a non-fatal error: {err}. Retrying..."
                         );
                         continue
                     };
@@ -437,6 +433,7 @@ mod tests {
     use reth_interfaces::{
         consensus, provider::ProviderError, test_utils::generators::random_header,
     };
+    use reth_primitives::stage::StageCheckpoint;
     use tokio_stream::StreamExt;
 
     #[test]

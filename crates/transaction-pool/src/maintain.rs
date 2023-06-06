@@ -12,7 +12,7 @@ use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
 };
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Maximum (reorg) depth we handle when updating the transaction pool: `new.number -
 /// last_seen.number`
@@ -98,7 +98,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                         }
                         Err(err) => {
                             let (addresses, err) = *err;
-                            warn!(
+                            debug!(
                                 ?err,
                                 "failed to load missing changed accounts at new tip: {:?}",
                                 new_tip.hash
