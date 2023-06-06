@@ -139,7 +139,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let start_block = input.checkpoint().block_number + 1;
-        let max_block = input.previous_stage_block_number();
+        let max_block = input.target();
 
         // Build executor
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));

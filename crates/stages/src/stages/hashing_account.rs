@@ -252,7 +252,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
         // so no checkpoint is needed.
-        let checkpoint = StageCheckpoint::new(input.previous_stage_block_number())
+        let checkpoint = StageCheckpoint::new(input.target())
             .with_account_hashing_stage_checkpoint(AccountHashingCheckpoint {
                 progress: stage_checkpoint_progress(tx)?,
                 ..Default::default()
@@ -536,11 +536,7 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 Ok(AccountHashingStage::seed(
                     &mut self.tx.inner(),
-                    SeedOpts {
-                        blocks: 1..=input.previous_stage_block_number(),
-                        accounts: 0..10,
-                        txs: 0..3,
-                    },
+                    SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },
                 )
                 .unwrap())
             }

@@ -14,7 +14,7 @@ use std::{
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
-    /// The block number of the stage that was run before the current stage.
+    /// The target block number the stage needs to execute towards.
     pub target: Option<BlockNumber>,
     /// The checkpoint of this stage the last time it was executed.
     pub checkpoint: Option<StageCheckpoint>,
@@ -26,8 +26,8 @@ impl ExecInput {
         self.checkpoint.unwrap_or_default()
     }
 
-    /// Return the progress of the previous stage or default.
-    pub fn previous_stage_block_number(&self) -> BlockNumber {
+    /// Return the target block number or default.
+    pub fn target(&self) -> BlockNumber {
         self.target.unwrap_or_default()
     }
 
@@ -51,7 +51,7 @@ impl ExecInput {
         let current_block = self.checkpoint();
         // +1 is to skip present block and always start from block number 1, not 0.
         let start = current_block.block_number + 1;
-        let target = self.previous_stage_block_number();
+        let target = self.target();
 
         let end = min(target, current_block.block_number.saturating_add(threshold));
 

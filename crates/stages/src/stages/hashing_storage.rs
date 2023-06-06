@@ -181,7 +181,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
         // so no checkpoint is needed.
-        let checkpoint = StageCheckpoint::new(input.previous_stage_block_number())
+        let checkpoint = StageCheckpoint::new(input.target())
             .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
                 progress: stage_checkpoint_progress(tx)?,
                 ..Default::default()
@@ -487,7 +487,7 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number + 1;
-            let end = input.previous_stage_block_number();
+            let end = input.target();
 
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
