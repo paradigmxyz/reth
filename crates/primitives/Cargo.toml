@@ -14,7 +14,7 @@ reth-rlp = { path = "../rlp", features = ["std", "derive", "ethereum-types"] }
 reth-rlp-derive = { path = "../rlp/rlp-derive" }
 reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 
-revm-primitives = { version = "1.1", features = ["serde"] }
+revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
 ethers-core = { version = "2.0.7", default-features = false }
@@ -75,7 +75,7 @@ serde_json = "1.0"
 hex-literal = "0.3"
 test-fuzz = "3.0.4"
 rand = "0.8"
-revm-primitives = { version = "1.1", features = ["arbitrary"] }
+revm-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }
 proptest-derive = "0.3"
