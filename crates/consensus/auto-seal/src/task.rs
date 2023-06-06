@@ -140,7 +140,7 @@ where
                         receipts_root: Default::default(),
                         withdrawals_root: None,
                         logs_bloom: Default::default(),
-                        difficulty: U256::from(1),
+                        difficulty: U256::from(2),
                         number: storage.best_block + 1,
                         gas_limit: 30_000_000,
                         gas_used: 0,
