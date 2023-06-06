@@ -19,14 +19,14 @@ impl<T: Table> Table for RawTable<T> {
     type Value = RawValue<T::Value>;
 }
 
-/// Raw DubSort table that can be used to access any table and its data in raw mode.
+/// Raw DupSort table that can be used to access any table and its data in raw mode.
 /// This is useful for delayed decoding/encoding of data.
 #[derive(Default, Copy, Clone, Debug)]
-pub struct RawDubSort<T: DupSort> {
+pub struct RawDupSort<T: DupSort> {
     phantom: std::marker::PhantomData<T>,
 }
 
-impl<T: DupSort> Table for RawDubSort<T> {
+impl<T: DupSort> Table for RawDupSort<T> {
     const NAME: &'static str = T::NAME;
 
     type Key = RawKey<T::Key>;
@@ -34,7 +34,7 @@ impl<T: DupSort> Table for RawDubSort<T> {
     type Value = RawValue<T::Value>;
 }
 
-impl<T: DupSort> DupSort for RawDubSort<T> {
+impl<T: DupSort> DupSort for RawDupSort<T> {
     type SubKey = RawKey<T::SubKey>;
 }
 

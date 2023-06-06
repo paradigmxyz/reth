@@ -17,7 +17,7 @@ pub mod models;
 mod raw;
 pub(crate) mod utils;
 
-pub use raw::{RawDubSort, RawKey, RawTable, RawValue};
+pub use raw::{RawDupSort, RawKey, RawTable, RawValue};
 
 /// Declaration of all Database tables.
 use crate::{
