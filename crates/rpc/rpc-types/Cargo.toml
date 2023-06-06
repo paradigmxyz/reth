@@ -34,3 +34,4 @@ reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 # misc
 rand = "0.8"
 assert_matches = "1.5"
+similar-asserts = "1.4"
