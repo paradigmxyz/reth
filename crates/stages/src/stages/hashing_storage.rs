@@ -486,7 +486,7 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.checkpoint().block_number + 1;
+            let stage_progress = input.next_block();
             let end = input.previous_stage_checkpoint_block_number();
 
             let n_accounts = 31;

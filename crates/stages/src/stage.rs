@@ -1,11 +1,11 @@
 use crate::error::StageError;
 use async_trait::async_trait;
-use reth_db::database::Database;
+use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    BlockNumber,
+    BlockNumber, TxNumber,
 };
-use reth_provider::Transaction;
+use reth_provider::{ProviderError, Transaction};
 use std::{
     cmp::{max, min},
     ops::RangeInclusive,
@@ -24,6 +24,18 @@ impl ExecInput {
     /// Return the checkpoint of the stage or default.
     pub fn checkpoint(&self) -> StageCheckpoint {
         self.checkpoint.unwrap_or_default()
+    }
+
+    /// Return the next block number after the current
+    /// +1 is needed to skip the present block and always start from block number 1, not 0.
+    pub fn next_block(&self) -> BlockNumber {
+        let current_block = self.checkpoint();
+        current_block.block_number + 1
+    }
+
+    /// Returns `true` if the target block number has already been reached.
+    pub fn target_reached(&self) -> bool {
+        self.checkpoint().block_number >= self.previous_stage_checkpoint_block_number()
     }
 
     /// Return the progress of the previous stage or default.
@@ -49,7 +61,6 @@ impl ExecInput {
         threshold: u64,
     ) -> (RangeInclusive<BlockNumber>, bool) {
         let current_block = self.checkpoint();
-        // +1 is to skip present block and always start from block number 1, not 0.
         let start = current_block.block_number + 1;
         let target = self.previous_stage_checkpoint_block_number();
 
@@ -57,6 +68,38 @@ impl ExecInput {
 
         let is_final_range = end == target;
         (start..=end, is_final_range)
+    }
+
+    /// Return the next block range determined the number of transactions within it.
+    /// This function walks the the block indices until either the end of the range is reached or
+    /// the number of transactions exceeds the threshold.
+    pub fn next_block_range_with_transaction_threshold<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        tx_threshold: u64,
+    ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
+        let start_block = self.next_block();
+        let start_block_body = tx
+            .get::<tables::BlockBodyIndices>(start_block)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(start_block))?;
+
+        let target_block = self.previous_stage_checkpoint_block_number();
+
+        let first_tx_number = start_block_body.first_tx_num();
+        let mut last_tx_number = start_block_body.last_tx_num();
+        let mut end_block_number = start_block;
+        let mut body_indices_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        for entry in body_indices_cursor.walk_range(start_block..=target_block)? {
+            let (block, body) = entry?;
+            last_tx_number = body.last_tx_num();
+            end_block_number = block;
+            let tx_count = (first_tx_number..=last_tx_number).count() as u64;
+            if tx_count > tx_threshold {
+                break
+            }
+        }
+        let is_final_range = end_block_number >= target_block;
+        Ok((first_tx_number..=last_tx_number, start_block..=end_block_number, is_final_range))
     }
 }
 

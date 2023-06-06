@@ -38,7 +38,7 @@ impl SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 500_000 }
+        Self { commit_threshold: 50_000 }
     }
 }
 
@@ -59,21 +59,17 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
-        if range.is_empty() {
-            return Ok(ExecOutput::done(*range.end()))
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint().block_number))
         }
-        let (start_block, end_block) = range.clone().into_inner();
 
-        // Look up the start index for the transaction range
-        let first_tx_num = tx.block_body_indices(start_block)?.first_tx_num();
-
-        // Look up the end index for transaction range (inclusive)
-        let last_tx_num = tx.block_body_indices(end_block)?.last_tx_num();
+        let (tx_range, block_range, is_final_range) =
+            input.next_block_range_with_transaction_threshold(tx, self.commit_threshold)?;
+        let end_block = *block_range.end();
 
         // No transactions to walk over
-        if first_tx_num > last_tx_num {
-            info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Target transaction already reached");
+        if tx_range.is_empty() {
+            info!(target: "sync::stages::sender_recovery", ?tx_range, "Target transaction already reached");
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
@@ -87,11 +83,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor over the transactions
         let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
         // Walk the transactions from start to end index (inclusive)
-        let tx_walker =
-            tx_cursor.walk_range(RawKey::new(first_tx_num)..=RawKey::new(last_tx_num))?;
+        let raw_tx_range = RawKey::new(*tx_range.start())..=RawKey::new(*tx_range.end());
+        let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
 
         // Iterate over transactions in chunks
-        info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Recovering senders");
+        info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
         // channels used to return result of sender recovery.
         let mut channels = Vec::new();
@@ -102,12 +98,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // We try to evenly divide the transactions to recover across all threads in the threadpool.
         // Chunks are submitted instead of individual transactions to reduce the overhead of work
         // stealing in the threadpool workers.
-        for chunk in
-            &tx_walker.chunks(self.commit_threshold as usize / rayon::current_num_threads())
-        {
+        let chunk_size = self.commit_threshold as usize / rayon::current_num_threads();
+        for chunk in &tx_walker.chunks(chunk_size) {
             // An _unordered_ channel to receive results from a rayon job
-            let (tx, rx) = mpsc::unbounded_channel();
-            channels.push(rx);
+            let (recovered_senders_tx, recovered_senders_rx) = mpsc::unbounded_channel();
+            channels.push(recovered_senders_rx);
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
             let chunk: Vec<_> = chunk.collect();
 
@@ -140,7 +135,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 let mut rlp_buf = Vec::with_capacity(128);
                 for entry in chunk {
                     rlp_buf.clear();
-                    let _ = tx.send(recover(entry, &mut rlp_buf));
+                    let recovery_result = recover_sender(entry, &mut rlp_buf);
+                    let _ = recovered_senders_tx.send(recovery_result);
                 }
             });
         }
@@ -202,6 +198,24 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
         })
     }
+}
+
+fn recover_sender(
+    entry: Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
+    rlp_buf: &mut Vec<u8>,
+) -> Result<(u64, H160), Box<StageError>> {
+    let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
+    let tx_id = tx_id.key().expect("key to be formated");
+
+    let tx = transaction.value().expect("value to be formated");
+    tx.transaction.encode_without_signature(rlp_buf);
+
+    let sender = tx
+        .signature
+        .recover_signer(keccak256(rlp_buf))
+        .ok_or(StageError::from(SenderRecoveryStageError::SenderRecovery { tx: tx_id }))?;
+
+    Ok((tx_id, sender))
 }
 
 fn stage_checkpoint<DB: Database>(
@@ -289,53 +303,63 @@ mod tests {
     /// Execute the stage twice with input range that exceeds the commit threshold
     #[tokio::test]
     async fn execute_intermediate_commit() {
-        let threshold = 50;
+        let threshold = 10;
         let mut runner = SenderRecoveryTestRunner::default();
         runner.set_threshold(threshold);
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
+
+        // Manually seed once with full input range
+        let seed = random_block_range(stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+        runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+
+        let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
+
         let first_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
-        // Seed only once with full input range
-        runner.seed_execution(first_input).expect("failed to seed execution");
-
-        let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
-
         // Execute first time
         let result = runner.execute(first_input).await.unwrap();
-        let expected_progress = stage_progress + threshold;
-        assert_matches!(
-            result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint {
-                block_number,
-                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                    processed,
-                    total
-                }))
-            }, done: false }) if block_number == expected_progress &&
-                processed == runner.tx.table::<tables::TxSenders>().unwrap().len() as u64 &&
-                total == total_transactions
+        let mut tx_count = 0;
+        let expected_progress = seed
+            .iter()
+            .find(|x| {
+                tx_count += x.body.len();
+                tx_count as u64 > threshold
+            })
+            .map(|x| x.number)
+            .unwrap_or(previous_stage);
+        assert_matches!(result, Ok(_));
+        assert_eq!(
+            result.unwrap(),
+            ExecOutput {
+                checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
+                    EntitiesCheckpoint {
+                        processed: runner.tx.table::<tables::TxSenders>().unwrap().len() as u64,
+                        total: total_transactions
+                    }
+                ),
+                done: false
+            }
         );
 
-        // Execute second time
+        // Execute second time to completion
+        runner.set_threshold(u64::MAX);
         let second_input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             checkpoint: Some(StageCheckpoint::new(expected_progress)),
         };
         let result = runner.execute(second_input).await.unwrap();
-        assert_matches!(
-            result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint {
-                block_number,
-                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                    processed,
-                    total
-                }))
-            }, done: true }) if block_number == previous_stage &&
-                processed == runner.tx.table::<tables::TxSenders>().unwrap().len() as u64 &&
-                total == total_transactions
+        assert_matches!(result, Ok(_));
+        assert_eq!(
+            result.as_ref().unwrap(),
+            &ExecOutput {
+                checkpoint: StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
+                    EntitiesCheckpoint { processed: total_transactions, total: total_transactions }
+                ),
+                done: true
+            }
         );
 
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
@@ -410,7 +434,7 @@ mod tests {
         ) -> Result<(), TestRunnerError> {
             match output {
                 Some(output) => self.tx.query(|tx| {
-                    let start_block = input.checkpoint().block_number + 1;
+                    let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
