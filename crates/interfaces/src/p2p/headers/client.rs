@@ -1,7 +1,7 @@
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
 pub use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection};
+use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, BlockHash};
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -23,11 +23,23 @@ pub struct HeadersRequest {
 /// The headers future type
 pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Send + Sync>>;
 
+/// A type representing either a valid header or invalid header
+#[derive(Debug, Clone)]
+pub enum ValidatedHeader {
+    /// A valid header
+    Valid(Header),
+    /// An invalid header
+    Invalid(Header),
+}
+
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
     /// The headers future type
     type Output: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin;
+
+    /// The future type for a single validated header
+    type ValidatedOutput: Future<Output = PeerRequestResult<ValidatedHeader>> + Sync + Send + Unpin;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
@@ -62,6 +74,16 @@ pub trait HeadersClient: DownloadClient {
         };
         let fut = self.get_headers_with_priority(req, priority);
         SingleHeaderRequest { fut }
+    }
+
+    /// Fetches a single header for the requested hash with priority
+    fn validated_header_by_hash_with_priority(&self, start: BlockHash, priority: Priority) -> SingleHeaderRequest<Self::ValidatedOutput> {
+        todo!()
+    }
+
+    /// Fetches a single header for the requested hash, and performing validation on header fields.
+    fn validated_header_by_hash(&self, start: BlockHash) -> SingleHeaderRequest<Self::ValidatedOutput> {
+        self.validated_header_by_hash_with_priority(start, Priority::Normal)
     }
 }
 
