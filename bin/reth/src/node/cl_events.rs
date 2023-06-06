@@ -26,8 +26,12 @@ pub struct ConsensusLayerHealthEvents {
 
 impl ConsensusLayerHealthEvents {
     /// Creates a new [ConsensusLayerHealthEvents] with the given canonical chain tracker.
-    pub fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
-        Self { interval: tokio::time::interval(CHECK_INTERVAL), canon_chain }
+    pub async fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
+        let mut interval = tokio::time::interval(CHECK_INTERVAL);
+        // Skip the first tick that's ready immediately after initialization to prevent the false
+        // `ConsensusLayerHealthEvent::NeverSeen` event.
+        interval.tick().await;
+        Self { interval, canon_chain }
     }
 }
 

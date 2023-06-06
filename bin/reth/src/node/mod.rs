@@ -355,6 +355,7 @@ impl Command {
             if self.debug.tip.is_none() {
                 Either::Left(
                     ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
+                        .await
                         .map(Into::into),
                 )
             } else {
