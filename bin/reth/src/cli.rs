@@ -193,7 +193,7 @@ fn display_hardforks_on_startup() {
 
     println!("Hardforks:");
     for (k,v) in &*hardfork{
-        println!("{}: {}", k, v);
+        println!("      {}      : {}", k, v);
     }
 }
 
@@ -207,6 +207,7 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
+        display_hardforks_on_startup();
         let reth = Cli::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"])
