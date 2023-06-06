@@ -3,7 +3,7 @@
 
 use crate::{state::StateOverride, BlockOverrides};
 use reth_primitives::{Bytes, H256, U256};
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::BTreeMap;
 
 // re-exports
@@ -74,7 +74,11 @@ pub struct StructLog {
     pub return_data: Option<Bytes>,
     /// Storage slots of current contract read from and written to. Only emitted for SLOAD and
     /// SSTORE. Disabled via disableStorage
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_string_storage_map_opt"
+    )]
     pub storage: Option<BTreeMap<H256, H256>>,
     /// Current call depth
     pub depth: u64,
@@ -327,6 +331,26 @@ pub struct GethDebugTracingCallOptions {
     pub block_overrides: Option<BlockOverrides>,
 }
 
+/// Serializes a storage map as a list of key-value pairs _without_ 0x-prefix
+fn serialize_string_storage_map_opt<S: Serializer>(
+    storage: &Option<BTreeMap<H256, H256>>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    match storage {
+        None => s.serialize_none(),
+        Some(storage) => {
+            let mut m = s.serialize_map(Some(storage.len()))?;
+            for (key, val) in storage.iter() {
+                let key = format!("{:?}", key);
+                let val = format!("{:?}", val);
+                // skip the 0x prefix
+                m.serialize_entry(&key.as_str()[2..], &val.as_str()[2..])?;
+            }
+            m.end()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +360,14 @@ mod tests {
     fn serde_default_frame() {
         let input = include_str!("../../../../test_data/default/structlogs_01.json");
         let _frame: DefaultFrame = serde_json::from_str(input).unwrap();
+    }
+
+    #[test]
+    fn test_serialize_storage_map() {
+        let s = r#"{"pc":3349,"op":"SLOAD","gas":23959,"gasCost":2100,"depth":1,"stack":[],"memory":[],"storage":{"6693dabf5ec7ab1a0d1c5bc58451f85d5e44d504c9ffeb75799bfdb61aa2997a":"0000000000000000000000000000000000000000000000000000000000000000"}}"#;
+        let log: StructLog = serde_json::from_str(s).unwrap();
+        let val = serde_json::to_value(&log).unwrap();
+        let input = serde_json::from_str::<serde_json::Value>(s).unwrap();
+        similar_asserts::assert_eq!(input, val);
     }
 }
