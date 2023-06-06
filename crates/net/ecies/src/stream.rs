@@ -153,7 +153,8 @@ mod tests {
 
     #[tokio::test]
     async fn can_write_and_read() {
-        let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
         let server_key = SecretKey::new(&mut rand::thread_rng());
 
         let handle = tokio::spawn(async move {
@@ -170,7 +171,7 @@ mod tests {
         let server_id = pk2id(&server_key.public_key(SECP256K1));
 
         let client_key = SecretKey::new(&mut rand::thread_rng());
-        let outgoing = TcpStream::connect("127.0.0.1:8080").await.unwrap();
+        let outgoing = TcpStream::connect(addr).await.unwrap();
         let mut client_stream =
             ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
         client_stream.send(Bytes::from("hello")).await.unwrap();
