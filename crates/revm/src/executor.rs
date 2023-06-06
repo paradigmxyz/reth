@@ -7,7 +7,7 @@ use crate::{
     to_reth_acc,
 };
 use reth_consensus_common::calc;
-use reth_interfaces::executor::BlockExecutionError;
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     Account, Address, Block, BlockNumber, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
@@ -81,11 +81,13 @@ where
             if body.len() == senders.len() {
                 Ok(senders)
             } else {
-                Err(BlockExecutionError::SenderRecoveryError)
+                Err(BlockValidationError::SenderRecoveryError.into())
             }
         } else {
             body.iter()
-                .map(|tx| tx.recover_signer().ok_or(BlockExecutionError::SenderRecoveryError))
+                .map(|tx| {
+                    tx.recover_signer().ok_or(BlockValidationError::SenderRecoveryError.into())
+                })
                 .collect()
         }
     }
@@ -198,7 +200,7 @@ where
             // main execution.
             self.evm.transact()
         };
-        out.map_err(|e| BlockExecutionError::EVM { hash, message: format!("{e:?}") })
+        out.map_err(|e| BlockValidationError::EVM { hash, message: format!("{e:?}") }.into())
     }
 
     /// Runs the provided transactions and commits their state to the run-time database.
@@ -232,10 +234,11 @@ where
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
-                return Err(BlockExecutionError::TransactionGasLimitMoreThanAvailableBlockGas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
-                })
+                }
+                .into())
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
@@ -285,10 +288,11 @@ where
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
-            return Err(BlockExecutionError::BlockGasUsed {
+            return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-            })
+            }
+            .into())
         }
 
         // Add block rewards
@@ -525,19 +529,21 @@ pub fn verify_receipt<'a>(
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
-        return Err(BlockExecutionError::ReceiptRootDiff {
+        return Err(BlockValidationError::ReceiptRootDiff {
             got: receipts_root,
             expected: expected_receipts_root,
-        })
+        }
+        .into())
     }
 
     // Create header log bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
-        return Err(BlockExecutionError::BloomLogDiff {
+        return Err(BlockValidationError::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
-        })
+        }
+        .into())
     }
 
     Ok(())

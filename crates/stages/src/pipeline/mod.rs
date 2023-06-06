@@ -1,6 +1,7 @@
 use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
+use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{listener::EventListeners, stage::StageId, BlockNumber, H256};
 use reth_provider::{providers::get_stage_checkpoint, Transaction};
 use std::pin::Pin;
@@ -385,6 +386,25 @@ where
 
                         // We unwind because of a validation error. If the unwind itself fails,
                         // we bail entirely, otherwise we restart the execution loop from the
+                        // beginning.
+                        Ok(ControlFlow::Unwind {
+                            target: prev_checkpoint.unwrap_or_default().block_number,
+                            bad_block: block,
+                        })
+                    } else if let StageError::ExecutionError {
+                        block,
+                        error: BlockExecutionError::Validation(error),
+                    } = err
+                    {
+                        warn!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            bad_block = %block.number,
+                            "Stage encountered an execution error: {error}"
+                        );
+
+                        // We unwind because of an execution error. If the unwind itself fails, we
+                        // bail entirely, otherwise we restart the execution loop from the
                         // beginning.
                         Ok(ControlFlow::Unwind {
                             target: prev_checkpoint.unwrap_or_default().block_number,
