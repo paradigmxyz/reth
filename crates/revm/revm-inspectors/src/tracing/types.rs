@@ -122,7 +122,9 @@ pub(crate) struct CallTrace {
     /// contract if [CallKind::Create].
     pub(crate) address: Address,
     /// Whether this is a call to a precompile
-    pub(crate) is_precompile: bool,
+    ///
+    /// Note: This is an Option because not all tracers make use of this
+    pub(crate) maybe_precompile: Option<bool>,
     /// Holds the target for the selfdestruct refund target if `status` is
     /// [InstructionResult::SelfDestruct]
     pub(crate) selfdestruct_refund_target: Option<Address>,
@@ -170,7 +172,7 @@ impl Default for CallTrace {
             kind: Default::default(),
             value: Default::default(),
             data: Default::default(),
-            is_precompile: false,
+            maybe_precompile: None,
             output: Default::default(),
             last_call_return_value: None,
             gas_used: Default::default(),
@@ -238,7 +240,7 @@ impl CallTraceNode {
 
     /// Returns true if this is a call to a precompile
     pub(crate) fn is_precompile(&self) -> bool {
-        self.trace.is_precompile
+        self.trace.maybe_precompile.unwrap_or(false)
     }
 
     /// Returns the kind of call the trace belongs to

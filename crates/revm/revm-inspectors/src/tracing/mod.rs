@@ -110,7 +110,7 @@ impl TracingInspector {
         value: U256,
         kind: CallKind,
         caller: Address,
-        is_precompile: bool,
+        maybe_precompile: Option<bool>,
     ) {
         self.trace_stack.push(self.traces.push_trace(
             0,
@@ -123,7 +123,7 @@ impl TracingInspector {
                 status: InstructionResult::Continue,
                 caller,
                 last_call_return_value: self.last_call_return_data.clone(),
-                is_precompile,
+                maybe_precompile,
                 ..Default::default()
             },
         ));
@@ -321,9 +321,11 @@ where
             _ => (inputs.context.caller, inputs.context.address),
         };
 
-        // TODO(mattsse): check if this call is a precompile and `depth > 0 && value == 0`
-
-        let is_precompile = false;
+        // if calls to precompiles should be excluded, check whether this is a call to a precompile
+        let maybe_precompile = self
+            .config
+            .exclude_precompile_calls
+            .then(|| is_precompile_call(data, &to, inputs.transfer.value));
 
         self.start_trace_on_call(
             data.journaled_state.depth() as usize,
@@ -332,7 +334,7 @@ where
             inputs.transfer.value,
             inputs.context.scheme.into(),
             from,
-            is_precompile,
+            maybe_precompile,
         );
 
         (InstructionResult::Continue, Gas::new(0), Bytes::new())
@@ -375,7 +377,7 @@ where
             inputs.value,
             inputs.scheme.into(),
             inputs.caller,
-            false
+            Some(false),
         );
 
         (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::default())
@@ -429,4 +431,13 @@ where
 struct StackStep {
     trace_idx: usize,
     step_idx: usize,
+}
+
+/// Returns true if this a call to a precompile contract with `depth > 0 && value == 0`.
+#[inline]
+fn is_precompile_call<DB: Database>(data: &EVMData<'_, DB>, to: &Address, value: U256) -> bool {
+    if data.precompiles.contains(to) {
+        return data.journaled_state.depth() > 0 && value == U256::ZERO
+    }
+    false
 }
