@@ -91,11 +91,7 @@ impl Command {
         let factory = reth_revm::Factory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
             factory,
-            ExecutionStageThresholds {
-                max_blocks: Some(1),
-                max_changes: None,
-                max_changesets: None,
-            },
+            ExecutionStageThresholds { max_blocks: Some(1), max_changes: None },
         );
 
         let mut account_hashing_stage = AccountHashingStage::default();
