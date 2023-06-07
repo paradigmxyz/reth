@@ -271,6 +271,27 @@ where
 
         Ok((post_state, cumulative_gas_used))
     }
+
+    /// Applies the post-block changes, assuming the poststate is generated after executing
+    /// tranactions
+    pub fn apply_post_block_changes(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        mut post_state: PostState,
+    ) -> Result<PostState, BlockExecutionError> {
+        // Add block rewards
+        let balance_increments = self.post_block_balance_increments(block, total_difficulty);
+        for (address, increment) in balance_increments.into_iter() {
+            self.increment_account_balance(block.number, address, increment, &mut post_state)?;
+        }
+
+        // Perform DAO irregular state change
+        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
+            self.apply_dao_fork_changes(block.number, &mut post_state)?;
+        }
+        Ok(post_state)
+    }
 }
 
 impl<DB> BlockExecutor<DB> for Executor<DB>
@@ -283,7 +304,7 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, BlockExecutionError> {
-        let (mut post_state, cumulative_gas_used) =
+        let (post_state, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
 
         // Check if gas used matches the value set in header.
@@ -295,17 +316,7 @@ where
             .into())
         }
 
-        // Add block rewards
-        let balance_increments = self.post_block_balance_increments(block, total_difficulty);
-        for (address, increment) in balance_increments.into_iter() {
-            self.increment_account_balance(block.number, address, increment, &mut post_state)?;
-        }
-
-        // Perform DAO irregular state change
-        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
-            self.apply_dao_fork_changes(block.number, &mut post_state)?;
-        }
-        Ok(post_state)
+        self.apply_post_block_changes(block, total_difficulty, post_state)
     }
 
     fn execute_and_verify_receipt(
