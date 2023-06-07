@@ -237,6 +237,8 @@ where
             })
         }
 
+        self.beacon_consensus.transition_configuration_exchanged().await;
+
         // Short circuit if communicated block hash is zero
         if terminal_block_hash.is_zero() {
             return Ok(TransitionConfiguration {
@@ -250,8 +252,6 @@ where
             .client
             .block_hash(terminal_block_number.as_u64())
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-
-        self.beacon_consensus.transition_configuration_exchanged().await;
 
         // Transition configuration exchange is successful if block hashes match
         match local_hash {
@@ -310,14 +310,14 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
-        trace!(target: "rpc::eth", "Serving engine_newPayloadV1");
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         Ok(EngineApi::new_payload_v1(self, payload).await?)
     }
 
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
-        trace!(target: "rpc::eth", "Serving engine_newPayloadV1");
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         Ok(EngineApi::new_payload_v2(self, payload).await?)
     }
 
@@ -330,7 +330,7 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        trace!(target: "rpc::eth", "Serving engine_forkchoiceUpdatedV1");
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
         Ok(EngineApi::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await?)
     }
 
@@ -341,7 +341,7 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        trace!(target: "rpc::eth", "Serving engine_forkchoiceUpdatedV2");
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         Ok(EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await?)
     }
 
@@ -357,7 +357,7 @@ where
     /// Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayload> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadV1");
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         Ok(EngineApi::get_payload_v1(self, payload_id).await?)
     }
 
@@ -371,7 +371,7 @@ where
     /// Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadV2");
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         Ok(EngineApi::get_payload_v2(self, payload_id).await?)
     }
 
@@ -381,7 +381,7 @@ where
         &self,
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodies> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         Ok(EngineApi::get_payload_bodies_by_hash(self, block_hashes)?)
     }
 
@@ -403,7 +403,7 @@ where
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodies> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         Ok(EngineApi::get_payload_bodies_by_range(self, start.as_u64(), count.as_u64())?)
     }
 
@@ -413,7 +413,7 @@ where
         &self,
         config: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration> {
-        trace!(target: "rpc::eth", "Serving engine_getPayloadBodiesByHashV1");
+        trace!(target: "rpc::engine", "Serving engine_exchangeTransitionConfigurationV1");
         Ok(EngineApi::exchange_transition_configuration(self, config).await?)
     }
 
