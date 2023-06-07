@@ -190,7 +190,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 // Reset the checkpoint and clear trie tables
                 checkpoint = None;
                 self.save_execution_checkpoint(provider, None)?;
-                let tx = provider.tx_mut();
+                let tx = provider.tx_ref();
                 tx.clear::<tables::AccountsTrie>()?;
                 tx.clear::<tables::StoragesTrie>()?;
 
@@ -203,7 +203,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     as u64,
             });
 
-            let tx = provider.tx_mut();
+            let tx = provider.tx_ref();
 
             let progress = StateRoot::new(tx)
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
@@ -280,7 +280,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let tx = provider.tx_mut();
+        let tx = provider.tx_ref();
         let range = input.unwind_block_range();
         if matches!(self, MerkleStage::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
@@ -319,7 +319,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             self.validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
-            updates.flush(provider.tx_mut())?;
+            updates.flush(provider.tx_ref())?;
 
             // TODO(alexey): update entities checkpoint
         } else {

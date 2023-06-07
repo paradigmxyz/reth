@@ -46,7 +46,7 @@ impl GethTraceBuilder {
         while let Some(CallTraceStepStackItem { trace_node, step, call_child_id }) =
             step_stack.pop_back()
         {
-            let mut log: StructLog = step.into();
+            let mut log = step.convert_to_geth_struct_log(opts);
 
             // Fill in memory and storage depending on the options
             if !opts.disable_storage.unwrap_or_default() {
@@ -55,13 +55,6 @@ impl GethTraceBuilder {
                     contract_storage.insert(change.key.into(), change.value.into());
                     log.storage = Some(contract_storage.clone());
                 }
-            }
-            if opts.disable_stack.unwrap_or_default() {
-                log.stack = None;
-            }
-
-            if !opts.enable_memory.unwrap_or_default() {
-                log.memory = None;
             }
 
             if opts.enable_return_data.unwrap_or_default() {

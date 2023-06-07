@@ -144,7 +144,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let start_block = input.checkpoint().block_number + 1;
+        let start_block = input.next_block();
         let max_block = input.previous_stage_checkpoint_block_number();
 
         // Build executor
@@ -346,73 +346,70 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_to, is_final_range) = {
-            let tx = provider.tx_mut();
-            // Acquire changeset cursors
-            let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-            let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
+        let tx = provider.tx_ref();
+        // Acquire changeset cursors
+        let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-            let (range, unwind_to, is_final_range) = input
-                .unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
+        let (range, unwind_to, is_final_range) =
+            input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
-            if range.is_empty() {
-                return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        if range.is_empty() {
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        }
+
+        // get all batches for account change
+        // Check if walk and walk_dup would do the same thing
+        let account_changeset_batch =
+            account_changeset.walk_range(range.clone())?.collect::<Result<Vec<_>, _>>()?;
+
+        // revert all changes to PlainState
+        for (_, changeset) in account_changeset_batch.into_iter().rev() {
+            if let Some(account_info) = changeset.info {
+                tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
+            } else {
+                tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
             }
+        }
 
-            // get all batches for account change
-            // Check if walk and walk_dup would do the same thing
-            let account_changeset_batch =
-                account_changeset.walk_range(range.clone())?.collect::<Result<Vec<_>, _>>()?;
+        // get all batches for storage change
+        let storage_changeset_batch = storage_changeset
+            .walk_range(BlockNumberAddress::range(range.clone()))?
+            .collect::<Result<Vec<_>, _>>()?;
 
-            // revert all changes to PlainState
-            for (_, changeset) in account_changeset_batch.into_iter().rev() {
-                if let Some(account_info) = changeset.info {
-                    tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
-                } else {
-                    tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
+        // revert all changes to PlainStorage
+        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        for (key, storage) in storage_changeset_batch.into_iter().rev() {
+            let address = key.address();
+            if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
+                if v.key == storage.key {
+                    plain_storage_cursor.delete_current()?;
                 }
             }
-
-            // get all batches for storage change
-            let storage_changeset_batch = storage_changeset
-                .walk_range(BlockNumberAddress::range(range.clone()))?
-                .collect::<Result<Vec<_>, _>>()?;
-
-            // revert all changes to PlainStorage
-            let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-            for (key, storage) in storage_changeset_batch.into_iter().rev() {
-                let address = key.address();
-                if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
-                    if v.key == storage.key {
-                        plain_storage_cursor.delete_current()?;
-                    }
-                }
-                if storage.value != U256::ZERO {
-                    plain_storage_cursor.upsert(address, storage)?;
-                }
+            if storage.value != U256::ZERO {
+                plain_storage_cursor.upsert(address, storage)?;
             }
+        }
 
-            // Discard unwinded changesets
-            let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
-            while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
-                if block_num <= unwind_to {
-                    break
-                }
-                // delete all changesets
-                rev_acc_changeset_walker.delete_current()?;
+        // Discard unwinded changesets
+        let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
+        while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
+            if block_num <= unwind_to {
+                break
             }
+            // delete all changesets
+            rev_acc_changeset_walker.delete_current()?;
+        }
 
-            let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
-            while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
-                if key.block_number() < *range.start() {
-                    break
-                }
-                // delete all changesets
-                rev_storage_changeset_walker.delete_current()?;
+        let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
+        while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
+            if key.block_number() < *range.start() {
+                break
             }
-            (range, unwind_to, is_final_range)
-        };
+            // delete all changesets
+            rev_storage_changeset_walker.delete_current()?;
+        }
 
         // Look up the start index for the transaction range
         let first_tx_num = provider.block_body_indices(*range.start())?.first_tx_num();
@@ -420,7 +417,6 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
         // Unwind all receipts for transactions in the block range
-        let tx = provider.tx_mut();
         let mut cursor = tx.cursor_write::<tables::Receipts>()?;
         let mut reverse_walker = cursor.walk_back(None)?;
 

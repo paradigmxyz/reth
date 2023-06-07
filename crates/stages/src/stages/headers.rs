@@ -195,7 +195,7 @@ where
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let tx = provider.tx_mut();
+        let tx = provider.tx_ref();
         let current_checkpoint = input.checkpoint();
 
         // Lookup the head and tip of the sync range

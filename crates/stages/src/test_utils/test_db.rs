@@ -19,6 +19,7 @@ use reth_provider::Transaction;
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
+    ops::RangeInclusive,
     path::{Path, PathBuf},
     sync::Arc,
 };

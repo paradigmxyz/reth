@@ -178,13 +178,13 @@ impl From<BodiesConfig> for BodiesDownloaderBuilder {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct SenderRecoveryConfig {
-    /// The maximum number of blocks to process before committing progress to the database.
+    /// The maximum number of transactions to process before committing progress to the database.
     pub commit_threshold: u64,
 }
 
 impl Default for SenderRecoveryConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000 }
+        Self { commit_threshold: 50_000 }
     }
 }
 

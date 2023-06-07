@@ -12,7 +12,7 @@ use reth_db::{
     transaction::DbTxMut,
 };
 use reth_primitives::{stage::StageId, ChainSpec};
-use reth_staged_sync::utils::init::insert_genesis_state;
+use reth_staged_sync::utils::init::{insert_genesis_header, insert_genesis_state};
 use std::sync::Arc;
 use tracing::info;
 
@@ -63,6 +63,15 @@ impl Command {
 
         tool.db.update(|tx| {
             match &self.stage {
+                StageEnum::Bodies => {
+                    tx.clear::<tables::BlockBodyIndices>()?;
+                    tx.clear::<tables::Transactions>()?;
+                    tx.clear::<tables::TransactionBlock>()?;
+                    tx.clear::<tables::BlockOmmers>()?;
+                    tx.clear::<tables::BlockWithdrawals>()?;
+                    tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
+                    insert_genesis_header::<Env<WriteMap>>(tx, self.chain)?;
+                }
                 StageEnum::Senders => {
                     tx.clear::<tables::TxSenders>()?;
                     tx.put::<tables::SyncStage>(
@@ -139,6 +148,14 @@ impl Command {
                         StageId::IndexStorageHistory.to_string(),
                         Default::default(),
                     )?;
+                }
+                StageEnum::TotalDifficulty => {
+                    tx.clear::<tables::HeaderTD>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::TotalDifficulty.to_string(),
+                        Default::default(),
+                    )?;
+                    insert_genesis_header::<Env<WriteMap>>(tx, self.chain)?;
                 }
                 _ => {
                     info!("Nothing to do for stage {:?}", self.stage);

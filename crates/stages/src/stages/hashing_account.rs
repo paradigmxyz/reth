@@ -146,7 +146,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
-            let tx = provider.tx_mut();
+            let tx = provider.tx_ref();
             let stage_checkpoint = input
                 .checkpoint
                 .and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
@@ -553,7 +553,7 @@ mod tests {
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
                 if let Some(output) = output {
-                    let start_block = input.checkpoint().block_number + 1;
+                    let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
                     if start_block > end_block {
                         return Ok(())

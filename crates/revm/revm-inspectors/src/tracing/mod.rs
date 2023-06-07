@@ -21,7 +21,7 @@ mod fourbyte;
 mod opcount;
 mod types;
 mod utils;
-use crate::tracing::types::StorageChange;
+use crate::tracing::types::{CallTraceNode, StorageChange};
 pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
@@ -76,7 +76,18 @@ impl TracingInspector {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
 
+    /// Returns the currently active call trace.
+    ///
+    /// This will be the last call trace pushed to the stack: the call we entered most recently.
+    #[track_caller]
+    #[inline]
+    fn active_trace(&self) -> Option<&CallTraceNode> {
+        self.trace_stack.last().map(|idx| &self.traces.arena[*idx])
+    }
+
     /// Returns the last trace [CallTrace] index from the stack.
+    ///
+    /// This will be the currently active call trace.
     ///
     /// # Panics
     ///
@@ -101,6 +112,7 @@ impl TracingInspector {
     /// Starts tracking a new trace.
     ///
     /// Invoked on [Inspector::call].
+    #[allow(clippy::too_many_arguments)]
     fn start_trace_on_call(
         &mut self,
         depth: usize,
@@ -109,6 +121,7 @@ impl TracingInspector {
         value: U256,
         kind: CallKind,
         caller: Address,
+        maybe_precompile: Option<bool>,
     ) {
         self.trace_stack.push(self.traces.push_trace(
             0,
@@ -121,6 +134,7 @@ impl TracingInspector {
                 status: InstructionResult::Continue,
                 caller,
                 last_call_return_value: self.last_call_return_data.clone(),
+                maybe_precompile,
                 ..Default::default()
             },
         ));
@@ -186,7 +200,7 @@ impl TracingInspector {
             stack,
             memory,
             memory_size: interp.memory.len(),
-            gas: self.gas_inspector.gas_remaining(),
+            gas_remaining: self.gas_inspector.gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
             // fields will be populated end of call
@@ -208,6 +222,13 @@ impl TracingInspector {
         let StackStep { trace_idx, step_idx } =
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
+
+        if self.config.record_memory_snapshots {
+            // resize memory so opcodes that allocated memory is correctly displayed
+            if interp.memory.len() > step.memory.len() {
+                step.memory.resize(interp.memory.len());
+            }
+        }
 
         if let Some(pc) = interp.program_counter().checked_sub(1) {
             if self.config.record_state_diff {
@@ -237,7 +258,9 @@ impl TracingInspector {
                 };
             }
 
-            step.gas_cost = step.gas - self.gas_inspector.gas_remaining();
+            // The gas cost is the difference between the recorded gas remaining at the start of the
+            // step the remaining gas here, at the end of the step.
+            step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
         }
 
         // set the status
@@ -310,7 +333,7 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         self.gas_inspector.call(data, inputs, is_static);
 
-        // determine correct `from` and `to`  based on the call scheme
+        // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
             CallScheme::DelegateCall | CallScheme::CallCode => {
                 (inputs.context.address, inputs.context.code_address)
@@ -318,13 +341,29 @@ where
             _ => (inputs.context.caller, inputs.context.address),
         };
 
+        let value = if matches!(inputs.context.scheme, CallScheme::DelegateCall) {
+            // for delegate calls we need to use the value of the top trace
+            if let Some(parent) = self.active_trace() {
+                parent.trace.value
+            } else {
+                inputs.transfer.value
+            }
+        } else {
+            inputs.transfer.value
+        };
+
+        // if calls to precompiles should be excluded, check whether this is a call to a precompile
+        let maybe_precompile =
+            self.config.exclude_precompile_calls.then(|| is_precompile_call(data, &to, value));
+
         self.start_trace_on_call(
             data.journaled_state.depth() as usize,
             to,
             inputs.input.clone(),
-            inputs.transfer.value,
+            value,
             inputs.context.scheme.into(),
             from,
+            maybe_precompile,
         );
 
         (InstructionResult::Continue, Gas::new(0), Bytes::new())
@@ -367,6 +406,7 @@ where
             inputs.value,
             inputs.scheme.into(),
             inputs.caller,
+            Some(false),
         );
 
         (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::default())
@@ -420,4 +460,13 @@ where
 struct StackStep {
     trace_idx: usize,
     step_idx: usize,
+}
+
+/// Returns true if this a call to a precompile contract with `depth > 0 && value == 0`.
+#[inline]
+fn is_precompile_call<DB: Database>(data: &EVMData<'_, DB>, to: &Address, value: U256) -> bool {
+    if data.precompiles.contains(to) {
+        return data.journaled_state.depth() > 0 && value == U256::ZERO
+    }
+    false
 }

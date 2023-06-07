@@ -5,13 +5,14 @@ use reth_db::{
     database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
+    DatabaseError,
 };
 use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
 use reth_provider::DatabaseProviderRW;
 use std::sync::Arc;
 use tracing::*;
@@ -81,7 +82,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let (from_block, to_block) = range.into_inner();
 
         // Cursors used to write bodies, ommers and transactions
-        let tx = provider.tx_mut();
+        let tx = provider.tx_ref();
         let mut block_indices_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
@@ -93,8 +94,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
-        // Task downloader can return `None` only if the response relaying channel was closed. This
-        // is a fatal error to prevent the pipeline from running forever.
+        // Task downloader can return `None` only if the response relaying channel was closed.
+        // This is a fatal error to prevent the pipeline from running forever.
         let downloaded_bodies =
             self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
 
@@ -155,7 +156,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // - We reached our target and the target was not limited by the batch size of the stage
         let done = highest_block == to_block;
         info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, is_final_range = done, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(highest_block), done })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(highest_block)
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+            done,
+        })
     }
 
     /// Unwind the stage.
@@ -164,7 +169,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let tx = provider.tx_mut();
+        let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
@@ -209,8 +214,23 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         }
 
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to)
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+        })
     }
+}
+
+// TODO(alexey): ideally, we want to measure Bodies stage progress in bytes, but it's hard to know
+//  beforehand how many bytes we need to download. So the good solution would be to measure the
+//  progress in gas as a proxy to size. Execution stage uses a similar approach.
+fn stage_checkpoint<DB: Database>(
+    provider: &DatabaseProviderRW<'_, DB>,
+) -> Result<EntitiesCheckpoint, DatabaseError> {
+    Ok(EntitiesCheckpoint {
+        processed: provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64,
+        total: provider.tx_ref().entries::<tables::Headers>()? as u64,
+    })
 }
 
 #[cfg(test)]
@@ -221,6 +241,7 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
+    use reth_primitives::stage::StageUnitCheckpoint;
     use test_utils::*;
 
     stage_test_suite_ext!(BodyTestRunner, body);
@@ -240,7 +261,8 @@ mod tests {
 
         // Set the batch size (max we sync per stage execution) to less than the number of blocks
         // the previous stage synced (10 vs 20)
-        runner.set_batch_size(10);
+        let batch_size = 10;
+        runner.set_batch_size(batch_size);
 
         // Run the stage
         let rx = runner.execute(input);
@@ -250,7 +272,14 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false }) if block_number < 200
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed, // 1 seeded block body + batch size
+                    total // seeded headers
+                }))
+            }, done: false }) if block_number < 200 &&
+                processed == 1 + batch_size && total == previous_stage
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -280,9 +309,15 @@ mod tests {
         assert_matches!(
             output,
             Ok(ExecOutput {
-                checkpoint: StageCheckpoint { block_number: 20, stage_checkpoint: None },
+                checkpoint: StageCheckpoint {
+                    block_number: 20,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                },
                 done: true
-            })
+            }) if processed == total && total == previous_stage
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -300,7 +335,8 @@ mod tests {
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
-        runner.set_batch_size(10);
+        let batch_size = 10;
+        runner.set_batch_size(batch_size);
 
         // Run the stage
         let rx = runner.execute(input);
@@ -309,7 +345,14 @@ mod tests {
         let first_run = rx.await.unwrap();
         assert_matches!(
             first_run,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false }) if block_number >= 10
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: false }) if block_number >= 10 &&
+                processed == 1 + batch_size && total == previous_stage
         );
         let first_run_checkpoint = first_run.unwrap().checkpoint;
 
@@ -324,7 +367,14 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true }) if block_number > first_run_checkpoint.block_number
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: true }) if block_number > first_run_checkpoint.block_number &&
+                processed == total && total == previous_stage
         );
         assert_matches!(
             runner.validate_execution(input, output.ok()),
@@ -357,7 +407,14 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true }) if block_number == previous_stage
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: true }) if block_number == previous_stage &&
+                processed == total && total == previous_stage
         );
         let checkpoint = output.unwrap().checkpoint;
         runner
@@ -381,7 +438,13 @@ mod tests {
         let res = runner.unwind(input).await;
         assert_matches!(
             res,
-            Ok(UnwindOutput { checkpoint: StageCheckpoint { block_number: 1, .. } })
+            Ok(UnwindOutput { checkpoint: StageCheckpoint {
+                block_number: 1,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed: 1,
+                    total
+                }))
+            }}) if total == previous_stage
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");

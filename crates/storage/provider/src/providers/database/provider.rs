@@ -185,12 +185,12 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         self.tx
     }
 
-    /// Consume `DbTx` or `DbTxMut`.
+    /// Pass `DbTx` or `DbTxMut` mutable reference.
     pub fn tx_mut(&mut self) -> &mut TX {
         &mut self.tx
     }
 
-    /// Consume `DbTx` or `DbTxMut`.
+    /// Pass `DbTx` or `DbTxMut` immutable reference.
     pub fn tx_ref(&self) -> &TX {
         &self.tx
     }
@@ -783,7 +783,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
             // Update pipeline progress
             if let Some(fork_number) = unwind_to {
-                self.update_pipeline_stages(fork_number)?;
+                self.update_pipeline_stages(fork_number, true)?;
             }
         }
 
@@ -986,12 +986,18 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     pub fn update_pipeline_stages(
         &self,
         block_number: BlockNumber,
+        drop_stage_checkpoint: bool,
     ) -> std::result::Result<(), TransactionError> {
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::SyncStage>()?;
         while let Some((stage_name, checkpoint)) = cursor.next()? {
-            // TODO(alexey): do we want to invalidate stage-specific checkpoint data?
-            cursor.upsert(stage_name, StageCheckpoint { block_number, ..checkpoint })?
+            cursor.upsert(
+                stage_name,
+                StageCheckpoint {
+                    block_number,
+                    ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
+                },
+            )?
         }
 
         Ok(())
@@ -1351,7 +1357,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         self.calculate_history_indices(first_number..=last_block_number)?;
 
         // Update pipeline progress
-        self.update_pipeline_stages(new_tip_number)?;
+        self.update_pipeline_stages(new_tip_number, false)?;
 
         Ok(())
     }
