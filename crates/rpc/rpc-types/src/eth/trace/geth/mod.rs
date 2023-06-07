@@ -292,22 +292,46 @@ pub struct GethDebugTracingOptions {
     pub timeout: Option<String>,
 }
 
-/// Default tracing options for the struct looger
+/// Default tracing options for the struct looger.
+///
+/// These are all known general purpose tracer options that may or not be supported by a given
+/// tracer. For example, the `enableReturnData` option is a noop on regular
+/// `debug_trace{Transaction,Block}` calls.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GethDefaultTracingOptions {
     /// enable memory capture
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_memory: Option<bool>,
+    /// Disable memory capture
+    ///
+    /// This is the opposite of `enable_memory`.
+    ///
+    /// Note: memory capture used to be enabled by default on geth, but has since been flipped <https://github.com/ethereum/go-ethereum/pull/23558> and is now disabled by default.
+    /// However, at the time of writing this, erigon still defaults to enabled and supports the
+    /// `disableMemory` option. So we keep this option for compatibility, but if it's missing
+    /// OR `enableMemory` is present `enableMemory` takes precedence.
+    ///
+    /// See also <https://github.com/paradigmxyz/reth/issues/3033>
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_memory: Option<bool>,
     /// disable stack capture
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_stack: Option<bool>,
-    /// disable storage capture
+    /// Disable storage capture
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_storage: Option<bool>,
-    /// enable return data capture
+    /// Enable return data capture
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_return_data: Option<bool>,
+    /// Disable return data capture
+    ///
+    /// This is the opposite of `enable_return_data`, and only supported for compatibility reasons.
+    /// See also `disable_memory`.
+    ///
+    /// If `enable_return_data` is present, `enable_return_data` always takes precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_return_data: Option<bool>,
     /// print output during capture end
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<bool>,
@@ -319,12 +343,14 @@ pub struct GethDefaultTracingOptions {
 impl GethDefaultTracingOptions {
     /// Returns `true` if return data capture is enabled
     pub fn is_return_data_enabled(&self) -> bool {
-        self.enable_return_data.unwrap_or(false)
+        self.enable_return_data
+            .or_else(|| self.disable_return_data.map(|disable| !disable))
+            .unwrap_or(false)
     }
 
     /// Returns `true` if memory capture is enabled
     pub fn is_memory_enabled(&self) -> bool {
-        self.enable_memory.unwrap_or(false)
+        self.enable_memory.or_else(|| self.disable_memory.map(|disable| !disable)).unwrap_or(false)
     }
 
     /// Returns `true` if stack capture is enabled
@@ -377,6 +403,38 @@ fn serialize_string_storage_map_opt<S: Serializer>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_memory_capture() {
+        let mut config = GethDefaultTracingOptions::default();
+
+        // by default false
+        assert!(!config.is_memory_enabled());
+
+        config.disable_memory = Some(false);
+        // disable == false -> enable
+        assert!(config.is_memory_enabled());
+
+        config.enable_memory = Some(false);
+        // enable == false -> disable
+        assert!(!config.is_memory_enabled());
+    }
+
+    #[test]
+    fn test_return_data_capture() {
+        let mut config = GethDefaultTracingOptions::default();
+
+        // by default false
+        assert!(!config.is_return_data_enabled());
+
+        config.disable_return_data = Some(false);
+        // disable == false -> enable
+        assert!(config.is_return_data_enabled());
+
+        config.enable_return_data = Some(false);
+        // enable == false -> disable
+        assert!(!config.is_return_data_enabled());
+    }
 
     // <https://etherscan.io/tx/0xd01212e8ab48d2fd2ea9c4f33f8670fd1cf0cfb09d2e3c6ceddfaf54152386e5>
     #[test]
