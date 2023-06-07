@@ -147,20 +147,23 @@ impl TracingInspector {
     /// # Panics
     ///
     /// This expects an existing trace [Self::start_trace_on_call]
-    fn fill_trace_on_call_end(
+    fn fill_trace_on_call_end<DB: Database>(
         &mut self,
+        data: &EVMData<'_, DB>,
         status: InstructionResult,
-        gas_used: u64,
+        gas: &Gas,
         output: Bytes,
         created_address: Option<Address>,
     ) {
         let trace_idx = self.pop_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
 
-        let success = matches!(status, return_ok!());
-        trace.status = status;
-        trace.success = success;
+        let gas_used = gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64);
+
         trace.gas_used = gas_used;
+        trace.gas_limit = gas.limit();
+        trace.status = status;
+        trace.success = matches!(status, return_ok!());
         trace.output = output.clone();
         self.last_call_return_data = Some(output);
 
@@ -380,12 +383,7 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         self.gas_inspector.call_end(data, inputs, gas, ret, out.clone(), is_static);
 
-        self.fill_trace_on_call_end(
-            ret,
-            gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64),
-            out.clone(),
-            None,
-        );
+        self.fill_trace_on_call_end(data, ret, &gas, out.clone(), None);
 
         (ret, gas, out)
     }
@@ -439,12 +437,7 @@ where
             })
             .unwrap_or_default();
 
-        self.fill_trace_on_call_end(
-            status,
-            gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64),
-            code.into(),
-            address,
-        );
+        self.fill_trace_on_call_end(data, status, &gas, code.into(), address);
 
         (status, address, gas, retdata)
     }
