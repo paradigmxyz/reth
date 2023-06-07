@@ -393,14 +393,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         // Discard unwinded changesets
-        let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
-        while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
-            if block_num <= unwind_to {
-                break
-            }
-            // delete all changesets
-            rev_acc_changeset_walker.delete_current()?;
-        }
+        provider.unwind_table_by_num::<tables::AccountChangeSet>(unwind_to)?;
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {

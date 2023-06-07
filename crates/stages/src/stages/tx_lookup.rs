@@ -57,89 +57,83 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint().block_number))
         }
-        let (end_block, is_final_range) = {
-            let (tx_range, block_range, is_final_range) = input
-                .next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
-            let end_block = *block_range.end();
+        let (tx_range, block_range, is_final_range) =
+            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
+        let end_block = *block_range.end();
 
-            debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
+        debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
 
-            let tx = provider.tx_ref();
-            let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-            let tx_walker = tx_cursor.walk_range(tx_range)?;
+        let tx = provider.tx_ref();
+        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+        let tx_walker = tx_cursor.walk_range(tx_range)?;
 
-            let chunk_size = 100_000 / rayon::current_num_threads();
-            let mut channels = Vec::with_capacity(chunk_size);
-            let mut transaction_count = 0;
+        let chunk_size = 100_000 / rayon::current_num_threads();
+        let mut channels = Vec::with_capacity(chunk_size);
+        let mut transaction_count = 0;
 
-            for chunk in &tx_walker.chunks(chunk_size) {
-                let (tx, rx) = mpsc::unbounded_channel();
-                channels.push(rx);
+        for chunk in &tx_walker.chunks(chunk_size) {
+            let (tx, rx) = mpsc::unbounded_channel();
+            channels.push(rx);
 
-                // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not
-                // Send)
-                let chunk: Vec<_> = chunk.collect();
-                transaction_count += chunk.len();
+            // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
+            let chunk: Vec<_> = chunk.collect();
+            transaction_count += chunk.len();
 
-                // closure that will calculate the TxHash
-                let calculate_hash =
-                    |entry: Result<(TxNumber, TransactionSignedNoHash), reth_db::DatabaseError>,
-                     rlp_buf: &mut Vec<u8>|
-                     -> Result<(H256, u64), Box<StageError>> {
-                        let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
-                        tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-                        Ok((H256(keccak256(rlp_buf)), tx_id))
-                    };
+            // closure that will calculate the TxHash
+            let calculate_hash =
+                |entry: Result<(TxNumber, TransactionSignedNoHash), reth_db::DatabaseError>,
+                 rlp_buf: &mut Vec<u8>|
+                 -> Result<(H256, u64), Box<StageError>> {
+                    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
+                    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+                    Ok((H256(keccak256(rlp_buf)), tx_id))
+                };
 
-                // Spawn the task onto the global rayon pool
-                // This task will send the results through the channel after it has calculated the
-                // hash.
-                rayon::spawn(move || {
-                    let mut rlp_buf = Vec::with_capacity(128);
-                    for entry in chunk {
-                        rlp_buf.clear();
-                        let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
-                    }
-                });
-            }
-
-            let mut tx_list = Vec::with_capacity(transaction_count);
-
-            // Iterate over channels and append the tx hashes to be sorted out later
-            for mut channel in channels {
-                while let Some(tx) = channel.recv().await {
-                    let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
-                    tx_list.push((tx_hash, tx_id));
+            // Spawn the task onto the global rayon pool
+            // This task will send the results through the channel after it has calculated the hash.
+            rayon::spawn(move || {
+                let mut rlp_buf = Vec::with_capacity(128);
+                for entry in chunk {
+                    rlp_buf.clear();
+                    let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
                 }
+            });
+        }
+
+        let mut tx_list = Vec::with_capacity(transaction_count);
+
+        // Iterate over channels and append the tx hashes to be sorted out later
+        for mut channel in channels {
+            while let Some(tx) = channel.recv().await {
+                let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
+                tx_list.push((tx_hash, tx_id));
             }
+        }
 
-            // Sort before inserting the reverse lookup for hash -> tx_id.
-            tx_list.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
+        // Sort before inserting the reverse lookup for hash -> tx_id.
+        tx_list.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
 
-            let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+        let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
 
-            // If the last inserted element in the database is equal or bigger than the first
-            // in our set, then we need to insert inside the DB. If it is smaller then last
-            // element in the DB, we can append to the DB.
-            // Append probably only ever happens during sync, on the first table insertion.
-            let insert = tx_list
-                .first()
-                .zip(txhash_cursor.last()?)
-                .map(|((first, _), (last, _))| first <= &last)
-                .unwrap_or_default();
-            // if txhash_cursor.last() is None we will do insert. `zip` would return none if any
-            // item is none. if it is some and if first is smaller than last, we will do
-            // append.
+        // If the last inserted element in the database is equal or bigger than the first
+        // in our set, then we need to insert inside the DB. If it is smaller then last
+        // element in the DB, we can append to the DB.
+        // Append probably only ever happens during sync, on the first table insertion.
+        let insert = tx_list
+            .first()
+            .zip(txhash_cursor.last()?)
+            .map(|((first, _), (last, _))| first <= &last)
+            .unwrap_or_default();
+        // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is
+        // none. if it is some and if first is smaller than last, we will do append.
 
-            for (tx_hash, id) in tx_list {
-                if insert {
-                    txhash_cursor.insert(tx_hash, id)?;
-                } else {
-                    txhash_cursor.append(tx_hash, id)?;
-                }
+        for (tx_hash, id) in tx_list {
+            if insert {
+                txhash_cursor.insert(tx_hash, id)?;
+            } else {
+                txhash_cursor.append(tx_hash, id)?;
             }
-            (end_block, is_final_range)
-        };
+        }
 
         info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
@@ -155,33 +149,30 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (unwind_to, is_final_range) = {
-            let tx = provider.tx_ref();
-            let (range, unwind_to, is_final_range) =
-                input.unwind_block_range_with_threshold(self.commit_threshold);
+        let tx = provider.tx_ref();
+        let (range, unwind_to, is_final_range) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
 
-            // Cursors to unwind tx hash to number
-            let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-            let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
-            let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
-            let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
-            while let Some((number, body)) = rev_walker.next().transpose()? {
-                if number <= unwind_to {
-                    break
-                }
+        // Cursors to unwind tx hash to number
+        let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+        let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
+        let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
+        while let Some((number, body)) = rev_walker.next().transpose()? {
+            if number <= unwind_to {
+                break
+            }
 
-                // Delete all transactions that belong to this block
-                for tx_id in body.tx_num_range() {
-                    // First delete the transaction and hash to id mapping
-                    if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
-                        if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
-                            tx_hash_number_cursor.delete_current()?;
-                        }
+            // Delete all transactions that belong to this block
+            for tx_id in body.tx_num_range() {
+                // First delete the transaction and hash to id mapping
+                if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
+                    if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
+                        tx_hash_number_cursor.delete_current()?;
                     }
                 }
             }
-            (unwind_to, is_final_range)
-        };
+        }
 
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {

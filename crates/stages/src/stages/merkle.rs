@@ -190,9 +190,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 // Reset the checkpoint and clear trie tables
                 checkpoint = None;
                 self.save_execution_checkpoint(provider, None)?;
-                let tx = provider.tx_ref();
-                tx.clear::<tables::AccountsTrie>()?;
-                tx.clear::<tables::StoragesTrie>()?;
+                provider.tx_ref().clear::<tables::AccountsTrie>()?;
+                provider.tx_ref().clear::<tables::StoragesTrie>()?;
 
                 None
             }
@@ -204,7 +203,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             });
 
             let tx = provider.tx_ref();
-
             let progress = StateRoot::new(tx)
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
