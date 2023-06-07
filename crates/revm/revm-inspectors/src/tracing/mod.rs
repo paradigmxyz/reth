@@ -189,7 +189,7 @@ impl TracingInspector {
             stack,
             memory,
             memory_size: interp.memory.len(),
-            gas: self.gas_inspector.gas_remaining(),
+            gas_remaining: self.gas_inspector.gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
             // fields will be populated end of call
@@ -247,7 +247,9 @@ impl TracingInspector {
                 };
             }
 
-            step.gas_cost = step.gas - self.gas_inspector.gas_remaining();
+            // The gas cost is the difference between the recorded gas remaining at the start of the
+            // step the remaining gas here, at the end of the step.
+            step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
         }
 
         // set the status
