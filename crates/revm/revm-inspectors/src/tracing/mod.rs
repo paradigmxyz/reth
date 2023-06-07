@@ -247,7 +247,8 @@ impl TracingInspector {
                 };
             }
 
-            // The gas cost is the difference between the recorded gas remaining at the start of the step the remaining gas here, at the end of the step.
+            // The gas cost is the difference between the recorded gas remaining at the start of the
+            // step the remaining gas here, at the end of the step.
             step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
         }
 
