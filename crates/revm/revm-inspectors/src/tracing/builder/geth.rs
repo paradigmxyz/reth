@@ -49,7 +49,7 @@ impl GethTraceBuilder {
             let mut log = step.convert_to_geth_struct_log(opts);
 
             // Fill in memory and storage depending on the options
-            if !opts.disable_storage.unwrap_or_default() {
+            if opts.is_storage_enabled() {
                 let contract_storage = storage.entry(step.contract).or_default();
                 if let Some(change) = step.storage_change {
                     contract_storage.insert(change.key.into(), change.value.into());
@@ -57,7 +57,7 @@ impl GethTraceBuilder {
                 }
             }
 
-            if opts.enable_return_data.unwrap_or_default() {
+            if opts.is_return_data_enabled() {
                 log.return_data = trace_node.trace.last_call_return_value.clone().map(Into::into);
             }
 
