@@ -212,6 +212,13 @@ impl TracingInspector {
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
+        if self.config.record_memory_snapshots {
+            // resize memory so opcodes that allocated memory is correctly displayed
+            if interp.memory.len() > step.memory.len() {
+                step.memory.resize(interp.memory.len());
+            }
+        }
+
         if let Some(pc) = interp.program_counter().checked_sub(1) {
             if self.config.record_state_diff {
                 let op = interp.contract.bytecode.bytecode()[pc];
