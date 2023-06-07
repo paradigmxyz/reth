@@ -445,7 +445,9 @@ pub(crate) struct CallTraceStep {
     pub(crate) contract: Address,
     /// Stack before step execution
     pub(crate) stack: Stack,
-    /// Memory before step execution
+    /// All allocated memory in a step
+    ///
+    /// This will be empty if memory capture is disabled
     pub(crate) memory: Memory,
     /// Size of memory
     pub(crate) memory_size: usize,
