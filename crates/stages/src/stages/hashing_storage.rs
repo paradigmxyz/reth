@@ -54,7 +54,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_mut();
@@ -162,7 +162,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         address: current_key,
                         storage: current_subkey,
                         block_range: CheckpointBlockRange { from: from_block, to: to_block },
-                        progress: stage_checkpoint_progress::<DB>(provider)?,
+                        progress: stage_checkpoint_progress(provider)?,
                     },
                 );
 
@@ -185,7 +185,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // so no checkpoint is needed.
         let checkpoint = StageCheckpoint::new(input.previous_stage_checkpoint_block_number())
             .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
-                progress: stage_checkpoint_progress::<DB>(provider)?,
+                progress: stage_checkpoint_progress(provider)?,
                 ..Default::default()
             });
 
@@ -196,7 +196,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, is_final_range) =
@@ -207,7 +207,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         let mut stage_checkpoint =
             input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
 
-        stage_checkpoint.progress = stage_checkpoint_progress::<DB>(provider)?;
+        stage_checkpoint.progress = stage_checkpoint_progress(provider)?;
 
         info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, %unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
@@ -218,7 +218,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 }
 
 fn stage_checkpoint_progress<DB: Database>(
-    provider: &DatabaseProviderRW<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: provider.tx_ref().entries::<tables::HashedStorage>()? as u64,

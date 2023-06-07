@@ -4,25 +4,19 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO,
-    mdbx::{Env, WriteMap},
-    tables,
-    transaction::DbTx,
-};
+use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     ChainSpec,
 };
 use reth_provider::ShareableDatabase;
-use reth_revm::Factory;
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage,
     },
-    ExecInput, PipelineError,
+    ExecInput, PipelineError, Stage,
 };
 use std::sync::Arc;
 
@@ -74,7 +68,7 @@ impl Command {
         std::fs::create_dir_all(&db_path)?;
 
         let db = Arc::new(init_db(db_path)?);
-        let shareable_db = ShareableDatabase::new(db.clone(), self.chain.clone());
+        let shareable_db = ShareableDatabase::new(&db, self.chain.clone());
         let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
         let execution_checkpoint_block =
@@ -118,21 +112,20 @@ impl Command {
                     None
                 };
 
-            <ExecutionStage<Factory> as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
-                &mut execution_stage,
-                &mut provider_rw,
-                ExecInput {
-                    previous_stage: Some((StageId::SenderRecovery, block)),
-                    checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
-                },
-            )
-            .await?;
+            execution_stage
+                .execute(
+                    &mut provider_rw,
+                    ExecInput {
+                        previous_stage: Some((StageId::SenderRecovery, block)),
+                        checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
+                    },
+                )
+                .await?;
 
             let mut account_hashing_done = false;
             while !account_hashing_done {
-                let output =
-                    <AccountHashingStage as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
-                        &mut account_hashing_stage,
+                let output = account_hashing_stage
+                    .execute(
                         &mut provider_rw,
                         ExecInput {
                             previous_stage: Some((StageId::Execution, block)),
@@ -145,9 +138,8 @@ impl Command {
 
             let mut storage_hashing_done = false;
             while !storage_hashing_done {
-                let output =
-                    <StorageHashingStage as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
-                        &mut storage_hashing_stage,
+                let output = storage_hashing_stage
+                    .execute(
                         &mut provider_rw,
                         ExecInput {
                             previous_stage: Some((StageId::AccountHashing, block)),
@@ -158,9 +150,8 @@ impl Command {
                 storage_hashing_done = output.done;
             }
 
-            let incremental_result =
-                <MerkleStage as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
-                    &mut merkle_stage,
+            let incremental_result = merkle_stage
+                .execute(
                     &mut provider_rw,
                     ExecInput {
                         previous_stage: Some((StageId::StorageHashing, block)),
@@ -187,13 +178,7 @@ impl Command {
                     checkpoint: None,
                 };
                 loop {
-                    let clean_result =
-                        <MerkleStage as reth_stages::Stage<Arc<Env<WriteMap>>>>::execute(
-                            &mut merkle_stage,
-                            &mut provider_rw,
-                            clean_input,
-                        )
-                        .await;
+                    let clean_result = merkle_stage.execute(&mut provider_rw, clean_input).await;
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
                     if clean_result.unwrap().done {
                         break

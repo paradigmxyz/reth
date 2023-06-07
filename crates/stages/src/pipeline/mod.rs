@@ -244,8 +244,7 @@ where
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let shareable_db: ShareableDatabase<&DB> =
-            ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
         let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
         for stage in unwind_pipeline {
@@ -305,8 +304,7 @@ where
         let stage = &mut self.stages[stage_index];
         let stage_id = stage.id();
         let mut made_progress = false;
-        let shareable_db: ShareableDatabase<&DB> =
-            ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
         let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
         loop {
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;

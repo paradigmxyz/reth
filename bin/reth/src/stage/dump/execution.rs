@@ -8,9 +8,9 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     MAINNET,
 };
-use reth_provider::{DatabaseProvider, ShareableDatabase};
+use reth_provider::ShareableDatabase;
 use reth_revm::Factory;
-use reth_stages::{stages::ExecutionStage, UnwindInput};
+use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -21,11 +21,11 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
     output_db: &PathBuf,
     should_run: bool,
 ) -> Result<()> {
-    let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;
+    let (output_db, tip_block_number) = setup(from, to, output_db, db_tool)?;
 
-    import_tables_with_range::<DB>(&output_db, db_tool, from, to)?;
+    import_tables_with_range(&output_db, db_tool, from, to)?;
 
-    unwind_and_copy::<DB>(db_tool, from, tip_block_number, &output_db).await?;
+    unwind_and_copy(db_tool, from, tip_block_number, &output_db).await?;
 
     if should_run {
         dry_run(output_db, to, from).await?;
@@ -97,22 +97,21 @@ async fn unwind_and_copy<DB: Database>(
     tip_block_number: u64,
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
-    let mut provider =
-        DatabaseProvider::new_rw(db_tool.db.tx_mut()?, std::sync::Arc::new(MAINNET.clone()));
+    let shareable_db = ShareableDatabase::new(db_tool.db, std::sync::Arc::new(MAINNET.clone()));
+    let mut provider = shareable_db.provider_rw()?;
 
-    let mut exec_stage =
-        ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
+    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(Arc::new(MAINNET.clone())));
 
-    <ExecutionStage<Factory> as reth_stages::Stage<DB>>::unwind(
-        &mut exec_stage,
-        &mut provider,
-        UnwindInput {
-            unwind_to: from,
-            checkpoint: StageCheckpoint::new(tip_block_number),
-            bad_block: None,
-        },
-    )
-    .await?;
+    exec_stage
+        .unwind(
+            &mut provider,
+            UnwindInput {
+                unwind_to: from,
+                checkpoint: StageCheckpoint::new(tip_block_number),
+                bad_block: None,
+            },
+        )
+        .await?;
 
     let unwind_inner_tx = provider.into_tx();
 
@@ -130,20 +129,19 @@ async fn unwind_and_copy<DB: Database>(
 async fn dry_run<DB: Database>(output_db: DB, to: u64, from: u64) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let shareable_db = ShareableDatabase::new(output_db, std::sync::Arc::new(MAINNET.clone()));
+    let shareable_db = ShareableDatabase::new(&output_db, std::sync::Arc::new(MAINNET.clone()));
     let mut provider = shareable_db.provider_rw()?;
-    let mut exec_stage =
-        ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
+    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(Arc::new(MAINNET.clone())));
 
-    <ExecutionStage<Factory> as reth_stages::Stage<DB>>::execute(
-        &mut exec_stage,
-        &mut provider,
-        reth_stages::ExecInput {
-            previous_stage: Some((StageId::Other("Another"), to)),
-            checkpoint: Some(StageCheckpoint::new(from)),
-        },
-    )
-    .await?;
+    exec_stage
+        .execute(
+            &mut provider,
+            reth_stages::ExecInput {
+                previous_stage: Some((StageId::Other("Another"), to)),
+                checkpoint: Some(StageCheckpoint::new(from)),
+            },
+        )
+        .await?;
 
     drop(provider.into_tx());
 

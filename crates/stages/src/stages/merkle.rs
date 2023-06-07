@@ -12,7 +12,7 @@ use reth_primitives::{
     trie::StoredSubNode,
     BlockNumber, SealedHeader, H256,
 };
-use reth_provider::{HeaderProvider, ProviderError};
+use reth_provider::{DatabaseProviderRW, HeaderProvider, ProviderError};
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;
 use tracing::*;
@@ -90,7 +90,7 @@ impl MerkleStage {
     /// Gets the hashing progress
     pub fn get_execution_checkpoint<DB: Database>(
         &self,
-        provider: &reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
     ) -> Result<Option<MerkleCheckpoint>, StageError> {
         let buf =
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
@@ -106,7 +106,7 @@ impl MerkleStage {
     /// Saves the hashing progress
     pub fn save_execution_checkpoint<DB: Database>(
         &mut self,
-        provider: &reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         checkpoint: Option<MerkleCheckpoint>,
     ) -> Result<(), StageError> {
         let mut buf = vec![];
@@ -138,7 +138,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let threshold = match self {
@@ -160,7 +160,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             .ok_or_else(|| ProviderError::HeaderNotFound(current_block.into()))?;
         let block_root = block.state_root;
 
-        let mut checkpoint = self.get_execution_checkpoint::<DB>(provider)?;
+        let mut checkpoint = self.get_execution_checkpoint(provider)?;
 
         let (trie_root, entities_checkpoint) = if range.is_empty() {
             (block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
@@ -189,7 +189,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 );
                 // Reset the checkpoint and clear trie tables
                 checkpoint = None;
-                self.save_execution_checkpoint::<DB>(provider, None)?;
+                self.save_execution_checkpoint(provider, None)?;
                 let tx = provider.tx_mut();
                 tx.clear::<tables::AccountsTrie>()?;
                 tx.clear::<tables::StoragesTrie>()?;
@@ -220,7 +220,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
                         state.hash_builder.into(),
                     );
-                    self.save_execution_checkpoint::<DB>(provider, Some(checkpoint))?;
+                    self.save_execution_checkpoint(provider, Some(checkpoint))?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
@@ -262,7 +262,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         };
 
         // Reset the checkpoint
-        self.save_execution_checkpoint::<DB>(provider, None)?;
+        self.save_execution_checkpoint(provider, None)?;
 
         self.validate_state_root(trie_root, block.seal_slow(), to_block)?;
 
@@ -277,7 +277,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_mut();

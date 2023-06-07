@@ -16,6 +16,7 @@ use reth_primitives::{
     },
     BlockHashOrNumber, BlockNumber, SealedHeader, H256,
 };
+use reth_provider::DatabaseProviderRW;
 use tokio::sync::watch;
 use tracing::*;
 
@@ -191,7 +192,7 @@ where
     /// starting from the tip of the chain
     async fn execute(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_mut();
@@ -314,7 +315,7 @@ where
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block
@@ -604,7 +605,7 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            stage.get_sync_gap(&tx, checkpoint).await,
+            stage.get_sync_gap::<DB>(&tx, checkpoint).await,
             Err(StageError::DatabaseIntegrity(ProviderError::HeaderNotFound(block_number)))
                 if block_number.as_number().unwrap() == checkpoint
         );
@@ -615,7 +616,7 @@ mod tests {
         tx.put::<tables::Headers>(head.number, head.clone().unseal())
             .expect("failed to write header");
 
-        let gap = stage.get_sync_gap(&tx, checkpoint).await.unwrap();
+        let gap = stage.get_sync_gap::<DB>(&tx, checkpoint).await.unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
 
@@ -625,7 +626,7 @@ mod tests {
         tx.put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
             .expect("failed to write header");
 
-        let gap = stage.get_sync_gap(&tx, checkpoint).await.unwrap();
+        let gap = stage.get_sync_gap::<DB>(&tx, checkpoint).await.unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
 
@@ -636,7 +637,7 @@ mod tests {
             .expect("failed to write header");
 
         assert_matches!(
-            stage.get_sync_gap(&tx, checkpoint).await,
+            stage.get_sync_gap::<DB>(&tx, checkpoint).await,
             Err(StageError::StageCheckpoint(_checkpoint)) if _checkpoint == checkpoint
         );
     }

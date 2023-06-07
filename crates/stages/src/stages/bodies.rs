@@ -12,6 +12,7 @@ use reth_interfaces::{
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
 use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_provider::DatabaseProviderRW;
 use std::sync::Arc;
 use tracing::*;
 
@@ -65,7 +66,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// header, limited by the stage's batch size.
     async fn execute(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let range = input.next_block_range();
@@ -160,7 +161,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_mut();

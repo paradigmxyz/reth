@@ -87,7 +87,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     // TODO: This should be in the block provider trait once we consolidate
     // SharedDatabase/Transaction
     fn read_block_with_senders<DB: Database>(
-        provider: &reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         block_number: BlockNumber,
     ) -> Result<(BlockWithSenders, U256), StageError> {
         let header = provider
@@ -141,7 +141,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let start_block = input.checkpoint().block_number + 1;
@@ -154,12 +154,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint =
-            execution_checkpoint::<DB>(provider, start_block, max_block, input.checkpoint())?;
+            execution_checkpoint(provider, start_block, max_block, input.checkpoint())?;
 
         // Execute block range
         let mut state = PostState::default();
         for block_number in start_block..=max_block {
-            let (block, td) = Self::read_block_with_senders::<DB>(provider, block_number)?;
+            let (block, td) = Self::read_block_with_senders(provider, block_number)?;
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
@@ -215,7 +215,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 }
 
 fn execution_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
@@ -237,8 +237,7 @@ fn execution_checkpoint<DB: Database>(
             block_range: CheckpointBlockRange { from: start_block, to: max_block },
             progress: EntitiesCheckpoint {
                 processed,
-                total: total +
-                    calculate_gas_used_from_headers::<DB>(provider, start_block..=max_block)?,
+                total: total + calculate_gas_used_from_headers(provider, start_block..=max_block)?,
             },
         },
         // If checkpoint block range ends on the same block as our range, we take the previously
@@ -254,10 +253,8 @@ fn execution_checkpoint<DB: Database>(
         // If there's any other non-empty checkpoint, we calculate the remaining amount of total gas
         // to be processed not including the checkpoint range.
         Some(ExecutionCheckpoint { progress: EntitiesCheckpoint { processed, .. }, .. }) => {
-            let after_checkpoint_block_number = calculate_gas_used_from_headers::<DB>(
-                provider,
-                checkpoint.block_number + 1..=max_block,
-            )?;
+            let after_checkpoint_block_number =
+                calculate_gas_used_from_headers(provider, checkpoint.block_number + 1..=max_block)?;
 
             ExecutionCheckpoint {
                 block_range: CheckpointBlockRange { from: start_block, to: max_block },
@@ -270,14 +267,14 @@ fn execution_checkpoint<DB: Database>(
         // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
         // already processed, if there's any.
         _ => {
-            let processed = calculate_gas_used_from_headers::<DB>(provider, 0..=start_block - 1)?;
+            let processed = calculate_gas_used_from_headers(provider, 0..=start_block - 1)?;
 
             ExecutionCheckpoint {
                 block_range: CheckpointBlockRange { from: start_block, to: max_block },
                 progress: EntitiesCheckpoint {
                     processed,
                     total: processed +
-                        calculate_gas_used_from_headers::<DB>(provider, start_block..=max_block)?,
+                        calculate_gas_used_from_headers(provider, start_block..=max_block)?,
                 },
             }
         }
@@ -285,7 +282,7 @@ fn execution_checkpoint<DB: Database>(
 }
 
 fn calculate_gas_used_from_headers<DB: Database>(
-    provider: &DatabaseProviderRW<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, DatabaseError> {
     let mut gas_total = 0;
@@ -319,7 +316,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Execute the stage
     async fn execute(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         // For Ethereum transactions that reaches the max call depth (1024) revm can use more stack
@@ -336,7 +333,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 .stack_size(BIG_STACK_SIZE)
                 .spawn_scoped(scope, || {
                     // execute and store output to results
-                    self.execute_inner::<DB>(provider, input)
+                    self.execute_inner(provider, input)
                 })
                 .expect("Expects that thread name is not null");
             handle.join().expect("Expects for thread to not panic")
@@ -346,7 +343,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_to, is_final_range) = {

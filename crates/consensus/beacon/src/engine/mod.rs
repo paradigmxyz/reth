@@ -1370,7 +1370,7 @@ mod tests {
             BlockchainTree::new(externals, canon_state_notification_sender, config)
                 .expect("failed to create tree"),
         );
-        let shareable_db = ShareableDatabase::new(db.clone(), chain_spec.clone());
+        let shareable_db = ShareableDatabase::new(&db, chain_spec.clone());
         let latest = chain_spec.genesis_header().seal_slow();
         let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
         let (engine, handle) = BeaconConsensusEngine::new(

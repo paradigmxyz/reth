@@ -36,7 +36,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
@@ -45,7 +45,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             return Ok(ExecOutput::done(*range.end()))
         }
 
-        let mut stage_checkpoint = stage_checkpoint::<DB>(provider, input.checkpoint(), &range)?;
+        let mut stage_checkpoint = stage_checkpoint(provider, input.checkpoint(), &range)?;
 
         let indices = provider.get_account_transition_ids_from_changeset(range.clone())?;
         let changesets = indices.values().map(|blocks| blocks.len() as u64).sum::<u64>();
@@ -66,7 +66,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, is_final_range) =
@@ -99,7 +99,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 /// given block range and calculates the progress by counting the number of processed entries in the
 /// [tables::AccountChangeSet] table within the given block range.
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
     checkpoint: StageCheckpoint,
     range: &RangeInclusive<BlockNumber>,
 ) -> Result<IndexHistoryCheckpoint, DatabaseError> {

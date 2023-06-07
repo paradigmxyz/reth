@@ -10,7 +10,7 @@ use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::DatabaseGAT,
+    database::{Database, DatabaseGAT},
     models::{
         sharded_key,
         storage_sharded_key::{self, StorageShardedKey},
@@ -39,7 +39,7 @@ use reth_trie::StateRoot;
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Range, RangeBounds, RangeInclusive},
+    ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -49,14 +49,43 @@ use super::get_stage_checkpoint;
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TX>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
-pub type DatabaseProviderRW<'this, DB> = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>;
+// pub type DatabaseProviderRW<'this, DB> = DatabaseProvider<'this, <DB as
+// DatabaseGAT<'this>>::TXMut>;
+pub struct DatabaseProviderRW<'this, DB: Database>(
+    pub DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>,
+);
+
+impl<'this, DB: Database> Deref for DatabaseProviderRW<'this, DB> {
+    type Target = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'this, DB: Database> DerefMut for DatabaseProviderRW<'this, DB> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'this, DB: Database> DatabaseProviderRW<'this, DB> {
+    /// Commit database transaction
+    pub fn commit(self) -> Result<bool> {
+        self.0.commit()
+    }
+
+    /// Consume `DbTx` or `DbTxMut`.
+    pub fn into_tx(self) -> <DB as DatabaseGAT<'this>>::TXMut {
+        self.0.into_tx()
+    }
+}
 
 /// A provider struct that fetchs data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashProvider`]
 #[derive(Debug)]
 pub struct DatabaseProvider<'this, TX>
 where
-    // Self: Send + Sync + 'this,
     Self: 'this + Send + Sync,
 {
     /// Database transaction.

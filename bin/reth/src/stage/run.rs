@@ -121,7 +121,7 @@ impl Command {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
-        let shareable_db = ShareableDatabase::new(db.clone(), self.chain.clone());
+        let shareable_db = ShareableDatabase::new(&db, self.chain.clone());
         let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
         if let Some(listen_addr) = self.metrics {

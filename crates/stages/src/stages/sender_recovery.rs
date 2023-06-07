@@ -55,7 +55,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
     async fn execute(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
@@ -75,7 +75,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Target transaction already reached");
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
-                    .with_entities_stage_checkpoint(stage_checkpoint::<DB>(provider)?),
+                    .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: is_final_range,
             })
         }
@@ -157,7 +157,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
-                .with_entities_stage_checkpoint(stage_checkpoint::<DB>(provider)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
             done: is_final_range,
         })
     }
@@ -165,7 +165,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, is_final_range) =
@@ -178,13 +178,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
-                .with_entities_stage_checkpoint(stage_checkpoint::<DB>(provider)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
 }
 
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: provider.tx_ref().entries::<tables::TxSenders>()? as u64,

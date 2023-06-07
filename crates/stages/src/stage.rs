@@ -140,14 +140,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 }

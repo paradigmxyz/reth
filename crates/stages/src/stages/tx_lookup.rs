@@ -53,7 +53,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Write transaction hash -> id entries
     async fn execute(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let (end_block, is_final_range) = {
@@ -159,7 +159,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
-                .with_entities_stage_checkpoint(stage_checkpoint::<DB>(provider)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
             done: is_final_range,
         })
     }
@@ -167,7 +167,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut reth_provider::DatabaseProviderRW<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (unwind_to, is_final_range) = {
@@ -201,7 +201,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
-                .with_entities_stage_checkpoint(stage_checkpoint::<DB>(provider)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
 }
@@ -219,7 +219,7 @@ impl From<TransactionLookupStageError> for StageError {
 }
 
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64,

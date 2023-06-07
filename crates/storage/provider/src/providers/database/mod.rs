@@ -43,7 +43,7 @@ impl<DB: Database> ShareableDatabase<DB> {
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashProvider`]
     pub fn provider_rw(&self) -> Result<DatabaseProviderRW<'_, DB>> {
-        Ok(DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone()))
+        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone())))
     }
 }
 

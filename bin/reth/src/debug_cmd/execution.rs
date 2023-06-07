@@ -254,7 +254,7 @@ impl Command {
         }
 
         let mut current_max_block = latest_block_number;
-        let shareable_db = ShareableDatabase::new(db.clone(), self.chain.clone());
+        let shareable_db = ShareableDatabase::new(&db, self.chain.clone());
 
         while current_max_block < self.to {
             let next_block = current_max_block + 1;

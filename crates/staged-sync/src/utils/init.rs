@@ -6,7 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, H256, U256};
-use reth_provider::{DatabaseProvider, DatabaseProviderRW, PostState, TransactionError};
+use reth_provider::{DatabaseProviderRW, PostState, ShareableDatabase, TransactionError};
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -67,11 +67,11 @@ pub fn init_genesis<DB: Database>(
 
     drop(tx);
     debug!("Writing genesis block.");
-    let tx = db.tx_mut()?;
 
     // use transaction to insert genesis header
-    let provider_rw = DatabaseProvider::new_rw(tx, chain.clone());
-    insert_genesis_hashes::<DB>(provider_rw, genesis)?;
+    let shareable_db = ShareableDatabase::new(&db, chain.clone());
+    let provider_rw = shareable_db.provider_rw()?;
+    insert_genesis_hashes(provider_rw, genesis)?;
 
     // Insert header
     let tx = db.tx_mut()?;
@@ -128,7 +128,7 @@ pub fn insert_genesis_state<DB: Database>(
 
 /// Inserts hashes for the genesis state.
 pub fn insert_genesis_hashes<DB: Database>(
-    provider: DatabaseProviderRW<'_, DB>,
+    provider: DatabaseProviderRW<'_, &DB>,
     genesis: &reth_primitives::Genesis,
 ) -> Result<(), InitDatabaseError> {
     // insert and hash accounts to hashing table
