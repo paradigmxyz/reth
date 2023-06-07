@@ -21,7 +21,7 @@ mod fourbyte;
 mod opcount;
 mod types;
 mod utils;
-use crate::tracing::types::StorageChange;
+use crate::tracing::types::{CallTraceNode, StorageChange};
 pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
@@ -76,7 +76,18 @@ impl TracingInspector {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
 
+    /// Returns the currently active call trace.
+    ///
+    /// This will be the last call trace pushed to the stack: the call we entered most recently.
+    #[track_caller]
+    #[inline]
+    fn active_trace(&self) -> Option<&CallTraceNode> {
+        self.trace_stack.last().map(|idx| &self.traces.arena[*idx])
+    }
+
     /// Returns the last trace [CallTrace] index from the stack.
+    ///
+    /// This will be the currently active call trace.
     ///
     /// # Panics
     ///
@@ -322,7 +333,7 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         self.gas_inspector.call(data, inputs, is_static);
 
-        // determine correct `from` and `to`  based on the call scheme
+        // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
             CallScheme::DelegateCall | CallScheme::CallCode => {
                 (inputs.context.address, inputs.context.code_address)
@@ -330,17 +341,26 @@ where
             _ => (inputs.context.caller, inputs.context.address),
         };
 
+        let value = if matches!(inputs.context.scheme, CallScheme::DelegateCall) {
+            // for delegate calls we need to use the value of the top trace
+            if let Some(parent) = self.active_trace() {
+                parent.trace.value
+            } else {
+                inputs.transfer.value
+            }
+        } else {
+            inputs.transfer.value
+        };
+
         // if calls to precompiles should be excluded, check whether this is a call to a precompile
-        let maybe_precompile = self
-            .config
-            .exclude_precompile_calls
-            .then(|| is_precompile_call(data, &to, inputs.transfer.value));
+        let maybe_precompile =
+            self.config.exclude_precompile_calls.then(|| is_precompile_call(data, &to, value));
 
         self.start_trace_on_call(
             data.journaled_state.depth() as usize,
             to,
             inputs.input.clone(),
-            inputs.transfer.value,
+            value,
             inputs.context.scheme.into(),
             from,
             maybe_precompile,
