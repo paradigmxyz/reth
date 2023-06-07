@@ -96,8 +96,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (_, unwind_to, is_final_range) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 

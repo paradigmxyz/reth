@@ -11,7 +11,6 @@ use std::{
     fmt::Debug,
     ops::{Deref, RangeInclusive},
 };
-use tracing::*;
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -71,7 +70,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, is_final_range) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         let changesets = tx.unwind_account_history_indices(range)?;

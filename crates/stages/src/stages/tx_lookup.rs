@@ -149,8 +149,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_to, is_final_range) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
