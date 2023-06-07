@@ -148,10 +148,9 @@ impl TracingInspector {
         let trace = &mut self.traces.arena[trace_idx].trace;
 
         let gas_used = gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64);
-        let gas_remaining = gas.remaining() + gas_used;
 
         trace.gas_used = gas_used;
-        trace.gas_remaining = gas_remaining;
+        trace.gas_limit = gas.limit();
         trace.status = status;
         trace.success = matches!(status, return_ok!());
         trace.output = output.clone();
