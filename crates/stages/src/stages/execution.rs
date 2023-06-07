@@ -176,13 +176,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
 
-            // Write history periodically to free up memory
-            if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
-                info!(target: "sync::stages::execution", ?block_number, "Writing history.");
-                state.write_history_to_db(&**tx)?;
-                info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
-                // gas_since_history_write = 0;
-            }
+            // // Write history periodically to free up memory
+            // if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
+            //     info!(target: "sync::stages::execution", ?block_number, "Writing history.");
+            //     state.write_history_to_db(&**tx)?;
+            //     info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
+            //     // gas_since_history_write = 0;
+            // }
 
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
