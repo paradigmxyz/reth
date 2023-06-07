@@ -389,7 +389,7 @@ mod tests {
         ) -> Result<(), TestRunnerError> {
             match output {
                 Some(output) => self.tx.query(|tx| {
-                    let start_block = input.checkpoint().block_number + 1;
+                    let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {

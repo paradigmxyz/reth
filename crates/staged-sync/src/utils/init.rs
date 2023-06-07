@@ -48,8 +48,7 @@ pub fn init_genesis<DB: Database>(
 ) -> Result<H256, InitDatabaseError> {
     let genesis = chain.genesis();
 
-    let header = chain.genesis_header();
-    let hash = header.hash_slow();
+    let hash = chain.genesis_hash();
 
     let tx = db.tx()?;
     if let Some((_, db_hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
@@ -71,11 +70,7 @@ pub fn init_genesis<DB: Database>(
 
     // Insert header
     let tx = db.tx_mut()?;
-    tx.put::<tables::CanonicalHeaders>(0, hash)?;
-    tx.put::<tables::HeaderNumbers>(hash, 0)?;
-    tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
-    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
-    tx.put::<tables::Headers>(0, header)?;
+    insert_genesis_header::<DB>(&tx, chain.clone())?;
 
     insert_genesis_state::<DB>(&tx, genesis)?;
 
@@ -138,6 +133,22 @@ pub fn insert_genesis_hashes<DB: Database>(
     });
     transaction.insert_storage_for_hashing(alloc_storage)?;
     transaction.commit()?;
+    Ok(())
+}
+
+/// Inserts header for the genesis state.
+pub fn insert_genesis_header<DB: Database>(
+    tx: &<DB as DatabaseGAT<'_>>::TXMut,
+    chain: Arc<ChainSpec>,
+) -> Result<(), InitDatabaseError> {
+    let header = chain.sealed_genesis_header();
+
+    tx.put::<tables::CanonicalHeaders>(0, header.hash)?;
+    tx.put::<tables::HeaderNumbers>(header.hash, 0)?;
+    tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
+    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
+    tx.put::<tables::Headers>(0, header.header)?;
+
     Ok(())
 }
 

@@ -525,14 +525,14 @@ async fn test_shutdown() {
     drop(handles);
     let _handle = net.spawn();
 
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+    let mut listener1 = NetworkEventStream::new(handle1.event_listener());
+
     handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
     handle1.add_peer(*handle2.peer_id(), handle2.local_addr());
 
     let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
-
-    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
-    let mut listener1 = NetworkEventStream::new(handle1.event_listener());
 
     // Before shutting down, we have two connected peers
     let peer1 = listener0.next_session_established().await.unwrap();

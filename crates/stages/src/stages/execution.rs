@@ -138,7 +138,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let start_block = input.checkpoint().block_number + 1;
+        let start_block = input.next_block();
         let max_block = input.target();
 
         // Build executor

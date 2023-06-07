@@ -62,4 +62,7 @@ pub enum ProviderError {
     /// Unable to compute state root on top of historical block
     #[error("Unable to compute state root on top of historical block")]
     StateRootNotAvailableForHistoricalBlock,
+    /// Unable to find the block number for a given transaction index
+    #[error("Unable to find the block number for a given transaction index")]
+    BlockNumberForTransactionIndexNotFound,
 }
