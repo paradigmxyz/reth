@@ -693,9 +693,7 @@ impl Command {
                         max_changes: stage_conf.execution.max_changes,
                         max_changesets: stage_conf.execution.max_changesets,
                     },
-                ))
-                .disable_if(StageId::MerkleUnwind, || self.auto_mine)
-                .disable_if(StageId::MerkleExecute, || self.auto_mine),
+                )),
             )
             .build(db);
 
