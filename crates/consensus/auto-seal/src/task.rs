@@ -183,7 +183,9 @@ where
                     match executor.execute_transactions(&block, U256::ZERO, Some(senders.clone())) {
                         Ok((post_state, gas_used)) => {
                             // apply post block changes
-                            let post_state = executor.apply_post_block_changes(&block, U256::ZERO, post_state).unwrap();
+                            let post_state = executor
+                                .apply_post_block_changes(&block, U256::ZERO, post_state)
+                                .unwrap();
 
                             let Block { mut header, body, .. } = block;
 

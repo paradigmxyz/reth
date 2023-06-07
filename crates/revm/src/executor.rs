@@ -274,7 +274,12 @@ where
 
     /// Applies the post-block changes, assuming the poststate is generated after executing
     /// tranactions
-    pub fn apply_post_block_changes(&mut self, block: &Block, total_difficulty: U256, mut post_state: PostState) -> Result<PostState, BlockExecutionError> {
+    pub fn apply_post_block_changes(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        mut post_state: PostState,
+    ) -> Result<PostState, BlockExecutionError> {
         // Add block rewards
         let balance_increments = self.post_block_balance_increments(block, total_difficulty);
         for (address, increment) in balance_increments.into_iter() {

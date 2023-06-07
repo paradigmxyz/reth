@@ -693,7 +693,7 @@ impl Command {
                         max_changes: stage_conf.execution.max_changes,
                         max_changesets: stage_conf.execution.max_changesets,
                     },
-                ))
+                )),
             )
             .build(db);
 
