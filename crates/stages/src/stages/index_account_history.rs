@@ -58,7 +58,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         stage_checkpoint.progress.processed += changesets;
 
-        info!(target: "sync::stages::index_account_history", stage_progress = *range.end(), is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(*range.end())
                 .with_index_history_stage_checkpoint(stage_checkpoint),
@@ -86,7 +85,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
                 StageCheckpoint::new(unwind_progress)
             };
 
-        info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { checkpoint })
     }

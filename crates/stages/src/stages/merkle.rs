@@ -264,7 +264,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         self.validate_state_root(trie_root, block.seal_slow(), to_block)?;
 
-        info!(target: "sync::stages::merkle::exec", stage_progress = to_block, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
                 .with_entities_stage_checkpoint(entities_checkpoint),
@@ -294,7 +293,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         if input.unwind_to == 0 {
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
-            info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
 
             entities_checkpoint.processed = 0;
 
@@ -322,7 +320,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }
 
-        info!(target: "sync::stages::merkle::unwind", stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }

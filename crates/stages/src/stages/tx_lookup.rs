@@ -136,7 +136,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
-        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
@@ -174,7 +173,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
-        info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),

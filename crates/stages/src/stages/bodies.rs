@@ -154,7 +154,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
         let done = highest_block == to_block;
-        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = to_block, is_final_range = done, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(highest_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
@@ -211,7 +210,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             rev_walker.delete_current()?;
         }
 
-        info!(target: "sync::stages::bodies", to_block = input.unwind_to, stage_progress = input.unwind_to, is_final_range = true, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),

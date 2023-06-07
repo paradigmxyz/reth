@@ -61,7 +61,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
         stage_checkpoint.progress.processed += changesets;
 
-        info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(*range.end())
                 .with_index_history_stage_checkpoint(stage_checkpoint),
@@ -89,7 +88,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
                 StageCheckpoint::new(unwind_progress)
             };
 
-        info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint })
     }
 }
