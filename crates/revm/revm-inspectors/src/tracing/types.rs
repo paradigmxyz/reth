@@ -452,7 +452,7 @@ pub(crate) struct CallTraceStep {
     /// Size of memory
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
-    pub(crate) gas: u64,
+    pub(crate) gas_remaining: u64,
     /// Gas refund counter before step execution
     pub(crate) gas_refund_counter: u64,
     // Fields filled in `step_end`
@@ -474,7 +474,7 @@ impl CallTraceStep {
         let mut log = StructLog {
             depth: self.depth,
             error: self.as_error(),
-            gas: self.gas,
+            gas: self.gas_remaining,
             gas_cost: self.gas_cost,
             op: self.op.to_string(),
             pc: self.pc as u64,
