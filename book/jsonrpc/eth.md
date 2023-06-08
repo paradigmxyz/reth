@@ -1,1 +1,1 @@
-# eth
+# `eth` Namespace
