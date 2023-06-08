@@ -3,7 +3,7 @@ use reth_interfaces::{
     consensus, db::DatabaseError as DbError, executor, p2p::error::DownloadError,
     provider::ProviderError,
 };
-use reth_primitives::SealedHeader;
+use reth_primitives::{BlockNumber, SealedHeader};
 use reth_provider::TransactionError;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -19,6 +19,15 @@ pub enum StageError {
         /// The underlying consensus error.
         #[source]
         error: consensus::ConsensusError,
+    },
+    /// The stage encountered a downloader error where the responses cannot be attached to the
+    /// current head.
+    #[error("Stage encountered detached head #{number} ({hash:?})", number = local_head.number, hash = local_head.hash)]
+    DetachedHead {
+        /// The local head header.
+        local_head: SealedHeader,
+        /// The unwind target block number.
+        unwind_to: BlockNumber,
     },
     /// The stage encountered a database error.
     #[error("An internal database error occurred: {0}")]

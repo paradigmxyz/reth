@@ -376,7 +376,18 @@ where
                 Err(err) => {
                     self.listeners.notify(PipelineEvent::Error { stage_id });
 
-                    let out = if let StageError::Validation { block, error } = err {
+                    let out = if let StageError::DetachedHead { local_head, unwind_to } = err {
+                        warn!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            current_head_number = local_head.number,
+                            current_head_hash = ?local_head.hash,
+                            "Stage encountered detached head"
+                        );
+
+                        // We unwind because of a detached head.
+                        Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
+                    } else if let StageError::Validation { block, error } = err {
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,

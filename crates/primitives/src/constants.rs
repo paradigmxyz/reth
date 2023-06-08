@@ -89,6 +89,9 @@ pub const EMPTY_TRANSACTIONS: H256 = EMPTY_SET_HASH;
 /// Withdrawals root of empty withdrawals set.
 pub const EMPTY_WITHDRAWALS: H256 = EMPTY_SET_HASH;
 
+/// The number of blocks to unwind during a reorg that already became a part of canonical chain.
+pub const REORG_UNWIND_DEPTH: u64 = 3;
+
 #[cfg(test)]
 mod tests {
     use super::*;
