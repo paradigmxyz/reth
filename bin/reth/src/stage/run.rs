@@ -191,7 +191,6 @@ impl Command {
                             ExecutionStageThresholds {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,
-                                max_changesets: None,
                             },
                         )),
                         None,

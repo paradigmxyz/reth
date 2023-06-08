@@ -691,7 +691,6 @@ impl Command {
                     ExecutionStageThresholds {
                         max_blocks: stage_conf.execution.max_blocks,
                         max_changes: stage_conf.execution.max_changes,
-                        max_changesets: stage_conf.execution.max_changesets,
                     },
                 )),
             )

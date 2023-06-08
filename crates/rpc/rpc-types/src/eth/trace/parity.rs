@@ -151,23 +151,35 @@ pub enum CallType {
     StaticCall,
 }
 
+/// Represents a certain [CallType] of a _call_ or message transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallAction {
+    /// Address of the sending account.
     pub from: Address,
+    /// Address of the destination/target account.
     pub to: Address,
+    /// Value transferred to the destination account.
     pub value: U256,
+    /// The gas available for executing the call.
     pub gas: U64,
+    /// The input data provided to the call.
     pub input: Bytes,
+    /// The type of the call.
     pub call_type: CallType,
 }
 
+/// Represents a _create_ action, either a `CREATE` operation or a CREATE transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAction {
+    /// The address of the creator.
     pub from: Address,
+    /// The value with which the new account is endowed.
     pub value: U256,
+    /// The gas available for the creation init code.
     pub gas: U64,
+    /// The init code.
     pub init: Bytes,
 }
 
@@ -181,16 +193,23 @@ pub enum RewardType {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RewardAction {
+    /// Author's address.
     pub author: Address,
+    /// Reward amount.
     pub value: U256,
+    /// Reward type.
     pub reward_type: RewardType,
 }
 
+/// Represents a _selfdestruct_ action fka `suicide`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelfdestructAction {
+    /// destroyed/suicided address.
     pub address: Address,
+    /// destroyed contract heir.
     pub refund_address: Address,
+    /// Balance of the contract just before it was destroyed.
     pub balance: U256,
 }
 
