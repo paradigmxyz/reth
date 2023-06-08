@@ -11,7 +11,7 @@ use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::{stage::StageId, ChainSpec};
+use reth_primitives::ChainSpec;
 use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
@@ -232,7 +232,7 @@ impl Command {
         }
 
         let mut input = ExecInput {
-            previous_stage: Some((StageId::Other("No Previous Stage"), self.to)),
+            target: Some(self.to),
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
