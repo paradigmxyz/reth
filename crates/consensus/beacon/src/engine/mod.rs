@@ -475,14 +475,16 @@ where
             }
         };
 
+        let status = on_updated.forkchoice_status();
+
         // update the forkchoice state tracker
-        self.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
+        self.forkchoice_state_tracker.set_latest(state, status);
 
         let is_valid_response = on_updated.is_valid_update();
         let _ = tx.send(Ok(on_updated));
 
         // notify listeners about new processed FCU
-        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state));
+        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status));
 
         // Terminate the sync early if it's reached the maximum user
         // configured block.
