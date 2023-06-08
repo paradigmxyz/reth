@@ -120,8 +120,6 @@ async fn unwind_and_copy<DB: Database>(
     output_db.update(|tx| tx.import_table::<tables::PlainAccountState, _>(&unwind_inner_tx))??;
     output_db.update(|tx| tx.import_table::<tables::Bytecodes, _>(&unwind_inner_tx))??;
 
-    drop(unwind_inner_tx);
-
     Ok(())
 }
 
@@ -142,8 +140,6 @@ async fn dry_run<DB: Database>(output_db: DB, to: u64, from: u64) -> eyre::Resul
             },
         )
         .await?;
-
-    drop(provider.into_tx());
 
     info!(target: "reth::cli", "Success.");
 

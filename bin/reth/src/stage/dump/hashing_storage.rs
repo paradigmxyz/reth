@@ -58,8 +58,6 @@ async fn unwind_and_copy<DB: Database>(
         .update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(&unwind_inner_tx))??;
     output_db.update(|tx| tx.import_dupsort::<tables::StorageChangeSet, _>(&unwind_inner_tx))??;
 
-    drop(unwind_inner_tx);
-
     Ok(())
 }
 
@@ -87,8 +85,6 @@ async fn dry_run<DB: Database>(output_db: DB, to: u64, from: u64) -> eyre::Resul
             .await?
             .done;
     }
-
-    drop(provider.into_tx());
 
     info!(target: "reth::cli", "Success.");
 
