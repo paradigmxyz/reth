@@ -138,12 +138,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range();
-        if range.is_empty() {
+        if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (start_block, max_block) = range.into_inner();
+        let (start_block, max_block) = input.next_block_range().into_inner();
 
         // Build executor
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));

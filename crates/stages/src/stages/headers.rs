@@ -205,7 +205,7 @@ where
         // Nothing to sync
         if gap.is_closed() {
             info!(target: "sync::stages::headers", checkpoint = %current_checkpoint, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput { checkpoint: current_checkpoint, done: true })
+            return Ok(ExecOutput::done(current_checkpoint))
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
