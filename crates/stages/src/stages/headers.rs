@@ -14,7 +14,7 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    constants::REORG_UNWIND_DEPTH,
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
     },
@@ -215,7 +215,7 @@ where
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
 
         // let the downloader know what to sync
-        self.downloader.update_sync_gap(gap.local_head.clone(), gap.target);
+        self.downloader.update_sync_gap(gap.local_head, gap.target);
 
         // The downloader returns the headers in descending order starting from the tip
         // down to the local head (latest block in db).
@@ -223,10 +223,9 @@ where
         // is a fatal error to prevent the pipeline from running forever.
         let downloaded_headers = match self.downloader.next().await {
             Some(Ok(headers)) => headers,
-            Some(Err(HeadersDownloaderError::HeaderCannotBeAttached { number, hash, error })) => {
-                error!(target: "sync::stages::headers", number, ?hash, ?error, "Cannot attach header to head");
-                let unwind_to = gap.local_head.number.saturating_sub(REORG_UNWIND_DEPTH).max(1);
-                return Err(StageError::DetachedHead { local_head: gap.local_head, unwind_to })
+            Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
+                error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                return Err(StageError::DetachedHead { local_head, header, error })
             }
             None => return Err(StageError::ChannelClosed),
         };

@@ -22,12 +22,20 @@ pub enum StageError {
     },
     /// The stage encountered a downloader error where the responses cannot be attached to the
     /// current head.
-    #[error("Stage encountered detached head #{number} ({hash:?})", number = local_head.number, hash = local_head.hash)]
+    #[error(
+        "Stage encountered inconsistent chain. Downloaded header #{header_number} ({header_hash:?}) is detached from local head #{head_number} ({head_hash:?}). Details: {error}.",
+        header_number = header.number,
+        header_hash = header.hash,
+        head_number = local_head.number,
+        head_hash = local_head.hash,
+    )]
     DetachedHead {
-        /// The local head header.
+        /// The local head we attempted to attach to.
         local_head: SealedHeader,
-        /// The unwind target block number.
-        unwind_to: BlockNumber,
+        /// The header we attempted to attach.
+        header: SealedHeader,
+        /// The error that occurred when attempting to attach the header.
+        error: consensus::ConsensusError,
     },
     /// The stage encountered a database error.
     #[error("An internal database error occurred: {0}")]
