@@ -65,6 +65,9 @@ use reth_interfaces::blockchain_tree::InsertPayloadOk;
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
 
+/// The largest gap for which the tree will be used for sync.
+const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = 128;
+
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
 ///
@@ -457,10 +460,15 @@ where
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response
     /// to a forkchoice update.
+    ///
+    /// Inserts the head into the invalid header cache if the head has a known invalid ancestor.
     fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
         let parent_hash = {
             // check if the head was previously marked as invalid
-            let header = self.invalid_headers.get(&head)?;
+            let header = self.invalid_headers.get(&head)?.clone();
+
+            // if so then insert with the invalid ancestor
+            self.invalid_headers.insert_with_invalid_ancestor(head, header.clone());
             header.parent_hash
         };
 
@@ -797,9 +805,7 @@ where
         let block_hash = block.hash();
 
         // now check the block itself
-        if let Some(status) = self.check_invalid_ancestor(block.parent_hash) {
-            // The parent is invalid, so this block is also invalid
-            self.invalid_headers.insert(block.header);
+        if let Some(status) = self.check_invalid_ancestor_with_head(block.parent_hash, block.hash) {
             return Ok(status)
         }
 
@@ -1030,8 +1036,17 @@ where
                         self.try_make_sync_target_canonical(num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
-                        // continue downloading the missing parent
-                        self.sync.download_full_block(missing_parent.hash);
+                        // if the number of missing blocks is greater than the max, run the
+                        // pipeline
+                        let head = self.blockchain.canonical_tip();
+                        if missing_parent.number >= head.number &&
+                            missing_parent.number - head.number > MIN_BLOCKS_FOR_PIPELINE_RUN
+                        {
+                            self.sync.set_pipeline_sync_target(missing_parent.hash)
+                        } else {
+                            // continue downloading the missing parent
+                            self.sync.download_full_block(missing_parent.hash);
+                        }
                     }
                     _ => (),
                 }
