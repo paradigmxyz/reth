@@ -5,7 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use reth_db::mdbx::test_utils::create_test_rw_db;
-use reth_primitives::{stage::StageId, BlockBody, SealedBlock};
+use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::ShareableDatabase;
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, ffi::OsStr, fs, path::Path, sync::Arc};
@@ -106,11 +106,7 @@ impl Case for BlockchainTestCase {
                         let _ = stage
                             .execute(
                                 &mut provider,
-                                ExecInput {
-                                    previous_stage: last_block
-                                        .map(|b| (StageId::Other("Dummy"), b)),
-                                    checkpoint: None,
-                                },
+                                ExecInput { target: last_block, checkpoint: None },
                             )
                             .await;
                     });

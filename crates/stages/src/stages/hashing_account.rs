@@ -253,7 +253,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
         // so no checkpoint is needed.
-        let checkpoint = StageCheckpoint::new(input.previous_stage_checkpoint_block_number())
+        let checkpoint = StageCheckpoint::new(input.target())
             .with_account_hashing_stage_checkpoint(AccountHashingCheckpoint {
                 progress: stage_checkpoint_progress(provider)?,
                 ..Default::default()
@@ -302,7 +302,6 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
-        PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
@@ -318,7 +317,7 @@ mod tests {
         runner.set_clean_threshold(1);
 
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -359,7 +358,7 @@ mod tests {
         runner.set_commit_threshold(5);
 
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -536,18 +535,11 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let mut tx = self.tx.inner();
-                let res = Ok(AccountHashingStage::seed(
-                    &mut tx,
-                    SeedOpts {
-                        blocks: 1..=input.previous_stage_checkpoint_block_number(),
-                        accounts: 0..10,
-                        txs: 0..3,
-                    },
+                Ok(AccountHashingStage::seed(
+                    &mut self.tx.inner(),
+                    SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },
                 )
-                .unwrap());
-                tx.commit().expect("failed to commit");
-                res
+                .unwrap())
             }
 
             fn validate_execution(

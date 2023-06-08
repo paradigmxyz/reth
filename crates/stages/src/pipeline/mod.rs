@@ -225,10 +225,9 @@ where
                 }
             }
 
-            previous_stage = Some((
-                stage_id,
+            previous_stage = Some(
                 get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default().block_number,
-            ));
+            );
         }
 
         Ok(self.progress.next_ctrl())
@@ -297,7 +296,7 @@ where
 
     async fn execute_stage_to_completion(
         &mut self,
-        previous_stage: Option<(StageId, BlockNumber)>,
+        previous_stage: Option<BlockNumber>,
         stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
         let total_stages = self.stages.len();
@@ -305,8 +304,11 @@ where
         let stage = &mut self.stages[stage_index];
         let stage_id = stage.id();
         let mut made_progress = false;
+        let target = self.max_block.or(previous_stage);
+
         let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
         let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+
         loop {
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
 
@@ -337,10 +339,7 @@ where
             });
 
             match stage
-                .execute(
-                    &mut provider_rw,
-                    ExecInput { previous_stage, checkpoint: prev_checkpoint },
-                )
+                .execute(&mut provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
                 .await
             {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
@@ -354,11 +353,7 @@ where
                         %done,
                         "Stage committed progress"
                     );
-                    self.metrics.stage_checkpoint(
-                        stage_id,
-                        checkpoint,
-                        self.max_block.or(previous_stage.map(|(_, block_number)| block_number)),
-                    );
+                    self.metrics.stage_checkpoint(stage_id, checkpoint, target);
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran {

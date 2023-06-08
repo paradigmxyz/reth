@@ -141,7 +141,7 @@ mod tests {
     use std::{collections::BTreeMap, sync::Arc};
 
     use super::*;
-    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
+    use crate::test_utils::TestTransaction;
     use reth_db::{
         models::{
             sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
@@ -205,8 +205,7 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let input =
-            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
+        let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
         let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
         let mut provider = factory.provider_rw().unwrap();
