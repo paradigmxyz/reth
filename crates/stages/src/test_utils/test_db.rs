@@ -62,7 +62,7 @@ impl TestTransaction {
         }
     }
 
-    /// Return a database wrapped in [Transaction].
+    /// Return a database wrapped in [DatabaseProviderRW].
     pub fn inner(&self) -> DatabaseProviderRW<'_, Arc<Env<WriteMap>>> {
         self.factory.provider_rw().expect("failed to create db container")
     }
