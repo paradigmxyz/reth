@@ -22,13 +22,14 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum InitDatabaseError {
-    /// Attempted to reinitialize database with inconsistent genesis block
-    #[error("Genesis hash mismatch: expected {expected}, got {actual}")]
+    /// An existing genesis block was found in the database, and its hash did not match the hash of
+    /// the chainspec.
+    #[error("Genesis hash in the database does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
     GenesisHashMismatch {
         /// Expected genesis hash.
-        expected: H256,
+        chainspec_hash: H256,
         /// Actual genesis hash.
-        actual: H256,
+        database_hash: H256,
     },
 
     /// Higher level error encountered when using a Transaction.
@@ -57,7 +58,10 @@ pub fn init_genesis<DB: Database>(
             return Ok(hash)
         }
 
-        return Err(InitDatabaseError::GenesisHashMismatch { expected: hash, actual: db_hash })
+        return Err(InitDatabaseError::GenesisHashMismatch {
+            chainspec_hash: hash,
+            database_hash: db_hash,
+        })
     }
 
     drop(tx);
@@ -199,8 +203,8 @@ mod tests {
         assert_eq!(
             genesis_hash.unwrap_err(),
             InitDatabaseError::GenesisHashMismatch {
-                expected: MAINNET_GENESIS,
-                actual: SEPOLIA_GENESIS
+                chainspec_hash: MAINNET_GENESIS,
+                database_hash: SEPOLIA_GENESIS
             }
         )
     }
