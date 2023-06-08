@@ -49,8 +49,9 @@ use super::get_stage_checkpoint;
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TX>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
-// pub type DatabaseProviderRW<'this, DB> = DatabaseProvider<'this, <DB as
-// DatabaseGAT<'this>>::TXMut>;
+///
+/// Ideally this would be an alias type. However, there's some weird compiler error (https://github.com/rust-lang/rust/issues/102211), that forces us to wrap this in a struct instead.
+/// Once that issue is solved, we can probably revert back to being an alias type.
 pub struct DatabaseProviderRW<'this, DB: Database>(
     pub DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>,
 );
@@ -206,8 +207,7 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
             .collect::<std::result::Result<Vec<_>, DatabaseError>>()
     }
 
-    // TEMPORARY should be moved to trait providers
-    ///
+    // TODO(joshie) TEMPORARY should be moved to trait providers
 
     /// Iterate over account changesets and return all account address that were changed.
     pub fn get_addresses_and_keys_of_changed_storages(
@@ -341,7 +341,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
             .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
             .collect::<std::result::Result<Vec<_>, _>>()?)
     }
-    // TEMPORARY should be moved to trait providers
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
@@ -349,11 +348,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     pub fn commit(self) -> Result<bool> {
         Ok(self.tx.commit()?)
     }
-    /// Return list of entries from table
-    ///
-    /// If TAKE is true, opened cursor would be write and it would delete all values from db.
 
-    // TEMPORARY2
+    // TODO(joshie) TEMPORARY should be moved to trait providers
+
     /// Get range of blocks and its execution result
     pub fn get_block_and_execution_range(
         &self,

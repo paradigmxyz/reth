@@ -7,7 +7,6 @@ use reth_primitives::{
     BlockNumber, MAINNET,
 };
 use reth_provider::ShareableDatabase;
-use reth_revm::Factory;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,

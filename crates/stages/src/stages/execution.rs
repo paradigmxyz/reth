@@ -84,8 +84,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         Self::new(executor_factory, ExecutionStageThresholds::default())
     }
 
-    // TODO: This should be in the block provider trait once we consolidate
-    // SharedDatabase/Transaction
+    // TODO(joshie): This should be in the block provider trait once we consolidate
     fn read_block_with_senders<DB: Database>(
         provider: &DatabaseProviderRW<'_, &DB>,
         block_number: BlockNumber,
