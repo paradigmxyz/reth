@@ -23,8 +23,8 @@ use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
     Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedBlockWithSenders, StorageEntry, TransactionSigned, TransactionSignedEcRecovered, H256,
-    U256,
+    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionSigned,
+    TransactionSignedEcRecovered, H256, U256,
 };
 use reth_trie::{StateRoot, StateRootError};
 use std::{
@@ -181,6 +181,13 @@ where
             .get::<tables::HeaderTD>(block)?
             .ok_or(ProviderError::TotalDifficultyNotFound { number: block })?;
         Ok(td.into())
+    }
+
+    /// Query the sealed header by number
+    pub fn get_sealed_header(&self, number: BlockNumber) -> Result<SealedHeader, TransactionError> {
+        let header = self.get_header(number)?;
+        let block_hash = self.get_block_hash(number)?;
+        Ok(header.seal(block_hash))
     }
 
     /// Unwind table by some number key.
@@ -504,7 +511,7 @@ where
         self.calculate_history_indices(first_number..=last_block_number)?;
 
         // Update pipeline progress
-        self.update_pipeline_stages(new_tip_number)?;
+        self.update_pipeline_stages(new_tip_number, false)?;
 
         Ok(())
     }
@@ -1002,7 +1009,7 @@ where
 
             // Update pipeline progress
             if let Some(fork_number) = unwind_to {
-                self.update_pipeline_stages(fork_number)?;
+                self.update_pipeline_stages(fork_number, true)?;
             }
         }
 
@@ -1014,12 +1021,18 @@ where
     pub fn update_pipeline_stages(
         &self,
         block_number: BlockNumber,
+        drop_stage_checkpoint: bool,
     ) -> Result<(), TransactionError> {
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.cursor_write::<tables::SyncStage>()?;
         while let Some((stage_name, checkpoint)) = cursor.next()? {
-            // TODO(alexey): do we want to invalidate stage-specific checkpoint data?
-            cursor.upsert(stage_name, StageCheckpoint { block_number, ..checkpoint })?
+            cursor.upsert(
+                stage_name,
+                StageCheckpoint {
+                    block_number,
+                    ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
+                },
+            )?
         }
 
         Ok(())

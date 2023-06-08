@@ -1,5 +1,5 @@
 use crate::{
-    engine::{message::OnForkChoiceUpdated, metrics::Metrics},
+    engine::{message::OnForkChoiceUpdated, metrics::EngineMetrics},
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt, TryFutureExt};
@@ -10,7 +10,7 @@ use reth_interfaces::{
         BlockStatus, BlockchainTreeEngine,
     },
     consensus::ForkchoiceState,
-    executor::BlockExecutionError,
+    executor::{BlockExecutionError, BlockValidationError},
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     sync::{NetworkSyncUpdater, SyncState},
     Error,
@@ -232,7 +232,7 @@ where
     /// invalid.
     invalid_headers: InvalidHeaderCache,
     /// Consensus engine metrics.
-    metrics: Metrics,
+    metrics: EngineMetrics,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -318,7 +318,7 @@ where
             payload_builder,
             listeners: EventListeners::default(),
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
-            metrics: Metrics::default(),
+            metrics: EngineMetrics::default(),
         };
 
         let maybe_pipeline_target = match target {
@@ -490,9 +490,6 @@ where
             // node's fully synced, clear pending requests
             self.sync.clear_full_block_requests();
 
-            // new VALID update that moved the canonical chain forward
-            let _ = self.update_canon_chain(&state);
-
             let tip_number = self.blockchain.canonical_tip().number;
             if self.sync.has_reached_max_block(tip_number) {
                 return true
@@ -534,14 +531,24 @@ where
 
         let status = match self.blockchain.make_canonical(&state.head_block_hash) {
             Ok(outcome) => {
-                let header = outcome.into_header();
-                debug!(target: "consensus::engine", hash=?state.head_block_hash, number=header.number, "canonicalized new head");
+                if !outcome.is_already_canonical() {
+                    debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
+
+                    // new VALID update that moved the canonical chain forward
+                    let _ = self.update_canon_chain(&state);
+                } else {
+                    debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
+                }
 
                 if let Some(attrs) = attrs {
                     // the CL requested to build a new payload on top of this new VALID head
-                    let payload_response =
-                        self.process_payload_attributes(attrs, header.unseal(), state);
-                    trace!(target: "consensus::engine", status = ?payload_response, ?state, "Returning forkchoice status ");
+                    let payload_response = self.process_payload_attributes(
+                        attrs,
+                        outcome.into_header().unseal(),
+                        state,
+                    );
+
+                    trace!(target: "consensus::engine", status = ?payload_response, ?state, "Returning forkchoice status");
                     return Ok(payload_response)
                 }
 
@@ -635,7 +642,11 @@ where
 
         #[allow(clippy::single_match)]
         match &error {
-            Error::Execution(error @ BlockExecutionError::BlockPreMerge { .. }) => {
+            Error::Execution(
+                error @ BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
+                    ..
+                }),
+            ) => {
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
@@ -1002,6 +1013,10 @@ where
             }
             Err(err) => {
                 debug!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
+                if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
+                    // non-internal error kinds occurr if the payload is invalid
+                    self.invalid_headers.insert(err.into_block().header);
+                }
             }
         }
     }
@@ -1782,7 +1797,7 @@ mod tests {
                 })
                 .await;
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
                     .to_string(),
             })
             .with_latest_valid_hash(H256::zero());
@@ -1792,9 +1807,7 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_interfaces::{
-            executor::BlockExecutionError, test_utils::generators::random_block,
-        };
+        use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::{Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
@@ -1966,7 +1979,7 @@ mod tests {
                 .await;
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockExecutionError::BlockPreMerge { hash: block1.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
                     .to_string(),
             })
             .with_latest_valid_hash(H256::zero());
@@ -1977,7 +1990,7 @@ mod tests {
                 env.send_new_payload_retry_on_syncing(block2.clone().into()).await.unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockExecutionError::BlockPreMerge { hash: block2.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }
                     .to_string(),
             })
             .with_latest_valid_hash(H256::zero());

@@ -1,10 +1,11 @@
 [package]
 name = "reth-stages"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Staged syncing primitives used in reth."
 
 [package.metadata.cargo-udeps.ignore]
@@ -46,7 +47,7 @@ reth-primitives = { path = "../primitives", features = ["arbitrary"] }
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
-reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(onbjerg): We only need this for [BlockBody]
+reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
 reth-blockchain-tree = { path = "../blockchain-tree" }
 reth-rlp = { path = "../rlp" }
 reth-revm = { path = "../revm" }
@@ -59,16 +60,11 @@ rand = "0.8.5"
 paste = "1.0"
 
 # Stage benchmarks
-pprof = { version = "0.11", features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
+pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion = { version = "0.4.0", features = ["async_futures"] }
 
 [features]
 test-utils = []
-
 
 [[bench]]
 name = "criterion"

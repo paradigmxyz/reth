@@ -4,7 +4,7 @@ use crate::{
     header::Head,
     proofs::genesis_state_root,
     BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
-    H160, H256, U256,
+    SealedHeader, H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
@@ -191,6 +191,11 @@ impl ChainSpec {
             withdrawals_root,
             ..Default::default()
         }
+    }
+
+    /// Get the sealed header for the genesis block.
+    pub fn sealed_genesis_header(&self) -> SealedHeader {
+        SealedHeader { header: self.genesis_header(), hash: self.genesis_hash() }
     }
 
     /// Get the initial base fee of the genesis block.

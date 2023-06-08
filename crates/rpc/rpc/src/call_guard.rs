@@ -18,4 +18,9 @@ impl TracingCallGuard {
     pub async fn acquire_owned(self) -> Result<OwnedSemaphorePermit, AcquireError> {
         self.0.acquire_owned().await
     }
+
+    /// See also [Semaphore::acquire_many_owned]
+    pub async fn acquire_many_owned(self, n: u32) -> Result<OwnedSemaphorePermit, AcquireError> {
+        self.0.acquire_many_owned(n).await
+    }
 }

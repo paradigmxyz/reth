@@ -4,9 +4,8 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, JsonU256, H256, U256};
+use reth_primitives::{Address, H256};
 use reth_rpc_types::trace::geth::*;
-
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
@@ -47,25 +46,18 @@ impl GethTraceBuilder {
         while let Some(CallTraceStepStackItem { trace_node, step, call_child_id }) =
             step_stack.pop_back()
         {
-            let mut log: StructLog = step.into();
+            let mut log = step.convert_to_geth_struct_log(opts);
 
             // Fill in memory and storage depending on the options
-            if !opts.disable_storage.unwrap_or_default() {
+            if opts.is_storage_enabled() {
                 let contract_storage = storage.entry(step.contract).or_default();
                 if let Some(change) = step.storage_change {
                     contract_storage.insert(change.key.into(), change.value.into());
                     log.storage = Some(contract_storage.clone());
                 }
             }
-            if opts.disable_stack.unwrap_or_default() {
-                log.stack = None;
-            }
 
-            if !opts.enable_memory.unwrap_or_default() {
-                log.memory = None;
-            }
-
-            if opts.enable_return_data.unwrap_or_default() {
+            if opts.is_return_data_enabled() {
                 log.return_data = trace_node.trace.last_call_return_value.clone().map(Into::into);
             }
 
@@ -85,7 +77,7 @@ impl GethTraceBuilder {
     pub fn geth_traces(
         &self,
         // TODO(mattsse): This should be the total gas used, or gas used by last CallTrace?
-        receipt_gas_used: U256,
+        receipt_gas_used: u64,
         opts: GethDefaultTracingOptions,
     ) -> DefaultFrame {
         if self.nodes.is_empty() {
@@ -102,7 +94,7 @@ impl GethTraceBuilder {
         DefaultFrame {
             // If the top-level trace succeeded, then it was a success
             failed: !main_trace.success,
-            gas: JsonU256(receipt_gas_used),
+            gas: receipt_gas_used,
             return_value: main_trace.output.clone().into(),
             struct_logs,
         }

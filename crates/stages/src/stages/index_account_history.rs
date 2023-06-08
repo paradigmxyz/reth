@@ -216,10 +216,7 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(5).with_index_history_stage_checkpoint(
                     IndexHistoryCheckpoint {
-                        block_range: CheckpointBlockRange {
-                            from: input.checkpoint().block_number + 1,
-                            to: run_to
-                        },
+                        block_range: CheckpointBlockRange { from: input.next_block(), to: run_to },
                         progress: EntitiesCheckpoint { processed: 2, total: 2 }
                     }
                 ),

@@ -1,11 +1,12 @@
 [package]
 name = "ef-tests"
 version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/paradigmxyz/reth"
-readme = "README.md"
 description = "Staged syncing primitives used in reth."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [features]
 ef-tests = []

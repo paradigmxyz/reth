@@ -4,14 +4,15 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    DatabaseError,
 };
 use reth_interfaces::{consensus::Consensus, provider::ProviderError};
 use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     U256,
 };
 use reth_provider::Transaction;
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 use tracing::*;
 
 /// The total difficulty stage.
@@ -81,8 +82,13 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
                 .map_err(|error| StageError::Validation { block: header.seal_slow(), error })?;
             cursor_td.append(block_number, td.into())?;
         }
+
         info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(end_block), done: is_final_range })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(end_block)
+                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -97,18 +103,31 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
         info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_to)
+                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+        })
     }
+}
+
+fn stage_checkpoint<DB: Database>(
+    tx: &Transaction<'_, DB>,
+) -> Result<EntitiesCheckpoint, DatabaseError> {
+    Ok(EntitiesCheckpoint {
+        processed: tx.deref().entries::<tables::HeaderTD>()? as u64,
+        total: tx.deref().entries::<tables::Headers>()? as u64,
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use reth_db::transaction::DbTx;
     use reth_interfaces::test_utils::{
         generators::{random_header, random_header_range},
         TestConsensus,
     };
-    use reth_primitives::{BlockNumber, SealedHeader};
+    use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedHeader};
 
     use super::*;
     use crate::test_utils::{
@@ -137,11 +156,17 @@ mod tests {
         // Execute first time
         let result = runner.execute(first_input).await.unwrap();
         let expected_progress = stage_progress + threshold;
-        assert!(matches!(
+        assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: false })
-                if block_number == expected_progress
-        ));
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: false }) if block_number == expected_progress && processed == 1 + threshold &&
+                total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
+        );
 
         // Execute second time
         let second_input = ExecInput {
@@ -149,11 +174,17 @@ mod tests {
             checkpoint: Some(StageCheckpoint::new(expected_progress)),
         };
         let result = runner.execute(second_input).await.unwrap();
-        assert!(matches!(
+        assert_matches!(
             result,
-            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number, ..}, done: true })
-                if block_number == previous_stage
-        ));
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: true }) if block_number == previous_stage && processed == total &&
+                total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
+        );
 
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
     }

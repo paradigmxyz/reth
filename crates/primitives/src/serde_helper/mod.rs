@@ -1,9 +1,12 @@
 //! Various serde utilities
 
 mod storage_key;
+
+use serde::Serializer;
 pub use storage_key::*;
 
 mod jsonu256;
+use crate::H256;
 pub use jsonu256::*;
 
 pub mod num;
@@ -56,6 +59,27 @@ pub mod hex_bytes {
         .map(Into::into)
         .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
+}
+
+/// Serialize a byte vec as a hex string _without_ 0x prefix.
+///
+/// This behaves exactly as [hex::encode]
+pub fn serialize_hex_string_no_prefix<S, T>(x: T, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: AsRef<[u8]>,
+{
+    s.serialize_str(&hex::encode(x.as_ref()))
+}
+
+/// Serialize a byte vec as a hex string _without_ 0x prefix
+pub fn serialize_h256_hex_string_no_prefix<S>(x: &H256, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let val = format!("{:?}", x);
+    // skip the 0x prefix
+    s.serialize_str(&val.as_str()[2..])
 }
 
 #[cfg(test)]

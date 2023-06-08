@@ -7,7 +7,7 @@ use std::{
     task::{ready, Context, Poll},
     time::Duration,
 };
-use tokio::time::Interval;
+use tokio::time::{Instant, Interval};
 
 /// Interval of checking Consensus Layer client health.
 const CHECK_INTERVAL: Duration = Duration::from_secs(300);
@@ -27,7 +27,9 @@ pub struct ConsensusLayerHealthEvents {
 impl ConsensusLayerHealthEvents {
     /// Creates a new [ConsensusLayerHealthEvents] with the given canonical chain tracker.
     pub fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
-        Self { interval: tokio::time::interval(CHECK_INTERVAL), canon_chain }
+        // Skip the first tick to prevent the false `ConsensusLayerHealthEvent::NeverSeen` event.
+        let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);
+        Self { interval, canon_chain }
     }
 }
 
@@ -44,6 +46,14 @@ impl Stream for ConsensusLayerHealthEvents {
                 this.canon_chain.last_exchanged_transition_configuration_timestamp(),
                 this.canon_chain.last_received_update_timestamp(),
             ) {
+                // Short circuit if we recently had an FCU.
+                (_, Some(fork_choice))
+                    if fork_choice.elapsed() <= NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
+                {
+                    continue
+                }
+                // Otherwise, continue with health checks based on Transition Configuration exchange
+                // and Fork Choice update.
                 (None, _) => Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen)),
                 (Some(transition_config), _)
                     if transition_config.elapsed() > NO_TRANSITION_CONFIG_EXCHANGED_PERIOD =>
@@ -55,11 +65,11 @@ impl Stream for ConsensusLayerHealthEvents {
                 (Some(_), None) => {
                     Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
                 }
-                (Some(_), Some(update))
-                    if update.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
+                (Some(_), Some(fork_choice))
+                    if fork_choice.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
                 {
                     Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
-                        update.elapsed(),
+                        fork_choice.elapsed(),
                     )))
                 }
                 _ => continue,
