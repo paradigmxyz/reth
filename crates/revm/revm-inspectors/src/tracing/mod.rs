@@ -1,6 +1,6 @@
 use crate::tracing::{
     types::{CallKind, LogCallOrder, RawLog},
-    utils::{gas_used, get_create_address},
+    utils::get_create_address,
 };
 pub use arena::CallTraceArena;
 use reth_primitives::{bytes::Bytes, Address, H256, U256};
@@ -149,7 +149,7 @@ impl TracingInspector {
     /// This expects an existing trace [Self::start_trace_on_call]
     fn fill_trace_on_call_end<DB: Database>(
         &mut self,
-        data: &EVMData<'_, DB>,
+        _data: &EVMData<'_, DB>,
         status: InstructionResult,
         gas: &Gas,
         output: Bytes,
@@ -158,9 +158,7 @@ impl TracingInspector {
         let trace_idx = self.pop_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
 
-        let gas_used = gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64);
-
-        trace.gas_used = gas_used;
+        trace.gas_used = gas.spend();
         trace.gas_limit = gas.limit();
         trace.status = status;
         trace.success = matches!(status, return_ok!());
