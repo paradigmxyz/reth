@@ -783,7 +783,6 @@ mod tests {
         } if total == block.gas_used);
 
         // assert unwind stage
-        let provider = db.provider_rw().unwrap();
         let db_tx = provider.tx_ref();
         assert_eq!(
             db_tx.get::<tables::PlainAccountState>(acc1),
