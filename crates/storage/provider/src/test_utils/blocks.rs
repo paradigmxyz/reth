@@ -1,6 +1,6 @@
 //! Dummy blocks and data for tests
 
-use crate::{post_state::PostState, Transaction};
+use crate::{post_state::PostState, DatabaseProviderRW};
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
     hex_literal::hex, Account, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
@@ -10,9 +10,11 @@ use reth_rlp::Decodable;
 use std::collections::BTreeMap;
 
 /// Assert genesis block
-pub fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlock) {
+pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<'_, DB>, g: SealedBlock) {
     let n = g.number;
     let h = H256::zero();
+    let tx = provider;
+
     // check if all tables are empty
     assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header.clone().unseal())]);
 

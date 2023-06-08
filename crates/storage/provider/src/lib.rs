@@ -33,7 +33,7 @@ pub use post_state::PostState;
 
 /// Helper types for interacting with the database
 mod transaction;
-pub use transaction::{Transaction, TransactionError};
+pub use transaction::TransactionError;
 
 /// Common database utilities.
 mod utils;

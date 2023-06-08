@@ -17,6 +17,7 @@ use reth_primitives::{
     BlockHashOrNumber, BlockNumber, SealedHeader, H256,
 };
 use reth_provider::DatabaseProviderRW;
+use std::ops::Deref;
 use tokio::sync::watch;
 use tracing::*;
 
@@ -81,12 +82,12 @@ where
     /// See also [SyncTarget]
     async fn get_sync_gap<DB: Database>(
         &mut self,
-        tx: &<DB as reth_db::database::DatabaseGAT<'_>>::TXMut,
+        provider: &DatabaseProviderRW<'_, &DB>,
         checkpoint: u64,
     ) -> Result<SyncGap, StageError> {
         // Create a cursor over canonical header hashes
-        let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
+        let mut cursor = provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
 
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
@@ -199,7 +200,7 @@ where
         let current_checkpoint = input.checkpoint();
 
         // Lookup the head and tip of the sync range
-        let gap = self.get_sync_gap::<DB>(tx, current_checkpoint.block_number).await?;
+        let gap = self.get_sync_gap(provider.deref(), current_checkpoint.block_number).await?;
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
@@ -372,6 +373,8 @@ impl SyncGap {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
@@ -379,7 +382,8 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::random_header;
-    use reth_primitives::{stage::StageUnitCheckpoint, H256};
+    use reth_primitives::{stage::StageUnitCheckpoint, H256, MAINNET};
+    use reth_provider::ShareableDatabase;
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
@@ -591,7 +595,9 @@ mod tests {
     #[tokio::test]
     async fn head_and_tip_lookup() {
         let runner = HeadersTestRunner::default();
-        let tx = runner.tx().inner();
+        let factory = ShareableDatabase::new(runner.tx().tx.as_ref(), Arc::new(MAINNET.clone()));
+        let provider = factory.provider_rw().unwrap();
+        let tx = provider.tx_ref();
         let mut stage = runner.stage();
 
         let consensus_tip = H256::random();
@@ -605,7 +611,7 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            stage.get_sync_gap::<DB>(&tx, checkpoint).await,
+            stage.get_sync_gap(&provider, checkpoint).await,
             Err(StageError::DatabaseIntegrity(ProviderError::HeaderNotFound(block_number)))
                 if block_number.as_number().unwrap() == checkpoint
         );
@@ -616,7 +622,7 @@ mod tests {
         tx.put::<tables::Headers>(head.number, head.clone().unseal())
             .expect("failed to write header");
 
-        let gap = stage.get_sync_gap::<DB>(&tx, checkpoint).await.unwrap();
+        let gap = stage.get_sync_gap(&provider, checkpoint).await.unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
 
@@ -626,7 +632,7 @@ mod tests {
         tx.put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
             .expect("failed to write header");
 
-        let gap = stage.get_sync_gap::<DB>(&tx, checkpoint).await.unwrap();
+        let gap = stage.get_sync_gap(&provider, checkpoint).await.unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
 
@@ -637,7 +643,7 @@ mod tests {
             .expect("failed to write header");
 
         assert_matches!(
-            stage.get_sync_gap::<DB>(&tx, checkpoint).await,
+            stage.get_sync_gap(&provider, checkpoint).await,
             Err(StageError::StageCheckpoint(_checkpoint)) if _checkpoint == checkpoint
         );
     }

@@ -79,7 +79,7 @@ impl AccountHashingStage {
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSet` table.
     pub fn seed<DB: Database>(
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, DB>,
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db::models::AccountBeforeTx;
@@ -92,18 +92,20 @@ impl AccountHashingStage {
         let blocks = random_block_range(opts.blocks.clone(), H256::zero(), opts.txs);
 
         for block in blocks {
-            insert_canonical_block(&**tx, block, None).unwrap();
+            insert_canonical_block(provider.tx_ref(), block, None).unwrap();
         }
         let mut accounts = random_eoa_account_range(opts.accounts);
         {
             // Account State generator
-            let mut account_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
+            let mut account_cursor =
+                provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
             accounts.sort_by(|a, b| a.0.cmp(&b.0));
             for (addr, acc) in accounts.iter() {
                 account_cursor.append(*addr, *acc)?;
             }
 
-            let mut acc_changeset_cursor = tx.cursor_write::<tables::AccountChangeSet>()?;
+            let mut acc_changeset_cursor =
+                provider.tx_ref().cursor_write::<tables::AccountChangeSet>()?;
             for (t, (addr, acc)) in (opts.blocks).zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
@@ -115,8 +117,6 @@ impl AccountHashingStage {
                 acc_changeset_cursor.append(t, acc_before_tx)?;
             }
         }
-
-        tx.commit()?;
 
         Ok(accounts)
     }
@@ -536,15 +536,18 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                Ok(AccountHashingStage::seed(
-                    &mut self.tx.inner(),
+                let mut tx = self.tx.inner();
+                let res = Ok(AccountHashingStage::seed(
+                    &mut tx,
                     SeedOpts {
                         blocks: 1..=input.previous_stage_checkpoint_block_number(),
                         accounts: 0..10,
                         txs: 0..3,
                     },
                 )
-                .unwrap())
+                .unwrap());
+                tx.commit().expect("failed to commit");
+                res
             }
 
             fn validate_execution(

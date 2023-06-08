@@ -195,6 +195,17 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         &self.tx
     }
 
+    /// Return full table as Vec
+    pub fn table<T: Table>(&self) -> std::result::Result<Vec<KeyValue<T>>, DatabaseError>
+    where
+        T::Key: Default + Ord,
+    {
+        self.tx
+            .cursor_read::<T>()?
+            .walk(Some(T::Key::default()))?
+            .collect::<std::result::Result<Vec<_>, DatabaseError>>()
+    }
+
     // TEMPORARY should be moved to trait providers
     ///
 

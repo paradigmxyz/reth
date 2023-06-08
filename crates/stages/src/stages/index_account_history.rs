@@ -137,7 +137,8 @@ fn stage_checkpoint<DB: Database>(
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use std::collections::BTreeMap;
+    use reth_provider::ShareableDatabase;
+    use std::{collections::BTreeMap, sync::Arc};
 
     use super::*;
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
@@ -150,7 +151,7 @@ mod tests {
         transaction::DbTxMut,
         BlockNumberList,
     };
-    use reth_primitives::{hex_literal::hex, H160};
+    use reth_primitives::{hex_literal::hex, H160, MAINNET};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
 
@@ -207,8 +208,9 @@ mod tests {
         let input =
             ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
-        let mut tx = tx.inner();
-        let out = stage.execute(&mut tx, input).await.unwrap();
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+        let mut provider = factory.provider_rw().unwrap();
+        let out = stage.execute(&mut provider, input).await.unwrap();
         assert_eq!(
             out,
             ExecOutput {
@@ -221,7 +223,7 @@ mod tests {
                 done: true
             }
         );
-        tx.commit().unwrap();
+        provider.commit().unwrap();
     }
 
     async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
@@ -231,10 +233,11 @@ mod tests {
             ..Default::default()
         };
         let mut stage = IndexAccountHistoryStage::default();
-        let mut tx = tx.inner();
-        let out = stage.unwind(&mut tx, input).await.unwrap();
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+        let mut provider = factory.provider_rw().unwrap();
+        let out = stage.unwind(&mut provider, input).await.unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
-        tx.commit().unwrap();
+        provider.commit().unwrap();
     }
 
     #[tokio::test]
@@ -474,8 +477,11 @@ mod tests {
         })
         .unwrap();
 
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+        let provider = factory.provider_rw().unwrap();
+
         assert_matches!(
-            stage_checkpoint::<DB>(&tx.inner(), StageCheckpoint::new(1), &(1..=2)).unwrap(),
+            stage_checkpoint(&provider, StageCheckpoint::new(1), &(1..=2)).unwrap(),
             IndexHistoryCheckpoint {
                 block_range: CheckpointBlockRange { from: 1, to: 2 },
                 progress: EntitiesCheckpoint { processed: 2, total: 4 }
