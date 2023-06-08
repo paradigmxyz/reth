@@ -21,10 +21,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         _tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(input.previous_stage_checkpoint_block_number()),
-            done: true,
-        })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 
     async fn unwind(
@@ -74,7 +71,7 @@ mod tests {
             self.tx.insert_headers_with_td(std::iter::once(&head))?;
 
             // use previous progress as seed size
-            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
+            let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
                 return Ok(Vec::default())
@@ -95,7 +92,7 @@ mod tests {
                 assert!(output.done, "stage should always be done");
                 assert_eq!(
                     output.checkpoint.block_number,
-                    input.previous_stage_checkpoint_block_number(),
+                    input.target(),
                     "stage progress should always match progress of previous stage"
                 );
             }

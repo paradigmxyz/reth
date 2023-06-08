@@ -14,8 +14,8 @@ use std::{
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
-    /// The stage that was run before the current stage and the block number it reached.
-    pub previous_stage: Option<(StageId, BlockNumber)>,
+    /// The target block number the stage needs to execute towards.
+    pub target: Option<BlockNumber>,
     /// The checkpoint of this stage the last time it was executed.
     pub checkpoint: Option<StageCheckpoint>,
 }
@@ -35,12 +35,12 @@ impl ExecInput {
 
     /// Returns `true` if the target block number has already been reached.
     pub fn target_reached(&self) -> bool {
-        self.checkpoint().block_number >= self.previous_stage_checkpoint_block_number()
+        self.checkpoint().block_number >= self.target()
     }
 
-    /// Return the progress of the previous stage or default.
-    pub fn previous_stage_checkpoint_block_number(&self) -> BlockNumber {
-        self.previous_stage.map(|(_, block_number)| block_number).unwrap_or_default()
+    /// Return the target block number or default.
+    pub fn target(&self) -> BlockNumber {
+        self.target.unwrap_or_default()
     }
 
     /// Return next block range that needs to be executed.
@@ -62,7 +62,7 @@ impl ExecInput {
     ) -> (RangeInclusive<BlockNumber>, bool) {
         let current_block = self.checkpoint();
         let start = current_block.block_number + 1;
-        let target = self.previous_stage_checkpoint_block_number();
+        let target = self.target();
 
         let end = min(target, current_block.block_number.saturating_add(threshold));
 
@@ -83,7 +83,7 @@ impl ExecInput {
             .get::<tables::BlockBodyIndices>(start_block)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(start_block))?;
 
-        let target_block = self.previous_stage_checkpoint_block_number();
+        let target_block = self.target();
 
         let first_tx_number = start_block_body.first_tx_num();
         let mut last_tx_number = start_block_body.last_tx_num();

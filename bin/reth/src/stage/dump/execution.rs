@@ -4,10 +4,7 @@ use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    MAINNET,
-};
+use reth_primitives::{stage::StageCheckpoint, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use std::{ops::DerefMut, path::PathBuf, sync::Arc};
@@ -139,7 +136,7 @@ async fn dry_run(
         .execute(
             &mut tx,
             reth_stages::ExecInput {
-                previous_stage: Some((StageId::Other("Another"), to)),
+                target: Some(to),
                 checkpoint: Some(StageCheckpoint::new(from)),
             },
         )
