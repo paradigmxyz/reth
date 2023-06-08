@@ -1,4 +1,5 @@
 use reth_primitives::{Address, BlockHash, BlockHashOrNumber, BlockNumber, TxNumber, H256};
+use crate::executor::{BlockExecutionError, BlockValidationError};
 
 /// Bundled errors variants thrown by various providers.
 #[allow(missing_docs)]
@@ -96,4 +97,16 @@ pub enum ProviderError {
     },
     #[error("State at block #{0} is pruned")]
     StateAtBlockPruned(BlockNumber),
+}
+
+impl From<ProviderError> for BlockExecutionError {
+    fn from(value: ProviderError) -> Self {
+        match value {
+            ProviderError::StateRootMismatch { expected, got, block_number, block_hash } => {
+                BlockValidationError::StateRootMismatch { expected, got, block_number, block_hash }
+                    .into()
+            }
+            err => Self::CanonicalCommit { inner: err.to_string() },
+        }
+    }
 }

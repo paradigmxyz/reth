@@ -1,4 +1,4 @@
-use reth_primitives::{BlockHash, BlockNumHash, Bloom, H256, BlockNumber};
+use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, Bloom, H256};
 use thiserror::Error;
 
 /// Transaction validation errors
