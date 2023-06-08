@@ -1,4 +1,4 @@
-use reth_primitives::{BlockHash, BlockNumHash, Bloom, H256};
+use reth_primitives::{BlockHash, BlockNumHash, Bloom, H256, BlockNumber};
 use thiserror::Error;
 
 /// Transaction validation errors
@@ -24,6 +24,18 @@ pub enum BlockValidationError {
     BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
+    /// Root mismatch
+    #[error("Merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
+    StateRootMismatch {
+        /// Expected root
+        expected: H256,
+        /// Calculated root
+        got: H256,
+        /// Block number
+        block_number: BlockNumber,
+        /// Block hash
+        block_hash: BlockHash,
+    },
 }
 
 /// BlockExecutor Errors
