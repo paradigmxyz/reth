@@ -3,13 +3,23 @@
 Reth runs on Linux and macOS (Windows tracked).
 
 There are three core methods to obtain Reth:
-* [Pre-built binaries](./binaries.md).
-* [Docker images](./docker.md).
-* [Building from source.](./source.md).
+
+* [Pre-built binaries](./binaries.md)
+* [Docker images](./docker.md)
+* [Building from source.](./source.md)
 
 ## Hardware Requirements
 
-The hardware requirements for running Reth depend on the node configuration and can change over time as the network grows or new features are implemented. The most important requirement is by far the disk, whereas CPU and RAM requirements are relatively flexible.
+The hardware requirements for running Reth depend on the node configuration and can change over time as the network grows or new features are implemented.
+
+The most important requirement is by far the disk, whereas CPU and RAM requirements are relatively flexible.
+
+|           | Archive Node                       | Full Node                           |
+|-----------|------------------------------------|-------------------------------------|
+| Disk      | At least 2.5TB (NVMe recommended)  | TBD                                 |
+| Memory    | 8GB+                               | 8GB+                                |
+| CPU       | Higher clock speed over core count | Higher clock speeds over core count |
+| Bandwidth | Stable 24Mbps+                     | Stable 24Mbps+                      |
 
 ### Disk
 
@@ -18,11 +28,13 @@ There are multiple types of disks to sync Reth, with varying size requirements, 
 * Archive Node: At least 2.5TB is required to store 
 * Full Node: TBD
 
-The time to sync also varies depending on the node type. NVMe drives are recommended for the best performance, however they can get expensive. SSDs are a good alternative, and HDDs are the cheapest option, but they will take the longest to sync.
+NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
 
 ### CPU
 
-Most of the time in Ethereum is spent executing transactions, which is a single-threaded operation due to potential state dependencies of a transaction on previous ones. As a result, the number of cores matters less, but in general higher clock speeds are better. More cores are better for parallelizable [stages, like Senders Recovery, or Bodies](../developers/architecture.md), but these stages are not the bottleneck for syncing.
+Most of the time during syncing is spent executing transactions, which is a single-threaded operation due to potential state dependencies of a transaction on previous ones.
+
+As a result, the number of cores matters less, but in general higher clock speeds are better. More cores are better for parallelizable [stages](../developers/architecture.md) (like sender recovery or bodies downloading), but these stages are not the primary bottleneck for syncing.
 
 ### Memory
 
@@ -30,7 +42,7 @@ It is recommended to use at least 8GB of RAM.
 
 Most of Reth's components tend to consume a low amount of memory, unless you are under heavy RPC load, so this should matter less than the other requirements.
 
-Higher memory is generally better as it allows for better caching and less stress on the disk.
+Higher memory is generally better as it allows for better caching, resulting in less stress on the disk.
 
 ### Bandwidth
 
