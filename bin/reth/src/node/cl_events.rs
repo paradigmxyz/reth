@@ -46,6 +46,14 @@ impl Stream for ConsensusLayerHealthEvents {
                 this.canon_chain.last_exchanged_transition_configuration_timestamp(),
                 this.canon_chain.last_received_update_timestamp(),
             ) {
+                // Short circuit if we recently had an FCU.
+                (_, Some(fork_choice))
+                    if fork_choice.elapsed() <= NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
+                {
+                    continue
+                }
+                // Otherwise, continue with health checks based on Transition Configuration exchange
+                // and Fork Choice update.
                 (None, _) => Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen)),
                 (Some(transition_config), _)
                     if transition_config.elapsed() > NO_TRANSITION_CONFIG_EXCHANGED_PERIOD =>
@@ -57,11 +65,11 @@ impl Stream for ConsensusLayerHealthEvents {
                 (Some(_), None) => {
                     Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
                 }
-                (Some(_), Some(update))
-                    if update.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
+                (Some(_), Some(fork_choice))
+                    if fork_choice.elapsed() > NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD =>
                 {
                     Poll::Ready(Some(ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
-                        update.elapsed(),
+                        fork_choice.elapsed(),
                     )))
                 }
                 _ => continue,
