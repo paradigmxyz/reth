@@ -52,6 +52,7 @@ pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as Database
 ///
 /// Ideally this would be an alias type. However, there's some weird compiler error (<https://github.com/rust-lang/rust/issues/102211>), that forces us to wrap this in a struct instead.
 /// Once that issue is solved, we can probably revert back to being an alias type.
+#[derive(Debug)]
 pub struct DatabaseProviderRW<'this, DB: Database>(
     pub DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>,
 );
@@ -87,7 +88,7 @@ impl<'this, DB: Database> DatabaseProviderRW<'this, DB> {
 #[derive(Debug)]
 pub struct DatabaseProvider<'this, TX>
 where
-    Self: 'this + Send + Sync,
+    Self: 'this,
 {
     /// Database transaction.
     tx: TX,
