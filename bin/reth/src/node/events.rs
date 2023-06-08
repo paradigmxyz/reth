@@ -112,8 +112,15 @@ impl NodeState {
 
     fn handle_consensus_engine_event(&mut self, event: BeaconConsensusEngineEvent) {
         match event {
-            BeaconConsensusEngineEvent::ForkchoiceUpdated(state) => {
-                info!(target: "reth::cli", ?state, "Forkchoice updated");
+            BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
+                info!(
+                    target: "reth::cli",
+                    head_block_hash = %state.head_block_hash,
+                    safe_block_hash = %state.safe_block_hash,
+                    finalized_block_hash = %state.finalized_block_hash,
+                    ?status,
+                    "Forkchoice updated"
+                );
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
                 self.latest_canonical_engine_block = Some(block.number);
