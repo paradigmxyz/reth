@@ -43,7 +43,8 @@
 //! #    db.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(H256::default());
-//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let chain = Arc::new(MAINNET.clone());
+//! # let factory = Factory::new(chain.clone());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
@@ -51,7 +52,7 @@
 //!     .add_stages(
 //!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)
 //!     )
-//!     .build(db);
+//!     .build(db, chain);
 //! ```
 mod error;
 mod pipeline;

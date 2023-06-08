@@ -17,11 +17,12 @@
 //! # use std::sync::Arc;
 //! use reth_db::mdbx::test_utils::create_test_rw_db;
 //!
-//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let chain = Arc::new(MAINNET.clone());
+//! # let factory = Factory::new(chain.clone());
 //! # let db = create_test_rw_db();
 //! // Build a pipeline with all offline stages.
 //! # let pipeline =
-//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db);
+//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db, chain);
 //! ```
 //!
 //! ```ignore
