@@ -1,5 +1,7 @@
 # `trace` Namespace
 
+<!-- TODO: We should probably document the format of the traces themselves, OE does not do that !-->
+
 The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces.
 
 A similar module exists (with other debug functions) with Geth-style traces ([`debug`](./debug.md)).
