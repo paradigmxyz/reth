@@ -10,10 +10,7 @@ use reth_primitives::{
     BlockNumber,
 };
 use reth_provider::DatabaseProviderRW;
-use std::{
-    fmt::Debug,
-    ops::{Deref, RangeInclusive},
-};
+use std::{fmt::Debug, ops::RangeInclusive};
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
