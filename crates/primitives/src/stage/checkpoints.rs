@@ -211,102 +211,9 @@ impl StageCheckpoint {
         Self { block_number, ..Default::default() }
     }
 
-    /// Returns the account hashing stage checkpoint, if any.
-    pub fn account_hashing_stage_checkpoint(&self) -> Option<AccountHashingCheckpoint> {
-        match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::Account(checkpoint)) => Some(checkpoint),
-            _ => None,
-        }
-    }
-
-    /// Returns the storage hashing stage checkpoint, if any.
-    pub fn storage_hashing_stage_checkpoint(&self) -> Option<StorageHashingCheckpoint> {
-        match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::Storage(checkpoint)) => Some(checkpoint),
-            _ => None,
-        }
-    }
-
-    /// Returns the entities stage checkpoint, if any.
-    pub fn entities_stage_checkpoint(&self) -> Option<EntitiesCheckpoint> {
-        match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::Entities(checkpoint)) => Some(checkpoint),
-            _ => None,
-        }
-    }
-
-    /// Returns the execution stage checkpoint, if any.
-    pub fn execution_stage_checkpoint(&self) -> Option<ExecutionCheckpoint> {
-        match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::Execution(checkpoint)) => Some(checkpoint),
-            _ => None,
-        }
-    }
-
-    /// Returns the headers stage checkpoint, if any.
-    pub fn headers_stage_checkpoint(&self) -> Option<HeadersCheckpoint> {
-        match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::Headers(checkpoint)) => Some(checkpoint),
-            _ => None,
-        }
-    }
-
-    /// Returns the index history stage checkpoint, if any.
-    pub fn index_history_stage_checkpoint(&self) -> Option<IndexHistoryCheckpoint> {
-        match self.stage_checkpoint {
-            Some(StageUnitCheckpoint::IndexHistory(checkpoint)) => Some(checkpoint),
-            _ => None,
-        }
-    }
-
     /// Sets the block number.
     pub fn with_block_number(mut self, block_number: BlockNumber) -> Self {
         self.block_number = block_number;
-        self
-    }
-
-    /// Sets the stage checkpoint to account hashing.
-    pub fn with_account_hashing_stage_checkpoint(
-        mut self,
-        checkpoint: AccountHashingCheckpoint,
-    ) -> Self {
-        self.stage_checkpoint = Some(StageUnitCheckpoint::Account(checkpoint));
-        self
-    }
-
-    /// Sets the stage checkpoint to storage hashing.
-    pub fn with_storage_hashing_stage_checkpoint(
-        mut self,
-        checkpoint: StorageHashingCheckpoint,
-    ) -> Self {
-        self.stage_checkpoint = Some(StageUnitCheckpoint::Storage(checkpoint));
-        self
-    }
-
-    /// Sets the stage checkpoint to entities.
-    pub fn with_entities_stage_checkpoint(mut self, checkpoint: EntitiesCheckpoint) -> Self {
-        self.stage_checkpoint = Some(StageUnitCheckpoint::Entities(checkpoint));
-        self
-    }
-
-    /// Sets the stage checkpoint to execution.
-    pub fn with_execution_stage_checkpoint(mut self, checkpoint: ExecutionCheckpoint) -> Self {
-        self.stage_checkpoint = Some(StageUnitCheckpoint::Execution(checkpoint));
-        self
-    }
-
-    /// Sets the stage checkpoint to headers.
-    pub fn with_headers_stage_checkpoint(mut self, checkpoint: HeadersCheckpoint) -> Self {
-        self.stage_checkpoint = Some(StageUnitCheckpoint::Headers(checkpoint));
-        self
-    }
-
-    /// Sets the stage checkpoint to index history.
-    pub fn with_index_history_stage_checkpoint(
-        mut self,
-        checkpoint: IndexHistoryCheckpoint,
-    ) -> Self {
-        self.stage_checkpoint = Some(StageUnitCheckpoint::IndexHistory(checkpoint));
         self
     }
 }
@@ -354,72 +261,121 @@ pub enum StageUnitCheckpoint {
     IndexHistory(IndexHistoryCheckpoint),
 }
 
-impl Compact for StageUnitCheckpoint {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>,
-    {
-        match self {
-            StageUnitCheckpoint::Account(data) => {
-                buf.put_u8(0);
-                1 + data.to_compact(buf)
+/// Generates:
+/// 1. [Compact::to_compact] and [Compact::from_compact] implementations for [StageUnitCheckpoint].
+/// 2. [StageCheckpoint] getter and builder methods.
+macro_rules! stage_unit_checkpoints {
+    ($(($index:expr,$enum_variant:tt,$checkpoint_ty:ty,#[doc = $fn_get_doc:expr]$fn_get_name:ident,#[doc = $fn_build_doc:expr]$fn_build_name:ident)),+) => {
+        impl Compact for StageUnitCheckpoint {
+            fn to_compact<B>(self, buf: &mut B) -> usize
+            where
+                B: BufMut + AsMut<[u8]>,
+            {
+                match self {
+                    $(
+                        StageUnitCheckpoint::$enum_variant(data) => {
+                            buf.put_u8($index);
+                            1 + data.to_compact(buf)
+                        }
+                    )+
+                }
             }
-            StageUnitCheckpoint::Storage(data) => {
-                buf.put_u8(1);
-                1 + data.to_compact(buf)
-            }
-            StageUnitCheckpoint::Entities(data) => {
-                buf.put_u8(2);
-                1 + data.to_compact(buf)
-            }
-            StageUnitCheckpoint::Execution(data) => {
-                buf.put_u8(3);
-                1 + data.to_compact(buf)
-            }
-            StageUnitCheckpoint::Headers(data) => {
-                buf.put_u8(4);
-                1 + data.to_compact(buf)
-            }
-            StageUnitCheckpoint::IndexHistory(data) => {
-                buf.put_u8(5);
-                1 + data.to_compact(buf)
-            }
-        }
-    }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
-        match buf[0] {
-            0 => {
-                let (data, buf) = AccountHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
-                (Self::Account(data), buf)
+            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
+            where
+                Self: Sized,
+            {
+                match buf[0] {
+                    $(
+                        $index => {
+                            let (data, buf) = <$checkpoint_ty>::from_compact(&buf[1..], buf.len() - 1);
+                            (Self::$enum_variant(data), buf)
+                        }
+                    )+
+                    _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
+                }
             }
-            1 => {
-                let (data, buf) = StorageHashingCheckpoint::from_compact(&buf[1..], buf.len() - 1);
-                (Self::Storage(data), buf)
-            }
-            2 => {
-                let (data, buf) = EntitiesCheckpoint::from_compact(&buf[1..], buf.len() - 1);
-                (Self::Entities(data), buf)
-            }
-            3 => {
-                let (data, buf) = ExecutionCheckpoint::from_compact(&buf[1..], buf.len() - 1);
-                (Self::Execution(data), buf)
-            }
-            4 => {
-                let (data, buf) = HeadersCheckpoint::from_compact(&buf[1..], buf.len() - 1);
-                (Self::Headers(data), buf)
-            }
-            5 => {
-                let (data, buf) = IndexHistoryCheckpoint::from_compact(&buf[1..], buf.len() - 1);
-                (Self::IndexHistory(data), buf)
-            }
-            _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
         }
-    }
+
+        impl StageCheckpoint {
+            $(
+                #[doc = $fn_get_doc]
+                pub fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
+                    match self.stage_checkpoint {
+                        Some(StageUnitCheckpoint::$enum_variant(checkpoint)) => Some(checkpoint),
+                        _ => None,
+                    }
+                }
+
+                #[doc = $fn_build_doc]
+                pub fn $fn_build_name(
+                    mut self,
+                    checkpoint: $checkpoint_ty,
+                ) -> Self {
+                    self.stage_checkpoint = Some(StageUnitCheckpoint::$enum_variant(checkpoint));
+                    self
+                }
+            )+
+        }
+    };
 }
+
+stage_unit_checkpoints!(
+    (
+        0,
+        Account,
+        AccountHashingCheckpoint,
+        /// Returns the account hashing stage checkpoint, if any.
+        account_hashing_stage_checkpoint,
+        /// Sets the stage checkpoint to account hashing.
+        with_account_hashing_stage_checkpoint
+    ),
+    (
+        1,
+        Storage,
+        StorageHashingCheckpoint,
+        /// Returns the storage hashing stage checkpoint, if any.
+        storage_hashing_stage_checkpoint,
+        /// Sets the stage checkpoint to storage hashing.
+        with_storage_hashing_stage_checkpoint
+    ),
+    (
+        2,
+        Entities,
+        EntitiesCheckpoint,
+        /// Returns the entities stage checkpoint, if any.
+        entities_stage_checkpoint,
+        /// Sets the stage checkpoint to entities.
+        with_entities_stage_checkpoint
+    ),
+    (
+        3,
+        Execution,
+        ExecutionCheckpoint,
+        /// Returns the execution stage checkpoint, if any.
+        execution_stage_checkpoint,
+        /// Sets the stage checkpoint to execution.
+        with_execution_stage_checkpoint
+    ),
+    (
+        4,
+        Headers,
+        HeadersCheckpoint,
+        /// Returns the headers stage checkpoint, if any.
+        headers_stage_checkpoint,
+        /// Sets the stage checkpoint to headers.
+        with_headers_stage_checkpoint
+    ),
+    (
+        5,
+        IndexHistory,
+        IndexHistoryCheckpoint,
+        /// Returns the index history stage checkpoint, if any.
+        index_history_stage_checkpoint,
+        /// Sets the stage checkpoint to index history.
+        with_index_history_stage_checkpoint
+    )
+);
 
 #[cfg(test)]
 mod tests {
