@@ -1,0 +1,28 @@
+[package]
+name = "reth-rpc-api-testing-util"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = """
+Reth RPC testing helpers
+"""
+
+[dependencies]
+# reth
+reth-primitives = { path = "../../primitives" }
+reth-rpc-types = { path = "../rpc-types" }
+reth-rpc-api = { path = "../rpc-api", default-features = false, features = ["client"] }
+
+# async
+async-trait = "0.1"
+futures = "0.3"
+
+# misc
+jsonrpsee = { version = "0.18", features = ["client", "async-client"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "rt"] }
+
