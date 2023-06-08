@@ -165,7 +165,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     },
                 );
 
-                info!(target: "sync::stages::hashing_storage", checkpoint = %checkpoint, is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput { checkpoint, done: false })
             }
         } else {
@@ -187,7 +186,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 ..Default::default()
             });
 
-        info!(target: "sync::stages::hashing_storage", checkpoint = %checkpoint, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { checkpoint, done: true })
     }
 
@@ -197,7 +195,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, is_final_range) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
@@ -207,7 +205,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         stage_checkpoint.progress = stage_checkpoint_progress(tx)?;
 
-        info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, %unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_progress)
                 .with_storage_hashing_stage_checkpoint(stage_checkpoint),

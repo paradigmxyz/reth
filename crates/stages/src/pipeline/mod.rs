@@ -265,6 +265,14 @@ where
                 match output {
                     Ok(unwind_output) => {
                         checkpoint = unwind_output.checkpoint;
+                        info!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            unwind_to = to,
+                            progress = checkpoint.block_number,
+                            done = checkpoint.block_number == to,
+                            "Stage unwound"
+                        );
                         self.metrics.stage_checkpoint(
                             stage_id, checkpoint,
                             // We assume it was set in the previous execute iteration, so it

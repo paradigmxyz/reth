@@ -189,12 +189,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         state.write_to_db(&**tx)?;
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 
-        let is_final_range = stage_progress == max_block;
-        info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
+        let done = stage_progress == max_block;
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(stage_progress)
                 .with_execution_stage_checkpoint(stage_checkpoint),
-            done: is_final_range,
+            done,
         })
     }
 }
@@ -335,7 +334,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let (range, unwind_to, is_final_range) =
+        let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
         if range.is_empty() {
@@ -414,7 +413,6 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             StageCheckpoint::new(unwind_to)
         };
 
-        info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint })
     }
 }
