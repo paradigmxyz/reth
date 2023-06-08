@@ -309,8 +309,31 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // check if block parent can be found in Tree
         if let Some(chain_id) = self.block_indices.get_blocks_chain_id(&parent.hash) {
+            // get the canonical fork of the chain so we can unwind later
+            let canonical_fork = match self.canonical_fork(chain_id) {
+                None => {
+                    return Err(InsertBlockError::tree_error(
+                        BlockchainTreeError::BlockSideChainIdConsistency { chain_id },
+                        block.block,
+                    ))
+                }
+                Some(fork) => fork,
+            };
+
+            // now we unwind
+            // TODO: remove unwrap
+            let old_canon_chain = self.revert_canonical(canonical_fork.number).unwrap();
+
             // found parent in side tree, try to insert there
-            return self.try_insert_block_into_side_chain(block, chain_id)
+            let res = self.try_insert_block_into_side_chain(block, chain_id);
+
+            // re insert canonical if possible
+            if let Some(old_chain) = old_canon_chain {
+                // TODO: remove unwrap
+                self.commit_canonical(old_chain).unwrap();
+            }
+
+            return res
         }
 
         // if not found, check if the parent can be found inside canonical chain.
