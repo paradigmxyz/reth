@@ -143,11 +143,7 @@ impl Command {
                 })
                 .set(ExecutionStage::new(
                     factory,
-                    ExecutionStageThresholds {
-                        max_blocks: None,
-                        max_changes: None,
-                        max_changesets: None,
-                    },
+                    ExecutionStageThresholds { max_blocks: None, max_changes: None },
                 )),
             )
             .build(db);

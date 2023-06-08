@@ -176,14 +176,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
 
-            // Write history periodically to free up memory
-            if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
-                info!(target: "sync::stages::execution", ?block_number, "Writing history.");
-                state.write_history_to_db(&**tx)?;
-                info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
-                // gas_since_history_write = 0;
-            }
-
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
             {
@@ -431,30 +423,17 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 ///
 /// If either of the thresholds (`max_blocks` and `max_changes`) are hit, then the execution stage
 /// commits all pending changes to the database.
-///
-/// A third threshold, `max_changesets`, can be set to periodically write changesets to the
-/// current database transaction, which frees up memory.
 #[derive(Debug)]
 pub struct ExecutionStageThresholds {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,
     /// The maximum amount of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum amount of changesets to keep in memory before they are written to the pending
-    /// database transaction.
-    ///
-    /// If this is lower than `max_changes`, then history is periodically flushed to the database
-    /// transaction, which frees up memory.
-    pub max_changesets: Option<u64>,
 }
 
 impl Default for ExecutionStageThresholds {
     fn default() -> Self {
-        Self {
-            max_blocks: Some(500_000),
-            max_changes: Some(5_000_000),
-            max_changesets: Some(1_000_000),
-        }
+        Self { max_blocks: Some(500_000), max_changes: Some(5_000_000) }
     }
 }
 
@@ -464,12 +443,6 @@ impl ExecutionStageThresholds {
     pub fn is_end_of_batch(&self, blocks_processed: u64, changes_processed: u64) -> bool {
         blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
             changes_processed >= self.max_changes.unwrap_or(u64::MAX)
-    }
-
-    /// Check if the history write threshold has been hit.
-    #[inline]
-    pub fn should_write_history(&self, history_changes: u64) -> bool {
-        history_changes >= self.max_changesets.unwrap_or(u64::MAX)
     }
 }
 
@@ -499,11 +472,7 @@ mod tests {
             Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
         ExecutionStage::new(
             factory,
-            ExecutionStageThresholds {
-                max_blocks: Some(100),
-                max_changes: None,
-                max_changesets: None,
-            },
+            ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
         )
     }
 
