@@ -24,7 +24,7 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 pub enum InitDatabaseError {
     /// An existing genesis block was found in the database, and its hash did not match the hash of
     /// the chainspec.
-    #[error("Genesis hash in the database does not match the specified chainspec: chainspec is {expected}, database is {actual}")]
+    #[error("Genesis hash in the database does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
     GenesisHashMismatch {
         /// Expected genesis hash.
         chainspec_hash: H256,
