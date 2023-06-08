@@ -535,11 +535,14 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                Ok(AccountHashingStage::seed(
-                    &mut self.tx.inner(),
+                let mut provider = self.tx.inner();
+                let res = Ok(AccountHashingStage::seed(
+                    &mut provider,
                     SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },
                 )
-                .unwrap())
+                .unwrap());
+                provider.commit().expect("failed to commit");
+                res
             }
 
             fn validate_execution(
