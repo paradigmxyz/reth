@@ -373,7 +373,7 @@ impl CallTraceNode {
             from: self.trace.caller,
             to: Some(self.trace.address),
             value: Some(self.trace.value),
-            gas: U256::from(self.trace.gas_used),
+            gas: U256::from(self.trace.gas_limit),
             gas_used: U256::from(self.trace.gas_used),
             input: self.trace.data.clone().into(),
             output: Some(self.trace.output.clone().into()),
