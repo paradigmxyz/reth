@@ -341,7 +341,6 @@ where
             checkpoint = checkpoint.with_headers_stage_checkpoint(stage_checkpoint);
         }
 
-        info!(target: "sync::stages::headers", to_block = input.unwind_to, checkpoint = input.unwind_to, is_final_range = true, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint })
     }
 }

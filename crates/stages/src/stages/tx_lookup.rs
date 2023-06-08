@@ -136,7 +136,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
-        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
@@ -150,8 +149,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_to, is_final_range) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
@@ -174,7 +172,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
-        info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
