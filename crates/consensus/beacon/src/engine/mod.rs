@@ -705,7 +705,7 @@ where
 
             trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering pipeline with target instead of downloading");
 
-            self.sync.set_pipeline_sync_target(lowest_unknown_hash);
+            self.sync.download_full_block(lowest_unknown_hash);
         } else {
             // we need to first check the buffer for the head and its ancestors
             let lowest_unknown_hash = self.lowest_buffered_ancestor_or(state.head_block_hash);
