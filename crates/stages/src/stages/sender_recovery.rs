@@ -152,7 +152,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             }
         }
 
-        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
@@ -166,14 +165,12 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (_, unwind_to, is_final_range) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Lookup latest tx id that we should unwind to
         let latest_tx_id = provider.block_body_indices(unwind_to)?.last_tx_num();
         provider.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
-        info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),

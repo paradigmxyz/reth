@@ -84,7 +84,6 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             cursor_td.append(block_number, td.into())?;
         }
 
-        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
@@ -98,12 +97,10 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (_, unwind_to, is_final_range) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         provider.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
-        info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),

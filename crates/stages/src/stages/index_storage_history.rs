@@ -10,8 +10,10 @@ use reth_primitives::{
     BlockNumber,
 };
 use reth_provider::DatabaseProviderRW;
-use std::{fmt::Debug, ops::RangeInclusive};
-use tracing::*;
+use std::{
+    fmt::Debug,
+    ops::{Deref, RangeInclusive},
+};
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -58,7 +60,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
         stage_checkpoint.progress.processed += changesets;
 
-        info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(*range.end())
                 .with_index_history_stage_checkpoint(stage_checkpoint),
@@ -72,7 +73,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, is_final_range) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         let changesets =
@@ -87,7 +88,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
                 StageCheckpoint::new(unwind_progress)
             };
 
-        info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint })
     }
 }
