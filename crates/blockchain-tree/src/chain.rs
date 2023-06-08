@@ -258,12 +258,14 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
+        // TODO: remove distinction between the two methods now that we unwind / commit for
+        // sidechain root validation?
         Self::validate_and_execute(
             block,
             parent_block,
             post_state_data_provider,
             externals,
-            BlockKind::ForksHistoricalBlock,
+            BlockKind::ExtendsCanonicalHead,
         )
     }
 

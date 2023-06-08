@@ -333,6 +333,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 self.commit_canonical(old_chain).unwrap();
             }
 
+            trace!(target: "blockchain_tree", ?res, "Inserted block into side chain");
+
             return res
         }
 
@@ -341,7 +343,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .is_block_hash_canonical(&parent.hash)
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
         {
-            return self.try_append_canonical_chain(block)
+            // now we unwind
+            // TODO: remove unwrap
+            let old_canon_chain = self.revert_canonical(parent.number).unwrap();
+
+            // found parent in side tree, try to insert there
+            let res = self.try_append_canonical_chain(block);
+
+            // re insert canonical if possible
+            if let Some(old_chain) = old_canon_chain {
+                // TODO: remove unwrap
+                self.commit_canonical(old_chain).unwrap();
+            }
+
+            trace!(target: "blockchain_tree", ?res, "Tried to append to canonical chain");
+            return res
         }
 
         // this is another check to ensure that if the block points to a canonical block its block
@@ -842,13 +858,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // insert block children
         for block in include_blocks.into_iter() {
             // dont fail on error, just ignore the block.
-            let _ = self.try_insert_validated_block(block).map_err(|err| {
+            if let err @ Err(_) = self.try_insert_validated_block(block) {
                 debug!(
                     target: "blockchain_tree", ?err,
                     "Failed to insert buffered block",
                 );
-                err
-            });
+            };
         }
     }
 
