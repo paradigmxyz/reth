@@ -140,7 +140,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     ) -> Result<ExecOutput, StageError> {
         let range = input.next_block_range();
         if range.is_empty() {
-            return Ok(ExecOutput::done(input.checkpoint().with_block_number(*range.end())))
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let (start_block, max_block) = range.into_inner();
