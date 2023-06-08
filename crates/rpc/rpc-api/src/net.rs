@@ -5,7 +5,7 @@ use reth_rpc_types::PeerCount;
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "net"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "net"))]
 pub trait NetApi {
-    /// Returns protocol version.
+    /// Returns the network ID.
     #[method(name = "version")]
     fn version(&self) -> RpcResult<String>;
 
