@@ -149,7 +149,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let threshold = match self {
             MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput::done(input.previous_stage_checkpoint_block_number()))
+                return Ok(ExecOutput::done(input.target()))
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
@@ -158,7 +158,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let range = input.next_block_range();
         let (from_block, to_block) = range.clone().into_inner();
-        let current_block = input.previous_stage_checkpoint_block_number();
+        let current_block = input.target();
 
         let block = tx.get_header(current_block)?;
         let block_root = block.state_root;
@@ -332,7 +332,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+        TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -360,7 +360,7 @@ mod tests {
         let mut runner = MerkleTestRunner::default();
         // set low threshold so we hash the whole storage
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -400,7 +400,7 @@ mod tests {
         // Set up the runner
         let mut runner = MerkleTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -462,7 +462,7 @@ mod tests {
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
-            let end = input.previous_stage_checkpoint_block_number();
+            let end = input.target();
 
             let num_of_accounts = 31;
             let accounts = random_contract_account_range(&mut (0..num_of_accounts))

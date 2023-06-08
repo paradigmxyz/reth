@@ -2,10 +2,7 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    BlockNumber, MAINNET,
-};
+use reth_primitives::{stage::StageCheckpoint, BlockNumber, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{
     stages::{
@@ -57,10 +54,8 @@ async fn unwind_and_copy<DB: Database>(
         checkpoint: StageCheckpoint::new(tip_block_number),
         bad_block: None,
     };
-    let execute_input = reth_stages::ExecInput {
-        previous_stage: Some((StageId::Other("Another"), to)),
-        checkpoint: Some(StageCheckpoint::new(from)),
-    };
+    let execute_input =
+        reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
 
     // Unwind hashes all the way to FROM
     StorageHashingStage::default().unwind(&mut unwind_tx, unwind).await.unwrap();
@@ -128,7 +123,7 @@ async fn dry_run(
         .execute(
             &mut tx,
             reth_stages::ExecInput {
-                previous_stage: Some((StageId::Other("Another"), to)),
+                target: Some(to),
                 checkpoint: Some(StageCheckpoint::new(from)),
             },
         )
