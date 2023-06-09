@@ -24,7 +24,7 @@ pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
-    discovered_nodes: HashMap<PeerId, SocketAddr>,
+    discovered_nodes: HashMap<PeerId, DiscoveryEntry>,
     /// Local ENR of the discovery service.
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
@@ -41,6 +41,12 @@ pub struct Discovery {
     _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
     queued_events: VecDeque<DiscoveryEvent>,
+}
+
+pub struct DiscoveryEntry {
+    remote_addr: SocketAddr,
+    fork_id: Option<ForkId>,
+    last_updated_at: std::time::Instant,
 }
 
 impl Discovery {
@@ -137,7 +143,8 @@ impl Discovery {
         match self.discovered_nodes.entry(id) {
             Entry::Occupied(_entry) => {}
             Entry::Vacant(entry) => {
-                entry.insert(addr);
+                let now = std::time::Instant::now();
+                entry.insert(DiscoveryEntry { remote_addr: addr, fork_id, last_updated_at: now });
                 self.queued_events.push_back(DiscoveryEvent::Discovered {
                     peer_id: id,
                     socket_addr: addr,
