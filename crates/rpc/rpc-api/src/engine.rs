@@ -101,23 +101,23 @@ pub trait EngineApi {
 ///
 /// Specifically for the engine auth server: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#underlying-protocol>
 #[cfg_attr(not(feature = "client"), rpc(server))]
-#[cfg_attr(feature = "client", rpc(server, client))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 #[async_trait]
 pub trait EngineEthApi {
     /// Returns an object with data about the sync status or false.
-    #[method(name = "eth_syncing")]
+    #[method(name = "syncing")]
     fn syncing(&self) -> RpcResult<SyncStatus>;
 
     /// Returns the chain ID of the current network.
-    #[method(name = "eth_chainId")]
+    #[method(name = "chainId")]
     async fn chain_id(&self) -> RpcResult<Option<U64>>;
 
     /// Returns the number of most recent block.
-    #[method(name = "eth_blockNumber")]
+    #[method(name = "blockNumber")]
     fn block_number(&self) -> RpcResult<U256>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
-    #[method(name = "eth_call")]
+    #[method(name = "call")]
     async fn call(
         &self,
         request: CallRequest,
@@ -126,15 +126,15 @@ pub trait EngineEthApi {
     ) -> RpcResult<Bytes>;
 
     /// Returns code at a given address at given block number.
-    #[method(name = "eth_getCode")]
+    #[method(name = "getCode")]
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<Bytes>;
 
     /// Returns information about a block by hash.
-    #[method(name = "eth_getBlockByHash")]
+    #[method(name = "getBlockByHash")]
     async fn block_by_hash(&self, hash: H256, full: bool) -> RpcResult<Option<RichBlock>>;
 
     /// Returns information about a block by number.
-    #[method(name = "eth_getBlockByNumber")]
+    #[method(name = "getBlockByNumber")]
     async fn block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -142,10 +142,10 @@ pub trait EngineEthApi {
     ) -> RpcResult<Option<RichBlock>>;
 
     /// Sends signed transaction, returning its hash.
-    #[method(name = "eth_sendRawTransaction")]
+    #[method(name = "sendRawTransaction")]
     async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<H256>;
 
     /// Returns logs matching given filter object.
-    #[method(name = "eth_getLogs")]
+    #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
 }
