@@ -3,8 +3,8 @@ use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_rlp::Encodable;
 use reth_primitives::{bytes::BytesMut, constants::MAXIMUM_EXTRA_DATA_SIZE};
+use reth_rlp::Encodable;
 use std::{ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
