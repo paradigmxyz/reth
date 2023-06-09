@@ -443,7 +443,7 @@ mod tests {
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>>) {
-        let chain_spec = Arc::new(MAINNET.clone());
+        let chain_spec: Arc<ChainSpec> = MAINNET.clone();
         let client = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();

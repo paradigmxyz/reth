@@ -1458,7 +1458,7 @@ mod test {
         tables,
     };
     use reth_primitives::{ChainSpecBuilder, IntegerList, H160, MAINNET, U256};
-    use std::{ops::DerefMut, sync::Arc};
+    use std::ops::DerefMut;
 
     #[test]
     fn insert_block_and_hashes_get_take() {
@@ -1535,7 +1535,7 @@ mod test {
 
         // Check that transactions map onto blocks correctly.
         {
-            let provider = ShareableDatabase::new(tx.db, Arc::new(MAINNET.clone()));
+            let provider = ShareableDatabase::new(tx.db, MAINNET.clone());
             assert_eq!(
                 provider.transaction_block(0).unwrap(),
                 Some(1),
