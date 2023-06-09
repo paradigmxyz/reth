@@ -499,19 +499,16 @@ where
 
             let blocks = blocks.iter().map(|(_, block)| block.block.clone()).collect::<Vec<_>>();
 
-            let mut receipts = Vec::new();
-
-            // TODO ideally we can map all receipts to their respective blocks
-
-            // we only have 1 block in the new chain, so we know all the receipts belong to the
-            // block
-            if blocks.len() == 1 {
+            // also cache all receipts of the blocks
+            let mut receipts = Vec::with_capacity(blocks.len());
+            for block in &blocks {
                 let block_receipts = BlockReceipts {
-                    block_hash: blocks[0].hash,
-                    receipts: state.receipts(blocks[0].number).to_vec(),
+                    block_hash: block.hash,
+                    receipts: state.receipts(block.number).to_vec(),
                 };
                 receipts.push(block_receipts);
             }
+
             let _ = eth_state_cache
                 .to_service
                 .send(CacheAction::CacheNewCanonicalChain { blocks, receipts });
