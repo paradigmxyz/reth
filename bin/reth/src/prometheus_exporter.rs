@@ -14,19 +14,24 @@ use reth_db::{
 use reth_metrics::metrics::{self, absolute_counter, describe_counter, Unit};
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
-/// Installs Prometheus as the metrics recorder and serves it over HTTP with a hook.
+pub(crate) trait Hook: Fn() + Send + Sync {}
+impl<T: Fn() + Send + Sync> Hook for T {}
+
+/// Installs Prometheus as the metrics recorder and serves it over HTTP with hooks.
 ///
-/// The hook is called every time the metrics are requested at the given endpoint, and can be used
+/// The hooks are called every time the metrics are requested at the given endpoint, and can be used
 /// to record values for pull-style metrics, i.e. metrics that are not automatically updated.
-pub(crate) async fn initialize_with_hook<F: Fn() + Send + Sync + 'static>(
+pub(crate) async fn initialize_with_hooks<F: Hook + 'static>(
     listen_addr: SocketAddr,
-    hook: F,
+    hooks: impl IntoIterator<Item = F>,
 ) -> eyre::Result<()> {
     let recorder = PrometheusBuilder::new().build_recorder();
     let handle = recorder.handle();
 
+    let hooks: Vec<_> = hooks.into_iter().collect();
+
     // Start endpoint
-    start_endpoint(listen_addr, handle, Arc::new(hook))
+    start_endpoint(listen_addr, handle, Arc::new(move || hooks.iter().for_each(|hook| hook())))
         .await
         .wrap_err("Could not start Prometheus endpoint")?;
 
@@ -40,7 +45,7 @@ pub(crate) async fn initialize_with_hook<F: Fn() + Send + Sync + 'static>(
 }
 
 /// Starts an endpoint at the given address to serve Prometheus metrics.
-async fn start_endpoint<F: Fn() + Send + Sync + 'static>(
+async fn start_endpoint<F: Hook + 'static>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     hook: Arc<F>,
@@ -64,10 +69,12 @@ async fn start_endpoint<F: Fn() + Send + Sync + 'static>(
     Ok(())
 }
 
-/// Installs Prometheus as the metrics recorder and serves it over HTTP with database metrics.
-pub(crate) async fn initialize_with_db_metrics(
+/// Installs Prometheus as the metrics recorder and serves it over HTTP with database and process
+/// metrics.
+pub(crate) async fn initialize(
     listen_addr: SocketAddr,
     db: Arc<Env<WriteMap>>,
+    process: metrics_process::Collector,
 ) -> eyre::Result<()> {
     let db_stats = move || {
         // TODO: A generic stats abstraction for other DB types to deduplicate this and `reth db
@@ -99,7 +106,12 @@ pub(crate) async fn initialize_with_db_metrics(
         });
     };
 
-    initialize_with_hook(listen_addr, db_stats).await?;
+    // Register help strings for process metrics
+    process.describe();
+
+    let hooks: Vec<Box<dyn Hook<Output = ()>>> =
+        vec![Box::new(db_stats), Box::new(move || process.collect())];
+    initialize_with_hooks(listen_addr, hooks).await?;
 
     // We describe the metrics after the recorder is installed, otherwise this information is not
     // registered
