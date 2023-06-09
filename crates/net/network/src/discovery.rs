@@ -193,9 +193,15 @@ impl Discovery {
                 self.on_node_record_update(node, Some(fork_id));
                 self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
-            DiscoveryUpdate::Removed(_node) => {
-                // Since we want to keep track of all nodes we have discovered here,
-                // we don't remove them when they are removed from the discv4 table.
+            DiscoveryUpdate::Removed(node) => {
+                // If the node was removed from the Discv4 table, it was for good reason (i.e.
+                // liveness failure) so we remove it from our discovered nodes.
+                self.discovered_nodes.remove(&node);
+                todo!("Handle removed nodes with event");
+            }
+            DiscoveryUpdate::Expired(node) => {
+                self.discovered_nodes.remove(&node);
+                todo!("Handle expired nodes with event");
             }
             DiscoveryUpdate::Batch(updates) => {
                 for update in updates {

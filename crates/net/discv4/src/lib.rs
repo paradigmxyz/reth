@@ -1269,7 +1269,11 @@ impl Discv4Service {
 
         // remove nodes that failed to pong
         for node_id in failed_pings {
-            self.remove_node(node_id);
+            // If the node was not present in the table, we explicity notify
+            // listeners with `DiscoveryUpdate::Expired`.
+            if !self.remove_node(node_id) {
+                self.notify(DiscoveryUpdate::Expired(node_id));
+            }
         }
 
         self.evict_failed_neighbours(now);
@@ -1321,7 +1325,7 @@ impl Discv4Service {
         }
     }
 
-    /// Re-pings all nodes which endpoint proofs are considered expired: [``NodeEntry::is_expired]
+    /// Re-pings all nodes which endpoint proofs are considered expired: [`NodeEntry::is_expired`]
     ///
     /// This will send a `Ping` to the nodes, if a node fails to respond with a `Pong` to renew the
     /// endpoint proof it will be removed from the table.
@@ -1963,6 +1967,8 @@ pub enum DiscoveryUpdate {
     EnrForkId(NodeRecord, ForkId),
     /// Node that was removed from the table
     Removed(PeerId),
+    /// Node that failed a liveness check by not responding to a ping
+    Expired(PeerId),
     /// A series of updates
     Batch(Vec<DiscoveryUpdate>),
 }
