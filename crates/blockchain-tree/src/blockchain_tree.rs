@@ -1420,7 +1420,7 @@ mod tests {
         // reinsert two blocks that point to canonical chain
         assert_eq!(
             tree.insert_block(block1a.clone()).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Accepted)
+            InsertPayloadOk::Inserted(BlockStatus::Valid)
         );
 
         TreeTester::default()
@@ -1435,7 +1435,7 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(block2a.clone()).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Accepted)
+            InsertPayloadOk::Inserted(BlockStatus::Valid)
         );
         // Trie state:
         // b2   b2a (side chain)
