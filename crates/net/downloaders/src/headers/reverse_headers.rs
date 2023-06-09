@@ -41,6 +41,7 @@ const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
 
 /// Wrapper for internal downloader errors.
+#[allow(clippy::large_enum_variant)]
 #[derive(Error, Debug)]
 enum ReverseHeadersDownloaderError {
     #[error(transparent)]
@@ -288,7 +289,7 @@ where
                 return Err(HeadersDownloaderError::DetachedHead {
                     local_head: head.clone(),
                     header: last_header.clone(),
-                    error,
+                    error: Box::new(error),
                 }
                 .into())
             }
