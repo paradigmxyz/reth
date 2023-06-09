@@ -138,6 +138,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
         let start_block = input.next_block();
         let max_block = input.target();
 
@@ -338,7 +342,9 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
         if range.is_empty() {
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput {
+                checkpoint: input.checkpoint.with_block_number(input.unwind_to),
+            })
         }
 
         // get all batches for account change

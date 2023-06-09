@@ -148,9 +148,9 @@ pub struct ExecOutput {
 }
 
 impl ExecOutput {
-    /// Mark the stage as done, checkpointing at the given block number.
-    pub fn done(block_number: BlockNumber) -> Self {
-        Self { checkpoint: StageCheckpoint::new(block_number), done: true }
+    /// Mark the stage as done, checkpointing at the given place.
+    pub fn done(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: true }
     }
 }
 

@@ -56,7 +56,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint().block_number))
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let (tx_range, block_range, is_final_range) =

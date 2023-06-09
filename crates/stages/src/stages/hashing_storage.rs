@@ -57,11 +57,11 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range();
-        if range.is_empty() {
-            return Ok(ExecOutput::done(*range.end()))
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
-        let (from_block, to_block) = range.into_inner();
+
+        let (from_block, to_block) = input.next_block_range().into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to

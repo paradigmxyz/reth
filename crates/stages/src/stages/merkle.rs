@@ -149,7 +149,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let threshold = match self {
             MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput::done(input.target()))
+                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
