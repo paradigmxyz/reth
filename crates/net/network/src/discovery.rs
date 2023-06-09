@@ -31,6 +31,10 @@ pub struct Discovery {
     discv4: Option<Discv4>,
     /// All KAD table updates from the discv4 service.
     discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
+    /// Heartbeat to periodically check for expired bond durations.
+    heartbeat: tokio::time::Interval,
+    /// The duration of a bond, after which a node should be checked for liveness.
+    bond_duration: std::time::Duration,
     /// The handle to the spawned discv4 service
     _discv4_service: Option<JoinHandle<()>>,
     /// Handler to interact with the DNS discovery service
@@ -47,6 +51,20 @@ pub struct DiscoveryEntry {
     remote_addr: SocketAddr,
     fork_id: Option<ForkId>,
     last_updated_at: std::time::Instant,
+}
+
+impl DiscoveryEntry {
+    pub fn update_fork_id(&mut self, fork_id: ForkId) {
+        self.fork_id = Some(fork_id);
+    }
+
+    pub fn update_addr(&mut self, addr: SocketAddr) {
+        self.remote_addr = addr;
+    }
+
+    pub fn reset_last_updated_at(&mut self) {
+        self.last_updated_at = std::time::Instant::now();
+    }
 }
 
 impl Discovery {
@@ -94,6 +112,8 @@ impl Discovery {
             discv4,
             discv4_updates,
             _discv4_service,
+            heartbeat: tokio::time::interval(std::time::Duration::from_secs(60)),
+            bond_duration: std::time::Duration::from_secs(60 * 60 * 24),
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
             _dns_disc_service,
@@ -103,7 +123,6 @@ impl Discovery {
     }
 
     /// Updates the `eth:ForkId` field in discv4.
-    #[allow(unused)]
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(discv4) = &self.discv4 {
             discv4.set_eip868_rlp("eth".as_bytes().to_vec(), fork_id)
@@ -136,12 +155,20 @@ impl Discovery {
         }
     }
 
-    /// Processes an incoming [NodeRecord] update from a discovery service
+    /// Processes an incoming [NodeRecord] update from a discovery service. This will update the
+    /// `last_updated_at` field of the entry.
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
         let addr = record.tcp_addr();
         match self.discovered_nodes.entry(id) {
-            Entry::Occupied(_entry) => {}
+            Entry::Occupied(entry) => {
+                let disc_entry = entry.into_mut();
+                disc_entry.reset_last_updated_at();
+                disc_entry.update_addr(addr);
+                if let Some(id) = fork_id {
+                    disc_entry.update_fork_id(id);
+                }
+            }
             Entry::Vacant(entry) => {
                 let now = std::time::Instant::now();
                 entry.insert(DiscoveryEntry { remote_addr: addr, fork_id, last_updated_at: now });
@@ -160,6 +187,8 @@ impl Discovery {
                 self.on_node_record_update(record, None);
             }
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
+                // Also update the existing discovery entry with the `ForkId` here.
+                self.on_node_record_update(node, Some(fork_id));
                 self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
             DiscoveryUpdate::Removed(node) => {
@@ -172,6 +201,14 @@ impl Discovery {
             }
             DiscoveryUpdate::DiscoveredAtCapacity(record) => {
                 self.on_node_record_update(record, None);
+            }
+        }
+    }
+
+    fn on_heartbeat(&self) {
+        for (peer_id, entry) in &self.discovered_nodes {
+            if entry.last_updated_at.elapsed() > self.bond_duration {
+                todo!("Poll peer for liveness");
             }
         }
     }
@@ -195,6 +232,10 @@ impl Discovery {
             {
                 self.add_discv4_node(update.node_record);
                 self.on_node_record_update(update.node_record, update.fork_id);
+            }
+
+            if self.heartbeat.poll_tick(cx).is_ready() {
+                self.on_heartbeat();
             }
 
             if self.queued_events.is_empty() {
@@ -221,6 +262,8 @@ impl Discovery {
             discv4: Default::default(),
             discv4_updates: Default::default(),
             queued_events: Default::default(),
+            heartbeat: tokio::time::interval(std::time::Duration::from_secs(60)),
+            bond_duration: std::time::Duration::from_secs(60 * 60 * 24),
             _discv4_service: Default::default(),
             _dns_discovery: None,
             dns_discovery_updates: None,
