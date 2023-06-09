@@ -78,7 +78,7 @@ pub(crate) async fn initialize(
 ) -> eyre::Result<()> {
     let db_stats = move || {
         // TODO: A generic stats abstraction for other DB types to deduplicate this and `reth db
-        // stats`
+        //  stats`
         let _ = db.view(|tx| {
             for table in tables::TABLES.iter().map(|(_, name)| name) {
                 let table_db =
@@ -106,17 +106,19 @@ pub(crate) async fn initialize(
         });
     };
 
-    // Register help strings for process metrics
-    process.describe();
-
-    let hooks: Vec<Box<dyn Hook<Output = ()>>> =
-        vec![Box::new(db_stats), Box::new(move || process.collect())];
-    initialize_with_hooks(listen_addr, hooks).await?;
+    {
+        let process = process.clone();
+        let hooks: Vec<Box<dyn Hook<Output = ()>>> =
+            vec![Box::new(db_stats), Box::new(move || process.collect())];
+        initialize_with_hooks(listen_addr, hooks).await?;
+    }
 
     // We describe the metrics after the recorder is installed, otherwise this information is not
     // registered
     describe_counter!("db.table_size", Unit::Bytes, "The size of a database table (in bytes)");
     describe_counter!("db.table_pages", "The number of database pages for a table");
+
+    process.describe();
 
     Ok(())
 }
