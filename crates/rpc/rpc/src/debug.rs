@@ -529,7 +529,7 @@ fn trace_transaction(
                     return Ok((frame.into(), res.state))
                 }
                 GethDebugBuiltInTracerType::PreStateTracer => {
-                    todo!()
+                    Err(EthApiError::Unsupported("prestate tracer is unimplemented yet."))
                 }
                 GethDebugBuiltInTracerType::NoopTracer => {
                     Ok((NoopFrame::default().into(), Default::default()))
