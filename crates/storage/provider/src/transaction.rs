@@ -1359,7 +1359,7 @@ fn unwind_account_history_shards<DB: Database>(
         } else if block_number <= sharded_key.highest_block_number {
             // if first element is in scope whole list would be removed.
             // so at least this first element is present.
-            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>());
+            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
         } else {
             let new_list = list.iter(0).collect::<Vec<_>>();
             return Ok(new_list)
