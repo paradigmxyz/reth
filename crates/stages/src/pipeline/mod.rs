@@ -2,7 +2,10 @@ use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{listener::EventListeners, stage::StageId, BlockNumber, H256};
+use reth_primitives::{
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
+    BlockNumber, H256,
+};
 use reth_provider::{providers::get_stage_checkpoint, Transaction};
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -377,7 +380,16 @@ where
                 Err(err) => {
                     self.listeners.notify(PipelineEvent::Error { stage_id });
 
-                    let out = if let StageError::Validation { block, error } = err {
+                    let out = if let StageError::DetachedHead { local_head, header, error } = err {
+                        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
+
+                        // We unwind because of a detached head.
+                        let unwind_to = local_head
+                            .number
+                            .saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH)
+                            .max(1);
+                        Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
+                    } else if let StageError::Validation { block, error } = err {
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,

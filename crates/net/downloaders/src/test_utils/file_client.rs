@@ -328,7 +328,7 @@ mod tests {
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, vec![p0, p1, p2,]);
+        assert_eq!(headers, Ok(vec![p0, p1, p2]));
         assert!(downloader.next().await.is_none());
         assert!(downloader.next().await.is_none());
     }
@@ -349,7 +349,7 @@ mod tests {
         header_downloader.update_sync_target(SyncTarget::Tip(headers.last().unwrap().hash()));
 
         // get headers first
-        let mut downloaded_headers = header_downloader.next().await.unwrap();
+        let mut downloaded_headers = header_downloader.next().await.unwrap().unwrap();
 
         // reverse to make sure it's in the right order before comparing
         downloaded_headers.reverse();

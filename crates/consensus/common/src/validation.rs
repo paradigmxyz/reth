@@ -247,6 +247,13 @@ pub fn validate_header_regarding_parent(
         })
     }
 
+    if parent.hash != child.parent_hash {
+        return Err(ConsensusError::ParentHashMismatch {
+            expected_parent_hash: parent.hash,
+            got_parent_hash: child.parent_hash,
+        })
+    }
+
     // timestamp in past check
     if child.timestamp <= parent.timestamp {
         return Err(ConsensusError::TimestampIsInPast {
