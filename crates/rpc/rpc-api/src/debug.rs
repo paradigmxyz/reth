@@ -9,32 +9,32 @@ use reth_rpc_types::{
 };
 
 /// Debug rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server))]
-#[cfg_attr(feature = "client", rpc(server, client))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
 pub trait DebugApi {
     /// Returns an RLP-encoded header.
-    #[method(name = "debug_getRawHeader")]
+    #[method(name = "getRawHeader")]
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
     /// Returns an RLP-encoded block.
-    #[method(name = "debug_getRawBlock")]
+    #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
     /// Returns a EIP-2718 binary-encoded transaction.
-    #[method(name = "debug_getRawTransaction")]
+    #[method(name = "getRawTransaction")]
     async fn raw_transaction(&self, hash: H256) -> RpcResult<Bytes>;
 
     /// Returns an array of EIP-2718 binary-encoded receipts.
-    #[method(name = "debug_getRawReceipts")]
+    #[method(name = "getRawReceipts")]
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>>;
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
-    #[method(name = "debug_getBadBlocks")]
+    #[method(name = "getBadBlocks")]
     async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>>;
 
     /// Returns the structured logs created during the execution of EVM between two blocks
     /// (excluding start) as a JSON object.
-    #[method(name = "debug_traceChain")]
+    #[method(name = "traceChain")]
     async fn debug_trace_chain(
         &self,
         start_exclusive: BlockNumberOrTag,
@@ -48,7 +48,7 @@ pub trait DebugApi {
     ///
     /// Note, the parent of this block must be present, or it will fail. For the second parameter
     /// see [GethDebugTracingOptions] reference.
-    #[method(name = "debug_traceBlock")]
+    #[method(name = "traceBlock")]
     async fn debug_trace_block(
         &self,
         rlp_block: Bytes,
@@ -58,7 +58,7 @@ pub trait DebugApi {
     /// Similar to `debug_traceBlock`, `debug_traceBlockByHash` accepts a block hash and will replay
     /// the block that is already present in the database. For the second parameter see
     /// [GethDebugTracingOptions].
-    #[method(name = "debug_traceBlockByHash")]
+    #[method(name = "traceBlockByHash")]
     async fn debug_trace_block_by_hash(
         &self,
         block: H256,
@@ -68,7 +68,7 @@ pub trait DebugApi {
     /// Similar to `debug_traceBlockByNumber`, `debug_traceBlockByHash` accepts a block number
     /// [BlockNumberOrTag] and will replay the block that is already present in the database.
     /// For the second parameter see [GethDebugTracingOptions].
-    #[method(name = "debug_traceBlockByNumber")]
+    #[method(name = "traceBlockByNumber")]
     async fn debug_trace_block_by_number(
         &self,
         block: BlockNumberOrTag,
@@ -79,7 +79,7 @@ pub trait DebugApi {
     /// exact same manner as it was executed on the network. It will replay any transaction that
     /// may have been executed prior to this one before it will finally attempt to execute the
     /// transaction that corresponds to the given hash.
-    #[method(name = "debug_traceTransaction")]
+    #[method(name = "traceTransaction")]
     async fn debug_trace_transaction(
         &self,
         tx_hash: H256,
@@ -95,7 +95,7 @@ pub trait DebugApi {
     /// The trace can be configured similar to `debug_traceTransaction`,
     /// see [GethDebugTracingOptions]. The method returns the same output as
     /// `debug_traceTransaction`.
-    #[method(name = "debug_traceCall")]
+    #[method(name = "traceCall")]
     async fn debug_trace_call(
         &self,
         request: CallRequest,
