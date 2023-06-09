@@ -7,6 +7,7 @@ use crate::{
         headers::{
             client::{HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
+            error::HeadersDownloaderResult,
         },
         priority::Priority,
     },
@@ -84,20 +85,20 @@ impl HeaderDownloader for TestHeaderDownloader {
 }
 
 impl Stream for TestHeaderDownloader {
-    type Item = Vec<SealedHeader>;
+    type Item = HeadersDownloaderResult<Vec<SealedHeader>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         loop {
             if this.queued_headers.len() == this.batch_size {
-                return Poll::Ready(Some(std::mem::take(&mut this.queued_headers)))
+                return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers))))
             }
             if this.download.is_none() {
                 this.download.insert(this.create_download());
             }
 
             match ready!(this.download.as_mut().unwrap().poll_next_unpin(cx)) {
-                None => return Poll::Ready(Some(std::mem::take(&mut this.queued_headers))),
+                None => return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers)))),
                 Some(header) => this.queued_headers.push(header.unwrap()),
             }
         }

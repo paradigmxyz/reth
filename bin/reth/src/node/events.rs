@@ -3,6 +3,7 @@
 use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
+use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{
@@ -112,8 +113,17 @@ impl NodeState {
 
     fn handle_consensus_engine_event(&mut self, event: BeaconConsensusEngineEvent) {
         match event {
-            BeaconConsensusEngineEvent::ForkchoiceUpdated(state) => {
-                info!(target: "reth::cli", ?state, "Forkchoice updated");
+            BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
+                let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
+                    state;
+                info!(
+                    target: "reth::cli",
+                    ?head_block_hash,
+                    ?safe_block_hash,
+                    ?finalized_block_hash,
+                    ?status,
+                    "Forkchoice updated"
+                );
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
                 self.latest_canonical_engine_block = Some(block.number);

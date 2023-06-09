@@ -7,7 +7,7 @@ use reth_primitives::{
 use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
-    CallRequest,
+    BlockOverrides, CallRequest,
 };
 use revm::{
     db::CacheDB,
@@ -21,10 +21,42 @@ use revm_primitives::{
 };
 use tracing::trace;
 
+/// Helper type that bundles various overrides for EVM Execution.
+///
+/// By `Default`, no overrides are included.
+#[derive(Debug, Clone, Default)]
+pub struct EvmOverrides {
+    /// Applies overrides to the state before execution.
+    pub state: Option<StateOverride>,
+    /// Applies overrides to the block before execution.
+    ///
+    /// This is a `Box` because less common and only available in debug trace endpoints.
+    pub block: Option<Box<BlockOverrides>>,
+}
+
+impl EvmOverrides {
+    /// Creates a new instance with the given overrides
+    pub fn new(state: Option<StateOverride>, block: Option<BlockOverrides>) -> Self {
+        Self { state, block: block.map(Box::new) }
+    }
+
+    /// Creates a new instance with the given state overrides.
+    pub fn state(state: Option<StateOverride>) -> Self {
+        Self { state, block: None }
+    }
+}
+
+impl From<Option<StateOverride>> for EvmOverrides {
+    fn from(state: Option<StateOverride>) -> Self {
+        Self::state(state)
+    }
+}
+
 /// Helper type to work with different transaction types when configuring the EVM env.
 ///
 /// This makes it easier to handle errors.
 pub(crate) trait FillableTransaction {
+    /// Returns the hash of the transaction.
     fn hash(&self) -> TxHash;
 
     /// Fill the transaction environment with the given transaction.
@@ -145,7 +177,7 @@ pub(crate) fn prepare_call_env<DB>(
     block: BlockEnv,
     request: CallRequest,
     db: &mut CacheDB<DB>,
-    state_overrides: Option<StateOverride>,
+    overrides: EvmOverrides,
 ) -> EthResult<Env>
 where
     DB: DatabaseRef,
@@ -169,8 +201,13 @@ where
     let mut env = build_call_evm_env(cfg, block, request)?;
 
     // apply state overrides
-    if let Some(state_overrides) = state_overrides {
+    if let Some(state_overrides) = overrides.state {
         apply_state_overrides(state_overrides, db)?;
+    }
+
+    // apply block overrides
+    if let Some(block_overrides) = overrides.block {
+        apply_block_overrides(*block_overrides, &mut env.block);
     }
 
     if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
@@ -321,6 +358,34 @@ impl CallFees {
             }
             _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
         }
+    }
+}
+
+/// Applies the given block overrides to the env
+fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
+    let BlockOverrides { number, difficulty, time, gas_limit, coinbase, random, base_fee } =
+        overrides;
+
+    if let Some(number) = number {
+        env.number = number;
+    }
+    if let Some(difficulty) = difficulty {
+        env.difficulty = difficulty;
+    }
+    if let Some(time) = time {
+        env.timestamp = U256::from(time.as_u64());
+    }
+    if let Some(gas_limit) = gas_limit {
+        env.gas_limit = U256::from(gas_limit.as_u64());
+    }
+    if let Some(coinbase) = coinbase {
+        env.coinbase = coinbase;
+    }
+    if let Some(random) = random {
+        env.prevrandao = Some(random);
+    }
+    if let Some(base_fee) = base_fee {
+        env.basefee = base_fee;
     }
 }
 

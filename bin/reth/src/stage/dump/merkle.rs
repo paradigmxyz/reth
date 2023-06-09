@@ -11,7 +11,7 @@ use reth_stages::{
     },
     Stage, UnwindInput,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::{ops::DerefMut, path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(

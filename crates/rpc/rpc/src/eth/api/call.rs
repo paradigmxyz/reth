@@ -59,7 +59,7 @@ where
             .transact_call_at(
                 request,
                 block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                state_overrides,
+                state_overrides.into(),
             )
             .await?;
 

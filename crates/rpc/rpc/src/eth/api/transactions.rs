@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 
+use crate::eth::revm_utils::EvmOverrides;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
@@ -23,8 +24,8 @@ use reth_revm::{
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
-    state::StateOverride, CallRequest, Index, Log, Transaction, TransactionInfo,
-    TransactionReceipt, TransactionRequest, TypedTransactionRequest,
+    CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
@@ -117,7 +118,7 @@ pub trait EthTransactions: Send + Sync {
         &self,
         request: CallRequest,
         at: BlockId,
-        state_overrides: Option<StateOverride>,
+        overrides: EvmOverrides,
         f: F,
     ) -> EthResult<R>
     where
@@ -128,7 +129,7 @@ pub trait EthTransactions: Send + Sync {
         &self,
         request: CallRequest,
         at: BlockId,
-        state_overrides: Option<StateOverride>,
+        overrides: EvmOverrides,
     ) -> EthResult<(ResultAndState, Env)>;
 
     /// Executes the call request at the given [BlockId]
@@ -136,7 +137,7 @@ pub trait EthTransactions: Send + Sync {
         &self,
         request: CallRequest,
         at: BlockId,
-        state_overrides: Option<StateOverride>,
+        overrides: EvmOverrides,
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
@@ -431,7 +432,7 @@ where
         &self,
         request: CallRequest,
         at: BlockId,
-        state_overrides: Option<StateOverride>,
+        overrides: EvmOverrides,
         f: F,
     ) -> EthResult<R>
     where
@@ -441,7 +442,7 @@ where
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
-        let env = prepare_call_env(cfg, block_env, request, &mut db, state_overrides)?;
+        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
         f(db, env)
     }
 
@@ -449,22 +450,22 @@ where
         &self,
         request: CallRequest,
         at: BlockId,
-        state_overrides: Option<StateOverride>,
+        overrides: EvmOverrides,
     ) -> EthResult<(ResultAndState, Env)> {
-        self.with_call_at(request, at, state_overrides, |mut db, env| transact(&mut db, env)).await
+        self.with_call_at(request, at, overrides, |mut db, env| transact(&mut db, env)).await
     }
 
     async fn inspect_call_at<I>(
         &self,
         request: CallRequest,
         at: BlockId,
-        state_overrides: Option<StateOverride>,
+        overrides: EvmOverrides,
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
         I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send,
     {
-        self.with_call_at(request, at, state_overrides, |db, env| inspect(db, env, inspector)).await
+        self.with_call_at(request, at, overrides, |db, env| inspect(db, env, inspector)).await
     }
 
     fn trace_at<F, R>(

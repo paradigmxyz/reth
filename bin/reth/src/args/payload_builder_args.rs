@@ -3,7 +3,8 @@ use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_primitives::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use reth_primitives::{bytes::BytesMut, constants::MAXIMUM_EXTRA_DATA_SIZE};
+use reth_rlp::Encodable;
 use std::{ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
@@ -33,6 +34,15 @@ pub struct PayloadBuilderArgs {
     /// Maximum number of tasks to spawn for building a payload.
     #[arg(long = "builder.max-tasks", help_heading = "Builder", default_value = "3", value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     pub max_payload_tasks: usize,
+}
+
+impl PayloadBuilderArgs {
+    /// Returns the rlp-encoded extradata bytes.
+    pub fn extradata_bytes(&self) -> reth_primitives::bytes::Bytes {
+        let mut extradata = BytesMut::new();
+        self.extradata.as_bytes().encode(&mut extradata);
+        extradata.freeze()
+    }
 }
 
 #[derive(Clone, Debug, Default)]

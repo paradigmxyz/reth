@@ -80,9 +80,7 @@ use crate::{
 };
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
-use reth_primitives::bytes::BytesMut;
 use reth_provider::providers::BlockchainProvider;
-use reth_rlp::Encodable;
 
 pub mod cl_events;
 pub mod events;
@@ -256,9 +254,6 @@ impl Command {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        // configure the payload builder
-        let mut extradata = BytesMut::new();
-        self.builder.extradata.as_bytes().encode(&mut extradata);
         let payload_generator = BasicPayloadJobGenerator::new(
             blockchain_db.clone(),
             transaction_pool.clone(),
@@ -267,7 +262,7 @@ impl Command {
                 .interval(self.builder.interval)
                 .deadline(self.builder.deadline)
                 .max_payload_tasks(self.builder.max_payload_tasks)
-                .extradata(extradata.freeze())
+                .extradata(self.builder.extradata_bytes())
                 .max_gas_limit(self.builder.max_gas_limit),
             Arc::clone(&self.chain),
         );

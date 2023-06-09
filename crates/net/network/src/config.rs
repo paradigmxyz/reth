@@ -160,7 +160,7 @@ impl NetworkConfigBuilder {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            chain_spec: Arc::new(MAINNET.clone()),
+            chain_spec: MAINNET.clone(),
             network_mode: Default::default(),
             executor: None,
             hello_message: None,
@@ -456,11 +456,10 @@ mod tests {
 
     #[test]
     fn test_network_fork_filter_default() {
-        let mut chain_spec = MAINNET.clone();
+        let mut chain_spec = Arc::clone(&MAINNET);
 
         // remove any `next` fields we would have by removing all hardforks
-        chain_spec.hardforks = BTreeMap::new();
-        let chain_spec = Arc::new(chain_spec);
+        Arc::make_mut(&mut chain_spec).hardforks = BTreeMap::new();
 
         // check that the forkid is initialized with the genesis and no other forks
         let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());

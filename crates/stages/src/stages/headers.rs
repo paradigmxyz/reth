@@ -7,7 +7,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{
-    p2p::headers::downloader::{HeaderDownloader, SyncTarget},
+    p2p::headers::{
+        downloader::{HeaderDownloader, SyncTarget},
+        error::HeadersDownloaderError,
+    },
     provider::ProviderError,
 };
 use reth_primitives::{
@@ -207,7 +210,7 @@ where
         // Nothing to sync
         if gap.is_closed() {
             info!(target: "sync::stages::headers", checkpoint = %current_checkpoint, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput { checkpoint: current_checkpoint, done: true })
+            return Ok(ExecOutput::done(current_checkpoint))
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -219,7 +222,14 @@ where
         // down to the local head (latest block in db).
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
-        let downloaded_headers = self.downloader.next().await.ok_or(StageError::ChannelClosed)?;
+        let downloaded_headers = match self.downloader.next().await {
+            Some(Ok(headers)) => headers,
+            Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
+                error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                return Err(StageError::DetachedHead { local_head, header, error })
+            }
+            None => return Err(StageError::ChannelClosed),
+        };
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
