@@ -191,8 +191,9 @@ impl Discovery {
                 self.on_node_record_update(node, Some(fork_id));
                 self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
-            DiscoveryUpdate::Removed(node) => {
-                self.discovered_nodes.remove(&node);
+            DiscoveryUpdate::Removed(_node) => {
+                // Since we want to keep track of all nodes we have discovered here,
+                // we don't remove them when they are removed from the discv4 table.
             }
             DiscoveryUpdate::Batch(updates) => {
                 for update in updates {
