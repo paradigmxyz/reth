@@ -7,7 +7,7 @@ use reth_rpc_types::{
 use std::collections::HashSet;
 
 /// Ethereum trace API
-#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "trace"))]
 pub trait TraceApi {
     /// Executes the given call and returns a number of possible traces for it.

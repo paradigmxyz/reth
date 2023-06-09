@@ -3,7 +3,7 @@ use reth_primitives::NodeRecord;
 use reth_rpc_types::NodeInfo;
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
-#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "admin"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "admin"))]
 #[async_trait::async_trait]
 pub trait AdminApi {
@@ -30,9 +30,9 @@ pub trait AdminApi {
 
     /// Creates an RPC subscription which serves events received from the network.
     #[subscription(
-        name = "peerEvents",
-        unsubscribe = "peerEvents_unsubscribe",
-        item = String
+    name = "peerEvents",
+    unsubscribe = "peerEvents_unsubscribe",
+    item = String
     )]
     async fn subscribe_peer_events(&self) -> jsonrpsee::core::SubscriptionResult;
 

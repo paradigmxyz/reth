@@ -2,7 +2,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_rpc_types::PeerCount;
 
 /// Net rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "net"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "net"))]
 pub trait NetApi {
     /// Returns protocol version.

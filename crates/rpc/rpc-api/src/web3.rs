@@ -2,7 +2,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Bytes, H256};
 
 /// Web3 rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "web3"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "web3"))]
 #[async_trait::async_trait]
 pub trait Web3Api {

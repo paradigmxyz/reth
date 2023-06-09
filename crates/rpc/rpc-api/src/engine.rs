@@ -9,7 +9,7 @@ use reth_rpc_types::{
     CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
 
-#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "engine"))]
 pub trait EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
@@ -100,7 +100,7 @@ pub trait EngineApi {
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 ///
 /// Specifically for the engine auth server: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#underlying-protocol>
-#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 #[async_trait]
 pub trait EngineEthApi {

@@ -9,7 +9,7 @@ use reth_rpc_types::{
 };
 
 /// Debug rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
 pub trait DebugApi {
     /// Returns an RLP-encoded header.

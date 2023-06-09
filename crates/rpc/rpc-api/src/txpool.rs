@@ -3,7 +3,7 @@ use reth_primitives::Address;
 use reth_rpc_types::txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolStatus};
 
 /// Txpool rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "txpool"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "txpool"))]
 #[async_trait::async_trait]
 pub trait TxPoolApi {
