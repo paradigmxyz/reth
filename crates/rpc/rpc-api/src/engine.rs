@@ -10,21 +10,21 @@ use reth_rpc_types::{
 };
 
 #[cfg_attr(not(feature = "client"), rpc(server))]
-#[cfg_attr(feature = "client", rpc(server, client))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine"))]
 pub trait EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
-    #[method(name = "engine_newPayloadV1")]
+    #[method(name = "newPayloadV1")]
     async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_newpayloadv2>
-    #[method(name = "engine_newPayloadV2")]
+    #[method(name = "newPayloadV2")]
     async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field
-    #[method(name = "engine_forkchoiceUpdatedV1")]
+    #[method(name = "forkchoiceUpdatedV1")]
     async fn fork_choice_updated_v1(
         &self,
         fork_choice_state: ForkchoiceState,
@@ -32,7 +32,7 @@ pub trait EngineApi {
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
-    #[method(name = "engine_forkchoiceUpdatedV2")]
+    #[method(name = "forkchoiceUpdatedV2")]
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
@@ -48,7 +48,7 @@ pub trait EngineApi {
     ///
     /// Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
-    #[method(name = "engine_getPayloadV1")]
+    #[method(name = "getPayloadV1")]
     async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayload>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_getpayloadv2>
@@ -56,11 +56,11 @@ pub trait EngineApi {
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call. Note:
     /// > Client software MAY stop the corresponding build process after serving this call.
-    #[method(name = "engine_getPayloadV2")]
+    #[method(name = "getPayloadV2")]
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
-    #[method(name = "engine_getPayloadBodiesByHashV1")]
+    #[method(name = "getPayloadBodiesByHashV1")]
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
@@ -78,7 +78,7 @@ pub trait EngineApi {
     /// Implementors should take care when acting on the input to this method, specifically
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
-    #[method(name = "engine_getPayloadBodiesByRangeV1")]
+    #[method(name = "getPayloadBodiesByRangeV1")]
     async fn get_payload_bodies_by_range_v1(
         &self,
         start: U64,
@@ -86,14 +86,14 @@ pub trait EngineApi {
     ) -> RpcResult<ExecutionPayloadBodies>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
-    #[method(name = "engine_exchangeTransitionConfigurationV1")]
+    #[method(name = "exchangeTransitionConfigurationV1")]
     async fn exchange_transition_configuration(
         &self,
         transition_configuration: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
-    #[method(name = "engine_exchangeCapabilities")]
+    #[method(name = "exchangeCapabilities")]
     async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
 }
 
