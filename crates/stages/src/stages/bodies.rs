@@ -70,13 +70,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range();
-        if range.is_empty() {
-            let (from, to) = range.into_inner();
-            info!(target: "sync::stages::bodies", from, "Target block already downloaded, skipping.");
-            return Ok(ExecOutput::done(to))
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
+        let range = input.next_block_range();
         // Update the header range on the downloader
         self.downloader.set_download_range(range.clone())?;
         let (from_block, to_block) = range.into_inner();
