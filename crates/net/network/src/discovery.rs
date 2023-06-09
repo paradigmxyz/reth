@@ -17,6 +17,9 @@ use std::{
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 
+/// The bond duration.
+static BOND_DURATION: std::time::Duration = std::time::Duration::from_secs(60 * 60 * 24);
+
 /// An abstraction over the configured discovery protocol.
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their address.
@@ -33,8 +36,6 @@ pub struct Discovery {
     discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
     /// Heartbeat to periodically check for expired bond durations.
     heartbeat: tokio::time::Interval,
-    /// The duration of a bond, after which a node should be checked for liveness.
-    bond_duration: std::time::Duration,
     /// The handle to the spawned discv4 service
     _discv4_service: Option<JoinHandle<()>>,
     /// Handler to interact with the DNS discovery service
@@ -47,10 +48,12 @@ pub struct Discovery {
     queued_events: VecDeque<DiscoveryEvent>,
 }
 
+/// An entry in the discovery map. It contains the latest known info
+/// about a node, and a
 pub struct DiscoveryEntry {
     remote_addr: SocketAddr,
     fork_id: Option<ForkId>,
-    last_updated_at: std::time::Instant,
+    bond_expiry: std::time::Instant,
 }
 
 impl DiscoveryEntry {
@@ -62,8 +65,8 @@ impl DiscoveryEntry {
         self.remote_addr = addr;
     }
 
-    pub fn reset_last_updated_at(&mut self) {
-        self.last_updated_at = std::time::Instant::now();
+    pub fn reset_bond_expiry(&mut self) {
+        self.bond_expiry = std::time::Instant::now() + BOND_DURATION;
     }
 }
 
@@ -113,7 +116,6 @@ impl Discovery {
             discv4_updates,
             _discv4_service,
             heartbeat: tokio::time::interval(std::time::Duration::from_secs(60)),
-            bond_duration: std::time::Duration::from_secs(60 * 60 * 24),
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
             _dns_disc_service,
@@ -163,7 +165,7 @@ impl Discovery {
         match self.discovered_nodes.entry(id) {
             Entry::Occupied(entry) => {
                 let disc_entry = entry.into_mut();
-                disc_entry.reset_last_updated_at();
+                disc_entry.reset_bond_expiry();
                 disc_entry.update_addr(addr);
                 if let Some(id) = fork_id {
                     disc_entry.update_fork_id(id);
@@ -171,7 +173,7 @@ impl Discovery {
             }
             Entry::Vacant(entry) => {
                 let now = std::time::Instant::now();
-                entry.insert(DiscoveryEntry { remote_addr: addr, fork_id, last_updated_at: now });
+                entry.insert(DiscoveryEntry { remote_addr: addr, fork_id, bond_expiry: now });
                 self.queued_events.push_back(DiscoveryEvent::Discovered {
                     peer_id: id,
                     socket_addr: addr,
@@ -208,8 +210,8 @@ impl Discovery {
 
     fn on_heartbeat(&self) {
         for (peer_id, entry) in &self.discovered_nodes {
-            if entry.last_updated_at.elapsed() > self.bond_duration {
-                todo!("Poll peer for liveness");
+            if entry.bond_expiry > std::time::Instant::now() {
+                todo!("Perform liveness checks");
             }
         }
     }
@@ -264,7 +266,6 @@ impl Discovery {
             discv4_updates: Default::default(),
             queued_events: Default::default(),
             heartbeat: tokio::time::interval(std::time::Duration::from_secs(60)),
-            bond_duration: std::time::Duration::from_secs(60 * 60 * 24),
             _discv4_service: Default::default(),
             _dns_discovery: None,
             dns_discovery_updates: None,
