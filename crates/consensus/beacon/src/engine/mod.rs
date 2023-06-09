@@ -1950,7 +1950,8 @@ mod tests {
         provider.commit().unwrap();
     }
 
-    /// Use this instead of [insert_blocks] when inserting hashes for each block is needed
+    /// Use this instead of [insert_blocks] when inserting hashes and calculating history indices
+    /// for each block is needed
     fn append_blocks<'a, DB: Database>(
         db: &DB,
         chain: Arc<ChainSpec>,
