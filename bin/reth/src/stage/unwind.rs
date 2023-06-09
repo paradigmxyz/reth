@@ -109,8 +109,8 @@ impl Subcommands {
                     .ok_or_else(|| eyre::eyre!("Block hash not found in database: {hash:?}"))?,
                 BlockHashOrNumber::Number(num) => *num,
             },
-            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount) + 1,
-        };
+            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount),
+        } + 1;
         Ok(target..=last.0)
     }
 }
