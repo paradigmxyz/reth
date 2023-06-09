@@ -30,7 +30,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let beacon_engine_handle = BeaconConsensusEngineHandle::new(tx);
     let engine_api = EngineApi::new(
         NoopProvider::default(),
-        Arc::new(MAINNET.clone()),
+        MAINNET.clone(),
         beacon_engine_handle,
         spawn_test_payload_service().into(),
     );

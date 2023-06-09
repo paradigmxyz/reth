@@ -11,7 +11,7 @@ use reth_stages::{
     },
     Stage, UnwindInput,
 };
-use std::{ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{ops::DerefMut, path::PathBuf};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
@@ -65,7 +65,7 @@ async fn unwind_and_copy<DB: Database>(
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
-        reth_revm::Factory::new(Arc::new(MAINNET.clone())),
+        reth_revm::Factory::new(MAINNET.clone()),
         ExecutionStageThresholds { max_blocks: Some(u64::MAX), max_changes: None },
     );
 

@@ -168,11 +168,11 @@ where
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodies> {
         if count > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len: count })
+            return Err(EngineApiError::PayloadRequestTooLarge { len: count });
         }
 
         if start == 0 || count == 0 {
-            return Err(EngineApiError::InvalidBodiesRange { start, count })
+            return Err(EngineApiError::InvalidBodiesRange { start, count });
         }
 
         let mut result = Vec::with_capacity(count as usize);
@@ -196,7 +196,7 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodies> {
         let len = hashes.len() as u64;
         if len > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len })
+            return Err(EngineApiError::PayloadRequestTooLarge { len });
         }
 
         let mut result = Vec::with_capacity(hashes.len());
@@ -234,7 +234,7 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            })
+            });
         }
 
         self.beacon_consensus.transition_configuration_exchanged().await;
@@ -244,7 +244,7 @@ where
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            })
+            });
         }
 
         // Attempt to look up terminal block hash
@@ -281,18 +281,18 @@ where
         match version {
             EngineApiMessageVersion::V1 => {
                 if has_withdrawals {
-                    return Err(EngineApiError::WithdrawalsNotSupportedInV1)
+                    return Err(EngineApiError::WithdrawalsNotSupportedInV1);
                 }
                 if is_shanghai {
-                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
+                    return Err(EngineApiError::NoWithdrawalsPostShanghai);
                 }
             }
             EngineApiMessageVersion::V2 => {
                 if is_shanghai && !has_withdrawals {
-                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
+                    return Err(EngineApiError::NoWithdrawalsPostShanghai);
                 }
                 if !is_shanghai && has_withdrawals {
-                    return Err(EngineApiError::HasWithdrawalsPreShanghai)
+                    return Err(EngineApiError::HasWithdrawalsPreShanghai);
                 }
             }
         };
@@ -443,7 +443,7 @@ mod tests {
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>>) {
-        let chain_spec = Arc::new(MAINNET.clone());
+        let chain_spec: Arc<ChainSpec> = MAINNET.clone();
         let client = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
@@ -534,8 +534,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number) &&
-                            !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number)
+                            && !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().unseal())),
             );
@@ -544,8 +544,8 @@ mod tests {
                 .iter()
                 .cloned()
                 .map(|b| {
-                    if first_missing_range.contains(&b.number) ||
-                        second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number)
+                        || second_missing_range.contains(&b.number)
                     {
                         None
                     } else {
@@ -573,8 +573,8 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
-                    U256::from(1),
+                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap()
+                    + U256::from(1),
                 ..Default::default()
             };
 

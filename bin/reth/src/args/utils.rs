@@ -19,7 +19,7 @@ pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::P
 /// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path
 /// to a custom one.
 pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
-    Ok(Arc::new(match s {
+    Ok(match s {
         "mainnet" => MAINNET.clone(),
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
@@ -27,22 +27,25 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
         }
-    }))
+    })
 }
 
 /// Clap value parser for [ChainSpec]s that takes either a built-in genesis format or the path
 /// to a custom one.
 pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
-    Ok(Arc::new(match s {
+    Ok(match s {
         "mainnet" => MAINNET.clone(),
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
         _ => {
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
-            genesis.into()
+            match genesis {
+                AllGenesisFormats::Reth(chain_spec) => Arc::new(chain_spec),
+                _ => return Err(eyre::eyre!("Unexpected genesis format")),
+            }
         }
-    }))
+    })
 }
 
 /// Parse [BlockHashOrNumber]
@@ -82,15 +85,15 @@ pub enum SocketAddressParsingError {
 /// An error is returned if the value is empty.
 pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddressParsingError> {
     if value.is_empty() {
-        return Err(SocketAddressParsingError::Empty)
+        return Err(SocketAddressParsingError::Empty);
     }
 
     if let Some(port) = value.strip_prefix(':').or_else(|| value.strip_prefix("localhost:")) {
         let port: u16 = port.parse()?;
-        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
     }
     if let Ok(port) = value.parse::<u16>() {
-        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
     }
     value
         .to_socket_addrs()?
