@@ -14,7 +14,6 @@
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
-//! # use std::sync::Arc;
 //! use reth_db::mdbx::test_utils::create_test_rw_db;
 //!
 //! # let chain = MAINNET.clone();
