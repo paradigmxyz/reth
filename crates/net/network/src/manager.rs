@@ -515,7 +515,7 @@ where
             NetworkHandleMessage::AnnounceBlock(block, hash) => {
                 if self.handle.mode().is_stake() {
                     // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
-                    warn!(target : "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
+                    warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
                     return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
