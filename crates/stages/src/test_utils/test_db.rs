@@ -44,11 +44,7 @@ impl Default for TestTransaction {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
         let tx = create_test_db::<WriteMap>(EnvKind::RW);
-        Self {
-            tx: tx.clone(),
-            path: None,
-            factory: ShareableDatabase::new(tx, Arc::new(MAINNET.clone())),
-        }
+        Self { tx: tx.clone(), path: None, factory: ShareableDatabase::new(tx, MAINNET.clone()) }
     }
 }
 
@@ -58,7 +54,7 @@ impl TestTransaction {
         Self {
             tx: tx.clone(),
             path: Some(path.to_path_buf()),
-            factory: ShareableDatabase::new(tx, Arc::new(MAINNET.clone())),
+            factory: ShareableDatabase::new(tx, MAINNET.clone()),
         }
     }
 

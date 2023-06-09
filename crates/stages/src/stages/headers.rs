@@ -382,7 +382,6 @@ impl SyncGap {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use super::*;
     use crate::test_utils::{
@@ -603,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn head_and_tip_lookup() {
         let runner = HeadersTestRunner::default();
-        let factory = ShareableDatabase::new(runner.tx().tx.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(runner.tx().tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let tx = provider.tx_ref();
         let mut stage = runner.stage();

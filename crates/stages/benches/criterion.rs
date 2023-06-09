@@ -136,7 +136,7 @@ fn measure_stage_with_path<F, S>(
             },
             |_| async {
                 let mut stage = stage.clone();
-                let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+                let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
                 let mut provider = factory.provider_rw().unwrap();
                 stage.execute(&mut provider, input).await.unwrap();
                 provider.commit().unwrap();

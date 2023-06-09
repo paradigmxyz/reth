@@ -138,7 +138,7 @@ mod tests {
 
     use assert_matches::assert_matches;
     use reth_provider::ShareableDatabase;
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
 
     use super::*;
     use crate::test_utils::TestTransaction;
@@ -217,7 +217,7 @@ mod tests {
     async fn run(tx: &TestTransaction, run_to: u64) {
         let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexStorageHistoryStage::default();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
         let out = stage.execute(&mut provider, input).await.unwrap();
         assert_eq!(
@@ -242,7 +242,7 @@ mod tests {
             ..Default::default()
         };
         let mut stage = IndexStorageHistoryStage::default();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
         let out = stage.unwind(&mut provider, input).await.unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
@@ -499,7 +499,7 @@ mod tests {
         })
         .unwrap();
 
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         assert_matches!(

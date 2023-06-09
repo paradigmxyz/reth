@@ -168,7 +168,6 @@ mod tests {
     use reth_primitives::{
         GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
     };
-    use std::sync::Arc;
 
     #[test]
     fn success_init_genesis_mainnet() {

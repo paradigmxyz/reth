@@ -52,7 +52,7 @@ mod test {
         tables,
     };
     use reth_primitives::{ChainSpecBuilder, IntegerList, H160, MAINNET, U256};
-    use std::{ops::DerefMut, sync::Arc};
+    use std::sync::Arc;
 
     #[test]
     fn insert_block_and_hashes_get_take() {

@@ -521,7 +521,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db, Arc::new(MAINNET.clone()));
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -583,7 +583,7 @@ mod tests {
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .with_max_block(10)
-            .build(db, Arc::new(MAINNET.clone()));
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -693,7 +693,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db, Arc::new(MAINNET.clone()));
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -786,7 +786,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db, Arc::new(MAINNET.clone()));
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -869,7 +869,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db, Arc::new(MAINNET.clone()));
+            .build(db, MAINNET.clone());
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
@@ -879,7 +879,7 @@ mod tests {
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))
-            .build(db, Arc::new(MAINNET.clone()));
+            .build(db, MAINNET.clone());
         let result = pipeline.run().await;
         assert_matches!(
             result,

@@ -17,7 +17,7 @@
 //! # use std::sync::Arc;
 //! use reth_db::mdbx::test_utils::create_test_rw_db;
 //!
-//! # let chain = Arc::new(MAINNET.clone());
+//! # let chain = MAINNET.clone();
 //! # let factory = Factory::new(chain.clone());
 //! # let db = create_test_rw_db();
 //! // Build a pipeline with all offline stages.
@@ -32,7 +32,7 @@
 //! # use reth_primitives::MAINNET;
 //! # use std::sync::Arc;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
-//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let factory = Factory::new(MAINNET.clone());
 //! Pipeline::builder()
 //!     .add_stages(
 //!         OfflineStages::new(factory).builder().add_stage(MyCustomStage)

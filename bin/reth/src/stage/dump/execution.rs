@@ -8,7 +8,7 @@ use reth_primitives::{stage::StageCheckpoint, ChainSpec};
 use reth_provider::ShareableDatabase;
 use reth_revm::Factory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
-use std::{ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(

@@ -38,7 +38,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use super::*;
     use reth_db::{
@@ -53,7 +52,7 @@ mod tests {
     #[test]
     fn test_account_trie_order() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
 

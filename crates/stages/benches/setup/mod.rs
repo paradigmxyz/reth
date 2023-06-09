@@ -20,7 +20,6 @@ use reth_trie::StateRoot;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 mod constants;
@@ -39,7 +38,7 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
 
         // Clear previous run
@@ -67,7 +66,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
 
         StorageHashingStage::default().unwind(&mut provider, unwind).await.unwrap();

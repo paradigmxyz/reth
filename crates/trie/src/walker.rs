@@ -256,7 +256,6 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use super::*;
     use crate::trie_cursor::{AccountTrieCursor, StorageTrieCursor};
@@ -291,7 +290,7 @@ mod tests {
 
         let db = create_test_rw_db();
 
-        let factory = ShareableDatabase::new(db.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
@@ -337,7 +336,7 @@ mod tests {
     #[test]
     fn cursor_rootnode_with_changesets() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), Arc::new(MAINNET.clone()));
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
         let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
