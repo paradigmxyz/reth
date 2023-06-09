@@ -53,16 +53,26 @@ pub struct Discovery {
 pub struct DiscoveryEntry {
     remote_addr: SocketAddr,
     fork_id: Option<ForkId>,
+    node_record: NodeRecord,
     bond_expiry: std::time::Instant,
 }
 
 impl DiscoveryEntry {
+    pub fn new(node_record: NodeRecord, fork_id: Option<ForkId>) -> Self {
+        Self {
+            remote_addr: node_record.tcp_addr(),
+            fork_id,
+            node_record,
+            bond_expiry: std::time::Instant::now() + BOND_DURATION,
+        }
+    }
     pub fn update_fork_id(&mut self, fork_id: ForkId) {
         self.fork_id = Some(fork_id);
     }
 
-    pub fn update_addr(&mut self, addr: SocketAddr) {
-        self.remote_addr = addr;
+    pub fn update_node_record(&mut self, record: NodeRecord) {
+        self.remote_addr = record.tcp_addr();
+        self.node_record = record;
     }
 
     pub fn reset_bond_expiry(&mut self) {
@@ -166,14 +176,13 @@ impl Discovery {
             Entry::Occupied(entry) => {
                 let disc_entry = entry.into_mut();
                 disc_entry.reset_bond_expiry();
-                disc_entry.update_addr(addr);
+                disc_entry.update_node_record(record);
                 if let Some(id) = fork_id {
                     disc_entry.update_fork_id(id);
                 }
             }
             Entry::Vacant(entry) => {
-                let now = std::time::Instant::now();
-                entry.insert(DiscoveryEntry { remote_addr: addr, fork_id, bond_expiry: now });
+                entry.insert(DiscoveryEntry::new(record, fork_id));
                 self.queued_events.push_back(DiscoveryEvent::Discovered {
                     peer_id: id,
                     socket_addr: addr,
@@ -214,10 +223,14 @@ impl Discovery {
         }
     }
 
+    /// Iterates over all the discovered nodes and pings them through discv4.
+    /// If they fail to respond, we will be notified through an event and the node will be removed.
     fn on_heartbeat(&self) {
-        for (peer_id, entry) in &self.discovered_nodes {
+        for entry in self.discovered_nodes.values() {
             if entry.bond_expiry > std::time::Instant::now() {
-                todo!("Perform liveness checks");
+                if let Some(discv4) = &self.discv4 {
+                    discv4.ping(entry.node_record);
+                }
             }
         }
     }
