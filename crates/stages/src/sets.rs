@@ -64,13 +64,14 @@ use std::sync::Arc;
 ///
 /// This expands to the following series of stages:
 /// - [`HeaderStage`]
+/// - [`TotalDifficultyStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
 /// - [`MerkleStage`] (unwind)
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
-/// - [`MerkleStage`] (execution)
+/// - [`MerkleStage`] (execute)
 /// - [`TransactionLookupStage`]
 /// - [`IndexStorageHistoryStage`]
 /// - [`IndexAccountHistoryStage`]
