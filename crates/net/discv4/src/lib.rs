@@ -315,6 +315,12 @@ impl Discv4 {
         self.set_eip868_rlp_pair(key, buf.freeze())
     }
 
+    /// Pings a peer to check if it is alive.
+    pub fn ping(&self, node_record: NodeRecord) {
+        let cmd = Discv4Command::Ping(node_record);
+        self.safe_send_to_service(cmd);
+    }
+
     fn safe_send_to_service(&self, cmd: Discv4Command) {
         // we want this message to always arrive, so we clone the sender
         let _ = self.to_service.clone().try_send(cmd);
@@ -1479,6 +1485,9 @@ impl Discv4Service {
                                     let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
                                 }
                             }
+                            Discv4Command::Ping(record) => {
+                                self.try_ping(record, PingReason::RePing);
+                            }
                         }
                     } else {
                         is_done = true;
@@ -1640,6 +1649,7 @@ enum Discv4Command {
     BanIp(IpAddr),
     Remove(PeerId),
     Lookup { node_id: Option<PeerId>, tx: Option<NodeRecordSender> },
+    Ping(NodeRecord),
     SetLookupInterval(Duration),
     Updates(OneshotSender<ReceiverStream<DiscoveryUpdate>>),
 }
