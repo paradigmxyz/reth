@@ -12,10 +12,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc::unbounded_channel;
 
 /// Localhost with port 0 so a free port is used.
