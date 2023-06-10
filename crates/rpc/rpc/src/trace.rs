@@ -21,7 +21,7 @@ use reth_revm::{
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
-    BlockError, CallRequest, Index, TransactionInfo,
+    BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
 use reth_tasks::TaskSpawner;
 use revm::primitives::Env;
@@ -120,7 +120,13 @@ where
         let (res, _) = self
             .inner
             .eth_api
-            .inspect_call_at(call, at, Default::default(), &mut inspector)
+            .inspect_call_at(
+                call,
+                at,
+                Default::default(),
+                BlockOverrides::default(),
+                &mut inspector,
+            )
             .await?;
 
         let trace_res =
@@ -182,6 +188,7 @@ where
                         call,
                         &mut db,
                         Default::default(),
+                        BlockOverrides::default(),
                     )?;
                     let config = tracing_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);

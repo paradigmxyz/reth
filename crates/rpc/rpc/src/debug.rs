@@ -24,7 +24,7 @@ use reth_rpc_types::{
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame, NoopFrame,
         TraceResult,
     },
-    BlockError, CallRequest, RichBlock,
+    BlockError, BlockOverrides, CallRequest, RichBlock,
 };
 use reth_tasks::TaskSpawner;
 use revm::primitives::Env;
@@ -256,6 +256,10 @@ where
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides } =
             opts;
+        let block_overrides_unwrap = match block_overrides.clone() {
+            Some(overrides) => overrides,
+            None => BlockOverrides::default(),
+        };
         let overrides = EvmOverrides::new(state_overrides, block_overrides);
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
@@ -274,7 +278,13 @@ where
                         let (_res, _) = self
                             .inner
                             .eth_api
-                            .inspect_call_at(call, at, overrides, &mut inspector)
+                            .inspect_call_at(
+                                call,
+                                at,
+                                overrides,
+                                block_overrides_unwrap,
+                                &mut inspector,
+                            )
                             .await?;
                         return Ok(FourByteFrame::from(inspector).into())
                     }
@@ -290,7 +300,13 @@ where
                         let _ = self
                             .inner
                             .eth_api
-                            .inspect_call_at(call, at, overrides, &mut inspector)
+                            .inspect_call_at(
+                                call,
+                                at,
+                                overrides,
+                                block_overrides_unwrap,
+                                &mut inspector,
+                            )
                             .await?;
 
                         let frame = inspector.into_geth_builder().geth_call_traces(call_config);
@@ -313,8 +329,11 @@ where
 
         let mut inspector = TracingInspector::new(inspector_config);
 
-        let (res, _) =
-            self.inner.eth_api.inspect_call_at(call, at, overrides, &mut inspector).await?;
+        let (res, _) = self
+            .inner
+            .eth_api
+            .inspect_call_at(call, at, overrides, block_overrides_unwrap, &mut inspector)
+            .await?;
         let gas_used = res.result.gas_used();
 
         let frame = inspector.into_geth_builder().geth_traces(gas_used, config);

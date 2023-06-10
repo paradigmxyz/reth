@@ -90,7 +90,7 @@ where
     EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into()))
         .await
         .unwrap();
-    EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None)
+    EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None, None)
         .await
         .unwrap();
     EthApiClient::syncing(client).await.unwrap();
