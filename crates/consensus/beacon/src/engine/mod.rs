@@ -332,12 +332,19 @@ where
                     .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
                     .unwrap_or_default()
                     .block_number;
-                let last_stage_checkpoint = this
-                    .blockchain
-                    .get_stage_checkpoint(*StageId::ALL.last().unwrap())?
-                    .unwrap_or_default()
-                    .block_number;
-                if first_stage_checkpoint != last_stage_checkpoint {
+                let mut need_pipeline_run = false;
+                for stage_id in StageId::ALL.iter().skip(1) {
+                    let stage_checkpoint = this
+                        .blockchain
+                        .get_stage_checkpoint(*stage_id)?
+                        .unwrap_or_default()
+                        .block_number;
+                    if stage_checkpoint < first_stage_checkpoint {
+                        need_pipeline_run = true;
+                        break
+                    }
+                }
+                if need_pipeline_run {
                     this.blockchain.block_hash(first_stage_checkpoint)?
                 } else {
                     None
