@@ -20,7 +20,7 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! # use reth_db::mdbx::test_utils::create_test_rw_db;
+//! use reth_db::mdbx::test_utils::create_test_rw_db;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
@@ -43,7 +43,7 @@
 //! #    db.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(H256::default());
-//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let factory = Factory::new(MAINNET.clone());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
