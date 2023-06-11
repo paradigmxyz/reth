@@ -1,4 +1,5 @@
 use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
+use reth_primitives::Address;
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::primitives::ExecutionResult;
 use std::collections::HashSet;
@@ -16,6 +17,11 @@ impl ParityTraceBuilder {
     /// Returns a new instance of the builder
     pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
         Self { nodes, _config }
+    }
+
+    /// Returns a list of all addresses that appeared as callers.
+    pub fn callers(&self) -> HashSet<Address> {
+        self.nodes.iter().map(|node| node.trace.caller).collect()
     }
 
     /// Returns the trace addresses of all transactions in the set
