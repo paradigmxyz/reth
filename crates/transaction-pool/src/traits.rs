@@ -651,7 +651,9 @@ impl FromRecoveredTransaction for PooledTransaction {
             }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(t) => {
-                // TODO: fix this gas price estimate
+                // Gas price is always set to 0 for deposits in order to zero out ETH refunds.
+                // The actual L1 cost varies depending on the gas oracle feed, and is calculated
+                // during tx execution.
                 let gas_price = U256::from(0);
                 let cost = U256::from(gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
                 let effective_gas_price = 0u128;

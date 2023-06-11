@@ -46,26 +46,8 @@ pub enum BlockExecutionError {
     CanonicalRevert { inner: String },
     #[error("Transaction error on commit: {inner:?}")]
     CanonicalCommit { inner: String },
-
-    // === tree errors ===
-    // TODO(mattsse): move this to tree error
-    #[error("Block hash {block_hash} not found in blockchain tree chain")]
-    BlockHashNotFoundInChain { block_hash: BlockHash },
-    #[error(
-        "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
-    )]
-    AppendChainDoesntConnect { chain_tip: BlockNumHash, other_chain_fork: BlockNumHash },
-
-    /// Only used for TestExecutor
-    ///
-    /// Note: this is not feature gated for convenience.
-    #[error("Execution unavailable for tests")]
-    UnavailableForTest,
-}
-
-impl BlockExecutionError {
-    /// Returns `true` if the error is fatal.
-    pub fn is_fatal(&self) -> bool {
-        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
-    }
+    #[error("Transaction error on pipeline status update: {inner:?}")]
+    PipelineStatusUpdate { inner: String },
+    #[error("DB Error during transaction execution: {inner:?}")]
+    DBError { inner: String },
 }
