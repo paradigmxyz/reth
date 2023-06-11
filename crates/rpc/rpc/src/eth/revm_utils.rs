@@ -169,8 +169,6 @@ where
     Ok(())
 }
 
-//
-
 /// Prepares the [Env] for execution.
 ///
 /// Does not commit any changes to the underlying database.
