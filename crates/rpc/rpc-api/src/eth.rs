@@ -4,8 +4,8 @@ use reth_primitives::{
     H256, H64, U256, U64,
 };
 use reth_rpc_types::{
-    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock,
-    SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
+    state::StateOverride, BlockOverrides, CallRequest, EIP1186AccountProofResponse, FeeHistory,
+    Index, RichBlock, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -143,6 +143,7 @@ pub trait EthApi {
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes>;
 
     /// Generates an access list for a transaction.
