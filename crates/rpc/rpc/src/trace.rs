@@ -120,13 +120,7 @@ where
         let (res, _) = self
             .inner
             .eth_api
-            .inspect_call_at(
-                call,
-                at,
-                Default::default(),
-                BlockOverrides::default(),
-                &mut inspector,
-            )
+            .inspect_call_at(call, at, Default::default(), &mut inspector)
             .await?;
 
         let trace_res =

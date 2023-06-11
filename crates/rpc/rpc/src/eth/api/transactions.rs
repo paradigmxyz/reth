@@ -139,7 +139,6 @@ pub trait EthTransactions: Send + Sync {
         request: CallRequest,
         at: BlockId,
         overrides: EvmOverrides,
-        block_overrides: BlockOverrides,
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
@@ -463,7 +462,6 @@ where
         request: CallRequest,
         at: BlockId,
         overrides: EvmOverrides,
-        block_overrides: BlockOverrides,
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
