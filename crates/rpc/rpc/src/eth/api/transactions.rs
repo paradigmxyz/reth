@@ -208,29 +208,25 @@ where
             } else {
                 // No pending block, use latest
                 at = BlockId::Number(BlockNumberOrTag::Latest);
-                // Modify the latest values
-                let block_hash =
-                self.client().block_hash_for_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                let block = self.
-                    block_by_id(at)
-                    .await?
+                // Update the latest values for the basefee, timestamp and number
+                let block_hash = self
+                    .client()
+                    .block_hash_for_id(at)?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                let block = 
+                    self.block_by_id(at).await?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
                 let (cfg, mut env) = self.cache().get_evm_env(block_hash).await?;
-                env.basefee = U256::from(block
-                    .header
-                    .next_block_base_fee()
-                    .unwrap());
-                env.timestamp = U256::from(block
-                    .header
-                    .timestamp +
-                    12);
+                env.basefee = U256::from(block.header.next_block_base_fee().unwrap());
+                env.timestamp = U256::from(block.header.timestamp + 12);
                 env.number = U256::from(block.timestamp);
                 return Ok((cfg, env, block_hash.into()))
             }
         } else {
-            //  Use cached values if there is not pending block
-            let block_hash =
-                self.client().block_hash_for_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            //  Use cached values if there is no pending block
+            let block_hash = self
+                .client()
+                .block_hash_for_id(at)?
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
             let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
             Ok((cfg, env, block_hash.into()))
         }
