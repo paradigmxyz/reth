@@ -230,10 +230,6 @@ where
         Ok(self.tree.pending_block())
     }
 
-    fn pending_header(&self) -> Result<Option<SealedHeader>> {
-        Ok(self.tree.pending_header())
-    }
-
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.database.provider()?.ommers(id)
     }
