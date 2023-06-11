@@ -213,7 +213,7 @@ where
                     .client()
                     .block_hash_for_id(at)?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                let block = 
+                let block =
                     self.block_by_id(at).await?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
                 let (cfg, mut env) = self.cache().get_evm_env(block_hash).await?;
                 env.basefee = U256::from(block.header.next_block_base_fee().unwrap());
