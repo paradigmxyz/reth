@@ -51,7 +51,7 @@
 //!     .add_stages(
 //!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)
 //!     )
-//!     .build(db, chain);
+//!     .build(db, MAINNET.clone());
 //! ```
 mod error;
 mod pipeline;
