@@ -75,7 +75,7 @@ impl TestTransaction {
     {
         let mut tx = self.inner();
         f(tx.tx_mut())?;
-        tx.commit().expect("failec to commit");
+        tx.commit().expect("failed to commit");
         Ok(())
     }
 
