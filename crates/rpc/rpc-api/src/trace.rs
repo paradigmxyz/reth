@@ -2,7 +2,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, Bytes, H256};
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
-    CallRequest, Index,
+    BlockOverrides, CallRequest, Index,
 };
 use std::collections::HashSet;
 
@@ -17,6 +17,7 @@ pub trait TraceApi {
         call: CallRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<TraceResults>;
 
     /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed

@@ -2,7 +2,7 @@ use crate::{
     eth::{
         cache::EthStateCache,
         error::{EthApiError, EthResult},
-        revm_utils::{inspect, prepare_call_env},
+        revm_utils::{inspect, prepare_call_env, EvmOverrides},
         utils::recover_raw_transaction,
         EthTransactions,
     },
@@ -21,7 +21,7 @@ use reth_revm::{
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
-    BlockError, CallRequest, Index, TransactionInfo,
+    BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
 use reth_tasks::TaskSpawner;
 use revm::primitives::Env;
@@ -100,9 +100,10 @@ where
         call: CallRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> EthResult<TraceResults> {
         self.on_blocking_task(|this| async move {
-            this.try_trace_call(call, trace_types, block_id).await
+            this.try_trace_call(call, trace_types, block_id, block_overrides).await
         })
         .await
     }
@@ -112,6 +113,7 @@ where
         call: CallRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> EthResult<TraceResults> {
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let config = tracing_config(&trace_types);
@@ -120,7 +122,7 @@ where
         let (res, _) = self
             .inner
             .eth_api
-            .inspect_call_at(call, at, Default::default(), &mut inspector)
+            .inspect_call_at(call, at, EvmOverrides::new(None, block_overrides), &mut inspector)
             .await?;
 
         let trace_res =
@@ -388,9 +390,10 @@ where
         call: CallRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_call(self, call, trace_types, block_id).await?)
+        Ok(TraceApi::trace_call(self, call, trace_types, block_id, block_overrides).await?)
     }
 
     /// Handler for `trace_callMany`
