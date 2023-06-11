@@ -227,6 +227,9 @@ where
 
         self.init_env(&block.header, total_difficulty);
 
+        #[cfg(feature = "optimism")]
+        let mut l1_cost_oracle = crate::optimism::OptimismGasCostOracle::default();
+
         let mut cumulative_gas_used = 0;
         let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
         for (transaction, sender) in block.body.iter().zip(senders) {
@@ -250,6 +253,15 @@ where
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
+            #[cfg(feature = "optimism")]
+            let l1_cost = l1_cost_oracle
+                .calculate_l1_cost(self.db(), block.header.number, transaction.clone())
+                .map_err(|db_err| Error::DBError { inner: db_err.to_string() })?;
+
+            // TODO: inject l1 cost into resulting state
+            // TODO: better manage the optimism flag in this function
+
+            #[cfg(feature = "optimism")]
             if transaction.is_deposit() && !matches!(result, ExecutionResult::Success { .. }) {
                 // If the deposit transaction failed, the deposit must still be included.
                 // In this case, we need to increment the sender nonce and disregard the
@@ -268,6 +280,7 @@ where
                     cumulative_gas_used,
                     bloom: Bloom::zero(),
                     logs: vec![],
+                    deposit_nonce: None, // TODO: add correct deposit nonce
                 });
                 post_state.finish_transition();
                 continue
@@ -285,18 +298,18 @@ where
             cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            post_state.add_receipt(
-                block.number,
-                Receipt {
-                    tx_type: transaction.tx_type(),
-                    // Success flag was added in `EIP-658: Embedding transaction status code in
-                    // receipts`.
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    // convert to reth log
-                    logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-                },
-            );
+            post_state.add_receipt(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                bloom: logs_bloom(logs.iter()),
+                logs,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None, // TODO: add correct deposit nonce
+            });
+            post_state.finish_transition();
         }
 
         Ok((post_state, cumulative_gas_used))
