@@ -16,8 +16,7 @@
 //! # use reth_primitives::MAINNET;
 //! use reth_db::mdbx::test_utils::create_test_rw_db;
 //!
-//! # let chain = MAINNET.clone();
-//! # let factory = Factory::new(chain.clone());
+//! # let factory = Factory::new(MAINNET.clone());
 //! # let db = create_test_rw_db();
 //! // Build a pipeline with all offline stages.
 //! # let pipeline =
@@ -29,7 +28,6 @@
 //! # use reth_stages::{StageSet, sets::OfflineStages};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
-//! # use std::sync::Arc;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
 //! # let factory = Factory::new(MAINNET.clone());
 //! Pipeline::builder()

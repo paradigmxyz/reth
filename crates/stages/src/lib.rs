@@ -43,8 +43,7 @@
 //! #    db.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(H256::default());
-//! # let chain = MAINNET.clone();
-//! # let factory = Factory::new(chain.clone());
+//! # let factory = Factory::new(MAINNET.clone());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
