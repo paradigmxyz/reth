@@ -17,7 +17,7 @@ use revm::{
     db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
         hash_map::{self, Entry},
-        Account as RevmAccount, AccountInfo, ResultAndState,
+        Account as RevmAccount, AccountInfo, ExecutionResult, ResultAndState,
     },
     EVM,
 };
@@ -240,8 +240,38 @@ where
                 }
                 .into())
             }
+
+            #[cfg(feature = "optimism")]
+            if let Some(m) = transaction.mint() {
+                // Add balance to the caller account equivalent to the minted amount
+                self.increment_account_balance(sender, U256::from(m), &mut post_state)?;
+            }
+
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
+
+            if transaction.is_deposit() && !matches!(result, ExecutionResult::Success { .. }) {
+                // If the deposit transaction failed, the deposit must still be included.
+                // In this case, we need to increment the sender nonce and disregard the
+                // state changes. The tx is invalid so it is also recorded as using all gas.
+                let mut acc = self.db().load_account(sender).map_err(|_| Error::ProviderError)?;
+                let old = to_reth_acc(&acc.info);
+                acc.info.nonce += 1;
+                let new = to_reth_acc(&acc.info);
+
+                post_state.change_account(sender, old, new);
+                cumulative_gas_used += transaction.gas_limit();
+
+                post_state.add_receipt(Receipt {
+                    tx_type: transaction.tx_type(),
+                    success: false,
+                    cumulative_gas_used,
+                    bloom: Bloom::zero(),
+                    logs: vec![],
+                });
+                post_state.finish_transition();
+                continue
+            }
 
             // commit changes
             self.commit_changes(
