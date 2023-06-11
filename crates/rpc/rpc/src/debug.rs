@@ -24,7 +24,7 @@ use reth_rpc_types::{
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame, NoopFrame,
         TraceResult,
     },
-    BlockError, BlockOverrides, CallRequest, RichBlock,
+    BlockError, CallRequest, RichBlock,
 };
 use reth_tasks::TaskSpawner;
 use revm::primitives::Env;

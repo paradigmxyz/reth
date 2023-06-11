@@ -54,17 +54,13 @@ where
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
-        block_overrides: Option<BlockOverrides>,
+        _block_overrides: Option<BlockOverrides>,
     ) -> EthResult<Bytes> {
         let (res, _env) = self
             .transact_call_at(
                 request,
                 block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
                 state_overrides.into(),
-                match block_overrides {
-                    Some(overrides) => overrides,
-                    None => BlockOverrides::default(),
-                },
             )
             .await?;
 

@@ -21,7 +21,7 @@ use reth_revm::{
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
-    BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
+    BlockError, CallRequest, Index, TransactionInfo,
 };
 use reth_tasks::TaskSpawner;
 use revm::primitives::Env;

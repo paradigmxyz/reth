@@ -24,8 +24,8 @@ use reth_revm::{
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
-    BlockOverrides, CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt,
-    TransactionRequest, TypedTransactionRequest,
+    CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
@@ -130,7 +130,6 @@ pub trait EthTransactions: Send + Sync {
         request: CallRequest,
         at: BlockId,
         overrides: EvmOverrides,
-        block_overrides: BlockOverrides,
     ) -> EthResult<(ResultAndState, Env)>;
 
     /// Executes the call request at the given [BlockId]
@@ -452,7 +451,6 @@ where
         request: CallRequest,
         at: BlockId,
         overrides: EvmOverrides,
-        block_overrides: BlockOverrides,
     ) -> EthResult<(ResultAndState, Env)> {
         self.with_call_at(request, at, overrides, |mut db, env| transact(&mut db, env)).await
     }
