@@ -188,7 +188,6 @@ where
                         call,
                         &mut db,
                         Default::default(),
-                        BlockOverrides::default(),
                     )?;
                     let config = tracing_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);

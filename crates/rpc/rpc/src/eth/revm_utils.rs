@@ -178,7 +178,6 @@ pub(crate) fn prepare_call_env<DB>(
     request: CallRequest,
     db: &mut CacheDB<DB>,
     overrides: EvmOverrides,
-    block_overrides: BlockOverrides,
 ) -> EthResult<Env>
 where
     DB: DatabaseRef,
@@ -206,7 +205,10 @@ where
         apply_state_overrides(state_overrides, db)?;
     }
 
-    apply_block_overrides(block_overrides, &mut env.block);
+    // apply block overrides
+    if let Some(block_overrides) = overrides.block {
+        apply_block_overrides(*block_overrides, &mut env.block);
+    }
 
     if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
         trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap");
