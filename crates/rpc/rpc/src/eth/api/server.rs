@@ -218,7 +218,7 @@ where
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
-        block_overrides: Option<BlockOverrides>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
         Ok(self

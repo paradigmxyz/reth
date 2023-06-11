@@ -123,7 +123,7 @@ pub trait EngineEthApi {
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
-        block_overrides: Option<BlockOverrides>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes>;
 
     /// Returns code at a given address at given block number.

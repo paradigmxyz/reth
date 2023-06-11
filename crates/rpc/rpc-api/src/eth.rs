@@ -143,7 +143,7 @@ pub trait EthApi {
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
-        block_overrides: Option<BlockOverrides>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes>;
 
     /// Generates an access list for a transaction.

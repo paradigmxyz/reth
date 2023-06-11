@@ -54,7 +54,7 @@ where
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
-        _block_overrides: Option<BlockOverrides>,
+        _block_overrides: Option<Box<BlockOverrides>>,
     ) -> EthResult<Bytes> {
         let (res, _env) = self
             .transact_call_at(
