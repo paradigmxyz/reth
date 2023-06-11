@@ -27,4 +27,5 @@ pub use factory::Factory;
 pub mod test_utils;
 
 #[cfg(feature = "optimism")]
+/// Optimism-specific utilities for the executor
 pub mod optimism;

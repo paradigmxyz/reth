@@ -173,6 +173,9 @@ mod tests {
                 logs,
             },
             bloom,
+            logs,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
         };
         let receipt = vec![receipt];
         let root = calculate_receipt_root(&receipt);

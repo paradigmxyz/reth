@@ -259,7 +259,7 @@ where
                 .map_err(|db_err| Error::DBError { inner: db_err.to_string() })?;
 
             // TODO: inject l1 cost into resulting state
-            // TODO: better manage the optimism flag in this function
+            // TODO: fix the use of the optimism flag in this function
 
             #[cfg(feature = "optimism")]
             if transaction.is_deposit() && !matches!(result, ExecutionResult::Success { .. }) {
