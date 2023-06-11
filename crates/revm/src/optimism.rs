@@ -10,13 +10,18 @@ const SCALAR_SLOT: u64 = 6;
 const ZERO_BYTE_COST: u64 = 4;
 const NON_ZERO_BYTE_COST: u64 = 16;
 
-/// OptimismGasCostOracle
+/// Optimism Gas Cost Oracle
 ///
-/// This is used to calculate the gas cost of a transaction on the L1 chain.
+/// This struct is used to calculate the gas cost of a transaction on the L1 chain.
+/// The L1 block contract on L2 is used to propagate changes to the gas cost over time,
+/// so we need to fetch it from the Reth database.
+///
+/// To make this more efficient, we cache the values and only fetch them when the block
+/// number changes.
 #[derive(Default)]
 pub struct OptimismGasCostOracle {
-    /// The block number of the last time the L1 gas cost was updated.
-    pub block_num: u64,
+    /// The cached block number
+    pub block_number: Option<u64>,
     /// The base fee of the L1 chain.
     pub l1_base_fee: U256,
     /// The overhead value used to calculate the gas cost.
@@ -26,7 +31,7 @@ pub struct OptimismGasCostOracle {
 }
 
 impl OptimismGasCostOracle {
-    /// Calculate the gas cost of a transaction on the L1 chain.
+    /// Calculate the gas cost of a transaction based on L1 block data posted on L2
     pub fn calculate_l1_cost<DB: DatabaseRef>(
         &mut self,
         db: &mut DB,
@@ -41,9 +46,8 @@ impl OptimismGasCostOracle {
             return Ok(None)
         }
 
-        if block_num != self.block_num {
+        if self.block_number.cmp(&Some(block_num)).is_ne() {
             let l1_block_address = Address::from_str(L1_BLOCK_CONTRACT).unwrap();
-
             self.l1_base_fee = db.storage(l1_block_address, U256::from(L1_BASE_FEE_SLOT))?;
             self.overhead = db.storage(l1_block_address, U256::from(OVERHEAD_SLOT))?;
             self.scalar = db.storage(l1_block_address, U256::from(SCALAR_SLOT))?;
