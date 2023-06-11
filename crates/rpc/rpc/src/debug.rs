@@ -302,7 +302,7 @@ where
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
-                GethDebugTracerType::JsTracer(_) => {
+                GethDebugTracerType::JsTracer(code) => {
                     Err(EthApiError::Unsupported("javascript tracers are unsupported."))
                 }
             }
