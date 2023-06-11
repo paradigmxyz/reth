@@ -7,6 +7,10 @@ use thiserror::Error;
 pub enum BlockValidationError {
     #[error("EVM reported invalid transaction ({hash:?}): {message}")]
     EVM { hash: H256, message: String },
+    #[error("Verification failed")]
+    VerificationFailed,
+    #[error("Fatal internal error")]
+    ExecutionFatalError,
     #[error("Failed to recover sender for transaction")]
     SenderRecoveryError,
     #[error("Receipt root {got:?} is different than expected {expected:?}.")]

@@ -702,6 +702,12 @@ impl Transaction {
         }
     }
 
+    /// Returns whether or not the transaction is an Optimism Deposited transaction.
+    #[cfg(feature = "optimism")]
+    pub fn is_deposit(&self) -> bool {
+        matches!(self, Transaction::Deposit(_))
+    }
+
     /// Encodes EIP-155 arguments into the desired buffer. Only encodes values for legacy
     /// transactions.
     pub(crate) fn encode_eip155_fields(&self, out: &mut dyn bytes::BufMut) {

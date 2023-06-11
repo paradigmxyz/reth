@@ -1,0 +1,58 @@
+[package]
+name = "reth-executor"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine",
+]
+
+[dependencies]
+# reth 
+reth-primitives = { path = "../primitives" }
+reth-interfaces = { path = "../interfaces" }
+reth-revm = { path = "../revm" }
+reth-revm-inspectors = { path = "../revm/revm-inspectors" }
+reth-rlp = { path = "../rlp" }
+reth-db = { path = "../storage/db" }
+reth-provider = { path = "../storage/provider" }
+
+# revm
+revm = { version = "3.0.0" }
+
+# common
+async-trait = "0.1.57"
+thiserror = "1.0.37"
+auto_impl = "1.0"
+tracing = "0.1.37"
+tokio = { version = "1.21.2", features = ["sync"] }
+
+# mics
+aquamarine = "0.3.0"
+parking_lot = { version = "0.12", optional = true }
+
+triehash = "0.8"
+# See to replace hashers to simplify libraries
+plain_hasher = "0.2"
+hash-db = "0.15"
+# todo replace with faster rlp impl
+rlp = { version = "0.5", default-features = false }
+# replace with tiny-keccak (it is faster hasher)
+sha3 = { version = "0.10", default-features = false }
+
+
+[dev-dependencies]
+reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
+reth-primitives = { path = "../primitives", features = ["test-utils"] }
+reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
+parking_lot = "0.12"
+
+[features]
+test-utils = ["parking_lot"]
+optimism = []
