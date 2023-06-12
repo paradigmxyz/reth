@@ -53,7 +53,7 @@ In the meantime, consider setting up [observability](./observability.md) to moni
 
 <!-- TODO: Add more logs to help node operators debug any weird CL to EL messages! -->
 
-[installation]: ./../installation//installation.md
+[installation]: ./../installation/installation.md
 [docs]: https://github.com/paradigmxyz/reth/tree/main/docs
 [metrics]: https://github.com/paradigmxyz/reth/blob/main/docs/design/metrics.md#current-metrics
 
