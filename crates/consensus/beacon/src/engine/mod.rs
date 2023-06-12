@@ -1488,7 +1488,7 @@ mod tests {
         let (consensus_engine, env) = setup_consensus_engine(
             chain_spec,
             VecDeque::from([
-                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true }),
+                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1) }),
                 Err(StageError::ChannelClosed),
             ]),
             Vec::default(),
@@ -1504,7 +1504,9 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconConsensusEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(
+                Err(BeaconConsensusEngineError::Pipeline(n))
+            ) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -1520,10 +1522,7 @@ mod tests {
         );
         let (mut consensus_engine, env) = setup_consensus_engine(
             chain_spec,
-            VecDeque::from([Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(max_block),
-                done: true,
-            })]),
+            VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(max_block) })]),
             Vec::default(),
         );
         consensus_engine.sync.set_max_block(max_block);
@@ -1563,10 +1562,7 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
+                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
                 Vec::default(),
             );
 
@@ -1594,10 +1590,7 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
+                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
                 Vec::default(),
             );
 
@@ -1643,8 +1636,8 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
                 VecDeque::from([
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
                 ]),
                 Vec::default(),
             );
@@ -1691,10 +1684,7 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
+                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
                 Vec::default(),
             );
 
@@ -1729,8 +1719,8 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
                 VecDeque::from([
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
                 ]),
                 Vec::default(),
             );
@@ -1778,8 +1768,8 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
                 VecDeque::from([
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
                 ]),
                 Vec::default(),
             );
@@ -1824,10 +1814,7 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
+                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
                 Vec::default(),
             );
 
@@ -1857,10 +1844,7 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
+                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
                 Vec::default(),
             );
 
@@ -1903,10 +1887,7 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
+                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
                 Vec::default(),
             );
 
@@ -1960,10 +1941,7 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
+                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
                 Vec::from([exec_result2]),
             );
 

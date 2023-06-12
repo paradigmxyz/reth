@@ -70,10 +70,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
         let range = input.next_block_range();
         // Update the header range on the downloader
         self.downloader.set_download_range(range.clone())?;
@@ -151,11 +147,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
-        let done = highest_block == to_block;
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(highest_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
-            done,
         })
     }
 
@@ -230,14 +224,10 @@ fn stage_checkpoint<DB: Database>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
-    };
+    use crate::test_utils::{ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner};
     use assert_matches::assert_matches;
     use reth_primitives::stage::StageUnitCheckpoint;
     use test_utils::*;
-
-    stage_test_suite_ext!(BodyTestRunner, body);
 
     /// Checks that the stage downloads at most `batch_size` blocks.
     #[tokio::test]
@@ -271,7 +261,7 @@ mod tests {
                     processed, // 1 seeded block body + batch size
                     total // seeded headers
                 }))
-            }, done: false }) if block_number < 200 &&
+            }}) if block_number < 200 &&
                 processed == 1 + batch_size && total == previous_stage
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
@@ -308,8 +298,7 @@ mod tests {
                         processed,
                         total
                     }))
-                },
-                done: true
+                }
             }) if processed == total && total == previous_stage
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
@@ -344,7 +333,7 @@ mod tests {
                     processed,
                     total
                 }))
-            }, done: false }) if block_number >= 10 &&
+            }}) if block_number >= 10 &&
                 processed == 1 + batch_size && total == previous_stage
         );
         let first_run_checkpoint = first_run.unwrap().checkpoint;
@@ -364,7 +353,7 @@ mod tests {
                     processed,
                     total
                 }))
-            }, done: true }) if block_number > first_run_checkpoint.block_number &&
+            }}) if block_number > first_run_checkpoint.block_number &&
                 processed == total && total == previous_stage
         );
         assert_matches!(
@@ -404,7 +393,7 @@ mod tests {
                     processed,
                     total
                 }))
-            }, done: true }) if block_number == previous_stage &&
+            }}) if block_number == previous_stage &&
                 processed == total && total == previous_stage
         );
         let checkpoint = output.unwrap().checkpoint;

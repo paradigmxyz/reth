@@ -10,6 +10,7 @@ use std::{
     cmp::{max, min},
     ops::RangeInclusive,
 };
+use tracing::warn;
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -45,8 +46,7 @@ impl ExecInput {
 
     /// Return next block range that needs to be executed.
     pub fn next_block_range(&self) -> RangeInclusive<BlockNumber> {
-        let (range, _) = self.next_block_range_with_threshold(u64::MAX);
-        range
+        self.next_block_range_with_threshold(u64::MAX)
     }
 
     /// Return true if this is the first block range to execute.
@@ -55,19 +55,15 @@ impl ExecInput {
     }
 
     /// Return the next block range to execute.
-    /// Return pair of the block range and if this is final block range.
-    pub fn next_block_range_with_threshold(
-        &self,
-        threshold: u64,
-    ) -> (RangeInclusive<BlockNumber>, bool) {
+    /// Return pair of the block range.
+    pub fn next_block_range_with_threshold(&self, threshold: u64) -> RangeInclusive<BlockNumber> {
         let current_block = self.checkpoint();
         let start = current_block.block_number + 1;
         let target = self.target();
 
         let end = min(target, current_block.block_number.saturating_add(threshold));
 
-        let is_final_range = end == target;
-        (start..=end, is_final_range)
+        start..=end
     }
 
     /// Return the next block range determined the number of transactions within it.
@@ -77,7 +73,7 @@ impl ExecInput {
         &self,
         tx: &Transaction<'_, DB>,
         tx_threshold: u64,
-    ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
+    ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>), StageError> {
         let start_block = self.next_block();
         let start_block_body = tx
             .get::<tables::BlockBodyIndices>(start_block)?
@@ -98,8 +94,7 @@ impl ExecInput {
                 break
             }
         }
-        let is_final_range = end_block_number >= target_block;
-        Ok((first_tx_number..=last_tx_number, start_block..=end_block_number, is_final_range))
+        Ok((first_tx_number..=last_tx_number, start_block..=end_block_number))
     }
 }
 
@@ -124,7 +119,7 @@ impl UnwindInput {
     pub fn unwind_block_range_with_threshold(
         &self,
         threshold: u64,
-    ) -> (RangeInclusive<BlockNumber>, BlockNumber, bool) {
+    ) -> (RangeInclusive<BlockNumber>, BlockNumber) {
         // +1 is to skip the block we're unwinding to
         let mut start = self.unwind_to + 1;
         let end = self.checkpoint;
@@ -133,8 +128,7 @@ impl UnwindInput {
 
         let unwind_to = start - 1;
 
-        let is_final_range = unwind_to == self.unwind_to;
-        (start..=end.block_number, unwind_to, is_final_range)
+        (start..=end.block_number, unwind_to)
     }
 }
 
@@ -143,14 +137,14 @@ impl UnwindInput {
 pub struct ExecOutput {
     /// How far the stage got.
     pub checkpoint: StageCheckpoint,
-    /// Whether or not the stage is done.
-    pub done: bool,
 }
 
 impl ExecOutput {
-    /// Mark the stage as done, checkpointing at the given place.
-    pub fn done(checkpoint: StageCheckpoint) -> Self {
-        Self { checkpoint, done: true }
+    pub fn is_done(&self, input: ExecInput) -> bool {
+        if self.checkpoint.block_number > input.target() {
+            warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the execution target");
+        }
+        self.checkpoint.block_number >= input.target()
     }
 }
 
@@ -159,6 +153,15 @@ impl ExecOutput {
 pub struct UnwindOutput {
     /// The checkpoint at which the stage has unwound to.
     pub checkpoint: StageCheckpoint,
+}
+
+impl UnwindOutput {
+    pub fn is_done(&self, input: UnwindInput) -> bool {
+        if self.checkpoint.block_number < input.unwind_to {
+            warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the unwind target");
+        }
+        self.checkpoint.block_number <= input.unwind_to
+    }
 }
 
 /// A stage is a segmented part of the syncing process of the node.

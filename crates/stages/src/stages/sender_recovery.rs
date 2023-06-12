@@ -59,11 +59,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
-        let (tx_range, block_range, is_final_range) =
+        let (tx_range, block_range) =
             input.next_block_range_with_transaction_threshold(tx, self.commit_threshold)?;
         let end_block = *block_range.end();
 
@@ -73,7 +69,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
-                done: is_final_range,
             })
         }
 
@@ -151,7 +146,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
-            done: is_final_range,
         })
     }
 
@@ -161,7 +155,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (_, unwind_to) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Lookup latest tx id that we should unwind to
         let latest_tx_id = tx.block_body_indices(unwind_to)?.last_tx_num();
@@ -229,11 +223,9 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
+        UnwindStageTestRunner,
     };
-
-    stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
 
     /// Execute a block range with a single transaction
     #[tokio::test]
@@ -268,7 +260,7 @@ mod tests {
                     processed: 1,
                     total: 1
                 }))
-            }, done: true }) if block_number == previous_stage
+            }}) if block_number == previous_stage
         );
 
         // Validate the stage execution
@@ -307,17 +299,17 @@ mod tests {
             .unwrap_or(previous_stage);
         assert_matches!(result, Ok(_));
         assert_eq!(
-            result.unwrap(),
-            ExecOutput {
+            result.as_ref().unwrap(),
+            &ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
                         processed: runner.tx.table::<tables::TxSenders>().unwrap().len() as u64,
                         total: total_transactions
                     }
-                ),
-                done: false
+                )
             }
         );
+        assert!(!result.unwrap().is_done(first_input));
 
         // Execute second time to completion
         runner.set_threshold(u64::MAX);
@@ -332,8 +324,7 @@ mod tests {
             &ExecOutput {
                 checkpoint: StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
                     EntitiesCheckpoint { processed: total_transactions, total: total_transactions }
-                ),
-                done: true
+                )
             }
         );
 

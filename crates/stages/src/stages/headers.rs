@@ -208,7 +208,7 @@ where
         // Nothing to sync
         if gap.is_closed() {
             info!(target: "sync::stages::headers", checkpoint = %current_checkpoint, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput::done(current_checkpoint))
+            return Ok(ExecOutput { checkpoint: current_checkpoint })
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -311,12 +311,10 @@ where
             Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(checkpoint)
                     .with_headers_stage_checkpoint(stage_checkpoint),
-                done: true,
             })
         } else {
             Ok(ExecOutput {
                 checkpoint: current_checkpoint.with_headers_stage_checkpoint(stage_checkpoint),
-                done: false,
             })
         }
     }
@@ -587,7 +585,7 @@ mod tests {
                     total,
                 }
             }))
-        }, done: true }) if block_number == tip.number &&
+        }}) if block_number == tip.number &&
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);
@@ -681,7 +679,7 @@ mod tests {
                     total,
                 }
             }))
-        }, done: false }) if block_number == checkpoint &&
+        }}) if block_number == checkpoint &&
             from == checkpoint && to == previous_stage &&
             processed == checkpoint + 500 && total == tip.number);
 
@@ -704,7 +702,7 @@ mod tests {
                     total,
                 }
             }))
-        }, done: true }) if block_number == tip.number &&
+        }}) if block_number == tip.number &&
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);
