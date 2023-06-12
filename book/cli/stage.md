@@ -99,7 +99,7 @@ Options:
       --stage <STAGE>
           The name of the stage to run
 
-          [possible values: headers, bodies, senders, execution, accounthashing, storagehashing, hashing, merkle, txlookup, history, accounthistory, storagehistory, totaldifficulty]
+          [possible values: headers, bodies, senders, execution, account-hashing, storage-hashing, hashing, merkle, tx-lookup, history, account-history, storage-history, total-difficulty]
 
       --from <FROM>
           The height to start at
@@ -182,7 +182,7 @@ Arguments:
   <STAGE>
           The name of the stage to drop
 
-          [possible values: headers, bodies, senders, execution, accounthashing, storagehashing, hashing, merkle, txlookup, history, accounthistory, storagehistory, totaldifficulty]
+          [possible values: headers, bodies, senders, execution, account-hashing, storage-hashing, hashing, merkle, tx-lookup, history, account-history, storage-history, total-difficulty]
 
 Options:
       --datadir <DATA_DIR>
@@ -218,9 +218,9 @@ Usage: reth stage dump [OPTIONS] <COMMAND>
 Commands:
   execution
       Execution stage.
-  storagehashing
+  storage-hashing
       StorageHashing stage.
-  accounthashing
+  account-hashing
       AccountHashing stage.
   merkle
       Merkle stage.

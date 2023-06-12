@@ -39,21 +39,15 @@ Commands:
   db
           Database debugging utilities
   stage
-          Run a single stage
-  dump-stage
-          Dumps a stage from a range into a new database
-  drop-stage
-          Drops a stage's tables from the database
+          Manipulate individual stages.
   p2p
           P2P Debugging utilities
-  test-chain
-          Run Ethereum blockchain tests
   test-vectors
           Generate Test Vectors
   config
           Write config to stdout
-  merkle-debug
-          Debug state root calculation
+  debug
+          Various debug routines
   help
           Print this message or the help of the given subcommand(s)
 
