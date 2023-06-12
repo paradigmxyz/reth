@@ -19,9 +19,7 @@ pub trait AccountExtProvider: Send + Sync {
     fn changed_accounts_with_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> Result<BTreeSet<Address>> {
-        todo!()
-    }
+    ) -> Result<BTreeSet<Address>>;
 
     /// Get basic account information for multiple accounts. A more efficient version than calling
     /// [`AccountProvider::basic_account`] repeatedly.
@@ -30,7 +28,5 @@ pub trait AccountExtProvider: Send + Sync {
     fn basic_accounts(
         &self,
         _iter: impl IntoIterator<Item = Address>,
-    ) -> Result<Vec<(Address, Option<Account>)>> {
-        todo!()
-    }
+    ) -> Result<Vec<(Address, Option<Account>)>>;
 }
