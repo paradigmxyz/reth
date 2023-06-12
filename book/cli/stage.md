@@ -53,7 +53,7 @@ Display:
           Silence all log output
 ```
 
-# `reth stage run`
+## `reth stage run`
 
 ```bash
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> --stage <STAGE>
@@ -172,7 +172,7 @@ Networking:
           Network listening port. default: 30303
 ```
 
-# `reth stage drop`
+## `reth stage drop`
 
 ```bash
 Usage: reth stage drop [OPTIONS] <STAGE>
@@ -209,7 +209,7 @@ Options:
           [default: mainnet]
 ```
 
-# `reth stage dump`
+## `reth stage dump`
 
 ```bash
 Usage: reth stage dump [OPTIONS] <COMMAND>
@@ -252,7 +252,7 @@ Options:
           [default: mainnet]
 ```
 
-## `reth stage dump execution`
+### `reth stage dump execution`
 
 ```bash
 Usage: reth stage dump execution [OPTIONS]
@@ -275,7 +275,7 @@ Options:
               [default: false]
 ```
 
-## `reth stage dump storage-hashing`
+### `reth stage dump storage-hashing`
 
 ```bash
 Usage: reth stage dump storage-hashing [OPTIONS]
@@ -298,7 +298,7 @@ Options:
               [default: false]
 ```
 
-## `reth stage dump account-hashing`
+### `reth stage dump account-hashing`
 
 ```bash
 Usage: reth stage dump account-hashing [OPTIONS]
@@ -321,7 +321,7 @@ Options:
               [default: false]
 ```
 
-## `reth stage dump merkle`
+### `reth stage dump merkle`
 
 ```bash
 Usage: reth stage dump merkle [OPTIONS]
@@ -343,7 +343,7 @@ Options:
               [default: false]
 ```
 
-# `reth stage unwind`
+## `reth stage unwind`
 
 ```bash
 Usage: reth stage unwind [OPTIONS] <COMMAND>
