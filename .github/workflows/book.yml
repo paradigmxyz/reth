@@ -2,14 +2,8 @@ name: book
 on:
   push:
     branches: [main]
-    paths:
-      - 'book/**'
-      - 'book.toml'
   pull_request:
     branches: [main]
-    paths:
-      - 'book/**'
-      - 'book.toml'
   merge_group:
 
 jobs:
