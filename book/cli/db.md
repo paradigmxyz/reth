@@ -14,31 +14,33 @@ Commands:
           Lists the contents of a table
   drop
           Deletes all database entries
+  get
+          Gets the content of a table for the given key
   help
           Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
-          
+
           Defaults to the OS-specific data directory:
-          
+
           - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
           - Windows: `{FOLDERID_RoamingAppData}/reth/`
           - macOS: `$HOME/Library/Application Support/reth/`
-          
+
           [default: default]
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-          
+
           Possible values are either a built-in chain or the path to a chain specification file.
-          
+
           Built-in chains:
           - mainnet
           - goerli
           - sepolia
-          
+
           [default: mainnet]
 
   -h, --help
@@ -47,7 +49,7 @@ Options:
 Display:
   -v, --verbosity...
           Set the minimum log level.
-          
+
           -v      Errors
           -vv     Warnings
           -vvv    Info
@@ -82,12 +84,12 @@ Arguments:
 Options:
   -s, --start <START>
           Where to start iterating
-          
+
           [default: 0]
 
   -l, --len <LEN>
           How many items to take from the walker
-          
+
           [default: 5]
 
   -h, --help
