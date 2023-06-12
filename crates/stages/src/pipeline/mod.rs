@@ -524,6 +524,10 @@ mod tests {
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
+                    .with_checkpoint(Some(StageCheckpoint::new(10)), &db),
+            )
+            .add_stage(
+                TestStage::new(StageId::Other("C"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10) })),
             )
             .with_max_block(10)
@@ -541,27 +545,28 @@ mod tests {
             vec![
                 PipelineEvent::Running {
                     pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_total: 3,
                     stage_id: StageId::Other("A"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
                     pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_total: 3,
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(20) },
                     done: true,
                 },
+                PipelineEvent::Skipped { stage_id: StageId::Other("B") },
                 PipelineEvent::Running {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
-                    stage_id: StageId::Other("B"),
+                    pipeline_position: 3,
+                    pipeline_total: 3,
+                    stage_id: StageId::Other("C"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
-                    stage_id: StageId::Other("B"),
+                    pipeline_position: 3,
+                    pipeline_total: 3,
+                    stage_id: StageId::Other("C"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10) },
                     done: true,
                 },
