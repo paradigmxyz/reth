@@ -21,7 +21,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         _tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()) })
     }
 
     async fn unwind(
@@ -37,13 +37,11 @@ impl<DB: Database> Stage<DB> for FinishStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
+        UnwindStageTestRunner,
     };
     use reth_interfaces::test_utils::generators::{random_header, random_header_range};
     use reth_primitives::SealedHeader;
-
-    stage_test_suite_ext!(FinishTestRunner, finish);
 
     #[derive(Default)]
     struct FinishTestRunner {
@@ -89,7 +87,7 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             if let Some(output) = output {
-                assert!(output.done, "stage should always be done");
+                assert!(output.is_done(input), "stage should always be done");
                 assert_eq!(
                     output.checkpoint.block_number,
                     input.target(),

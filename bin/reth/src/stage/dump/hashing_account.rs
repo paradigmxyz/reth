@@ -76,16 +76,11 @@ async fn dry_run(
 
     let mut exec_output = false;
     while !exec_output {
-        exec_output = exec_stage
-            .execute(
-                &mut tx,
-                reth_stages::ExecInput {
-                    target: Some(to),
-                    checkpoint: Some(StageCheckpoint::new(from)),
-                },
-            )
-            .await?
-            .done;
+        let exec_input = reth_stages::ExecInput {
+            target: Some(to),
+            checkpoint: Some(StageCheckpoint::new(from)),
+        };
+        exec_output = exec_stage.execute(&mut tx, exec_input).await?.is_done(exec_input);
     }
 
     tx.drop()?;

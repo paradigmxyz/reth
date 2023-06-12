@@ -1323,6 +1323,12 @@ where
         Ok(())
     }
 
+    /// Delete stage checkpoint.
+    pub fn delete_stage_checkpoint(&self, id: StageId) -> Result<(), DbError> {
+        self.delete::<tables::SyncStage>(id.to_string(), None)?;
+        Ok(())
+    }
+
     /// Return full table as Vec
     pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DbError>
     where

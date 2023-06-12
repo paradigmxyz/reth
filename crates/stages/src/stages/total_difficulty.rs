@@ -54,11 +54,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        let range = input.next_block_range_with_threshold(self.commit_threshold);
         let (start_block, end_block) = range.clone().into_inner();
 
         debug!(target: "sync::stages::total_difficulty", start_block, end_block, "Commencing sync");
@@ -90,7 +86,6 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
-            done: is_final_range,
         })
     }
 
@@ -100,7 +95,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (_, unwind_to) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
@@ -132,11 +127,9 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
+        UnwindStageTestRunner,
     };
-
-    stage_test_suite_ext!(TotalDifficultyTestRunner, total_difficulty);
 
     #[tokio::test]
     async fn execute_with_intermediate_commit() {
@@ -165,9 +158,10 @@ mod tests {
                     processed,
                     total
                 }))
-            }, done: false }) if block_number == expected_progress && processed == 1 + threshold &&
+            }}) if block_number == expected_progress && processed == 1 + threshold &&
                 total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
         );
+        assert!(!result.unwrap().is_done(first_input));
 
         // Execute second time
         let second_input = ExecInput {
@@ -183,7 +177,7 @@ mod tests {
                     processed,
                     total
                 }))
-            }, done: true }) if block_number == previous_stage && processed == total &&
+            }}) if block_number == previous_stage && processed == total &&
                 total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
         );
 
