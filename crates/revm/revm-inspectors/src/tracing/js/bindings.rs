@@ -1,16 +1,37 @@
 //! Type bindings for js tracing inspector
 
-use crate::tracing::js::builtins::{to_buf, to_buf_value};
+use crate::tracing::js::builtins::{to_buf_value};
 use boa_engine::{
     native_function::NativeFunction, object::FunctionObjectBuilder, Context, JsObject, JsResult,
     JsValue,
 };
 
-use boa_gc::{Gc, GcRefCell};
 use reth_primitives::{Address, Bytes, H256, U256};
 use revm::interpreter::{OpCode, Stack};
 use serde::{Deserialize, Serialize};
-use std::borrow::Borrow;
+
+
+/// A macro that creates a native function that returns a bigint
+macro_rules! bigint {
+    ($value:ident, $ctx:ident) => {
+        FunctionObjectBuilder::new(
+            $ctx,
+            NativeFunction::from_copy_closure(move |_this, _args, ctx| {
+                let bigint = ctx.global_object().get("bigint", ctx)?;
+                if !bigint.is_callable() {
+                    return Ok(JsValue::undefined())
+                }
+                bigint.as_callable().unwrap().call(
+                    &JsValue::undefined(),
+                    &[JsValue::from($value)],
+                    ctx,
+                )
+            }),
+        )
+        .length(0)
+        .build();
+    };
+}
 
 /// The Log object that is passed to the javascript inspector.
 #[derive(Debug)]
@@ -42,8 +63,31 @@ impl StepLog {
     ///
     /// Caution: this expects a global property `bigint` to be present.
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
-        // let Self { stack, op, memory, pc, gas, cost, depth, refund, error, contract } = self;
+        let Self { stack: _, op: _, memory: _, pc, gas, cost, depth, refund, error: _, contract } = self;
         let obj = JsObject::default();
+
+        // fields
+        // TODO memory object
+        // TODO op object
+        // TODO sack object
+        let contract = contract.into_js_object(context)?;
+
+        obj.set("contract", contract, false, context)?;
+
+        // methods
+
+        let get_pc = bigint!(pc, context);
+        let get_gas = bigint!(gas, context);
+        let get_cost = bigint!(cost, context);
+        let get_refund = bigint!(refund, context);
+        let depth = depth as u64;
+        let get_depth = bigint!(depth, context);
+
+        obj.set("getPc", get_pc, false, context)?;
+        obj.set("getGas", get_gas, false, context)?;
+        obj.set("getCost", get_cost, false, context)?;
+        obj.set("getDepth", get_depth, false, context)?;
+        obj.set("getRefund", get_refund, false, context)?;
 
         Ok(obj)
     }
@@ -106,7 +150,7 @@ impl Contract {
         let get_input = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure_with_captures(
-                move |_this, _args, input, ctx| Ok(input.clone()),
+                move |_this, _args, input, _ctx| Ok(input.clone()),
                 input,
             ),
         )
