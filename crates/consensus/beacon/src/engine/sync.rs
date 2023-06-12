@@ -83,12 +83,6 @@ where
         self.metrics.active_block_downloads.set(self.inflight_full_block_requests.len() as f64);
     }
 
-    /// Sets the max block value for testing
-    #[cfg(test)]
-    pub(crate) fn set_max_block(&mut self, block: BlockNumber) {
-        self.max_block = Some(block);
-    }
-
     /// Cancels all full block requests that are in progress.
     pub(crate) fn clear_full_block_requests(&mut self) {
         self.inflight_full_block_requests.clear();
