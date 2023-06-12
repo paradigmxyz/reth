@@ -47,7 +47,7 @@ pub enum EthApiError {
     BothStateAndStateDiffInOverride(Address),
     /// Other internal error
     #[error(transparent)]
-    Internal(#[from] reth_interfaces::Error),
+    Internal(reth_interfaces::Error),
     /// Error related to signing
     #[error(transparent)]
     Signing(#[from] SignError),
@@ -102,6 +102,32 @@ impl From<EthApiError> for ErrorObject<'static> {
 impl From<EthApiError> for RpcError {
     fn from(error: EthApiError) -> Self {
         RpcError::Call(error.into())
+    }
+}
+
+impl From<reth_interfaces::Error> for EthApiError {
+    fn from(error: reth_interfaces::Error) -> Self {
+        match error {
+            reth_interfaces::Error::Provider(err) => err.into(),
+            err => EthApiError::Internal(err),
+        }
+    }
+}
+
+impl From<reth_interfaces::provider::ProviderError> for EthApiError {
+    fn from(error: reth_interfaces::provider::ProviderError) -> Self {
+        use reth_interfaces::provider::ProviderError;
+        match error {
+            ProviderError::HeaderNotFound(_) |
+            ProviderError::BlockHashNotFound(_) |
+            ProviderError::BestBlockNotFound |
+            ProviderError::FinalizedBlockNotFound |
+            ProviderError::SafeBlockNotFound |
+            ProviderError::BlockNumberForTransactionIndexNotFound |
+            ProviderError::TotalDifficultyNotFound { .. } |
+            ProviderError::UnknownBlockHash(_) => EthApiError::UnknownBlockNumber,
+            err => EthApiError::Internal(err.into()),
+        }
     }
 }
 
