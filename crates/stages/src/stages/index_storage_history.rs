@@ -54,7 +54,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             tx,
             input.checkpoint(),
             // It is important to provide the full block range into the checkpoint,
-            // not the one accounting for commit threshold.
+            // not the one accounting for commit threshold, to get the correct range end.
             &input.next_block_range(),
         )?;
 
