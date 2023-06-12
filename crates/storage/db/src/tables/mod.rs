@@ -53,6 +53,15 @@ pub enum TableType {
 /// Number of tables that should be present inside database.
 pub const NUM_TABLES: usize = 25;
 
+/// The table visitor
+pub trait TableViewer<R> {
+    /// Type of error to return
+    type Error;
+
+    /// Allows to operate on specific table type
+    fn view<T: Table>(&self) -> Result<R, Self::Error>;
+}
+
 macro_rules! tables {
     ([$(($table:ident, $type:expr)),*]) => {
         #[derive(Debug, PartialEq, Copy, Clone)]
@@ -82,6 +91,18 @@ macro_rules! tables {
                 match self {
                     $(Tables::$table => {
                         $type
+                    },)*
+                }
+            }
+
+            /// Allows to operate on specific table type
+            pub fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
+            where
+                T: TableViewer<R>,
+            {
+                match self {
+                    $(Tables::$table => {
+                        visitor.view::<$table>()
                     },)*
                 }
             }
