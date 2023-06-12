@@ -523,14 +523,10 @@ mod tests {
         keccak256,
         proofs::KeccakHasher,
         trie::{BranchNodeCompact, TrieMask},
-        Account, Address, H256, U256,
+        Account, Address, H256, MAINNET, U256,
     };
-    use reth_provider::Transaction;
-    use std::{
-        collections::BTreeMap,
-        ops::{Deref, DerefMut, Mul},
-        str::FromStr,
-    };
+    use reth_provider::{DatabaseProviderRW, ShareableDatabase};
+    use std::{collections::BTreeMap, ops::Mul, str::FromStr};
 
     fn insert_account<'a, TX: DbTxMut<'a>>(
         tx: &mut TX,
@@ -559,10 +555,12 @@ mod tests {
 
     fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let mut tx = factory.provider_rw().unwrap();
         let hashed_address = H256::from_low_u64_be(1);
 
-        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
+        let mut hashed_storage_cursor =
+            tx.tx_ref().cursor_dup_write::<tables::HashedStorage>().unwrap();
         let data = inputs.iter().map(|x| H256::from_str(x).unwrap());
         let value = U256::from(0);
         for key in data {
@@ -571,7 +569,7 @@ mod tests {
 
         // Generate the intermediate nodes on the receiving end of the channel
         let (_, _, trie_updates) =
-            StorageRoot::new_hashed(tx.deref(), hashed_address).root_with_updates().unwrap();
+            StorageRoot::new_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
 
         // 1. Some state transition happens, update the hashed storage to the new value
         let modified_key = H256::from_str(modified).unwrap();
@@ -585,16 +583,16 @@ mod tests {
             .unwrap();
 
         // 2. Calculate full merkle root
-        let loader = StorageRoot::new_hashed(tx.deref(), hashed_address);
+        let loader = StorageRoot::new_hashed(tx.tx_ref(), hashed_address);
         let modified_root = loader.root().unwrap();
 
         // Update the intermediate roots table so that we can run the incremental verification
-        trie_updates.flush(tx.deref()).unwrap();
+        trie_updates.flush(tx.tx_ref()).unwrap();
 
         // 3. Calculate the incremental root
         let mut storage_changes = PrefixSet::default();
         storage_changes.insert(Nibbles::unpack(modified_key));
-        let loader = StorageRoot::new_hashed(tx.deref_mut(), hashed_address)
+        let loader = StorageRoot::new_hashed(tx.tx_mut(), hashed_address)
             .with_changed_prefixes(storage_changes);
         let incremental_root = loader.root().unwrap();
 
@@ -624,9 +622,10 @@ mod tests {
 
             let hashed_address = keccak256(address);
             let db = create_test_rw_db();
-            let mut tx = Transaction::new(db.as_ref()).unwrap();
+            let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+            let tx = factory.provider_rw().unwrap();
             for (key, value) in &storage {
-                tx.put::<tables::HashedStorage>(
+                tx.tx_ref().put::<tables::HashedStorage>(
                     hashed_address,
                     StorageEntry { key: keccak256(key), value: *value },
                 )
@@ -634,7 +633,8 @@ mod tests {
             }
             tx.commit().unwrap();
 
-            let got = StorageRoot::new(tx.deref_mut(), address).root().unwrap();
+            let mut tx =  factory.provider_rw().unwrap();
+            let got = StorageRoot::new(tx.tx_mut(), address).root().unwrap();
             let expected = storage_root(storage.into_iter());
             assert_eq!(expected, got);
         });
@@ -680,7 +680,8 @@ mod tests {
     // This ensures we return an empty root when there are no storage entries
     fn test_empty_storage_root() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let mut tx = factory.provider_rw().unwrap();
 
         let address = Address::random();
         let code = "el buen fla";
@@ -689,10 +690,11 @@ mod tests {
             balance: U256::from(414241124u32),
             bytecode_hash: Some(keccak256(code)),
         };
-        insert_account(&mut *tx, address, account, &Default::default());
+        insert_account(tx.tx_mut(), address, account, &Default::default());
         tx.commit().unwrap();
 
-        let got = StorageRoot::new(tx.deref_mut(), address).root().unwrap();
+        let mut tx = factory.provider_rw().unwrap();
+        let got = StorageRoot::new(tx.tx_mut(), address).root().unwrap();
         assert_eq!(got, EMPTY_ROOT);
     }
 
@@ -700,7 +702,8 @@ mod tests {
     // This ensures that the walker goes over all the storage slots
     fn test_storage_root() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let mut tx = factory.provider_rw().unwrap();
 
         let address = Address::random();
         let storage = BTreeMap::from([
@@ -715,10 +718,11 @@ mod tests {
             bytecode_hash: Some(keccak256(code)),
         };
 
-        insert_account(&mut *tx, address, account, &storage);
+        insert_account(tx.tx_mut(), address, account, &storage);
         tx.commit().unwrap();
 
-        let got = StorageRoot::new(tx.deref_mut(), address).root().unwrap();
+        let mut tx = factory.provider_rw().unwrap();
+        let got = StorageRoot::new(tx.tx_mut(), address).root().unwrap();
 
         assert_eq!(storage_root(storage.into_iter()), got);
     }
@@ -742,12 +746,15 @@ mod tests {
                     state.values().map(|(_, slots)| slots.len()).sum::<usize>();
 
                 let db = create_test_rw_db();
-                let mut tx = Transaction::new(db.as_ref()).unwrap();
+                let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+                let mut tx = factory.provider_rw().unwrap();
 
                 for (address, (account, storage)) in &state {
-                    insert_account(&mut *tx, *address, *account, storage)
+                    insert_account(tx.tx_mut(), *address, *account, storage)
                 }
                 tx.commit().unwrap();
+                let mut tx =  factory.provider_rw().unwrap();
+
                 let expected = state_root(state.into_iter());
 
                 let threshold = 10;
@@ -756,7 +763,7 @@ mod tests {
 
                 let mut intermediate_state: Option<Box<IntermediateStateRootState>> = None;
                 while got.is_none() {
-                    let calculator = StateRoot::new(tx.deref_mut())
+                    let calculator = StateRoot::new(tx.tx_mut())
                         .with_threshold(threshold)
                         .with_intermediate_state(intermediate_state.take().map(|state| *state));
                     match calculator.root_with_progress().unwrap() {
@@ -778,15 +785,17 @@ mod tests {
 
     fn test_state_root_with_state(state: State) {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let mut tx = factory.provider_rw().unwrap();
 
         for (address, (account, storage)) in &state {
-            insert_account(&mut *tx, *address, *account, storage)
+            insert_account(tx.tx_mut(), *address, *account, storage)
         }
         tx.commit().unwrap();
         let expected = state_root(state.into_iter());
 
-        let got = StateRoot::new(tx.deref_mut()).root().unwrap();
+        let mut tx = factory.provider_rw().unwrap();
+        let got = StateRoot::new(tx.tx_mut()).root().unwrap();
         assert_eq!(expected, got);
     }
 
@@ -803,7 +812,8 @@ mod tests {
     #[test]
     fn storage_root_regression() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let tx = factory.provider_rw().unwrap();
         // Some address whose hash starts with 0xB041
         let address3 = Address::from_str("16b07afd1c635f77172e842a000ead9a2a222459").unwrap();
         let key3 = keccak256(address3);
@@ -820,13 +830,15 @@ mod tests {
             .map(|(slot, val)| (H256::from_str(slot).unwrap(), U256::from(val))),
         );
 
-        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
+        let mut hashed_storage_cursor =
+            tx.tx_ref().cursor_dup_write::<tables::HashedStorage>().unwrap();
         for (hashed_slot, value) in storage.clone() {
             hashed_storage_cursor.upsert(key3, StorageEntry { key: hashed_slot, value }).unwrap();
         }
         tx.commit().unwrap();
+        let mut tx = factory.provider_rw().unwrap();
 
-        let account3_storage_root = StorageRoot::new(tx.deref_mut(), address3).root().unwrap();
+        let account3_storage_root = StorageRoot::new(tx.tx_mut(), address3).root().unwrap();
         let expected_root = storage_root_prehashed(storage.into_iter());
         assert_eq!(expected_root, account3_storage_root);
     }
@@ -845,10 +857,13 @@ mod tests {
         );
 
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let mut tx = factory.provider_rw().unwrap();
 
-        let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>().unwrap();
-        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
+        let mut hashed_account_cursor =
+            tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+        let mut hashed_storage_cursor =
+            tx.tx_ref().cursor_dup_write::<tables::HashedStorage>().unwrap();
 
         let mut hash_builder = HashBuilder::default();
 
@@ -891,7 +906,7 @@ mod tests {
             }
             hashed_storage_cursor.upsert(key3, StorageEntry { key: hashed_slot, value }).unwrap();
         }
-        let account3_storage_root = StorageRoot::new(tx.deref_mut(), address3).root().unwrap();
+        let account3_storage_root = StorageRoot::new(tx.tx_mut(), address3).root().unwrap();
         hash_builder.add_leaf(
             Nibbles::unpack(key3),
             &encode_account(account3, Some(account3_storage_root)),
@@ -940,7 +955,7 @@ mod tests {
         assert_eq!(hash_builder.root(), computed_expected_root);
 
         // Check state root calculation from scratch
-        let (root, trie_updates) = StateRoot::new(tx.deref()).root_with_updates().unwrap();
+        let (root, trie_updates) = StateRoot::new(tx.tx_ref()).root_with_updates().unwrap();
         assert_eq!(root, computed_expected_root);
 
         // Check account trie
@@ -1005,7 +1020,7 @@ mod tests {
             H256::from_str("8e263cd4eefb0c3cbbb14e5541a66a755cad25bcfab1e10dd9d706263e811b28")
                 .unwrap();
 
-        let (root, trie_updates) = StateRoot::new(tx.deref())
+        let (root, trie_updates) = StateRoot::new(tx.tx_ref())
             .with_changed_account_prefixes(prefix_set)
             .root_with_updates()
             .unwrap();
@@ -1035,9 +1050,11 @@ mod tests {
         assert_eq!(nibbles2b.inner[..], [0xB, 0x0]);
         assert_eq!(node2a, node2b);
         tx.commit().unwrap();
+        let tx = factory.provider_rw().unwrap();
 
         {
-            let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>().unwrap();
+            let mut hashed_account_cursor =
+                tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
 
             let account = hashed_account_cursor.seek_exact(key2).unwrap().unwrap();
             hashed_account_cursor.delete_current().unwrap();
@@ -1055,7 +1072,7 @@ mod tests {
                 (key6, encode_account(account6, None)),
             ]);
 
-            let (root, trie_updates) = StateRoot::new(tx.deref())
+            let (root, trie_updates) = StateRoot::new(tx.tx_ref())
                 .with_changed_account_prefixes(account_prefix_set)
                 .root_with_updates()
                 .unwrap();
@@ -1085,11 +1102,13 @@ mod tests {
             assert_ne!(node1c.hashes[0], node1b.hashes[0]);
             assert_eq!(node1c.hashes[1], node1b.hashes[1]);
             assert_eq!(node1c.hashes[2], node1b.hashes[2]);
-            tx.drop().unwrap();
+            drop(tx);
         }
 
+        let mut tx = factory.provider_rw().unwrap();
         {
-            let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>().unwrap();
+            let mut hashed_account_cursor =
+                tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
 
             let account2 = hashed_account_cursor.seek_exact(key2).unwrap().unwrap();
             hashed_account_cursor.delete_current().unwrap();
@@ -1110,7 +1129,7 @@ mod tests {
                 (key6, encode_account(account6, None)),
             ]);
 
-            let (root, trie_updates) = StateRoot::new(tx.deref_mut())
+            let (root, trie_updates) = StateRoot::new(tx.tx_mut())
                 .with_changed_account_prefixes(account_prefix_set)
                 .root_with_updates()
                 .unwrap();
@@ -1145,11 +1164,12 @@ mod tests {
     #[test]
     fn account_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let mut tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&mut tx);
 
-        let (got, updates) = StateRoot::new(tx.deref_mut()).root_with_updates().unwrap();
+        let (got, updates) = StateRoot::new(tx.tx_mut()).root_with_updates().unwrap();
         assert_eq!(expected, got);
 
         // Check account trie
@@ -1170,16 +1190,17 @@ mod tests {
 
     fn account_trie_around_extension_node_with_dbtrie() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let mut tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&mut tx);
 
-        let (got, updates) = StateRoot::new(tx.deref_mut()).root_with_updates().unwrap();
+        let (got, updates) = StateRoot::new(tx.tx_mut()).root_with_updates().unwrap();
         assert_eq!(expected, got);
-        updates.flush(tx.deref_mut()).unwrap();
+        updates.flush(tx.tx_mut()).unwrap();
 
         // read the account updates from the db
-        let mut accounts_trie = tx.cursor_read::<tables::AccountsTrie>().unwrap();
+        let mut accounts_trie = tx.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
         let walker = accounts_trie.walk(None).unwrap();
         let mut account_updates = HashMap::new();
         for item in walker {
@@ -1197,8 +1218,9 @@ mod tests {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
 
                 let db = create_test_rw_db();
-                let mut tx = Transaction::new(db.as_ref()).unwrap();
-                let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>().unwrap();
+                let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+                let mut tx = factory.provider_rw().unwrap();
+                let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
 
                 let mut state = BTreeMap::default();
                 for accounts in account_changes {
@@ -1211,7 +1233,7 @@ mod tests {
                         }
                     }
 
-                    let (state_root, trie_updates) = StateRoot::new(tx.deref_mut())
+                    let (state_root, trie_updates) = StateRoot::new(tx.tx_mut())
                         .with_changed_account_prefixes(changes)
                         .root_with_updates()
                         .unwrap();
@@ -1221,7 +1243,7 @@ mod tests {
                         state.clone().into_iter().map(|(key, balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
                     );
                     assert_eq!(expected_root, state_root);
-                    trie_updates.flush(tx.deref_mut()).unwrap();
+                    trie_updates.flush(tx.tx_mut()).unwrap();
                 }
             });
         }
@@ -1230,14 +1252,15 @@ mod tests {
     #[test]
     fn storage_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let mut tx = factory.provider_rw().unwrap();
 
         let hashed_address = H256::random();
         let (expected_root, expected_updates) =
             extension_node_storage_trie(&mut tx, hashed_address);
 
         let (got, _, updates) =
-            StorageRoot::new_hashed(tx.deref_mut(), hashed_address).root_with_updates().unwrap();
+            StorageRoot::new_hashed(tx.tx_mut(), hashed_address).root_with_updates().unwrap();
         assert_eq!(expected_root, got);
 
         // Check account trie
@@ -1256,12 +1279,12 @@ mod tests {
     }
 
     fn extension_node_storage_trie(
-        tx: &mut Transaction<'_, Env<WriteMap>>,
+        tx: &mut DatabaseProviderRW<'_, &Env<WriteMap>>,
         hashed_address: H256,
     ) -> (H256, HashMap<Nibbles, BranchNodeCompact>) {
         let value = U256::from(1);
 
-        let mut hashed_storage = tx.cursor_write::<tables::HashedStorage>().unwrap();
+        let mut hashed_storage = tx.tx_ref().cursor_write::<tables::HashedStorage>().unwrap();
 
         let mut hb = HashBuilder::default().with_updates(true);
 
@@ -1282,12 +1305,12 @@ mod tests {
         (root, updates)
     }
 
-    fn extension_node_trie(tx: &mut Transaction<'_, Env<WriteMap>>) -> H256 {
+    fn extension_node_trie(tx: &mut DatabaseProviderRW<'_, &Env<WriteMap>>) -> H256 {
         let a =
             Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(H256::random()) };
         let val = encode_account(a, None);
 
-        let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>().unwrap();
+        let mut hashed_accounts = tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
         let mut hb = HashBuilder::default();
 
         for key in [

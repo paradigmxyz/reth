@@ -63,8 +63,9 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         std::fs::create_dir_all(&path).unwrap();
         println!("Account Hashing testdata not found, generating to {:?}", path.display());
         let tx = TestTransaction::new(&path);
-        let mut tx = tx.inner();
-        let _accounts = AccountHashingStage::seed(&mut tx, opts);
+        let mut provider = tx.inner();
+        let _accounts = AccountHashingStage::seed(&mut provider, opts);
+        provider.commit().expect("failed to commit");
     }
     (path, (ExecInput { target: Some(num_blocks), ..Default::default() }, UnwindInput::default()))
 }

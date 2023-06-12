@@ -256,13 +256,14 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::trie_cursor::{AccountTrieCursor, StorageTrieCursor};
     use reth_db::{
         cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
     };
-    use reth_primitives::trie::StorageTrieEntry;
-    use reth_provider::Transaction;
+    use reth_primitives::{trie::StorageTrieEntry, MAINNET};
+    use reth_provider::ShareableDatabase;
 
     #[test]
     fn walk_nodes_with_common_prefix() {
@@ -288,8 +289,11 @@ mod tests {
         ];
 
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
-        let mut account_cursor = tx.cursor_write::<tables::AccountsTrie>().unwrap();
+
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let tx = factory.provider_rw().unwrap();
+
+        let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
         for (k, v) in &inputs {
             account_cursor.upsert(k.clone().into(), v.clone()).unwrap();
         }
@@ -297,7 +301,7 @@ mod tests {
         test_cursor(account_trie, &expected);
 
         let hashed_address = H256::random();
-        let mut storage_cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
         for (k, v) in &inputs {
             storage_cursor
                 .upsert(
@@ -332,8 +336,9 @@ mod tests {
     #[test]
     fn cursor_rootnode_with_changesets() {
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
-        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let tx = factory.provider_rw().unwrap();
+        let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
         let nodes = vec![
             (
