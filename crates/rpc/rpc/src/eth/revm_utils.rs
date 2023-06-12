@@ -36,8 +36,8 @@ pub struct EvmOverrides {
 
 impl EvmOverrides {
     /// Creates a new instance with the given overrides
-    pub fn new(state: Option<StateOverride>, block: Option<BlockOverrides>) -> Self {
-        Self { state, block: block.map(Box::new) }
+    pub fn new(state: Option<StateOverride>, block: Option<Box<BlockOverrides>>) -> Self {
+        Self { state, block }
     }
 
     /// Creates a new instance with the given state overrides.

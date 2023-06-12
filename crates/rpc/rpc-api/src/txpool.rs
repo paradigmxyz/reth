@@ -9,7 +9,8 @@ use reth_rpc_types::txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, Tx
 pub trait TxPoolApi {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
-    /// Ref: [Here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_status)
+    ///
+    /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_status) for more details
     #[method(name = "status")]
     async fn txpool_status(&self) -> RpcResult<TxpoolStatus>;
 
