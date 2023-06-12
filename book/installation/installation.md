@@ -30,6 +30,8 @@ There are multiple types of disks to sync Reth, with varying size requirements, 
 
 NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
 
+At the time of writing, syncing an Ethereum mainnet node to block 17.4M on NVMe drives takes about 50 hours, while on a GCP "Persistent SSD" it takes around 5 days.
+
 ### CPU
 
 Most of the time during syncing is spent executing transactions, which is a single-threaded operation due to potential state dependencies of a transaction on previous ones.
