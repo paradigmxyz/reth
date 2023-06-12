@@ -1,20 +1,48 @@
 //! Builtin functions
 
-// toHex, toWord, toAddress toContract toContract2 isPrecompiled slice
-
 use boa_engine::{
     object::builtins::{JsArray, JsArrayBuffer},
-    Context, JsError, JsNativeError, JsResult, JsValue, NativeFunction,
+    property::Attribute,
+    Context, JsArgs, JsError, JsNativeError, JsResult, JsString, JsValue, NativeFunction, Source,
 };
-use reth_primitives::U256;
+use reth_primitives::{hex, U256};
 
 /// bigIntegerJS is the minified version of https://github.com/peterolson/BigInteger.js.
 pub(crate) const BIG_INT_JS: &str = include_str!("bigint.js");
 
+/// Registers all the builtin functions and global bigint property
 pub(crate) fn register_builtins(ctx: &mut Context<'_>) -> JsResult<()> {
+    let big_int = ctx.eval(Source::from_bytes(BIG_INT_JS.as_bytes()))?;
+    ctx.register_global_property("bigint", big_int, Attribute::all())?;
     ctx.register_global_builtin_callable("toHex", 1, NativeFunction::from_fn_ptr(to_hex))?;
 
+    // TODO: register toWord, toAddress toContract toContract2 isPrecompiled slice
+
     Ok(())
+}
+
+/// Converts an array, hex string or Uint8Array to a []byte
+pub(crate) fn from_buf(val: JsValue, context: &mut Context<'_>) -> JsResult<Vec<u8>> {
+    if let Some(obj) = val.as_object().cloned() {
+        if obj.is_array_buffer() {
+            let buf = JsArrayBuffer::from_object(obj)?;
+            return buf.take()
+        } else if obj.is_string() {
+            let js_string = obj.borrow().as_string().unwrap();
+            return hex_decode_js_string(js_string)
+        } else if obj.is_array() {
+            let array = JsArray::from_object(obj)?;
+            let len = array.length(context)?;
+            let mut buf = Vec::with_capacity(len as usize);
+            for i in 0..len {
+                let val = array.get(i, context)?;
+                buf.push(val.to_number(context)? as u8);
+            }
+            return Ok(buf)
+        }
+    }
+
+    Err(JsError::from_native(JsNativeError::typ().with_message("invalid buffer type")))
 }
 
 /// Create a new array buffer from byte block.
@@ -45,13 +73,27 @@ pub(crate) fn to_bigint_array(items: &[U256], ctx: &mut Context<'_>) -> JsResult
     Ok(arr)
 }
 
-// func toBuf(vm *goja.Runtime, bufType goja.Value, val []byte) (goja.Value, error) {
-// // bufType is usually Uint8Array. This is equivalent to `new Uint8Array(val)` in JS.
-// return vm.New(bufType, vm.ToValue(vm.NewArrayBuffer(val)))
-// }
+/// Converts a buffer type to a hex string
+pub(crate) fn to_hex(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>) -> JsResult<JsValue> {
+    let val = args.get_or_undefined(0).clone();
+    let buf = from_buf(val, ctx)?;
+    Ok(JsValue::from(hex::encode(buf)))
+}
 
-pub(crate) fn to_hex(_: &JsValue, _args: &[JsValue], _ctx: &mut Context<'_>) -> JsResult<JsValue> {
-    todo!()
+/// Decodes a hex decoded js-string
+fn hex_decode_js_string(js_string: JsString) -> JsResult<Vec<u8>> {
+    match js_string.to_std_string() {
+        Ok(s) => match hex::decode(s.as_str()) {
+            Ok(data) => Ok(data),
+            Err(err) => Err(JsError::from_native(
+                JsNativeError::error().with_message(format!("invalid hex string {s}: {err}",)),
+            )),
+        },
+        Err(err) => Err(JsError::from_native(
+            JsNativeError::error()
+                .with_message(format!("invalid utf8 string {js_string:?}: {err}",)),
+        )),
+    }
 }
 
 #[cfg(test)]

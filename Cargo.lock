@@ -617,16 +617,6 @@ version = "0.16.0"
 source = "git+https://github.com/boa-dev/boa#da4a3315d75680e63ce2a2dba66000ef2e0e50b9"
 
 [[package]]
-name = "boa_runtime"
-version = "0.16.0"
-source = "git+https://github.com/boa-dev/boa#da4a3315d75680e63ce2a2dba66000ef2e0e50b9"
-dependencies = [
- "boa_engine",
- "boa_gc",
- "rustc-hash",
-]
-
-[[package]]
 name = "brotli"
 version = "3.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5566,8 +5556,6 @@ name = "reth-revm-inspectors"
 version = "0.1.0"
 dependencies = [
  "boa_engine",
- "boa_gc",
- "boa_runtime",
  "hashbrown 0.13.2",
  "reth-primitives",
  "reth-rpc-types",

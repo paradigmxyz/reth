@@ -24,9 +24,7 @@ serde_json = { version = "1.0", optional = true }
 
 # js-tracing-inspector
 boa_engine = { git = "https://github.com/boa-dev/boa", optional = true }
-boa_gc = { git = "https://github.com/boa-dev/boa", optional = true }
-boa_runtime = { git = "https://github.com/boa-dev/boa", optional = true }
 
 [features]
 default = ["js-tracer"]
-js-tracer = ["boa_engine", "boa_gc", "boa_runtime", "thiserror", "serde_json"]
+js-tracer = ["boa_engine", "thiserror", "serde_json"]

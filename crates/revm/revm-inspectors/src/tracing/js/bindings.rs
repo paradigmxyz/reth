@@ -5,10 +5,10 @@ use boa_engine::{
     native_function::NativeFunction, object::FunctionObjectBuilder, Context, JsArgs, JsError,
     JsNativeError, JsObject, JsResult, JsValue,
 };
-use reth_primitives::{Address, Bytes, H256, U256};
+use reth_primitives::{bytes::Bytes, Address, H256, U256};
 use revm::interpreter::{
     opcode::{PUSH0, PUSH32},
-    OpCode, Stack,
+    Memory, OpCode, Stack,
 };
 
 /// A macro that creates a native function that returns a bigint
@@ -64,7 +64,7 @@ pub(crate) struct StepLog {
     /// Gas cost of step execution
     pub(crate) cost: u64,
     /// Call depth
-    pub(crate) depth: usize,
+    pub(crate) depth: u64,
     /// Gas refund counter before step execution
     pub(crate) refund: u64,
     /// returns information about the error if one occurred, otherwise returns undefined
@@ -100,7 +100,6 @@ impl StepLog {
         let get_gas = bigint!(gas, context);
         let get_cost = bigint!(cost, context);
         let get_refund = bigint!(refund, context);
-        let depth = depth as u64;
         let get_depth = bigint!(depth, context);
 
         obj.set("getPc", get_pc, false, context)?;
@@ -116,13 +115,14 @@ impl StepLog {
 
 /// Represents the memory object
 #[derive(Debug)]
-pub(crate) struct MemoryObj(pub(crate) Bytes);
+pub(crate) struct MemoryObj(pub(crate) Memory);
 
 impl MemoryObj {
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
         let obj = JsObject::default();
         let len = self.0.len();
-        let value = to_buf(self.0.to_vec(), context)?;
+        // TODO: add into data <https://github.com/bluealloy/revm/pull/516>
+        let value = to_buf(self.0.data().clone(), context)?;
 
         let length = FunctionObjectBuilder::new(
             context,

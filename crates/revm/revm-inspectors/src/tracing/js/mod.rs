@@ -1,9 +1,15 @@
 //! Javascript inspector
 
-use boa_engine::{Context, JsError, JsObject, JsValue, Source};
+use crate::tracing::js::{
+    bindings::{Contract, MemoryObj, OpObj, StackObj, StepLog},
+    builtins::register_builtins,
+};
+use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
 use reth_primitives::bytes::Bytes;
 use revm::{
-    interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
+    interpreter::{
+        CallInputs, CreateInputs, Gas, InstructionResult, Interpreter, OpCode,
+    },
     primitives::B160,
     Database, EVMData, Inspector,
 };
@@ -44,9 +50,11 @@ impl JsInspector {
     /// - `exit`: a function that will be called when the execution exits a call.
     /// - `step`: a function that will be called when the execution steps to the next instruction.
     pub fn new(code: String, config: serde_json::Value) -> Result<Self, JsInspectorError> {
-        // evaluate the code
         // Instantiate the execution context
         let mut ctx = Context::default();
+        register_builtins(&mut ctx)?;
+
+        // evaluate the code
         let code = format!("({})", code);
         let obj =
             ctx.eval(Source::from_bytes(code.as_bytes())).map_err(JsInspectorError::EvalCode)?;
@@ -93,13 +101,47 @@ impl JsInspector {
 
         Ok(Self { ctx, config, obj, result_fn, fault_fn, enter_fn, exit_fn, step_fn })
     }
+
+    /// Calls the result function and returns the result as [serde_json::Value].
+    ///
+    /// Note: This is supposed to be called after the inspection has finished.
+    pub fn json_result(&mut self) -> JsResult<serde_json::Value> {
+        self.result()?.to_json(&mut self.ctx)
+    }
+
+    /// Calls the result function and returns the result.
+    pub fn result(&mut self) -> JsResult<JsValue> {
+        self.result_fn.call(&(self.obj.clone().into()), &[], &mut self.ctx)
+    }
+
+    fn try_step(&mut self, step: StepLog) -> JsResult<()> {
+        if let Some(step_fn) = &self.step_fn {
+            let val = step.into_js_object(&mut self.ctx)?;
+            step_fn.call(&(self.obj.clone().into()), &[val.into()], &mut self.ctx)?;
+        }
+        Ok(())
+    }
+
+    fn try_enter(&mut self) -> JsResult<()> {
+        if let Some(enter_fn) = &self.enter_fn {
+            enter_fn.call(&(self.obj.clone().into()), &[], &mut self.ctx)?;
+        }
+        Ok(())
+    }
+
+    fn try_exit(&mut self) -> JsResult<()> {
+        if let Some(exit_fn) = &self.exit_fn {
+            exit_fn.call(&(self.obj.clone().into()), &[], &mut self.ctx)?;
+        }
+        Ok(())
+    }
 }
 
 impl<DB> Inspector<DB> for JsInspector
 where
     DB: Database,
 {
-    fn step(
+    fn initialize_interp(
         &mut self,
         _interp: &mut Interpreter,
         _data: &mut EVMData<'_, DB>,
@@ -107,6 +149,46 @@ where
     ) -> InstructionResult {
         todo!()
     }
+
+    fn step(
+        &mut self,
+        interp: &mut Interpreter,
+        data: &mut EVMData<'_, DB>,
+        _is_static: bool,
+    ) -> InstructionResult {
+        if self.step_fn.is_none() {
+            return InstructionResult::Continue
+        }
+
+        let pc = interp.program_counter();
+        let step = StepLog {
+            stack: StackObj(interp.stack.clone()),
+            op: OpObj(
+                OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+                    .expect("is valid opcode;"),
+            ),
+            memory: MemoryObj(interp.memory.clone()),
+            pc: pc as u64,
+            gas: 0,
+            cost: 0,
+            depth: data.journaled_state.depth(),
+            refund: 0,
+            error: None,
+            // TODO need to track this in a stack via call/call_end
+            contract: Contract {
+                caller: Default::default(),
+                contract: Default::default(),
+                value: Default::default(),
+                input: Default::default(),
+            },
+        };
+
+        if self.try_step(step).is_err() {
+            return InstructionResult::Revert
+        }
+        InstructionResult::Continue
+    }
+
     fn step_end(
         &mut self,
         _interp: &mut Interpreter,
@@ -114,8 +196,9 @@ where
         _is_static: bool,
         _eval: InstructionResult,
     ) -> InstructionResult {
-        todo!()
+        InstructionResult::Continue
     }
+
     fn call(
         &mut self,
         _data: &mut EVMData<'_, DB>,
@@ -124,6 +207,7 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         todo!()
     }
+
     fn call_end(
         &mut self,
         _data: &mut EVMData<'_, DB>,
@@ -135,6 +219,7 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         todo!()
     }
+
     fn create(
         &mut self,
         _data: &mut EVMData<'_, DB>,
@@ -142,6 +227,7 @@ where
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
         todo!()
     }
+
     fn create_end(
         &mut self,
         _data: &mut EVMData<'_, DB>,
@@ -155,6 +241,7 @@ where
     }
 
     fn selfdestruct(&mut self, _contract: B160, _target: B160) {
+        // capture enter
         todo!()
     }
 }
