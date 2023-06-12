@@ -9,12 +9,15 @@ reth --help
 ```
 
 Some of the most useful commands as a node developer are:
-* [`reth node`](./node.md): Starts the Reth node's components, including the JSON-RPC. 
-* [`reth db`](./db.md): Administrative TUI to the key-value store
-* [`reth p2p`](./p2p.md): P2P-related utilities
+* [`reth node`](./node.md): Starts the Reth node's components, including the JSON-RPC.
+* [`reth init`](./init.md): Initialize the database from a genesis file.
+* [`reth import`](./import.md): This syncs RLP encoded blocks from a file.
+* [`reth db`](./db.md): Administrative TUI to the key-value store.
 * [`reth stage`](./stage.md): Runs a stage in isolation. Useful for testing and benchmarking.
-* [`reth drop-stage`](./drop-stage.md): Drops all the tables associated with a stage. Useful for resetting state.
-* [`reth dump-stage`](./dump-stage.md): Dumps all the tables associated with a stage to a new database. Useful for creating snapshots
+* [`reth p2p`](./p2p.md): P2P-related utilities
+* [`reth test-vectors`](./test-vectors.md): Generate Test Vectors
+* [`reth config`](./config.md): Write config to stdout
+* [`reth debug`](./debug.md): Various debug routines
 
 See below for the full list of commands.
 
@@ -67,7 +70,7 @@ Logging:
 
       --log.directory <PATH>
           The path to put log files in
-          
+
           [default: /Users/georgios/Library/Caches/reth/logs]
 
       --log.journald
@@ -75,13 +78,13 @@ Logging:
 
       --log.filter <FILTER>
           The filter to use for logs written to the log file
-          
+
           [default: debug]
 
 Display:
   -v, --verbosity...
           Set the minimum log level.
-          
+
           -v      Errors
           -vv     Warnings
           -vvv    Info
