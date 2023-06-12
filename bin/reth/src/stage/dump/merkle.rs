@@ -116,17 +116,19 @@ async fn dry_run(
     let mut tx = Transaction::new(&output_db)?;
     let mut exec_output = false;
     while !exec_output {
-        let exec_input = reth_stages::ExecInput {
-            target: Some(to),
-            checkpoint: Some(StageCheckpoint::new(from)),
-        };
         exec_output = MerkleStage::Execution {
-            // Forces updating the root instead of calculating from scratch
-            clean_threshold: u64::MAX,
+            clean_threshold: u64::MAX, /* Forces updating the root instead of calculating from
+                                        * scratch */
         }
-        .execute(&mut tx, exec_input)
+        .execute(
+            &mut tx,
+            reth_stages::ExecInput {
+                target: Some(to),
+                checkpoint: Some(StageCheckpoint::new(from)),
+            },
+        )
         .await?
-        .is_done(exec_input);
+        .done;
     }
 
     tx.drop()?;
