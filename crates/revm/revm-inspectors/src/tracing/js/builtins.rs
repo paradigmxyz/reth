@@ -29,15 +29,6 @@ pub(crate) fn to_buf_value(bytes: Vec<u8>, context: &mut Context<'_>) -> JsResul
 // }
 
 pub(crate) fn to_hex(_: &JsValue, _args: &[JsValue], _ctx: &mut Context<'_>) -> JsResult<JsValue> {
-    /// // TODO: load console from goja-nodejs
-    // 	vm.Set("toHex", func(v goja.Value) string {
-    // 		b, err := t.fromBuf(vm, v, false)
-    // 		if err != nil {
-    // 			vm.Interrupt(err)
-    // 			return ""
-    // 		}
-    // 		return hexutil.Encode(b)
-    // 	})
     todo!()
 }
 

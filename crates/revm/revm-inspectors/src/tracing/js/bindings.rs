@@ -1,15 +1,13 @@
 //! Type bindings for js tracing inspector
 
-use crate::tracing::js::builtins::{to_buf_value};
+use crate::tracing::js::builtins::{to_buf, to_buf_value};
 use boa_engine::{
-    native_function::NativeFunction, object::FunctionObjectBuilder, Context, JsObject, JsResult,
-    JsValue,
+    native_function::NativeFunction, object::FunctionObjectBuilder, Context, JsArgs, JsError,
+    JsNativeError, JsObject, JsResult, JsValue,
 };
 
 use reth_primitives::{Address, Bytes, H256, U256};
 use revm::interpreter::{OpCode, Stack};
-use serde::{Deserialize, Serialize};
-
 
 /// A macro that creates a native function that returns a bigint
 macro_rules! bigint {
@@ -29,7 +27,22 @@ macro_rules! bigint {
             }),
         )
         .length(0)
-        .build();
+        .build()
+    };
+}
+
+/// A macro that creates a native function that returns a captured JsValue
+macro_rules! capture_getter {
+    ($value:ident, $ctx:ident) => {
+        FunctionObjectBuilder::new(
+            $ctx,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, _args, input, _ctx| Ok(input.clone()),
+                $value,
+            ),
+        )
+        .length(0)
+        .build()
     };
 }
 
@@ -37,11 +50,11 @@ macro_rules! bigint {
 #[derive(Debug)]
 pub(crate) struct StepLog {
     /// Stack before step execution
-    stack: Stack,
+    stack: StackObj,
     /// Opcode to be executed
-    op: OpCode,
+    op: OpObj,
     /// All allocated memory in a step
-    memory: Bytes,
+    memory: MemoryObj,
     /// Program counter before step execution
     pc: u64,
     /// Remaining gas before step execution
@@ -52,7 +65,7 @@ pub(crate) struct StepLog {
     depth: usize,
     /// Gas refund counter before step execution
     refund: u64,
-
+    /// returns information about the error if one occurred, otherwise returns undefined
     error: Option<String>,
     /// The contract object available to the js inspector
     contract: Contract,
@@ -63,19 +76,24 @@ impl StepLog {
     ///
     /// Caution: this expects a global property `bigint` to be present.
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
-        let Self { stack: _, op: _, memory: _, pc, gas, cost, depth, refund, error: _, contract } = self;
+        let Self { stack, op, memory, pc, gas, cost, depth, refund, error, contract } = self;
         let obj = JsObject::default();
 
         // fields
-        // TODO memory object
-        // TODO op object
-        // TODO sack object
+        let op = op.into_js_object(context)?;
+        let memory = memory.into_js_object(context)?;
+        let stack = stack.into_js_object(context)?;
         let contract = contract.into_js_object(context)?;
 
+        obj.set("op", op, false, context)?;
+        obj.set("memory", memory, false, context)?;
+        obj.set("stack", stack, false, context)?;
         obj.set("contract", contract, false, context)?;
 
         // methods
-
+        let error =
+            if let Some(error) = error { JsValue::from(error) } else { JsValue::undefined() };
+        let get_error = capture_getter!(error, context);
         let get_pc = bigint!(pc, context);
         let get_gas = bigint!(gas, context);
         let get_cost = bigint!(cost, context);
@@ -84,6 +102,7 @@ impl StepLog {
         let get_depth = bigint!(depth, context);
 
         obj.set("getPc", get_pc, false, context)?;
+        obj.set("getError", get_error, false, context)?;
         obj.set("getGas", get_gas, false, context)?;
         obj.set("getCost", get_cost, false, context)?;
         obj.set("getDepth", get_depth, false, context)?;
@@ -93,8 +112,103 @@ impl StepLog {
     }
 }
 
+/// Represents the memory object
+#[derive(Debug)]
+pub(crate) struct MemoryObj(Bytes);
+
+impl MemoryObj {
+    pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
+        let obj = JsObject::default();
+        let len = self.0.len();
+        let value = to_buf(self.0.to_vec(), context)?;
+
+        let length = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure(move |_this, _args, _ctx| {
+                Ok(JsValue::from(len as u64))
+            }),
+        )
+        .length(0)
+        .build();
+
+        let slice = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                |_this, args, memory, ctx| {
+                    let start = args.get_or_undefined(0).to_number(ctx)?;
+                    let end = args.get_or_undefined(1).to_number(ctx)?;
+                    if end < start || start < 0. {
+                        return Err(JsError::from_native(JsNativeError::typ().with_message(
+                            format!(
+                                "tracer accessed out of bound memory: offset {start}, end {end}"
+                            ),
+                        )))
+                    }
+                    let start = start as usize;
+                    let end = end as usize;
+
+                    let mut mem = memory.take()?;
+                    let slice = mem.drain(start..end).collect::<Vec<u8>>();
+                    to_buf_value(slice, ctx)
+                },
+                value.clone(),
+            ),
+        )
+        .length(2)
+        .build();
+
+        let get_uint = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                 |_this, args, memory, ctx|  {
+                    let offset_f64 = args.get_or_undefined(0).to_number(ctx)?;
+
+                     let mut mem = memory.take()?;
+                     let offset = offset_f64 as usize;
+                     if mem.len() < offset+32 || offset_f64 < 0. {
+                         return Err(JsError::from_native(
+                             JsNativeError::typ().with_message(format!("tracer accessed out of bound memory: available {}, offset {}, size 32", mem.len(), offset))
+                         ));
+                     }
+
+                    let slice = mem.drain(offset..offset+32).collect::<Vec<u8>>();
+                     to_buf_value(slice, ctx)
+                },
+                value
+            ),
+        )
+            .length(1)
+            .build();
+
+        obj.set("slice", slice, false, context)?;
+        obj.set("getUint", get_uint, false, context)?;
+        obj.set("length", length, false, context)?;
+        Ok(obj)
+    }
+}
+
+/// Represents the opcode object
+#[derive(Debug)]
+pub(crate) struct OpObj(OpCode);
+
+impl OpObj {
+    pub(crate) fn into_js_object(self, _context: &mut Context<'_>) -> JsResult<JsObject> {
+        todo!()
+    }
+}
+
+/// Represents the stack object
+#[derive(Debug, Clone)]
+pub(crate) struct StackObj(Stack);
+
+impl StackObj {
+    pub(crate) fn into_js_object(self, _context: &mut Context<'_>) -> JsResult<JsObject> {
+        todo!()
+    }
+}
+
 /// Represents the contract object
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub(crate) struct Contract {
     caller: Address,
     contract: Address,
@@ -146,7 +260,6 @@ impl Contract {
         .build();
 
         let input = to_buf_value(input.to_vec(), context)?;
-
         let get_input = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure_with_captures(
