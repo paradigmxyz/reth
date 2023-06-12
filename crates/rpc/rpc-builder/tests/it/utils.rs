@@ -12,10 +12,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc::unbounded_channel;
 
 /// Localhost with port 0 so a free port is used.
@@ -30,7 +27,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let beacon_engine_handle = BeaconConsensusEngineHandle::new(tx);
     let engine_api = EngineApi::new(
         NoopProvider::default(),
-        Arc::new(MAINNET.clone()),
+        MAINNET.clone(),
         beacon_engine_handle,
         spawn_test_payload_service().into(),
     );

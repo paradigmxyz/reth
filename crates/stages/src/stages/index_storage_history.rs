@@ -14,7 +14,6 @@ use std::{
     fmt::Debug,
     ops::{Deref, RangeInclusive},
 };
-use tracing::*;
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -45,12 +44,11 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let target = input.previous_stage_checkpoint_block_number();
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
-
-        if range.is_empty() {
-            return Ok(ExecOutput::done(target))
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
+
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         let mut stage_checkpoint = stage_checkpoint(tx, input.checkpoint(), &range)?;
 
@@ -61,7 +59,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
         stage_checkpoint.progress.processed += changesets;
 
-        info!(target: "sync::stages::index_storage_history", stage_progress = *range.end(), done = is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(*range.end())
                 .with_index_history_stage_checkpoint(stage_checkpoint),
@@ -75,7 +72,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, is_final_range) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         let changesets = tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
@@ -89,7 +86,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
                 StageCheckpoint::new(unwind_progress)
             };
 
-        info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint })
     }
 }
@@ -145,7 +141,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
+    use crate::test_utils::TestTransaction;
     use reth_db::{
         models::{
             storage_sharded_key::{StorageShardedKey, NUM_OF_INDICES_IN_SHARD},
@@ -219,8 +215,7 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let input =
-            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
+        let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
@@ -307,7 +302,7 @@ mod tests {
     async fn insert_index_to_full_shard() {
         // init
         let tx = TestTransaction::default();
-        let _input = ExecInput { previous_stage: Some((PREV_STAGE_ID, 5)), ..Default::default() };
+        let _input = ExecInput { target: Some(5), ..Default::default() };
 
         // change does not matter only that account is present in changeset.
         let full_list = vec![3; NUM_OF_INDICES_IN_SHARD];

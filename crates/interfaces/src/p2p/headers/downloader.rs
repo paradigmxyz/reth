@@ -1,3 +1,4 @@
+use super::error::HeadersDownloaderResult;
 use crate::{
     consensus::Consensus,
     p2p::error::{DownloadError, DownloadResult},
@@ -12,7 +13,9 @@ use reth_primitives::{BlockHashOrNumber, SealedHeader, H256};
 /// of fulfilling these requests.
 ///
 /// A [HeaderDownloader] is a [Stream] that returns batches of headers.
-pub trait HeaderDownloader: Send + Sync + Stream<Item = Vec<SealedHeader>> + Unpin {
+pub trait HeaderDownloader:
+    Send + Sync + Stream<Item = HeadersDownloaderResult<Vec<SealedHeader>>> + Unpin
+{
     /// Updates the gap to sync which ranges from local head to the sync target
     ///
     /// See also [HeaderDownloader::update_sync_target] and [HeaderDownloader::update_local_head]
@@ -76,7 +79,6 @@ pub fn validate_header_download(
     header: &SealedHeader,
     parent: &SealedHeader,
 ) -> DownloadResult<()> {
-    ensure_parent(header, parent)?;
     // validate header against parent
     consensus
         .validate_header_against_parent(header, parent)
@@ -85,18 +87,5 @@ pub fn validate_header_download(
     consensus
         .validate_header(header)
         .map_err(|error| DownloadError::HeaderValidation { hash: parent.hash(), error })?;
-    Ok(())
-}
-
-/// Ensures that the given `parent` header is the actual parent of the `header`
-pub fn ensure_parent(header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
-    if !(parent.hash() == header.parent_hash && parent.number + 1 == header.number) {
-        return Err(DownloadError::MismatchedHeaders {
-            header_number: header.number,
-            parent_number: parent.number,
-            header_hash: header.hash(),
-            parent_hash: parent.hash(),
-        })
-    }
     Ok(())
 }

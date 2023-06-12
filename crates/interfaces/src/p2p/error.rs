@@ -115,7 +115,7 @@ impl From<oneshot::error::RecvError> for RequestError {
 pub type DownloadResult<T> = Result<T, DownloadError>;
 
 /// The downloader error type
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum DownloadError {
     /* ==================== HEADER ERRORS ==================== */
     /// Header validation failed
@@ -126,19 +126,6 @@ pub enum DownloadError {
         /// The details of validation failure
         #[source]
         error: consensus::ConsensusError,
-    },
-    /// Error when checking that the current [`Header`] has the parent's hash as the parent_hash
-    /// field, and that they have sequential block numbers.
-    #[error("Headers did not match, current number: {header_number} / current hash: {header_hash}, parent number: {parent_number} / parent_hash: {parent_hash}")]
-    MismatchedHeaders {
-        /// The header number being evaluated
-        header_number: BlockNumber,
-        /// The header hash being evaluated
-        header_hash: H256,
-        /// The parent number being evaluated
-        parent_number: BlockNumber,
-        /// The parent hash being evaluated
-        parent_hash: H256,
     },
     /// Received an invalid tip
     #[error("Received invalid tip: {received:?}. Expected {expected:?}.")]

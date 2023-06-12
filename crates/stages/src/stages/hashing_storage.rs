@@ -57,11 +57,11 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range();
-        if range.is_empty() {
-            return Ok(ExecOutput::done(*range.end()))
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
-        let (from_block, to_block) = range.into_inner();
+
+        let (from_block, to_block) = input.next_block_range().into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
@@ -165,7 +165,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     },
                 );
 
-                info!(target: "sync::stages::hashing_storage", checkpoint = %checkpoint, is_final_range = false, "Stage iteration finished");
                 return Ok(ExecOutput { checkpoint, done: false })
             }
         } else {
@@ -181,13 +180,12 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
         // so no checkpoint is needed.
-        let checkpoint = StageCheckpoint::new(input.previous_stage_checkpoint_block_number())
+        let checkpoint = StageCheckpoint::new(input.target())
             .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
                 progress: stage_checkpoint_progress(tx)?,
                 ..Default::default()
             });
 
-        info!(target: "sync::stages::hashing_storage", checkpoint = %checkpoint, is_final_range = true, "Stage iteration finished");
         Ok(ExecOutput { checkpoint, done: true })
     }
 
@@ -197,7 +195,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, is_final_range) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
@@ -207,7 +205,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         stage_checkpoint.progress = stage_checkpoint_progress(tx)?;
 
-        info!(target: "sync::stages::hashing_storage", to_block = input.unwind_to, %unwind_progress, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_progress)
                 .with_storage_hashing_stage_checkpoint(stage_checkpoint),
@@ -229,7 +226,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+        TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -262,7 +259,7 @@ mod tests {
         runner.set_commit_threshold(1);
 
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -322,7 +319,7 @@ mod tests {
         runner.set_commit_threshold(500);
 
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -487,7 +484,7 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.next_block();
-            let end = input.previous_stage_checkpoint_block_number();
+            let end = input.target();
 
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));

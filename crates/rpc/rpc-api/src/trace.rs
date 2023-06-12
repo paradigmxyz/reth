@@ -7,11 +7,11 @@ use reth_rpc_types::{
 use std::collections::HashSet;
 
 /// Ethereum trace API
-#[cfg_attr(not(feature = "client"), rpc(server))]
-#[cfg_attr(feature = "client", rpc(server, client))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "trace"))]
 pub trait TraceApi {
     /// Executes the given call and returns a number of possible traces for it.
-    #[method(name = "trace_call")]
+    #[method(name = "call")]
     async fn trace_call(
         &self,
         call: CallRequest,
@@ -22,7 +22,7 @@ pub trait TraceApi {
     /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
     /// on top of a pending block with all n-1 transactions applied (traced) first. Allows to trace
     /// dependent transactions.
-    #[method(name = "trace_callMany")]
+    #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
         calls: Vec<(CallRequest, HashSet<TraceType>)>,
@@ -32,7 +32,7 @@ pub trait TraceApi {
     /// Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
     ///
     /// Expects a raw transaction data
-    #[method(name = "trace_rawTransaction")]
+    #[method(name = "rawTransaction")]
     async fn trace_raw_transaction(
         &self,
         data: Bytes,
@@ -41,7 +41,7 @@ pub trait TraceApi {
     ) -> RpcResult<TraceResults>;
 
     /// Replays all transactions in a block returning the requested traces for each transaction.
-    #[method(name = "trace_replayBlockTransactions")]
+    #[method(name = "replayBlockTransactions")]
     async fn replay_block_transactions(
         &self,
         block_id: BlockId,
@@ -49,7 +49,7 @@ pub trait TraceApi {
     ) -> RpcResult<Option<Vec<TraceResultsWithTransactionHash>>>;
 
     /// Replays a transaction, returning the traces.
-    #[method(name = "trace_replayTransaction")]
+    #[method(name = "replayTransaction")]
     async fn replay_transaction(
         &self,
         transaction: H256,
@@ -57,18 +57,18 @@ pub trait TraceApi {
     ) -> RpcResult<TraceResults>;
 
     /// Returns traces created at given block.
-    #[method(name = "trace_block")]
+    #[method(name = "block")]
     async fn trace_block(
         &self,
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
 
     /// Returns traces matching given filter
-    #[method(name = "trace_filter")]
+    #[method(name = "filter")]
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 
     /// Returns transaction trace at given index.
-    #[method(name = "trace_get")]
+    #[method(name = "get")]
     async fn trace_get(
         &self,
         hash: H256,
@@ -76,7 +76,7 @@ pub trait TraceApi {
     ) -> RpcResult<Option<LocalizedTransactionTrace>>;
 
     /// Returns all traces of given transaction.
-    #[method(name = "trace_transaction")]
+    #[method(name = "transaction")]
     async fn trace_transaction(
         &self,
         hash: H256,

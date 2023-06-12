@@ -7,7 +7,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{
-    p2p::headers::downloader::{HeaderDownloader, SyncTarget},
+    p2p::headers::{
+        downloader::{HeaderDownloader, SyncTarget},
+        error::HeadersDownloaderError,
+    },
     provider::ProviderError,
 };
 use reth_primitives::{
@@ -205,7 +208,7 @@ where
         // Nothing to sync
         if gap.is_closed() {
             info!(target: "sync::stages::headers", checkpoint = %current_checkpoint, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput { checkpoint: current_checkpoint, done: true })
+            return Ok(ExecOutput::done(current_checkpoint))
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -217,7 +220,14 @@ where
         // down to the local head (latest block in db).
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
-        let downloaded_headers = self.downloader.next().await.ok_or(StageError::ChannelClosed)?;
+        let downloaded_headers = match self.downloader.next().await {
+            Some(Ok(headers)) => headers,
+            Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
+                error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                return Err(StageError::DetachedHead { local_head, header, error })
+            }
+            None => return Err(StageError::ChannelClosed),
+        };
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
@@ -341,7 +351,6 @@ where
             checkpoint = checkpoint.with_headers_stage_checkpoint(stage_checkpoint);
         }
 
-        info!(target: "sync::stages::headers", to_block = input.unwind_to, checkpoint = input.unwind_to, is_final_range = true, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint })
     }
 }
@@ -374,7 +383,6 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
-        PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::random_header;
@@ -446,7 +454,7 @@ mod tests {
                 self.tx.commit(|tx| tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into()))?;
 
                 // use previous checkpoint as seed size
-                let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
+                let end = input.target.unwrap_or_default() + 1;
 
                 if start + 1 >= end {
                     return Ok(Vec::default())
@@ -554,7 +562,7 @@ mod tests {
         let mut runner = HeadersTestRunner::with_linear_downloader();
         let (checkpoint, previous_stage) = (1000, 1200);
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(checkpoint)),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");
@@ -648,7 +656,7 @@ mod tests {
         // pick range that's larger than the configured headers batch size
         let (checkpoint, previous_stage) = (600, 1200);
         let mut input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(checkpoint)),
         };
         let headers = runner.seed_execution(input).expect("failed to seed execution");

@@ -117,7 +117,11 @@ where
         let config = tracing_config(&trace_types);
         let mut inspector = TracingInspector::new(config);
 
-        let (res, _) = self.inner.eth_api.inspect_call_at(call, at, None, &mut inspector).await?;
+        let (res, _) = self
+            .inner
+            .eth_api
+            .inspect_call_at(call, at, Default::default(), &mut inspector)
+            .await?;
 
         let trace_res =
             inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
@@ -172,8 +176,13 @@ where
                 let mut db = SubState::new(State::new(state));
 
                 for (call, trace_types) in calls {
-                    let env =
-                        prepare_call_env(cfg.clone(), block_env.clone(), call, &mut db, None)?;
+                    let env = prepare_call_env(
+                        cfg.clone(),
+                        block_env.clone(),
+                        call,
+                        &mut db,
+                        Default::default(),
+                    )?;
                     let config = tracing_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;

@@ -2,7 +2,10 @@ use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{listener::EventListeners, stage::StageId, BlockNumber, H256};
+use reth_primitives::{
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
+    BlockNumber, H256,
+};
 use reth_provider::{providers::get_stage_checkpoint, Transaction};
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -223,10 +226,9 @@ where
                 }
             }
 
-            previous_stage = Some((
-                stage_id,
+            previous_stage = Some(
                 get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default().block_number,
-            ));
+            );
         }
 
         Ok(self.progress.next_ctrl())
@@ -266,6 +268,14 @@ where
                 match output {
                     Ok(unwind_output) => {
                         checkpoint = unwind_output.checkpoint;
+                        info!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            unwind_to = to,
+                            progress = checkpoint.block_number,
+                            done = checkpoint.block_number == to,
+                            "Stage unwound"
+                        );
                         self.metrics.stage_checkpoint(
                             stage_id, checkpoint,
                             // We assume it was set in the previous execute iteration, so it
@@ -292,7 +302,7 @@ where
 
     async fn execute_stage_to_completion(
         &mut self,
-        previous_stage: Option<(StageId, BlockNumber)>,
+        previous_stage: Option<BlockNumber>,
         stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
         let total_stages = self.stages.len();
@@ -300,6 +310,7 @@ where
         let stage = &mut self.stages[stage_index];
         let stage_id = stage.id();
         let mut made_progress = false;
+        let target = self.max_block.or(previous_stage);
 
         loop {
             let mut tx = Transaction::new(&self.db)?;
@@ -332,10 +343,7 @@ where
                 checkpoint: prev_checkpoint,
             });
 
-            match stage
-                .execute(&mut tx, ExecInput { previous_stage, checkpoint: prev_checkpoint })
-                .await
-            {
+            match stage.execute(&mut tx, ExecInput { target, checkpoint: prev_checkpoint }).await {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
@@ -347,11 +355,7 @@ where
                         %done,
                         "Stage committed progress"
                     );
-                    self.metrics.stage_checkpoint(
-                        stage_id,
-                        checkpoint,
-                        self.max_block.or(previous_stage.map(|(_, block_number)| block_number)),
-                    );
+                    self.metrics.stage_checkpoint(stage_id, checkpoint, target);
                     tx.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran {
@@ -376,7 +380,16 @@ where
                 Err(err) => {
                     self.listeners.notify(PipelineEvent::Error { stage_id });
 
-                    let out = if let StageError::Validation { block, error } = err {
+                    let out = if let StageError::DetachedHead { local_head, header, error } = err {
+                        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
+
+                        // We unwind because of a detached head.
+                        let unwind_to = local_head
+                            .number
+                            .saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH)
+                            .max(1);
+                        Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
+                    } else if let StageError::Validation { block, error } = err {
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,

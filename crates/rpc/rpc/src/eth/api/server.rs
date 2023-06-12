@@ -3,7 +3,10 @@
 
 use super::EthApiSpec;
 use crate::{
-    eth::api::{EthApi, EthTransactions},
+    eth::{
+        api::{EthApi, EthTransactions},
+        revm_utils::EvmOverrides,
+    },
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
@@ -18,8 +21,8 @@ use reth_provider::{
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock,
-    SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    state::StateOverride, BlockOverrides, CallRequest, EIP1186AccountProofResponse, FeeHistory,
+    Index, RichBlock, SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -218,11 +221,17 @@ where
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<Bytes> {
-        trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, "Serving eth_call");
+        trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
         Ok(self
             .on_blocking_task(|this| async move {
-                this.call(request, block_number, state_overrides).await
+                this.call(
+                    request,
+                    block_number,
+                    EvmOverrides::new(state_overrides, block_overrides),
+                )
+                .await
             })
             .await?)
     }

@@ -206,10 +206,6 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
         Ok(None)
     }
 
-    fn pending_header(&self) -> Result<Option<SealedHeader>> {
-        Ok(None)
-    }
-
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             // TODO: this can be optimized to return empty Vec post-merge

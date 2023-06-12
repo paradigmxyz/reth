@@ -138,8 +138,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
         let start_block = input.next_block();
-        let max_block = input.previous_stage_checkpoint_block_number();
+        let max_block = input.target();
 
         // Build executor
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
@@ -176,14 +180,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
 
-            // Write history periodically to free up memory
-            if self.thresholds.should_write_history(state.changeset_size_hint() as u64) {
-                info!(target: "sync::stages::execution", ?block_number, "Writing history.");
-                state.write_history_to_db(&**tx)?;
-                info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
-                // gas_since_history_write = 0;
-            }
-
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
             {
@@ -197,12 +193,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         state.write_to_db(&**tx)?;
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 
-        let is_final_range = stage_progress == max_block;
-        info!(target: "sync::stages::execution", stage_progress, is_final_range, "Stage iteration finished");
+        let done = stage_progress == max_block;
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(stage_progress)
                 .with_execution_stage_checkpoint(stage_checkpoint),
-            done: is_final_range,
+            done,
         })
     }
 }
@@ -343,11 +338,13 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let (range, unwind_to, is_final_range) =
+        let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
         if range.is_empty() {
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput {
+                checkpoint: input.checkpoint.with_block_number(input.unwind_to),
+            })
         }
 
         // get all batches for account change
@@ -422,7 +419,6 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             StageCheckpoint::new(unwind_to)
         };
 
-        info!(target: "sync::stages::execution", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput { checkpoint })
     }
 }
@@ -431,30 +427,17 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 ///
 /// If either of the thresholds (`max_blocks` and `max_changes`) are hit, then the execution stage
 /// commits all pending changes to the database.
-///
-/// A third threshold, `max_changesets`, can be set to periodically write changesets to the
-/// current database transaction, which frees up memory.
 #[derive(Debug)]
 pub struct ExecutionStageThresholds {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,
     /// The maximum amount of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum amount of changesets to keep in memory before they are written to the pending
-    /// database transaction.
-    ///
-    /// If this is lower than `max_changes`, then history is periodically flushed to the database
-    /// transaction, which frees up memory.
-    pub max_changesets: Option<u64>,
 }
 
 impl Default for ExecutionStageThresholds {
     fn default() -> Self {
-        Self {
-            max_blocks: Some(500_000),
-            max_changes: Some(5_000_000),
-            max_changesets: Some(1_000_000),
-        }
+        Self { max_blocks: Some(500_000), max_changes: Some(5_000_000) }
     }
 }
 
@@ -465,18 +448,12 @@ impl ExecutionStageThresholds {
         blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
             changes_processed >= self.max_changes.unwrap_or(u64::MAX)
     }
-
-    /// Check if the history write threshold has been hit.
-    #[inline]
-    pub fn should_write_history(&self, history_changes: u64) -> bool {
-        history_changes >= self.max_changesets.unwrap_or(u64::MAX)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
+    use crate::test_utils::TestTransaction;
     use assert_matches::assert_matches;
     use reth_db::{
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
@@ -499,11 +476,7 @@ mod tests {
             Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
         ExecutionStage::new(
             factory,
-            ExecutionStageThresholds {
-                max_blocks: Some(100),
-                max_changes: None,
-                max_changesets: None,
-            },
+            ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
         )
     }
 
@@ -632,7 +605,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, 1)),
+            target: Some(1),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };
@@ -736,7 +709,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, 1)),
+            target: Some(1),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };
@@ -822,7 +795,7 @@ mod tests {
         let test_tx = TestTransaction::default();
         let mut tx = test_tx.inner();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, 1)),
+            target: Some(1),
             /// The progress of this stage the last time it was executed.
             checkpoint: None,
         };

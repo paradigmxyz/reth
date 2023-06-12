@@ -196,21 +196,11 @@ pub struct ExecutionConfig {
     pub max_blocks: Option<u64>,
     /// The maximum amount of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum amount of changesets to keep in memory before they are written to the pending
-    /// database transaction.
-    ///
-    /// If this is lower than `max_gas`, then history is periodically flushed to the database
-    /// transaction, which frees up memory.
-    pub max_changesets: Option<u64>,
 }
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        Self {
-            max_blocks: Some(500_000),
-            max_changes: Some(5_000_000),
-            max_changesets: Some(1_000_000),
-        }
+        Self { max_blocks: Some(500_000), max_changes: Some(5_000_000) }
     }
 }
 

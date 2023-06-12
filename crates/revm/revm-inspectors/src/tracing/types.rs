@@ -136,9 +136,11 @@ pub(crate) struct CallTrace {
     pub(crate) data: Bytes,
     /// The return data of the call if this was not a contract creation, otherwise it is the
     /// runtime bytecode of the created contract
-    pub(crate) output: Option<Bytes>,
+    pub(crate) output: Bytes,
     /// The gas cost of the call
     pub(crate) gas_used: u64,
+    /// The gas limit of the call
+    pub(crate) gas_limit: u64,
     /// The status of the trace's call
     pub(crate) status: InstructionResult,
     /// call context of the runtime
@@ -172,8 +174,8 @@ impl Default for CallTrace {
             data: Default::default(),
             maybe_precompile: None,
             output: Default::default(),
-            last_call_return_value: None,
             gas_used: Default::default(),
+            gas_limit: Default::default(),
             status: InstructionResult::Continue,
             call_context: Default::default(),
             steps: Default::default(),
@@ -345,7 +347,7 @@ impl CallTraceNode {
                     from: self.trace.caller,
                     to: self.trace.address,
                     value: self.trace.value,
-                    gas: self.trace.gas_used.into(),
+                    gas: self.trace.gas_limit.into(),
                     input: self.trace.data.clone().into(),
                     call_type: self.kind().into(),
                 })
@@ -353,7 +355,7 @@ impl CallTraceNode {
             CallKind::Create | CallKind::Create2 => Action::Create(CreateAction {
                 from: self.trace.caller,
                 value: self.trace.value,
-                gas: self.trace.gas_used.into(),
+                gas: self.trace.gas_limit.into(),
                 init: self.trace.data.clone().into(),
             }),
         }
@@ -368,7 +370,7 @@ impl CallTraceNode {
             from: self.trace.caller,
             to: Some(self.trace.address),
             value: Some(self.trace.value),
-            gas: U256::from(self.trace.gas_used),
+            gas: U256::from(self.trace.gas_limit),
             gas_used: U256::from(self.trace.gas_used),
             input: self.trace.data.clone().into(),
             output: Some(self.trace.output.clone().into()),
@@ -443,12 +445,14 @@ pub(crate) struct CallTraceStep {
     pub(crate) contract: Address,
     /// Stack before step execution
     pub(crate) stack: Stack,
-    /// Memory before step execution
+    /// All allocated memory in a step
+    ///
+    /// This will be empty if memory capture is disabled
     pub(crate) memory: Memory,
     /// Size of memory
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
-    pub(crate) gas: u64,
+    pub(crate) gas_remaining: u64,
     /// Gas refund counter before step execution
     pub(crate) gas_refund_counter: u64,
     // Fields filled in `step_end`
@@ -470,7 +474,7 @@ impl CallTraceStep {
         let mut log = StructLog {
             depth: self.depth,
             error: self.as_error(),
-            gas: self.gas,
+            gas: self.gas_remaining,
             gas_cost: self.gas_cost,
             op: self.op.to_string(),
             pc: self.pc as u64,

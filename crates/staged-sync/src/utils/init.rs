@@ -22,13 +22,14 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum InitDatabaseError {
-    /// Attempted to reinitialize database with inconsistent genesis block
-    #[error("Genesis hash mismatch: expected {expected}, got {actual}")]
+    /// An existing genesis block was found in the database, and its hash did not match the hash of
+    /// the chainspec.
+    #[error("Genesis hash in the database does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
     GenesisHashMismatch {
         /// Expected genesis hash.
-        expected: H256,
+        chainspec_hash: H256,
         /// Actual genesis hash.
-        actual: H256,
+        database_hash: H256,
     },
 
     /// Higher level error encountered when using a Transaction.
@@ -57,7 +58,10 @@ pub fn init_genesis<DB: Database>(
             return Ok(hash)
         }
 
-        return Err(InitDatabaseError::GenesisHashMismatch { expected: hash, actual: db_hash })
+        return Err(InitDatabaseError::GenesisHashMismatch {
+            chainspec_hash: hash,
+            database_hash: db_hash,
+        })
     }
 
     drop(tx);
@@ -159,12 +163,11 @@ mod tests {
     use reth_primitives::{
         GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
     };
-    use std::sync::Arc;
 
     #[test]
     fn success_init_genesis_mainnet() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, Arc::new(MAINNET.clone())).unwrap();
+        let genesis_hash = init_genesis(db, MAINNET.clone()).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS);
@@ -173,7 +176,7 @@ mod tests {
     #[test]
     fn success_init_genesis_goerli() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, Arc::new(GOERLI.clone())).unwrap();
+        let genesis_hash = init_genesis(db, GOERLI.clone()).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS);
@@ -182,7 +185,7 @@ mod tests {
     #[test]
     fn success_init_genesis_sepolia() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, Arc::new(SEPOLIA.clone())).unwrap();
+        let genesis_hash = init_genesis(db, SEPOLIA.clone()).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS);
@@ -191,16 +194,16 @@ mod tests {
     #[test]
     fn fail_init_inconsistent_db() {
         let db = create_test_rw_db();
-        init_genesis(db.clone(), Arc::new(SEPOLIA.clone())).unwrap();
+        init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(db, Arc::new(MAINNET.clone()));
+        let genesis_hash = init_genesis(db, MAINNET.clone());
 
         assert_eq!(
             genesis_hash.unwrap_err(),
             InitDatabaseError::GenesisHashMismatch {
-                expected: MAINNET_GENESIS,
-                actual: SEPOLIA_GENESIS
+                chainspec_hash: MAINNET_GENESIS,
+                database_hash: SEPOLIA_GENESIS
             }
         )
     }

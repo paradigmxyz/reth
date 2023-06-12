@@ -54,6 +54,10 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
         let (start_block, end_block) = range.clone().into_inner();
 
@@ -83,7 +87,6 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             cursor_td.append(block_number, td.into())?;
         }
 
-        info!(target: "sync::stages::total_difficulty", stage_progress = end_block, is_final_range, "Stage iteration finished");
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
@@ -97,12 +100,10 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (_, unwind_to, is_final_range) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
-        info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, unwind_progress = unwind_to, is_final_range, "Unwind iteration finished");
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
                 .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
@@ -132,7 +133,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+        TestTransaction, UnwindStageTestRunner,
     };
 
     stage_test_suite_ext!(TotalDifficultyTestRunner, total_difficulty);
@@ -146,7 +147,7 @@ mod tests {
         runner.set_threshold(threshold);
 
         let first_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
@@ -170,7 +171,7 @@ mod tests {
 
         // Execute second time
         let second_input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(expected_progress)),
         };
         let result = runner.execute(second_input).await.unwrap();
@@ -239,7 +240,7 @@ mod tests {
             })?;
 
             // use previous progress as seed size
-            let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
+            let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
                 return Ok(Vec::default())
