@@ -1,6 +1,6 @@
 //! Type bindings for js tracing inspector
 
-use crate::tracing::js::builtins::{to_buf, to_buf_value};
+use crate::tracing::js::builtins::{to_bigint_array, to_buf, to_buf_value};
 use boa_engine::{
     native_function::NativeFunction, object::FunctionObjectBuilder, Context, JsArgs, JsError,
     JsNativeError, JsObject, JsResult, JsValue,
@@ -235,8 +235,42 @@ impl OpObj {
 pub(crate) struct StackObj(pub(crate) Stack);
 
 impl StackObj {
-    pub(crate) fn into_js_object(self, _context: &mut Context<'_>) -> JsResult<JsObject> {
-        todo!()
+    pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
+        let obj = JsObject::default();
+        let stack = self.0;
+        let len = stack.len();
+        let stack_arr = to_bigint_array(stack.data(), context)?;
+        let length = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure(move |_this, _args, _ctx| Ok(JsValue::from(len))),
+        )
+        .length(0)
+        .build();
+
+        let peek = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, stack_arr, ctx| {
+                    let idx_f64 = args.get_or_undefined(0).to_number(ctx)?;
+                    let idx = idx_f64 as usize;
+                    if len <= idx || idx_f64 < 0. {
+                        return Err(JsError::from_native(JsNativeError::typ().with_message(
+                            format!(
+                                "tracer accessed out of bound stack: size {len}, index {idx_f64}"
+                            ),
+                        )))
+                    }
+                    stack_arr.get(idx as u64, ctx)
+                },
+                stack_arr,
+            ),
+        )
+        .length(1)
+        .build();
+
+        obj.set("length", length, false, context)?;
+        obj.set("peek", peek, false, context)?;
+        Ok(obj)
     }
 }
 

@@ -2,7 +2,11 @@
 
 // toHex, toWord, toAddress toContract toContract2 isPrecompiled slice
 
-use boa_engine::{object::builtins::JsArrayBuffer, Context, JsResult, JsValue, NativeFunction};
+use boa_engine::{
+    object::builtins::{JsArray, JsArrayBuffer},
+    Context, JsError, JsNativeError, JsResult, JsValue, NativeFunction,
+};
+use reth_primitives::U256;
 
 /// bigIntegerJS is the minified version of https://github.com/peterolson/BigInteger.js.
 pub(crate) const BIG_INT_JS: &str = include_str!("bigint.js");
@@ -21,6 +25,24 @@ pub(crate) fn to_buf(bytes: Vec<u8>, context: &mut Context<'_>) -> JsResult<JsAr
 /// Create a new array buffer object from byte block.
 pub(crate) fn to_buf_value(bytes: Vec<u8>, context: &mut Context<'_>) -> JsResult<JsValue> {
     Ok(to_buf(bytes, context)?.into())
+}
+
+/// Create a new array buffer object from byte block.
+pub(crate) fn to_bigint_array(items: &[U256], ctx: &mut Context<'_>) -> JsResult<JsArray> {
+    let arr = JsArray::new(ctx);
+    let bigint = ctx.global_object().get("bigint", ctx)?;
+    if !bigint.is_callable() {
+        return Err(JsError::from_native(
+            JsNativeError::typ().with_message("global object bigint is not callable"),
+        ))
+    }
+    let bigint = bigint.as_callable().unwrap();
+
+    for item in items {
+        let val = bigint.call(&JsValue::undefined(), &[JsValue::from(item.to_string())], ctx)?;
+        arr.push(val, ctx)?;
+    }
+    Ok(arr)
 }
 
 // func toBuf(vm *goja.Runtime, bufType goja.Value, val []byte) (goja.Value, error) {
