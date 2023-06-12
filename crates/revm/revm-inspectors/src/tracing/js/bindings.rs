@@ -5,9 +5,11 @@ use boa_engine::{
     native_function::NativeFunction, object::FunctionObjectBuilder, Context, JsArgs, JsError,
     JsNativeError, JsObject, JsResult, JsValue,
 };
-
 use reth_primitives::{Address, Bytes, H256, U256};
-use revm::interpreter::{OpCode, Stack};
+use revm::interpreter::{
+    opcode::{PUSH0, PUSH32},
+    OpCode, Stack,
+};
 
 /// A macro that creates a native function that returns a bigint
 macro_rules! bigint {
@@ -50,25 +52,25 @@ macro_rules! capture_getter {
 #[derive(Debug)]
 pub(crate) struct StepLog {
     /// Stack before step execution
-    stack: StackObj,
+    pub(crate) stack: StackObj,
     /// Opcode to be executed
-    op: OpObj,
+    pub(crate) op: OpObj,
     /// All allocated memory in a step
-    memory: MemoryObj,
+    pub(crate) memory: MemoryObj,
     /// Program counter before step execution
-    pc: u64,
+    pub(crate) pc: u64,
     /// Remaining gas before step execution
-    gas: u64,
+    pub(crate) gas: u64,
     /// Gas cost of step execution
-    cost: u64,
+    pub(crate) cost: u64,
     /// Call depth
-    depth: usize,
+    pub(crate) depth: usize,
     /// Gas refund counter before step execution
-    refund: u64,
+    pub(crate) refund: u64,
     /// returns information about the error if one occurred, otherwise returns undefined
-    error: Option<String>,
+    pub(crate) error: Option<String>,
     /// The contract object available to the js inspector
-    contract: Contract,
+    pub(crate) contract: Contract,
 }
 
 impl StepLog {
@@ -114,7 +116,7 @@ impl StepLog {
 
 /// Represents the memory object
 #[derive(Debug)]
-pub(crate) struct MemoryObj(Bytes);
+pub(crate) struct MemoryObj(pub(crate) Bytes);
 
 impl MemoryObj {
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
@@ -189,17 +191,48 @@ impl MemoryObj {
 
 /// Represents the opcode object
 #[derive(Debug)]
-pub(crate) struct OpObj(OpCode);
+pub(crate) struct OpObj(pub(crate) OpCode);
 
 impl OpObj {
-    pub(crate) fn into_js_object(self, _context: &mut Context<'_>) -> JsResult<JsObject> {
-        todo!()
+    pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
+        let obj = JsObject::default();
+        let value = self.0.u8();
+        let is_push = (PUSH0..=PUSH32).contains(&value);
+
+        let to_number = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure(move |_this, _args, _ctx| Ok(JsValue::from(value))),
+        )
+        .length(0)
+        .build();
+
+        let is_push = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure(move |_this, _args, _ctx| Ok(JsValue::from(is_push))),
+        )
+        .length(0)
+        .build();
+
+        let to_string = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure(move |_this, _args, _ctx| {
+                let s = OpCode::try_from_u8(value).expect("invalid opcode").to_string();
+                Ok(JsValue::from(s))
+            }),
+        )
+        .length(0)
+        .build();
+
+        obj.set("toNumber", to_number, false, context)?;
+        obj.set("toString", to_string, false, context)?;
+        obj.set("isPush", is_push, false, context)?;
+        Ok(obj)
     }
 }
 
 /// Represents the stack object
 #[derive(Debug, Clone)]
-pub(crate) struct StackObj(Stack);
+pub(crate) struct StackObj(pub(crate) Stack);
 
 impl StackObj {
     pub(crate) fn into_js_object(self, _context: &mut Context<'_>) -> JsResult<JsObject> {
@@ -210,10 +243,10 @@ impl StackObj {
 /// Represents the contract object
 #[derive(Debug, Clone)]
 pub(crate) struct Contract {
-    caller: Address,
-    contract: Address,
-    value: U256,
-    input: Bytes,
+    pub(crate) caller: Address,
+    pub(crate) contract: Address,
+    pub(crate) value: U256,
+    pub(crate) input: Bytes,
 }
 
 impl Contract {
