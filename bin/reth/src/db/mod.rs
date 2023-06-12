@@ -100,7 +100,7 @@ impl Command {
             reth_db::mdbx::EnvKind::RW,
         )?;
 
-        let mut tool = DbTool::new(&db)?;
+        let mut tool = DbTool::new(&db, self.chain.clone())?;
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.

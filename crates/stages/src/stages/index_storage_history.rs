@@ -9,11 +9,8 @@ use reth_primitives::{
     },
     BlockNumber,
 };
-use reth_provider::Transaction;
-use std::{
-    fmt::Debug,
-    ops::{Deref, RangeInclusive},
-};
+use reth_provider::DatabaseProviderRW;
+use std::{fmt::Debug, ops::RangeInclusive};
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -41,7 +38,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -51,17 +48,17 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         let mut stage_checkpoint = stage_checkpoint(
-            tx,
+            provider,
             input.checkpoint(),
             // It is important to provide the full block range into the checkpoint,
             // not the one accounting for commit threshold, to get the correct range end.
             &input.next_block_range(),
         )?;
 
-        let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;
+        let indices = provider.get_storage_transition_ids_from_changeset(range.clone())?;
         let changesets = indices.values().map(|blocks| blocks.len() as u64).sum::<u64>();
 
-        tx.insert_storage_history_index(indices)?;
+        provider.insert_storage_history_index(indices)?;
 
         stage_checkpoint.progress.processed += changesets;
 
@@ -75,13 +72,14 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        let changesets = tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
+        let changesets =
+            provider.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
 
         let checkpoint =
             if let Some(mut stage_checkpoint) = input.checkpoint.index_history_stage_checkpoint() {
@@ -106,7 +104,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 /// given block range and calculates the progress by counting the number of processed entries in the
 /// [tables::StorageChangeSet] table within the given block range.
 fn stage_checkpoint<DB: Database>(
-    tx: &Transaction<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
     checkpoint: StageCheckpoint,
     range: &RangeInclusive<BlockNumber>,
 ) -> Result<IndexHistoryCheckpoint, DatabaseError> {
@@ -123,18 +121,19 @@ fn stage_checkpoint<DB: Database>(
                 block_range: CheckpointBlockRange::from(range),
                 progress: EntitiesCheckpoint {
                     processed: progress.processed,
-                    total: tx.deref().entries::<tables::StorageChangeSet>()? as u64,
+                    total: provider.tx_ref().entries::<tables::StorageChangeSet>()? as u64,
                 },
             }
         }
         _ => IndexHistoryCheckpoint {
             block_range: CheckpointBlockRange::from(range),
             progress: EntitiesCheckpoint {
-                processed: tx
+                processed: provider
+                    .tx_ref()
                     .cursor_read::<tables::StorageChangeSet>()?
                     .walk_range(BlockNumberAddress::range(0..=checkpoint.block_number))?
                     .count() as u64,
-                total: tx.deref().entries::<tables::StorageChangeSet>()? as u64,
+                total: provider.tx_ref().entries::<tables::StorageChangeSet>()? as u64,
             },
         },
     })
@@ -144,6 +143,7 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
 
     use assert_matches::assert_matches;
+    use reth_provider::ShareableDatabase;
     use std::collections::BTreeMap;
 
     use super::*;
@@ -157,7 +157,7 @@ mod tests {
         transaction::DbTxMut,
         BlockNumberList,
     };
-    use reth_primitives::{hex_literal::hex, StorageEntry, H160, H256, U256};
+    use reth_primitives::{hex_literal::hex, StorageEntry, H160, H256, MAINNET, U256};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
     const STORAGE_KEY: H256 =
@@ -223,8 +223,9 @@ mod tests {
     async fn run(tx: &TestTransaction, run_to: u64) {
         let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexStorageHistoryStage::default();
-        let mut tx = tx.inner();
-        let out = stage.execute(&mut tx, input).await.unwrap();
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let mut provider = factory.provider_rw().unwrap();
+        let out = stage.execute(&mut provider, input).await.unwrap();
         assert_eq!(
             out,
             ExecOutput {
@@ -237,7 +238,7 @@ mod tests {
                 done: true
             }
         );
-        tx.commit().unwrap();
+        provider.commit().unwrap();
     }
 
     async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
@@ -247,10 +248,11 @@ mod tests {
             ..Default::default()
         };
         let mut stage = IndexStorageHistoryStage::default();
-        let mut tx = tx.inner();
-        let out = stage.unwind(&mut tx, input).await.unwrap();
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let mut provider = factory.provider_rw().unwrap();
+        let out = stage.unwind(&mut provider, input).await.unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
-        tx.commit().unwrap();
+        provider.commit().unwrap();
     }
 
     #[tokio::test]
@@ -463,10 +465,11 @@ mod tests {
         // run
         {
             let mut stage = IndexStorageHistoryStage { commit_threshold: 4 }; // Two runs required
-            let mut tx = test_tx.inner();
+            let factory = ShareableDatabase::new(&test_tx.tx, MAINNET.clone());
+            let mut provider = factory.provider_rw().unwrap();
 
             let mut input = ExecInput { target: Some(5), ..Default::default() };
-            let out = stage.execute(&mut tx, input).await.unwrap();
+            let out = stage.execute(&mut provider, input).await.unwrap();
             assert_eq!(
                 out,
                 ExecOutput {
@@ -481,7 +484,7 @@ mod tests {
             );
             input.checkpoint = Some(out.checkpoint);
 
-            let out = stage.execute(&mut tx, input).await.unwrap();
+            let out = stage.execute(&mut provider, input).await.unwrap();
             assert_eq!(
                 out,
                 ExecOutput {
@@ -495,7 +498,7 @@ mod tests {
                 }
             );
 
-            tx.commit().unwrap();
+            provider.commit().unwrap();
         }
 
         // verify
@@ -561,8 +564,11 @@ mod tests {
         })
         .unwrap();
 
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+
         assert_matches!(
-            stage_checkpoint(&tx.inner(), StageCheckpoint::new(1), &(1..=2)).unwrap(),
+            stage_checkpoint(&provider, StageCheckpoint::new(1), &(1..=2)).unwrap(),
             IndexHistoryCheckpoint {
                 block_range: CheckpointBlockRange { from: 1, to: 2 },
                 progress: EntitiesCheckpoint { processed: 3, total: 6 }

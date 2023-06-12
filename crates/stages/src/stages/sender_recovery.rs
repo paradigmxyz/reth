@@ -13,8 +13,8 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     TransactionSignedNoHash, TxNumber, H160,
 };
-use reth_provider::{ProviderError, Transaction};
-use std::{fmt::Debug, ops::Deref};
+use reth_provider::{DatabaseProviderRW, HeaderProvider, ProviderError};
+use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::*;
@@ -56,7 +56,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -64,7 +64,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         }
 
         let (tx_range, block_range, is_final_range) =
-            input.next_block_range_with_transaction_threshold(tx, self.commit_threshold)?;
+            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
 
         // No transactions to walk over
@@ -72,10 +72,12 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             info!(target: "sync::stages::sender_recovery", ?tx_range, "Target transaction already reached");
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
-                    .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                    .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: is_final_range,
             })
         }
+
+        let tx = provider.tx_ref();
 
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
@@ -133,7 +135,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
                                 // fetch the sealed header so we can use it in the sender recovery
                                 // unwind
-                                let sealed_header = tx.get_sealed_header(block_number)?;
+                                let sealed_header = provider
+                                    .sealed_header(block_number)?
+                                    .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
                                 return Err(StageError::Validation {
                                     block: sealed_header,
                                     error:
@@ -150,7 +154,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
             done: is_final_range,
         })
     }
@@ -158,18 +162,18 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = tx.block_body_indices(unwind_to)?.last_tx_num();
-        tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
+        let latest_tx_id = provider.block_body_indices(unwind_to)?.last_tx_num();
+        provider.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
 }
@@ -194,11 +198,11 @@ fn recover_sender(
 }
 
 fn stage_checkpoint<DB: Database>(
-    tx: &Transaction<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: tx.deref().entries::<tables::TxSenders>()? as u64,
-        total: tx.deref().entries::<tables::Transactions>()? as u64,
+        processed: provider.tx_ref().entries::<tables::TxSenders>()? as u64,
+        total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
 

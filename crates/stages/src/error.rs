@@ -66,6 +66,9 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
     Download(#[from] DownloadError),
+    /// Internal error
+    #[error(transparent)]
+    Internal(#[from] reth_interfaces::Error),
     /// The stage encountered a recoverable error.
     ///
     /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
@@ -104,6 +107,9 @@ pub enum PipelineError {
     /// The pipeline encountered a database error.
     #[error("A database error occurred.")]
     Database(#[from] DbError),
+    /// The pipeline encountered an irrecoverable error in one of the stages.
+    #[error("An interface error occurred.")]
+    Interface(#[from] reth_interfaces::Error),
     /// The pipeline encountered an error while trying to send an event.
     #[error("The pipeline encountered an error while trying to send an event.")]
     Channel(#[from] SendError<PipelineEvent>),

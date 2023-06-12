@@ -18,7 +18,7 @@ use std::{ops::RangeBounds, sync::Arc};
 use tracing::trace;
 
 mod provider;
-use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
 /// A common provider that fetches data from a database.
 ///
@@ -34,16 +34,17 @@ pub struct ShareableDatabase<DB> {
 impl<DB: Database> ShareableDatabase<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
-    /// [`BlockHashProvider`]
+    /// [`BlockHashProvider`]. This may fail if the inner read database transaction fails to open.
     pub fn provider(&self) -> Result<DatabaseProviderRO<'_, DB>> {
         Ok(DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone()))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
-    /// [`BlockHashProvider`]
+    /// [`BlockHashProvider`].  This may fail if the inner read/write database transaction fails to
+    /// open.
     pub fn provider_rw(&self) -> Result<DatabaseProviderRW<'_, DB>> {
-        Ok(DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone()))
+        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone())))
     }
 }
 

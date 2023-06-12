@@ -11,8 +11,8 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     U256,
 };
-use reth_provider::Transaction;
-use std::{ops::Deref, sync::Arc};
+use reth_provider::DatabaseProviderRW;
+use std::sync::Arc;
 use tracing::*;
 
 /// The total difficulty stage.
@@ -51,9 +51,10 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Write total difficulty entries
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        let tx = provider.tx_ref();
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -89,7 +90,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
             done: is_final_range,
         })
     }
@@ -97,26 +98,26 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
+        provider.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
 }
 
 fn stage_checkpoint<DB: Database>(
-    tx: &Transaction<'_, DB>,
+    provider: &DatabaseProviderRW<'_, DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: tx.deref().entries::<tables::HeaderTD>()? as u64,
-        total: tx.deref().entries::<tables::Headers>()? as u64,
+        processed: provider.tx_ref().entries::<tables::HeaderTD>()? as u64,
+        total: provider.tx_ref().entries::<tables::Headers>()? as u64,
     })
 }
 

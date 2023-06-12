@@ -12,12 +12,9 @@ use reth_primitives::{
     trie::StoredSubNode,
     BlockNumber, SealedHeader, H256,
 };
-use reth_provider::Transaction;
+use reth_provider::{DatabaseProviderRW, HeaderProvider, ProviderError};
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
-use std::{
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
+use std::fmt::Debug;
 use tracing::*;
 
 /// The merkle hashing stage uses input from
@@ -93,11 +90,10 @@ impl MerkleStage {
     /// Gets the hashing progress
     pub fn get_execution_checkpoint<DB: Database>(
         &self,
-        tx: &Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
     ) -> Result<Option<MerkleCheckpoint>, StageError> {
-        let buf = tx
-            .get::<tables::SyncStageProgress>(StageId::MerkleExecute.to_string())?
-            .unwrap_or_default();
+        let buf =
+            provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
 
         if buf.is_empty() {
             return Ok(None)
@@ -110,7 +106,7 @@ impl MerkleStage {
     /// Saves the hashing progress
     pub fn save_execution_checkpoint<DB: Database>(
         &mut self,
-        tx: &Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         checkpoint: Option<MerkleCheckpoint>,
     ) -> Result<(), StageError> {
         let mut buf = vec![];
@@ -123,8 +119,7 @@ impl MerkleStage {
             );
             checkpoint.to_compact(&mut buf);
         }
-        tx.put::<tables::SyncStageProgress>(StageId::MerkleExecute.to_string(), buf)?;
-        Ok(())
+        Ok(provider.save_stage_checkpoint_progress(StageId::MerkleExecute, buf)?)
     }
 }
 
@@ -143,7 +138,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let threshold = match self {
@@ -160,10 +155,12 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let (from_block, to_block) = range.clone().into_inner();
         let current_block = input.target();
 
-        let block = tx.get_header(current_block)?;
+        let block = provider
+            .header_by_number(current_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(current_block.into()))?;
         let block_root = block.state_root;
 
-        let mut checkpoint = self.get_execution_checkpoint(tx)?;
+        let mut checkpoint = self.get_execution_checkpoint(provider)?;
 
         let (trie_root, entities_checkpoint) = if range.is_empty() {
             (block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
@@ -192,25 +189,27 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 );
                 // Reset the checkpoint and clear trie tables
                 checkpoint = None;
-                self.save_execution_checkpoint(tx, None)?;
-                tx.clear::<tables::AccountsTrie>()?;
-                tx.clear::<tables::StoragesTrie>()?;
+                self.save_execution_checkpoint(provider, None)?;
+                provider.tx_ref().clear::<tables::AccountsTrie>()?;
+                provider.tx_ref().clear::<tables::StoragesTrie>()?;
 
                 None
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (tx.deref().entries::<tables::HashedAccount>()? +
-                    tx.deref().entries::<tables::HashedStorage>()?) as u64,
+                total: (provider.tx_ref().entries::<tables::HashedAccount>()? +
+                    provider.tx_ref().entries::<tables::HashedStorage>()?)
+                    as u64,
             });
 
-            let progress = StateRoot::new(tx.deref_mut())
+            let tx = provider.tx_ref();
+            let progress = StateRoot::new(tx)
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
             match progress {
                 StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
-                    updates.flush(tx.deref_mut())?;
+                    updates.flush(tx)?;
 
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
@@ -219,7 +218,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
                         state.hash_builder.into(),
                     );
-                    self.save_execution_checkpoint(tx, Some(checkpoint))?;
+                    self.save_execution_checkpoint(provider, Some(checkpoint))?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
@@ -231,7 +230,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     })
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
-                    updates.flush(tx.deref_mut())?;
+                    updates.flush(tx)?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
@@ -240,12 +239,13 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             }
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block, target = ?to_block, "Updating trie");
-            let (root, updates) = StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?;
-            updates.flush(tx.deref_mut())?;
+            let (root, updates) =
+                StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
+                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            updates.flush(provider.tx_ref())?;
 
-            let total_hashed_entries = (tx.deref().entries::<tables::HashedAccount>()? +
-                tx.deref().entries::<tables::HashedStorage>()?)
+            let total_hashed_entries = (provider.tx_ref().entries::<tables::HashedAccount>()? +
+                provider.tx_ref().entries::<tables::HashedStorage>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
@@ -260,7 +260,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         };
 
         // Reset the checkpoint
-        self.save_execution_checkpoint(tx, None)?;
+        self.save_execution_checkpoint(provider, None)?;
 
         self.validate_state_root(trie_root, block.seal_slow(), to_block)?;
 
@@ -274,9 +274,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        let tx = provider.tx_ref();
         let range = input.unwind_block_range();
         if matches!(self, MerkleStage::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
@@ -286,8 +287,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (tx.deref().entries::<tables::HashedAccount>()? +
-                    tx.deref().entries::<tables::HashedStorage>()?) as u64,
+                total: (tx.entries::<tables::HashedAccount>()? +
+                    tx.entries::<tables::HashedStorage>()?) as u64,
             });
 
         if input.unwind_to == 0 {
@@ -304,16 +305,17 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         // Unwind trie only if there are transitions
         if !range.is_empty() {
-            let (block_root, updates) =
-                StateRoot::incremental_root_with_updates(tx.deref_mut(), range)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calulated state root
-            let target = tx.get_header(input.unwind_to)?;
+            let target = provider
+                .header_by_number(input.unwind_to)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
             self.validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
-            updates.flush(tx.deref_mut())?;
+            updates.flush(provider.tx_ref())?;
 
             // TODO(alexey): update entities checkpoint
         } else {

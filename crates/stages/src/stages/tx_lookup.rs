@@ -13,8 +13,7 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     TransactionSignedNoHash, TxNumber, H256,
 };
-use reth_provider::Transaction;
-use std::ops::Deref;
+use reth_provider::DatabaseProviderRW;
 use tokio::sync::mpsc;
 use tracing::*;
 
@@ -52,19 +51,19 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Write transaction hash -> id entries
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
-
         let (tx_range, block_range, is_final_range) =
-            input.next_block_range_with_transaction_threshold(tx, self.commit_threshold)?;
+            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
 
         debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
 
+        let tx = provider.tx_ref();
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         let tx_walker = tx_cursor.walk_range(tx_range)?;
 
@@ -138,7 +137,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
             done: is_final_range,
         })
     }
@@ -146,9 +145,10 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        let tx = provider.tx_ref();
         let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Cursors to unwind tx hash to number
@@ -174,17 +174,17 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
 }
 
 fn stage_checkpoint<DB: Database>(
-    tx: &Transaction<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: tx.deref().entries::<tables::TxHashNumber>()? as u64,
-        total: tx.deref().entries::<tables::Transactions>()? as u64,
+        processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64,
+        total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
 

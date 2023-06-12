@@ -177,7 +177,7 @@ impl ImportCommand {
                     },
                 )),
             )
-            .build(db);
+            .build(db, self.chain.clone());
 
         let events = pipeline.events().map(Into::into);
 

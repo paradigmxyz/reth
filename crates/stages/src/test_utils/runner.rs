@@ -1,8 +1,9 @@
 use super::TestTransaction;
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::mdbx::{Env, WriteMap};
-use reth_provider::Transaction;
-use std::borrow::Borrow;
+use reth_primitives::MAINNET;
+use reth_provider::ShareableDatabase;
+use std::{borrow::Borrow, sync::Arc};
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
@@ -44,9 +45,11 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let mut db = Transaction::new(db.borrow()).expect("failed to create db container");
-            let result = stage.execute(&mut db, input).await;
-            db.commit().expect("failed to commit");
+            let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+            let mut provider = factory.provider_rw().unwrap();
+
+            let result = stage.execute(&mut provider, input).await;
+            provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send message")
         });
         rx
@@ -68,9 +71,11 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let mut db = Transaction::new(db.borrow()).expect("failed to create db container");
-            let result = stage.unwind(&mut db, input).await;
-            db.commit().expect("failed to commit");
+            let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+            let mut provider = factory.provider_rw().unwrap();
+
+            let result = stage.unwind(&mut provider, input).await;
+            provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
         });
         Box::pin(rx).await.unwrap()

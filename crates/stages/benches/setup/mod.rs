@@ -9,7 +9,8 @@ use reth_interfaces::test_utils::generators::{
     random_block_range, random_contract_account_range, random_eoa_account_range,
     random_transition_range,
 };
-use reth_primitives::{Account, Address, SealedBlock, H256};
+use reth_primitives::{Account, Address, SealedBlock, H256, MAINNET};
+use reth_provider::ShareableDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::TestTransaction,
@@ -18,7 +19,6 @@ use reth_stages::{
 use reth_trie::StateRoot;
 use std::{
     collections::BTreeMap,
-    ops::Deref,
     path::{Path, PathBuf},
 };
 
@@ -38,11 +38,12 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let mut db_tx = tx.inner();
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let mut provider = factory.provider_rw().unwrap();
 
         // Clear previous run
         stage
-            .unwind(&mut db_tx, unwind)
+            .unwind(&mut provider, unwind)
             .await
             .map_err(|e| {
                 format!(
@@ -52,7 +53,7 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
             })
             .unwrap();
 
-        db_tx.commit().unwrap();
+        provider.commit().unwrap();
     });
 }
 
@@ -65,18 +66,19 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let mut db_tx = tx.inner();
+        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let mut provider = factory.provider_rw().unwrap();
 
-        StorageHashingStage::default().unwind(&mut db_tx, unwind).await.unwrap();
-        AccountHashingStage::default().unwind(&mut db_tx, unwind).await.unwrap();
+        StorageHashingStage::default().unwind(&mut provider, unwind).await.unwrap();
+        AccountHashingStage::default().unwind(&mut provider, unwind).await.unwrap();
 
         // Clear previous run
-        stage.unwind(&mut db_tx, unwind).await.unwrap();
+        stage.unwind(&mut provider, unwind).await.unwrap();
 
-        AccountHashingStage::default().execute(&mut db_tx, input).await.unwrap();
-        StorageHashingStage::default().execute(&mut db_tx, input).await.unwrap();
+        AccountHashingStage::default().execute(&mut provider, input).await.unwrap();
+        StorageHashingStage::default().execute(&mut provider, input).await.unwrap();
 
-        db_tx.commit().unwrap();
+        provider.commit().unwrap();
     });
 }
 
@@ -121,7 +123,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         tx.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates) = StateRoot::new(tx.inner().deref()).root_with_updates().unwrap();
+        let (root, updates) = StateRoot::new(tx.inner().tx_ref()).root_with_updates().unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -142,8 +144,8 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         // make last block have valid state root
         let root = {
-            let mut tx_mut = tx.inner();
-            let root = StateRoot::new(tx_mut.deref()).root().unwrap();
+            let tx_mut = tx.inner();
+            let root = StateRoot::new(tx_mut.tx_ref()).root().unwrap();
             tx_mut.commit().unwrap();
             root
         };

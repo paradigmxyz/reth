@@ -20,7 +20,7 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! use reth_db::mdbx::test_utils::create_test_rw_db;
+//! # use reth_db::mdbx::test_utils::create_test_rw_db;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
@@ -51,7 +51,7 @@
 //!     .add_stages(
 //!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)
 //!     )
-//!     .build(db);
+//!     .build(db, MAINNET.clone());
 //! ```
 mod error;
 mod pipeline;

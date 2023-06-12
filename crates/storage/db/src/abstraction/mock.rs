@@ -38,7 +38,7 @@ impl<'a> DatabaseGAT<'a> for DatabaseMock {
 }
 
 /// Mock read only tx
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TxMock {
     /// Table representation
     _table: BTreeMap<Vec<u8>, Vec<u8>>,
