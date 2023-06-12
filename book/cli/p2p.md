@@ -20,30 +20,30 @@ Options:
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-          
+
           Possible values are either a built-in chain or the path to a chain specification file.
-          
+
           Built-in chains:
           - mainnet
           - goerli
           - sepolia
-          
+
           [default: mainnet]
 
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
-          
+
           Defaults to the OS-specific data directory:
-          
+
           - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
           - Windows: `{FOLDERID_RoamingAppData}/reth/`
           - macOS: `$HOME/Library/Application Support/reth/`
-          
+
           [default: default]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
-          
+
           This also will deterministically set the peer ID.
 
   -d, --disable-discovery
@@ -66,7 +66,7 @@ Options:
 
       --retries <RETRIES>
           The number of retries per request
-          
+
           [default: 5]
 
       --nat <NAT>
@@ -81,7 +81,7 @@ Logging:
 
       --log.directory <PATH>
           The path to put log files in
-          
+
           [default: /Users/georgios/Library/Caches/reth/logs]
 
       --log.journald
@@ -89,13 +89,13 @@ Logging:
 
       --log.filter <FILTER>
           The filter to use for logs written to the log file
-          
+
           [default: debug]
 
 Display:
   -v, --verbosity...
           Set the minimum log level.
-          
+
           -v      Errors
           -vv     Warnings
           -vvv    Info
@@ -112,20 +112,11 @@ Display:
 $ reth p2p header --help
 Download block header
 
-Usage: reth p2p header [OPTIONS] <ID>
+Usage: reth p2p header <ID>
 
 Arguments:
   <ID>
           The header number or hash
-
-Options:
-      --p2p-secret-key <PATH>
-          Secret key to use for this node.
-          
-          This also will deterministically set the peer ID.
-
-  -h, --help
-          Print help (see a summary with '-h')
 ```
 
 
@@ -136,18 +127,9 @@ Options:
 $ reth p2p body --help
 Download block body
 
-Usage: reth p2p body [OPTIONS] <ID>
+Usage: reth p2p body <ID>
 
 Arguments:
   <ID>
           The block number or hash
-
-Options:
-      --p2p-secret-key <PATH>
-          Secret key to use for this node.
-          
-          This also will deterministically set the peer ID.
-
-  -h, --help
-          Print help (see a summary with '-h')
 ```
