@@ -66,12 +66,12 @@ As a data engineer/analyst, or as a data indexer, you'll want to use Archive mod
 ## Is this secure?
 
 Reth implements the specification of Ethereum as defined in the [ethereum/execution-specs](https://github.com/ethereum/execution-specs/) repository. To make sure the node is built securelty, we run the following tests:
-1. 
-2. EVM state tests are run on every [Revm Pull Request](https://github.com/bluealloy/revm/blob/main/.github/workflows/ethereum-tests.yml)
-2. Hive tests are [run every 24 hours](https://github.com/paradigmxyz/reth/blob/main/.github/workflows/hive.yml) in the main Reth repository.
-3. We regularly re-sync multiple nodes from scratch.
-4. We operate multiple nodes at the tip of Ethereum mainnet and various testnets.
-5. We extensively unit test, fuzz test and document all our code, while also restricting PRs with aggressive lint rules.
+
+1. EVM state tests are run on every [Revm Pull Request](https://github.com/bluealloy/revm/blob/main/.github/workflows/ethereum-tests.yml)
+1. Hive tests are [run every 24 hours](https://github.com/paradigmxyz/reth/blob/main/.github/workflows/hive.yml) in the main Reth repository.
+1. We regularly re-sync multiple nodes from scratch.
+1. We operate multiple nodes at the tip of Ethereum mainnet and various testnets.
+1. We extensively unit test, fuzz test and document all our code, while also restricting PRs with aggressive lint rules.
 
 We intend to also audit / fuzz the EVM & parts of the codebase. Please reach out if you're interested in collaborating on securing this codebase.
 
