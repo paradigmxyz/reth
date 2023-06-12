@@ -26,6 +26,8 @@ Options:
           - goerli
           - sepolia
 
+          [default: mainnet]
+
       --path <IMPORT_PATH>
           The path to a block file for import.
 

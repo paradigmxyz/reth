@@ -25,6 +25,8 @@ Options:
           - goerli
           - sepolia
 
+          [default: mainnet]
+
 Logging:
       --log.persistent
           The flag to enable persistent logs
