@@ -16,7 +16,7 @@ The most important requirement is by far the disk, whereas CPU and RAM requireme
 
 |           | Archive Node                       | Full Node                           |
 |-----------|------------------------------------|-------------------------------------|
-| Disk      | At least 2.5TB (NVMe recommended)  | TBD                                 |
+| Disk      | At least 2TB (NVMe recommended)    | TBD                                 |
 | Memory    | 8GB+                               | 8GB+                                |
 | CPU       | Higher clock speed over core count | Higher clock speeds over core count |
 | Bandwidth | Stable 24Mbps+                     | Stable 24Mbps+                      |
@@ -25,7 +25,7 @@ The most important requirement is by far the disk, whereas CPU and RAM requireme
 
 There are multiple types of disks to sync Reth, with varying size requirements, depending on the [syncing mode](../run/sync-modes.md):
 
-* Archive Node: At least 2.5TB is required to store 
+* Archive Node: At least 2TB is required to store 
 * Full Node: TBD
 
 NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
