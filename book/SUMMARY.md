@@ -8,7 +8,6 @@
    1. [Update Priorities](./installation/priorities.md)
 1. [Run a Node](./run/run-a-node.md)
    1. [Mainnet or official testnets](./run/mainnet.md)
-   1. [Local Testnet](./run/local_testnet.md)
    1. [Metrics](./run/observability.md)
    1. [Configuring Reth](./run/config.md)
 1. [Interacting with Reth over JSON-RPC](./jsonrpc/intro.md)
