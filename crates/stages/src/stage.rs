@@ -36,7 +36,7 @@ impl ExecInput {
 
     /// Returns `true` if the target block number has already been reached.
     pub fn target_reached(&self) -> bool {
-        self.checkpoint().block_number >= self.target()
+        ExecOutput { checkpoint: self.checkpoint.unwrap_or_default() }.is_done(*self)
     }
 
     /// Return the target block number or default.
@@ -110,6 +110,11 @@ pub struct UnwindInput {
 }
 
 impl UnwindInput {
+    /// Returns `true` if the target block number has already been reached.
+    pub fn target_reached(&self) -> bool {
+        UnwindOutput { checkpoint: self.checkpoint }.is_done(*self)
+    }
+
     /// Return next block range that needs to be unwound.
     pub fn unwind_block_range(&self) -> RangeInclusive<BlockNumber> {
         self.unwind_block_range_with_threshold(u64::MAX).0
@@ -140,6 +145,8 @@ pub struct ExecOutput {
 }
 
 impl ExecOutput {
+    /// Returns `true` if the target block number has already been reached,
+    /// i.e. `checkpoint.block_number >= target`.
     pub fn is_done(&self, input: ExecInput) -> bool {
         if self.checkpoint.block_number > input.target() {
             warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the execution target");
@@ -156,6 +163,8 @@ pub struct UnwindOutput {
 }
 
 impl UnwindOutput {
+    /// Returns `true` if the target block number has already been reached,
+    /// i.e. `checkpoint.block_number <= unwind_to`.
     pub fn is_done(&self, input: UnwindInput) -> bool {
         if self.checkpoint.block_number < input.unwind_to {
             warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the unwind target");

@@ -1,4 +1,4 @@
-use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
@@ -259,11 +259,7 @@ where
                 continue
             }
 
-            let mut done = UnwindOutput { checkpoint }.is_done(UnwindInput {
-                checkpoint,
-                unwind_to: to,
-                bad_block,
-            });
+            let mut done = UnwindInput { checkpoint, unwind_to: to, bad_block }.target_reached();
 
             debug!(target: "sync::pipeline", from = %checkpoint, %to, ?bad_block, "Starting unwind");
             while !done {
