@@ -1,6 +1,7 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, Bytes, H256};
 use reth_rpc_types::{
+    state::StateOverride,
     trace::{filter::TraceFilter, parity::*},
     BlockOverrides, CallRequest, Index,
 };
@@ -17,6 +18,7 @@ pub trait TraceApi {
         call: CallRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<TraceResults>;
 
