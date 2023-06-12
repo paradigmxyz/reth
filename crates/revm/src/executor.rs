@@ -245,31 +245,56 @@ where
             }
 
             #[cfg(feature = "optimism")]
-            if let Some(m) = transaction.mint() {
-                // Add balance to the caller account equivalent to the minted amount
-                self.increment_account_balance(sender, U256::from(m), &mut post_state)?;
+            {
+                if let Some(m) = transaction.mint() {
+                    // Add balance to the caller account equivalent to the minted amount
+                    self.increment_account_balance(sender, U256::from(m), &mut post_state)?;
+                }
+
+                // Check if the sender balance can cover the total cost including L1 cost
+                // total cost: gas_limit * gas_price + l1_cost
+                let db = self.db();
+                let l1_cost = l1_cost_oracle
+                    .calculate_l1_cost(db, block.header.number, transaction.clone())
+                    .map_err(|db_err| Error::DBError { inner: db_err.to_string() })?;
+
+                // TODO: check if max_fee_per_gas works for 1559 txs here,
+                // for legacy this is the same as gas_price and for deposit this is 0.
+                // If this doesn't work we can replicate revm's effective_gas_price logic here
+                let total_cost = U256::from(transaction.gas_limit())
+                    .saturating_mul(U256::from(transaction.max_fee_per_gas()))
+                    .saturating_add(U256::from(l1_cost));
+
+                let sender_account = db.load_account(sender).map_err(|_| Error::ProviderError)?;
+                if sender_account.info.balance.cmp(&total_cost) == std::cmp::Ordering::Less {
+                    return Err(Error::InsufficientFunds {
+                        have: sender_account.info.balance.to::<u64>(),
+                        want: total_cost.to::<u64>(),
+                    })
+                }
+
+                // Safely take l1_cost from sender (the rest will be deducted by the
+                // EVM execution and included in result.gas_used())
+                // TODO: handle calls with `disable_balance_check` flag set?
+                let old = to_reth_acc(&sender_account.info);
+                sender_account.info.balance -= l1_cost;
+                let new = to_reth_acc(&sender_account.info);
+                post_state.change_account(sender, old, new);
             }
 
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
             #[cfg(feature = "optimism")]
-            let l1_cost = l1_cost_oracle
-                .calculate_l1_cost(self.db(), block.header.number, transaction.clone())
-                .map_err(|db_err| Error::DBError { inner: db_err.to_string() })?;
-
-            // TODO: inject l1 cost into resulting state
-            // TODO: fix the use of the optimism flag in this function
-
-            #[cfg(feature = "optimism")]
             if transaction.is_deposit() && !matches!(result, ExecutionResult::Success { .. }) {
                 // If the deposit transaction failed, the deposit must still be included.
                 // In this case, we need to increment the sender nonce and disregard the
                 // state changes. The tx is invalid so it is also recorded as using all gas.
-                let mut acc = self.db().load_account(sender).map_err(|_| Error::ProviderError)?;
-                let old = to_reth_acc(&acc.info);
-                acc.info.nonce += 1;
-                let new = to_reth_acc(&acc.info);
+                let sender_account =
+                    self.db().load_account(sender).map_err(|_| Error::ProviderError)?;
+                let old = to_reth_acc(&sender_account.info);
+                sender_account.info.nonce += 1;
+                let new = to_reth_acc(&sender_account.info);
 
                 post_state.change_account(sender, old, new);
                 cumulative_gas_used += transaction.gas_limit();

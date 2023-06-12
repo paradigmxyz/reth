@@ -48,6 +48,11 @@ pub enum BlockExecutionError {
     CanonicalCommit { inner: String },
     #[error("Transaction error on pipeline status update: {inner:?}")]
     PipelineStatusUpdate { inner: String },
+
+    #[cfg(feature = "optimism")]
     #[error("DB Error during transaction execution: {inner:?}")]
     DBError { inner: String },
+    #[cfg(feature = "optimism")]
+    #[error("Insufficient funds to cover transaction cost: want {want}, have {have}")]
+    InsufficientFunds { want: u64, have: u64 },
 }
