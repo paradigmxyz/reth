@@ -449,10 +449,11 @@ mod tests {
         // run
         {
             let mut stage = IndexAccountHistoryStage { commit_threshold: 4 }; // Two runs required
-            let mut tx = test_tx.inner();
+            let factory = ShareableDatabase::new(&test_tx.tx, MAINNET.clone());
+            let mut provider = factory.provider_rw().unwrap();
 
             let mut input = ExecInput { target: Some(5), ..Default::default() };
-            let out = stage.execute(&mut tx, input).await.unwrap();
+            let out = stage.execute(&mut provider, input).await.unwrap();
             assert_eq!(
                 out,
                 ExecOutput {
@@ -467,7 +468,7 @@ mod tests {
             );
             input.checkpoint = Some(out.checkpoint);
 
-            let out = stage.execute(&mut tx, input).await.unwrap();
+            let out = stage.execute(&mut provider, input).await.unwrap();
             assert_eq!(
                 out,
                 ExecOutput {
@@ -481,7 +482,7 @@ mod tests {
                 }
             );
 
-            tx.commit().unwrap();
+            provider.commit().unwrap();
         }
 
         // verify
