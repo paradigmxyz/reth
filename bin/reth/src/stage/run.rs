@@ -20,7 +20,7 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, Stage, UnwindInput,
+    ExecInput, ExecOutput, Stage, UnwindInput,
 };
 use std::{any::Any, net::SocketAddr, ops::Deref, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -236,13 +236,10 @@ impl Command {
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
-        loop {
-            let result = exec_stage.execute(&mut tx, input).await?;
-            if result.is_done(input) {
-                break
-            }
-
-            input.checkpoint = Some(result.checkpoint);
+        while let ExecOutput { checkpoint: stage_progress, done: false } =
+            exec_stage.execute(&mut tx, input).await?
+        {
+            input.checkpoint = Some(stage_progress);
 
             if self.commit {
                 tx.commit()?;

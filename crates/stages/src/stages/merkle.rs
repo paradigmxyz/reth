@@ -149,7 +149,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let threshold = match self {
             MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()) })
+                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
@@ -227,6 +227,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         checkpoint: input
                             .checkpoint()
                             .with_entities_stage_checkpoint(entities_checkpoint),
+                        done: false,
                     })
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
@@ -266,6 +267,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
                 .with_entities_stage_checkpoint(entities_checkpoint),
+            done: true,
         })
     }
 
@@ -326,8 +328,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-        UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -343,6 +345,8 @@ mod tests {
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
+
+    stage_test_suite_ext!(MerkleTestRunner, merkle);
 
     /// Execute from genesis so as to merkelize whole state
     #[tokio::test]
@@ -372,7 +376,8 @@ mod tests {
                         processed,
                         total
                     }))
-                }
+                },
+                done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
                     runner.tx.table::<tables::HashedAccount>().unwrap().len() +
@@ -411,7 +416,8 @@ mod tests {
                         processed,
                         total
                     }))
-                }
+                },
+                done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
                     runner.tx.table::<tables::HashedAccount>().unwrap().len() +
