@@ -105,7 +105,13 @@ where
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> EthResult<TraceResults> {
         self.on_blocking_task(|this| async move {
-            this.try_trace_call(call, trace_types, block_id, state_overrides, block_overrides).await
+            this.try_trace_call(
+                call,
+                trace_types,
+                block_id,
+                EvmOverrides::new(state_overrides, block_overrides),
+            )
+            .await
         })
         .await
     }
@@ -115,23 +121,14 @@ where
         call: CallRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
+        overrides: EvmOverrides,
     ) -> EthResult<TraceResults> {
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let config = tracing_config(&trace_types);
         let mut inspector = TracingInspector::new(config);
 
-        let (res, _) = self
-            .inner
-            .eth_api
-            .inspect_call_at(
-                call,
-                at,
-                EvmOverrides::new(state_overrides, block_overrides),
-                &mut inspector,
-            )
-            .await?;
+        let (res, _) =
+            self.inner.eth_api.inspect_call_at(call, at, overrides, &mut inspector).await?;
 
         let trace_res =
             inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
