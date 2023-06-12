@@ -1,19 +1,46 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::stage::StageId;
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::Transaction;
 use std::collections::VecDeque;
 
 #[derive(Debug)]
 pub struct TestStage {
     id: StageId,
+    checkpoint: Option<StageCheckpoint>,
     exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
     unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
 }
 
 impl TestStage {
     pub fn new(id: StageId) -> Self {
-        Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new() }
+        Self {
+            id,
+            checkpoint: None,
+            exec_outputs: VecDeque::new(),
+            unwind_outputs: VecDeque::new(),
+        }
+    }
+
+    pub fn with_checkpoint<DB: Database>(
+        mut self,
+        checkpoint: Option<StageCheckpoint>,
+        db: DB,
+    ) -> Self {
+        let mut tx = Transaction::new(&db).expect("initialize transaction");
+
+        if let Some(checkpoint) = checkpoint {
+            tx.save_stage_checkpoint(self.id, checkpoint)
+                .unwrap_or_else(|_| panic!("save stage {} checkpoint", self.id))
+        } else {
+            tx.delete_stage_checkpoint(self.id)
+                .unwrap_or_else(|_| panic!("delete stage {} checkpoint", self.id))
+        }
+
+        tx.commit().expect("commit transaction");
+
+        self.checkpoint = checkpoint;
+        self
     }
 
     pub fn with_exec(mut self, exec_outputs: VecDeque<Result<ExecOutput, StageError>>) -> Self {
