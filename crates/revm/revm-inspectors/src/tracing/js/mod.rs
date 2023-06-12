@@ -1,6 +1,6 @@
 //! Javascript inspector
 
-use boa_engine::{object::builtins::JsFunction, Context, JsError, JsObject, JsValue, Source};
+use boa_engine::{Context, JsError, JsObject, JsValue, Source};
 use reth_primitives::bytes::Bytes;
 use revm::{
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
@@ -128,9 +128,9 @@ where
         &mut self,
         _data: &mut EVMData<'_, DB>,
         _inputs: &CallInputs,
-        remaining_gas: Gas,
-        ret: InstructionResult,
-        out: Bytes,
+        _remaining_gas: Gas,
+        _ret: InstructionResult,
+        _out: Bytes,
         _is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         todo!()
@@ -146,10 +146,10 @@ where
         &mut self,
         _data: &mut EVMData<'_, DB>,
         _inputs: &CreateInputs,
-        ret: InstructionResult,
-        address: Option<B160>,
-        remaining_gas: Gas,
-        out: Bytes,
+        _ret: InstructionResult,
+        _address: Option<B160>,
+        _remaining_gas: Gas,
+        _out: Bytes,
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
         todo!()
     }
