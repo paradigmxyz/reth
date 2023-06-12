@@ -12,10 +12,10 @@ Commands:
           Lists all the tables, their entry count and their size
   list
           Lists the contents of a table
-  drop
-          Deletes all database entries
   get
           Gets the content of a table for the given key
+  drop
+          Deletes all database entries
   help
           Print this message or the help of the given subcommand(s)
 
@@ -82,15 +82,43 @@ Arguments:
           The table name
 
 Options:
-  -s, --start <START>
-          Where to start iterating
+  -s, --skip <SKIP>
+          Skip first N entries
 
           [default: 0]
+
+  -r, --reverse <REVERSE>
+          Reverse the order of the entries. If enabled last table entries are read.
+
+          [default: false]
 
   -l, --len <LEN>
           How many items to take from the walker
 
           [default: 5]
+
+  -j, --json
+          Dump as JSON instead of using TUI.
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `reth db get`
+
+```bash
+$ reth db get --help
+Gets the content of a table for the given key
+
+Usage: reth db get [OPTIONS] <TABLE>
+
+Arguments:
+  <TABLE>
+          The table name
+
+Options:
+  --key
+          The key to get content for
 
   -h, --help
           Print help (see a summary with '-h')
