@@ -16,18 +16,18 @@ const NON_ZERO_BYTE_COST: u64 = 16;
 /// The L1 block contract on L2 is used to propagate changes to the gas cost over time,
 /// so we need to fetch it from the Reth database.
 ///
-/// To make this more efficient, we cache the values and only fetch them when the block
-/// number changes.
+/// To make this slightly more efficient, we cache the values and only fetch them again
+/// when the block number changes.
 #[derive(Default)]
 pub struct OptimismGasCostOracle {
     /// The cached block number
-    pub block_number: Option<u64>,
-    /// The base fee of the L1 chain.
-    pub l1_base_fee: U256,
-    /// The overhead value used to calculate the gas cost.
-    pub overhead: U256,
-    /// The scalar value used to calculate the gas cost.
-    pub scalar: U256,
+    block_number: Option<u64>,
+    /// The base fee of the L1 chain
+    l1_base_fee: U256,
+    /// The overhead value used to calculate the gas cost
+    overhead: U256,
+    /// The scalar value used to calculate the gas cost
+    scalar: U256,
 }
 
 impl OptimismGasCostOracle {
@@ -37,17 +37,19 @@ impl OptimismGasCostOracle {
         db: &mut DB,
         block_num: u64,
         tx: TransactionSigned,
-    ) -> Result<Option<U256>, DB::Error> {
+    ) -> Result<U256, DB::Error> {
         let rollup_data_gas_cost = U256::from(tx.input().iter().fold(0, |acc, byte| {
             acc + if byte == &0x00 { ZERO_BYTE_COST } else { NON_ZERO_BYTE_COST }
         }));
 
         if tx.is_deposit() || rollup_data_gas_cost == U256::ZERO {
-            return Ok(None)
+            return Ok(U256::ZERO)
         }
 
         if self.block_number.cmp(&Some(block_num)).is_ne() {
             let l1_block_address = Address::from_str(L1_BLOCK_CONTRACT).unwrap();
+
+            // TODO: what block is the DB info last written in? Is this always up-to-date?
             self.l1_base_fee = db.storage(l1_block_address, U256::from(L1_BASE_FEE_SLOT))?;
             self.overhead = db.storage(l1_block_address, U256::from(OVERHEAD_SLOT))?;
             self.scalar = db.storage(l1_block_address, U256::from(SCALAR_SLOT))?;
@@ -57,6 +59,7 @@ impl OptimismGasCostOracle {
             .saturating_add(self.overhead)
             .saturating_mul(self.l1_base_fee)
             .saturating_mul(self.scalar)
-            .checked_div(U256::from(1_000_000)))
+            .checked_div(U256::from(1_000_000))
+            .unwrap_or_default())
     }
 }
