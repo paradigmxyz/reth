@@ -252,6 +252,97 @@ Options:
           [default: mainnet]
 ```
 
+## `reth stage dump execution`
+
+```bash
+Usage: reth stage dump execution [OPTIONS]
+      Execution stage.
+
+Options:
+          --output_db <OUTPUT_PATH>
+              The path to the new database folder.
+
+      -f, --from <FROM>
+              From which block.
+
+      -t, --to <TO>
+              To which block.
+
+      -d, --dry-run <DRY_RUN>
+              If passed, it will dry-run a stage execution from the newly created database right after
+              dumping.
+
+              [default: false]
+```
+
+## `reth stage dump storage-hashing`
+
+```bash
+Usage: reth stage dump storage-hashing [OPTIONS]
+      StorageHashing stage.
+
+Options:
+          --output_db <OUTPUT_PATH>
+              The path to the new database folder.
+
+      -f, --from <FROM>
+              From which block.
+
+      -t, --to <TO>
+              To which block.
+
+      -d, --dry-run <DRY_RUN>
+              If passed, it will dry-run a stage execution from the newly created database right after
+              dumping.
+
+              [default: false]
+```
+
+## `reth stage dump account-hashing`
+
+```bash
+Usage: reth stage dump account-hashing [OPTIONS]
+      AccountHashing stage.
+
+Options:
+          --output_db <OUTPUT_PATH>
+              The path to the new database folder.
+
+      -f, --from <FROM>
+              From which block.
+
+      -t, --to <TO>
+              To which block.
+
+      -d, --dry-run <DRY_RUN>
+              If passed, it will dry-run a stage execution from the newly created database right after
+              dumping.
+
+              [default: false]
+```
+
+## `reth stage dump merkle`
+
+```bash
+Usage: reth stage dump merkle [OPTIONS]
+      Merkle stage.
+
+Options:
+          --output_db <OUTPUT_PATH>
+              The path to the new database folder.
+
+      -f, --from <FROM>
+              From which block.
+
+      -t, --to <TO>
+              To which block.
+      -d, --dry-run <DRY_RUN>
+              If passed, it will dry-run a stage execution from the newly created database right after
+              dumping.
+
+              [default: false]
+```
+
 # `reth stage unwind`
 
 ```bash
