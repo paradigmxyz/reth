@@ -41,7 +41,11 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range_with_threshold(self.commit_threshold);
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         let mut stage_checkpoint = stage_checkpoint(
             tx,
@@ -62,6 +66,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(*range.end())
                 .with_index_history_stage_checkpoint(stage_checkpoint),
+            done: is_final_range,
         })
     }
 
@@ -71,7 +76,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         let changesets = tx.unwind_account_history_indices(range)?;
@@ -217,9 +222,9 @@ mod tests {
                         progress: EntitiesCheckpoint { processed: 2, total: 2 }
                     }
                 ),
+                done: true
             }
         );
-        assert!(out.is_done(input));
         tx.commit().unwrap();
     }
 
