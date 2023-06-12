@@ -43,14 +43,17 @@ pub fn fill_cfg_env(
 }
 
 /// Fill block environment from Block.
+/// 
+// FIXME:
 pub fn fill_block_env(
     block_env: &mut BlockEnv,
     chain_spec: &ChainSpec,
     header: &Header,
     after_merge: bool,
 ) {
-    let coinbase = block_coinbase(chain_spec, header, after_merge);
-    fill_block_env_with_coinbase(block_env, header, after_merge, coinbase);
+    todo!()
+    // let coinbase = block_coinbase(chain_spec, header, after_merge);
+    // fill_block_env_with_coinbase(block_env, header, after_merge, coinbase);
 }
 
 /// Fill block environment with coinbase.
@@ -77,11 +80,14 @@ pub fn fill_block_env_with_coinbase(
 
 /// Return the coinbase address for the given header and chain spec.
 pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool) -> Address {
-    if chain_spec.chain == Chain::goerli() && !after_merge {
-        recover_header_signer(header).expect("failed to recover signer")
-    } else {
-        header.beneficiary
-    }
+
+    todo!()
+
+    // if chain_spec.chain == Chain::goerli() && !after_merge {
+    //     recover_header_signer(header).expect("failed to recover signer")
+    // } else {
+    //     header.beneficiary
+    // }
 }
 
 /// Recover the account from signed header per clique consensus rules.

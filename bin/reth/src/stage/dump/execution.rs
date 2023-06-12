@@ -4,7 +4,7 @@ use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
-use reth_primitives::{stage::StageCheckpoint, MAINNET};
+use reth_primitives::{stage::StageCheckpoint, MAINNET_SPEC};
 use reth_provider::Transaction;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use std::{ops::DerefMut, path::PathBuf};
@@ -95,7 +95,7 @@ async fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let mut unwind_tx = Transaction::new(db_tool.db)?;
 
-    let mut exec_stage = ExecutionStage::new_with_factory(reth_revm::Factory::new(MAINNET.clone()));
+    let mut exec_stage = ExecutionStage::new_with_factory(reth_revm::Factory::new(MAINNET_SPEC.clone()));
 
     exec_stage
         .unwind(
@@ -128,7 +128,7 @@ async fn dry_run(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let mut tx = Transaction::new(&output_db)?;
-    let mut exec_stage = ExecutionStage::new_with_factory(reth_revm::Factory::new(MAINNET.clone()));
+    let mut exec_stage = ExecutionStage::new_with_factory(reth_revm::Factory::new(MAINNET_SPEC.clone()));
 
     exec_stage
         .execute(

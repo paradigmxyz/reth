@@ -19,23 +19,26 @@ use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, Chain, ChainSpec, Hard
 /// - Definition: [Yellow Paper][yp] (page 15, 11.3)
 ///
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
+// FIXME:
 pub fn base_block_reward(
     chain_spec: &ChainSpec,
     block_number: BlockNumber,
     block_difficulty: U256,
     total_difficulty: U256,
 ) -> Option<u128> {
-    if chain_spec.chain == Chain::goerli() ||
-        chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
-    {
-        None
-    } else if chain_spec.fork(Hardfork::Petersburg).active_at_block(block_number) {
-        Some(ETH_TO_WEI * 2)
-    } else if chain_spec.fork(Hardfork::Byzantium).active_at_block(block_number) {
-        Some(ETH_TO_WEI * 3)
-    } else {
-        Some(ETH_TO_WEI * 5)
-    }
+    // if chain_spec.chain == Chain::goerli() ||
+    //     chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
+    // {
+    //     None
+    // } else if chain_spec.fork(Hardfork::Petersburg).active_at_block(block_number) {
+    //     Some(ETH_TO_WEI * 2)
+    // } else if chain_spec.fork(Hardfork::Byzantium).active_at_block(block_number) {
+    //     Some(ETH_TO_WEI * 3)
+    // } else {
+    //     Some(ETH_TO_WEI * 5)
+    // }
+
+    todo!()
 }
 
 /// Calculates the reward for a block, including the reward for ommer inclusion.

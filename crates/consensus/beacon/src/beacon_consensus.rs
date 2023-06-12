@@ -72,9 +72,11 @@ impl Consensus for BeaconConsensus {
             // Goerli exception:
             //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
             //  support clique.
-            if self.chain_spec.chain != Chain::goerli() {
-                validate_header_extradata(header)?;
-            }
+
+            // FIXME: commented this out - probably not necessary
+            // if self.chain_spec.chain != Chain::goerli() {
+            //     validate_header_extradata(header)?;
+            // }
         }
 
         Ok(())

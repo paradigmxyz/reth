@@ -12,10 +12,10 @@ use std::{
 pub fn config_path_prefix(chain: Chain) -> String {
     if chain == Chain::mainnet() {
         "mainnet".to_string()
-    } else if chain == Chain::goerli() {
-        "goerli".to_string()
-    } else if chain == Chain::sepolia() {
-        "sepolia".to_string()
+    } else if chain == Chain::devnet() {
+        "devnet".to_string()
+    } else if chain == Chain::testnet() {
+        "testnet".to_string()
     } else {
         chain.id().to_string()
     }

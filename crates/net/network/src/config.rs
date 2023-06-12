@@ -11,7 +11,7 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, Status};
-use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET};
+use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET_SPEC};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
@@ -160,7 +160,7 @@ impl NetworkConfigBuilder {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            chain_spec: MAINNET.clone(),
+            chain_spec: MAINNET_SPEC.clone(),
             network_mode: Default::default(),
             executor: None,
             hello_message: None,

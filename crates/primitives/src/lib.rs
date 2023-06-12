@@ -39,6 +39,11 @@ mod withdrawal;
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
 
+// Symphony specific modules
+pub mod symphony_primitives;
+
+pub use symphony_primitives::{symphony_constants, symphony_chains};
+
 pub use account::{Account, Bytecode};
 pub use bits::H512;
 pub use block::{
@@ -47,8 +52,7 @@ pub use block::{
 };
 pub use bloom::Bloom;
 pub use chain::{
-    AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
-    MAINNET, SEPOLIA,
+    AllGenesisFormats, Chain, ChainInfo, ChainSpec, ForkCondition, MAINNET_SPEC // ChainSpecBuilder
 };
 pub use compression::*;
 pub use constants::{

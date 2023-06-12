@@ -1,6 +1,6 @@
 //! Clap parser utilities
 
-use reth_primitives::{AllGenesisFormats, BlockHashOrNumber, ChainSpec, GOERLI, MAINNET, SEPOLIA};
+use reth_primitives::{AllGenesisFormats, BlockHashOrNumber, ChainSpec, MAINNET_SPEC};
 use reth_revm::primitives::B256 as H256;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
@@ -18,11 +18,12 @@ pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::P
 
 /// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path
 /// to a custom one.
+// FIXME:
 pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
-        "mainnet" => MAINNET.clone(),
-        "goerli" => GOERLI.clone(),
-        "sepolia" => SEPOLIA.clone(),
+        "mainnet" => MAINNET_SPEC.clone(),
+        "devnet" => todo!(),
+        "testnet" => todo!(),
         _ => {
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
@@ -34,9 +35,9 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
 /// to a custom one.
 pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
-        "mainnet" => MAINNET.clone(),
-        "goerli" => GOERLI.clone(),
-        "sepolia" => SEPOLIA.clone(),
+        "mainnet" => MAINNET_SPEC.clone(),
+        "devnet" => todo!(),
+        "testnet" => todo!(),
         _ => {
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;

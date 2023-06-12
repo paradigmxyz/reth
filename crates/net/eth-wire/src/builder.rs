@@ -41,6 +41,7 @@ pub struct StatusBuilder {
     status: Status,
 }
 
+
 impl StatusBuilder {
     /// Consumes the type and creates the actual [`Status`](crate::types::Status) message.
     pub fn build(self) -> Status {
