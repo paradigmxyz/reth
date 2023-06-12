@@ -3,7 +3,7 @@
 ```bash
 $ reth stage --help
 
-Usage: reth db [OPTIONS] <COMMAND>
+Usage: reth db <COMMAND>
 
 Commands:
   run
@@ -96,7 +96,7 @@ Options:
 
           The metrics will be served at the given interface and port.
 
-      --stage
+      --stage <STAGE>
           The name of the stage to run
 
           [possible values: headers, bodies, senders, execution, accounthashing, storagehashing, hashing, merkle, txlookup, history, accounthistory, storagehistory, totaldifficulty]
@@ -175,8 +175,14 @@ Networking:
 # `reth stage drop`
 
 ```bash
-Usage: reth stage drop [OPTIONS]
+Usage: reth stage drop [OPTIONS] <STAGE>
       Drop a stage's tables from the database.
+
+Arguments:
+  <STAGE>
+          The name of the stage to drop
+
+          [possible values: headers, bodies, senders, execution, accounthashing, storagehashing, hashing, merkle, txlookup, history, accounthistory, storagehistory, totaldifficulty]
 
 Options:
       --datadir <DATA_DIR>
@@ -201,11 +207,6 @@ Options:
           - sepolia
 
           [default: mainnet]
-
-      --stage
-          The name of the stage to run
-
-          [possible values: headers, bodies, senders, execution, accounthashing, storagehashing, hashing, merkle, txlookup, history, accounthistory, storagehistory, totaldifficulty]
 ```
 
 # `reth stage dump`
