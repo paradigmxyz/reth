@@ -2,36 +2,39 @@
 
 There are two ways to obtain a Reth Docker image:
 
-1. [Docker Hub](#docker-hub), or
-2. By [building a Docker image from source](#building-the-docker-image).
+1. [GitHub](#github)
+2. [Building it from source](#building-the-docker-image)
 
-Once you have obtained the docker image via one of these methods, proceed to [Using the Docker
+Once you have obtained the Docker image, proceed to [Using the Docker
 image](#using-the-docker-image).
 
-## Docker Hub
+## GitHub
 
-Reth maintains the [paradigmxyz/reth][docker_hub] Docker Hub repository which provides an easy
-way to run Reth without building the image yourself.
+Reth docker images for both x86_64 and ARM64 machines are published with every release of reth on GitHub Container Registry.
 
-Obtain the latest image with:
-
-```bash
-docker pull paradigmxyz/reth
-```
-
-Download and test the image with:
+You can obtain the latest image with:
 
 ```bash
-docker run paradigmxyz/reth reth --version
+docker pull ghcr.io/paradigmxyz/reth
 ```
 
-If you can see the latest [Reth release](https://github.com/paradigmxyz/reth/releases) version
-(see example below), then you've successfully installed Reth via Docker.
+Or a specific version (e.g. v0.0.1) with:
 
-## Building the Docker Image
+```bash
+docker pull ghcr.io/paradigmxyz/reth:v0.0.1
+```
 
-To build the image from source, navigate to
-the root of the repository and run:
+You can test the image with:
+
+```bash
+docker run --rm ghcr.io/paradigmxyz/reth reth --version
+```
+
+If you can see the latest [Reth release](https://github.com/paradigmxyz/reth/releases) version, then you've successfully installed Reth via Docker.
+
+## Building the Docker image
+
+To build the image from source, navigate to the root of the repository and run:
 
 ```bash
 docker build . -t reth:local
@@ -40,8 +43,5 @@ docker build . -t reth:local
 The build will likely take several minutes. Once it's built, test it with:
 
 ```bash
-docker run reth:local reth --help
+docker run reth:local reth --version
 ```
-
-[docker_hub]: https://hub.docker.com/repository/docker/paradigmxyz/reth/
-

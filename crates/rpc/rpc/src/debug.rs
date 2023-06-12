@@ -256,7 +256,7 @@ where
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides } =
             opts;
-        let overrides = EvmOverrides::new(state_overrides, block_overrides);
+        let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
         if let Some(tracer) = tracer {

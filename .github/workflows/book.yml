@@ -2,14 +2,8 @@ name: book
 on:
   push:
     branches: [main]
-    paths:
-      - 'book/**'
-      - 'book.toml'
   pull_request:
     branches: [main]
-    paths:
-      - 'book/**'
-      - 'book.toml'
   merge_group:
 
 jobs:
@@ -42,6 +36,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Install mdbook
         run: |
           mkdir mdbook
@@ -54,8 +54,15 @@ jobs:
           curl -sSL https://github.com/sgoudham/mdbook-template/releases/latest/download/mdbook-template-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=./mdbook-template
           echo `pwd`/mdbook-template >> $GITHUB_PATH
 
-      - name: Build
+      - name: Build book
         run: mdbook build
+
+      - name: Build docs
+        run: RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo +nightly doc --all --no-deps
+
+      - name: Move docs to book folder
+        run: |
+          mv target/doc target/book/docs
 
       - name: Save pages artifact
         uses: actions/upload-pages-artifact@v1
