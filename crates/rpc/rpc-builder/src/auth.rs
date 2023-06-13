@@ -27,8 +27,8 @@ use std::{
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Client, Pool, Network, Tasks, EngineApi>(
-    client: Client,
+pub async fn launch<Provider, Pool, Network, Tasks, EngineApi>(
+    provider: Provider,
     pool: Pool,
     network: Network,
     executor: Tasks,
@@ -37,7 +37,7 @@ pub async fn launch<Client, Pool, Network, Tasks, EngineApi>(
     secret: JwtSecret,
 ) -> Result<AuthServerHandle, RpcError>
 where
-    Client: BlockProviderIdExt
+    Provider: BlockProviderIdExt
         + ReceiptProviderIdExt
         + HeaderProvider
         + StateProviderFactory
@@ -51,10 +51,11 @@ where
     EngineApi: EngineApiServer,
 {
     // spawn a new cache task
-    let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor.clone());
-    let gas_oracle = GasPriceOracle::new(client.clone(), Default::default(), eth_cache.clone());
+    let eth_cache =
+        EthStateCache::spawn_with(provider.clone(), Default::default(), executor.clone());
+    let gas_oracle = GasPriceOracle::new(provider.clone(), Default::default(), eth_cache.clone());
     let eth_api = EthApi::with_spawner(
-        client.clone(),
+        provider.clone(),
         pool.clone(),
         network,
         eth_cache.clone(),
@@ -62,7 +63,7 @@ where
         Box::new(executor.clone()),
     );
     let eth_filter = EthFilter::new(
-        client,
+        provider,
         pool,
         eth_cache.clone(),
         DEFAULT_MAX_LOGS_IN_RESPONSE,
@@ -72,15 +73,15 @@ where
 }
 
 /// Configure and launch a _standalone_ auth server with existing EthApi implementation.
-pub async fn launch_with_eth_api<Client, Pool, Network, EngineApi>(
-    eth_api: EthApi<Client, Pool, Network>,
-    eth_filter: EthFilter<Client, Pool>,
+pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi>(
+    eth_api: EthApi<Provider, Pool, Network>,
+    eth_filter: EthFilter<Provider, Pool>,
     engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,
 ) -> Result<AuthServerHandle, RpcError>
 where
-    Client: BlockProviderIdExt
+    Provider: BlockProviderIdExt
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider

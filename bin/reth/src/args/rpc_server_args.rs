@@ -237,9 +237,9 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Client, Pool, Network, Tasks, Events, Engine>(
+    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine>(
         &self,
-        client: Client,
+        provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
@@ -248,7 +248,7 @@ impl RpcServerArgs {
         jwt_secret: JwtSecret,
     ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
     where
-        Client: BlockProviderIdExt
+        Provider: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -267,7 +267,7 @@ impl RpcServerArgs {
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
         let (rpc_modules, auth_module) = RpcModuleBuilder::default()
-            .with_client(client)
+            .with_provider(provider)
             .with_pool(pool)
             .with_network(network)
             .with_events(events)
@@ -297,16 +297,16 @@ impl RpcServerArgs {
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub async fn start_rpc_server<Client, Pool, Network, Tasks, Events>(
+    pub async fn start_rpc_server<Provider, Pool, Network, Tasks, Events>(
         &self,
-        client: Client,
+        provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
         events: Events,
     ) -> Result<RpcServerHandle, RpcError>
     where
-        Client: BlockProviderIdExt
+        Provider: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -319,7 +319,7 @@ impl RpcServerArgs {
         Events: CanonStateSubscriptions + Clone + 'static,
     {
         reth_rpc_builder::launch(
-            client,
+            provider,
             pool,
             network,
             self.transport_rpc_module_config(),
@@ -331,17 +331,17 @@ impl RpcServerArgs {
     }
 
     /// Create Engine API server.
-    pub async fn start_auth_server<Client, Pool, Network, Tasks>(
+    pub async fn start_auth_server<Provider, Pool, Network, Tasks>(
         &self,
-        client: Client,
+        provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
-        engine_api: EngineApi<Client>,
+        engine_api: EngineApi<Provider>,
         jwt_secret: JwtSecret,
     ) -> Result<AuthServerHandle, RpcError>
     where
-        Client: BlockProviderIdExt
+        Provider: BlockProviderIdExt
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -358,7 +358,7 @@ impl RpcServerArgs {
         );
 
         reth_rpc_builder::auth::launch(
-            client,
+            provider,
             pool,
             network,
             executor,

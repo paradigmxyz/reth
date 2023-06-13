@@ -81,9 +81,9 @@ impl GasPriceOracleConfig {
 
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
-pub struct GasPriceOracle<Client> {
+pub struct GasPriceOracle<Provider> {
     /// The type used to subscribe to block events and get block info
-    client: Client,
+    provider: Provider,
     /// The cache for blocks
     cache: EthStateCache,
     /// The config for the oracle
@@ -92,13 +92,13 @@ pub struct GasPriceOracle<Client> {
     last_price: Mutex<GasPriceOracleResult>,
 }
 
-impl<Client> GasPriceOracle<Client>
+impl<Provider> GasPriceOracle<Provider>
 where
-    Client: BlockProviderIdExt + 'static,
+    Provider: BlockProviderIdExt + 'static,
 {
     /// Creates and returns the [GasPriceOracle].
     pub fn new(
-        client: Client,
+        provider: Provider,
         mut oracle_config: GasPriceOracleConfig,
         cache: EthStateCache,
     ) -> Self {
@@ -108,13 +108,13 @@ where
             oracle_config.percentile = 100;
         }
 
-        Self { client, oracle_config, last_price: Default::default(), cache }
+        Self { provider, oracle_config, last_price: Default::default(), cache }
     }
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
     pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
         let header = self
-            .client
+            .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
 
