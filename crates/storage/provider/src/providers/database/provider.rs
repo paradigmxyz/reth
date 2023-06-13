@@ -1108,6 +1108,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(())
     }
 
+    /// Delete stage checkpoint.
+    pub fn delete_stage_checkpoint(&self, id: StageId) -> std::result::Result<(), DatabaseError> {
+        self.tx.delete::<tables::SyncStage>(id.to_string(), None)?;
+        Ok(())
+    }
+
     /// Get stage checkpoint progress.
     pub fn get_stage_checkpoint_progress(
         &self,
