@@ -358,8 +358,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // https://github.com/paradigmxyz/reth/issues/1713
 
         let (block_status, chain) = {
-            let db = self.externals.database();
-            let provider = db
+            let factory = self.externals.database();
+            let provider = factory
                 .provider()
                 .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
@@ -829,9 +829,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // canonical, but in the db. If it is in a sidechain, it is not canonical. If it is not in
         // the db, then it is not canonical.
 
+        let factory = self.externals.database();
+        let provider = factory.provider()?;
+
         let mut header = None;
         if let Some(num) = self.block_indices.get_canonical_block_number(hash) {
-            header = self.externals.database().provider()?.header_by_number(num)?;
+            header = provider.header_by_number(num)?;
         }
 
         if header.is_none() && self.is_block_hash_inside_chain(*hash) {
@@ -839,7 +842,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         if header.is_none() {
-            header = self.externals.database().provider()?.header(hash)?
+            header = provider.header(hash)?
         }
 
         Ok(header.map(|header| header.seal(*hash)))
