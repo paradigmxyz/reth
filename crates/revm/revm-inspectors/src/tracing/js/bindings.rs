@@ -64,7 +64,7 @@ pub(crate) struct StepLog {
     /// Program counter before step execution
     pub(crate) pc: u64,
     /// Remaining gas before step execution
-    pub(crate) gas: u64,
+    pub(crate) gas_remaining: u64,
     /// Gas cost of step execution
     pub(crate) cost: u64,
     /// Call depth
@@ -82,7 +82,18 @@ impl StepLog {
     ///
     /// Caution: this expects a global property `bigint` to be present.
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
-        let Self { stack, op, memory, pc, gas, cost, depth, refund, error, contract } = self;
+        let Self {
+            stack,
+            op,
+            memory,
+            pc,
+            gas_remaining: gas,
+            cost,
+            depth,
+            refund,
+            error,
+            contract,
+        } = self;
         let obj = JsObject::default();
 
         // fields
@@ -342,9 +353,9 @@ impl Contract {
 
 /// Represents the call frame object for exit functions
 pub(crate) struct FrameResult {
-    gas_used: u64,
-    output: Bytes,
-    error: Option<String>,
+    pub(crate) gas_used: u64,
+    pub(crate) output: Bytes,
+    pub(crate) error: Option<String>,
 }
 
 impl FrameResult {
@@ -377,9 +388,9 @@ impl FrameResult {
 
 /// Represents the call frame object for enter functions
 pub(crate) struct CallFrame {
-    contract: Contract,
-    kind: CallKind,
-    gas: u64,
+    pub(crate) contract: Contract,
+    pub(crate) kind: CallKind,
+    pub(crate) gas: u64,
 }
 
 impl CallFrame {

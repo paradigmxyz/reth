@@ -2,7 +2,7 @@
 
 use crate::tracing::{
     js::{
-        bindings::{Contract, EvmDb, MemoryObj, OpObj, StackObj, StepLog},
+        bindings::{CallFrame, Contract, EvmDb, MemoryObj, OpObj, StackObj, StepLog},
         builtins::register_builtins,
     },
     types::CallKind,
@@ -148,9 +148,14 @@ impl JsInspector {
         Ok(())
     }
 
-    fn try_enter(&mut self) -> JsResult<()> {
+    fn try_enter<DB>(&mut self, frame: CallFrame, db: EvmDb<DB>) -> JsResult<()>
+    where
+        DB: DatabaseRef + 'static,
+    {
         if let Some(enter_fn) = &self.enter_fn {
-            enter_fn.call(&(self.obj.clone().into()), &[], &mut self.ctx)?;
+            let frame = frame.into_js_object(&mut self.ctx)?;
+            let db = db.into_js_object(&mut self.ctx)?;
+            enter_fn.call(&(self.obj.clone().into()), &[frame.into(), db.into()], &mut self.ctx)?;
         }
         Ok(())
     }
@@ -178,12 +183,13 @@ impl JsInspector {
         value: U256,
         kind: CallKind,
         caller: Address,
-    ) {
+    ) -> &CallStackItem {
         let call = CallStackItem {
             contract: Contract { caller, contract: address, value, input: data },
             kind,
         };
         self.call_stack.push(call);
+        self.active_call()
     }
 
     fn pop_call(&mut self) {
@@ -227,7 +233,7 @@ where
             ),
             memory: MemoryObj(interp.memory.clone()),
             pc: pc as u64,
-            gas: interp.gas.limit(),
+            gas_remaining: interp.gas.remaining(),
             cost: interp.gas.spend(),
             depth: data.journaled_state.depth(),
             refund: interp.gas.refunded() as u64,
@@ -285,6 +291,19 @@ where
 
         let value = inputs.transfer.value;
         self.push_call(to, inputs.input.clone(), value, inputs.context.scheme.into(), from);
+
+        if self.enter_fn.is_some() {
+            let call = self.active_call();
+            let frame = CallFrame {
+                contract: call.contract.clone(),
+                kind: call.kind,
+                gas: inputs.gas_limit,
+            };
+            let db = EvmDb::new(data.db.clone());
+            if let Err(err) = self.try_enter(frame, db) {
+                return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
+            }
+        }
 
         (InstructionResult::Continue, Gas::new(0), Bytes::new())
     }

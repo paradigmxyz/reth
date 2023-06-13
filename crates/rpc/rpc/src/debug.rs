@@ -14,7 +14,7 @@ use reth_provider::{BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, St
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
-    tracing::{FourByteInspector, TracingInspector, TracingInspectorConfig},
+    tracing::{js::JsInspector, FourByteInspector, TracingInspector, TracingInspectorConfig},
 };
 use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
@@ -303,6 +303,17 @@ where
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
                 GethDebugTracerType::JsTracer(code) => {
+                    let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
+                    let mut inspector = JsInspector::new(code, config)?;
+
+                    // TODO
+
+                    // let _ = self
+                    //     .inner
+                    //     .eth_api
+                    //     .inspect_call_at(call, at, overrides, &mut inspector)
+                    //     .await?;
+
                     Err(EthApiError::Unsupported("javascript tracers are unsupported."))
                 }
             }
@@ -535,7 +546,12 @@ fn trace_transaction(
                     Ok((NoopFrame::default().into(), Default::default()))
                 }
             },
-            GethDebugTracerType::JsTracer(_) => {
+            GethDebugTracerType::JsTracer(code) => {
+                let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
+                let mut inspector = JsInspector::new(code, config)?;
+
+                // TODO
+
                 Err(EthApiError::Unsupported("javascript tracers are unsupported."))
             }
         }

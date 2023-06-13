@@ -241,6 +241,16 @@ impl GethDebugTracerConfig {
         }
     }
 
+    /// Returns the json config if this config is a JS tracer.
+    pub fn into_js_config(self) -> Option<serde_json::Value> {
+        match self {
+            GethDebugTracerConfig::JsTracer(cfg) => {
+                Some(cfg)
+            }
+            _ => None,
+        }
+    }
+
     /// Returns the [PreStateConfig] if it is a call config.
     pub fn into_pre_state_config(self) -> Option<PreStateConfig> {
         match self {
