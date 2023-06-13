@@ -42,8 +42,8 @@ macro_rules! stage_test_suite {
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(
                     result,
-                    Ok(ExecOutput { done, checkpoint })
-                        if done && checkpoint.block_number == previous_stage
+                    Ok(ref output @ ExecOutput { checkpoint })
+                        if output.is_done(input) && checkpoint.block_number == previous_stage
                 );
 
                 // Validate the stage execution
@@ -94,8 +94,8 @@ macro_rules! stage_test_suite {
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(
                     result,
-                    Ok(ExecOutput { done, checkpoint })
-                        if done && checkpoint.block_number == previous_stage
+                    Ok(ref output @ ExecOutput { checkpoint })
+                        if output.is_done(execute_input) && checkpoint.block_number == previous_stage
                 );
                 assert_matches::assert_matches!(runner.validate_execution(execute_input, result.ok()),Ok(_), "execution validation");
 
@@ -113,7 +113,8 @@ macro_rules! stage_test_suite {
                 // Assert the successful unwind result
                 assert_matches::assert_matches!(
                     rx,
-                    Ok(UnwindOutput { checkpoint }) if checkpoint.block_number == unwind_input.unwind_to
+                    Ok(output @ UnwindOutput { checkpoint })
+                        if output.is_done(unwind_input) && checkpoint.block_number == unwind_input.unwind_to
                 );
 
                 // Validate the stage unwind
@@ -123,46 +124,4 @@ macro_rules! stage_test_suite {
     };
 }
 
-// `execute_already_reached_target` is not suitable for the headers stage thus
-// included in the test suite extension
-macro_rules! stage_test_suite_ext {
-    ($runner:ident, $name:ident) => {
-        crate::test_utils::stage_test_suite!($runner, $name);
-
-         paste::item! {
-            /// Check that the execution is short-circuited if the target was already reached.
-            #[tokio::test]
-            async fn [< execute_already_reached_target_ $name>] () {
-                let stage_progress = 1000;
-
-                // Set up the runner
-                let mut runner = $runner::default();
-                let input = crate::stage::ExecInput {
-                    target: Some(stage_progress),
-                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(stage_progress)),
-                };
-                let seed = runner.seed_execution(input).expect("failed to seed");
-
-                // Run stage execution
-                let rx = runner.execute(input);
-
-                // Run `after_execution` hook
-                runner.after_execution(seed).await.expect("failed to run after execution hook");
-
-                // Assert the successful result
-                let result = rx.await.unwrap();
-                assert_matches::assert_matches!(
-                    result,
-                    Ok(ExecOutput { done, checkpoint })
-                        if done && checkpoint.block_number == stage_progress
-                );
-
-                // Validate the stage execution
-                assert_matches::assert_matches!(runner.validate_execution(input, result.ok()),Ok(_), "execution validation");
-            }
-        }
-    };
-}
-
 pub(crate) use stage_test_suite;
-pub(crate) use stage_test_suite_ext;

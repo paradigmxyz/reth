@@ -58,9 +58,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
 
@@ -166,7 +163,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     },
                 );
 
-                return Ok(ExecOutput { checkpoint, done: false })
+                return Ok(ExecOutput { checkpoint })
             }
         } else {
             // Aggregate all changesets and and make list of storages that have been
@@ -188,7 +185,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 ..Default::default()
             });
 
-        Ok(ExecOutput { checkpoint, done: true })
+        Ok(ExecOutput { checkpoint })
     }
 
     /// Unwind the stage.
@@ -197,7 +194,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, _) =
+        let (range, unwind_progress) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         provider.unwind_storage_hashing(BlockNumberAddress::range(range))?;
@@ -227,8 +224,8 @@ fn stage_checkpoint_progress<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
+        UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -242,8 +239,6 @@ mod tests {
     use reth_primitives::{
         stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
     };
-
-    stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 
     /// Execute with low clean threshold so as to hash whole storage
     #[tokio::test]
@@ -268,10 +263,8 @@ mod tests {
         runner.seed_execution(input).expect("failed to seed execution");
 
         loop {
-            if let Ok(result @ ExecOutput { checkpoint, done }) =
-                runner.execute(input).await.unwrap()
-            {
-                if !done {
+            if let Ok(result @ ExecOutput { checkpoint }) = runner.execute(input).await.unwrap() {
+                if !result.is_done(input) {
                     let previous_checkpoint = input
                         .checkpoint
                         .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint())
@@ -361,8 +354,7 @@ mod tests {
                             total
                         }
                     }))
-                },
-                done: false
+                }
             }) if address == progress_address && storage == progress_key &&
                 total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
@@ -407,8 +399,7 @@ mod tests {
                             }
                         }
                     ))
-                },
-                done: false
+                }
             }) if address == progress_address && storage == progress_key &&
                 total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
@@ -439,8 +430,7 @@ mod tests {
                             }
                         }
                     ))
-                },
-                done: true
+                }
             }) if processed == total &&
                 total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
