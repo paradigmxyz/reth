@@ -184,7 +184,7 @@ pub struct SenderRecoveryConfig {
 
 impl Default for SenderRecoveryConfig {
     fn default() -> Self {
-        Self { commit_threshold: 50_000 }
+        Self { commit_threshold: 5_000_000 }
     }
 }
 

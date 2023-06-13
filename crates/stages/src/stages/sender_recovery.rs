@@ -38,7 +38,7 @@ impl SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 50_000 }
+        Self { commit_threshold: 5_000_000 }
     }
 }
 
