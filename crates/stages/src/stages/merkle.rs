@@ -214,7 +214,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
                         state.last_account_key,
-                        state.last_walker_key.hex_data,
+                        state.last_walker_key.hex_data.to_vec(),
                         state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
                         state.hash_builder.into(),
                     );

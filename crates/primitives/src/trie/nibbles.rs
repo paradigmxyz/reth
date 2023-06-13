@@ -78,7 +78,7 @@ impl Compact for StoredNibblesSubKey {
 )]
 pub struct Nibbles {
     /// The inner representation of the nibble sequence.
-    pub hex_data: Vec<u8>,
+    pub hex_data: Bytes,
 }
 
 impl From<&[u8]> for Nibbles {
@@ -102,13 +102,20 @@ impl std::fmt::Debug for Nibbles {
 impl Nibbles {
     /// Creates a new [Nibbles] instance from bytes.
     pub fn from_hex(hex: Vec<u8>) -> Self {
-        Nibbles { hex_data: hex }
+        Nibbles { hex_data: Bytes::from(hex) }
     }
 
     /// Take a byte array (slice or vector) as input and convert it into a [Nibbles] struct
     /// containing the nibbles (half-bytes or 4 bits) that make up the input byte data.
     pub fn unpack<T: AsRef<[u8]>>(data: T) -> Self {
-        Nibbles { hex_data: data.as_ref().iter().flat_map(|item| [item / 16, item % 16]).collect() }
+        Nibbles {
+            hex_data: Bytes::from(
+                data.as_ref()
+                    .iter()
+                    .flat_map(|item| vec![item / 16, item % 16])
+                    .collect::<Vec<u8>>(),
+            ),
+        }
     }
 
     /// Packs the nibbles stored in the struct into a byte vector.
@@ -202,13 +209,13 @@ impl Nibbles {
 
     /// Increments the nibble sequence by one.
     pub fn increment(&self) -> Option<Nibbles> {
-        let mut incremented = self.hex_data.clone();
+        let mut incremented = self.hex_data.to_vec();
 
         for nibble in incremented.iter_mut().rev() {
             assert!(*nibble < 0x10);
             if *nibble < 0xf {
                 *nibble += 1;
-                return Some(Nibbles::from(incremented))
+                return Some(Nibbles::from_hex(incremented))
             } else {
                 *nibble = 0;
             }
@@ -269,12 +276,16 @@ impl Nibbles {
 
     /// Extend the current nibbles with another nibbles.
     pub fn extend(&mut self, b: impl AsRef<[u8]>) {
-        self.hex_data.extend_from_slice(b.as_ref());
+        // self.hex_data.extend_from_slice(b.as_ref());
+
+        let mut bytes = self.hex_data.to_vec();
+        bytes.extend_from_slice(b.as_ref());
+        self.hex_data = bytes.into();
     }
 
     /// Truncate the current nibbles to the given length.
     pub fn truncate(&mut self, len: usize) {
-        self.hex_data.truncate(len)
+        self.hex_data.0.truncate(len)
     }
 }
 
@@ -286,7 +297,7 @@ mod tests {
     #[test]
     fn hashed_regression() {
         let nibbles = hex::decode("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b").unwrap();
-        let nibbles = Nibbles::from(nibbles);
+        let nibbles = Nibbles::from_hex(nibbles);
         let path = nibbles.encode_path_leaf(true);
         let expected =
             hex::decode("351464a4233f1852b5c47037e997f1ba852317ca924bf0f064a45f2b9710aa4b")
@@ -304,7 +315,7 @@ mod tests {
             (vec![0xa, 0xb, 0x2, 0x0], vec![0xab, 0x20]),
             (vec![0xa, 0xb, 0x2, 0x7], vec![0xab, 0x27]),
         ] {
-            let nibbles = Nibbles::from(input);
+            let nibbles = Nibbles::from_hex(input);
             let encoded = nibbles.pack();
             assert_eq!(encoded, expected);
         }
