@@ -6,7 +6,7 @@ use reth_rpc_types::{
         ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    CallRequest, Filter, Log, RichBlock, SyncStatus,
+    BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
 
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"))]
@@ -123,6 +123,7 @@ pub trait EngineEthApi {
         request: CallRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes>;
 
     /// Returns code at a given address at given block number.

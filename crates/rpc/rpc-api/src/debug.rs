@@ -65,7 +65,7 @@ pub trait DebugApi {
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
 
-    /// Similar to `debug_traceBlockByNumber`, `debug_traceBlockByHash` accepts a block number
+    /// Similar to `debug_traceBlockByHash`, `debug_traceBlockByNumber` accepts a block number
     /// [BlockNumberOrTag] and will replay the block that is already present in the database.
     /// For the second parameter see [GethDebugTracingOptions].
     #[method(name = "traceBlockByNumber")]
@@ -86,11 +86,11 @@ pub trait DebugApi {
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTraceFrame>;
 
-    /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
-    /// execution using the final state of parent block as the base.
+    /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
+    /// block execution using the final state of parent block as the base.
     ///
-    /// The first argument (just as in`eth_call`) is a transaction request.
-    /// The block can be specified either by hash or by number as
+    /// The first argument (just as in `eth_call`) is a transaction request.
+    /// The block can optionally be specified either by hash or by number as
     /// the second argument.
     /// The trace can be configured similar to `debug_traceTransaction`,
     /// see [GethDebugTracingOptions]. The method returns the same output as

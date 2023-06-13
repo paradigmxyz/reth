@@ -20,7 +20,7 @@
 //! # let db = create_test_rw_db();
 //! // Build a pipeline with all offline stages.
 //! # let pipeline =
-//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db);
+//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db, MAINNET.clone());
 //! ```
 //!
 //! ```ignore

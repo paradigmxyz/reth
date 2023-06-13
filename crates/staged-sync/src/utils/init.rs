@@ -6,7 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, H256, U256};
-use reth_provider::{PostState, Transaction, TransactionError};
+use reth_provider::{DatabaseProviderRW, PostState, ShareableDatabase, TransactionError};
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -39,6 +39,10 @@ pub enum InitDatabaseError {
     /// Low-level database error.
     #[error(transparent)]
     DBError(#[from] reth_db::DatabaseError),
+
+    /// Internal error.
+    #[error(transparent)]
+    InternalError(#[from] reth_interfaces::Error),
 }
 
 /// Write the genesis block if it has not already been written
@@ -66,11 +70,11 @@ pub fn init_genesis<DB: Database>(
 
     drop(tx);
     debug!("Writing genesis block.");
-    let tx = db.tx_mut()?;
 
     // use transaction to insert genesis header
-    let transaction = Transaction::new_raw(&db, tx);
-    insert_genesis_hashes(transaction, genesis)?;
+    let shareable_db = ShareableDatabase::new(&db, chain.clone());
+    let provider_rw = shareable_db.provider_rw()?;
+    insert_genesis_hashes(provider_rw, genesis)?;
 
     // Insert header
     let tx = db.tx_mut()?;
@@ -123,20 +127,21 @@ pub fn insert_genesis_state<DB: Database>(
 
 /// Inserts hashes for the genesis state.
 pub fn insert_genesis_hashes<DB: Database>(
-    mut transaction: Transaction<'_, DB>,
+    provider: DatabaseProviderRW<'_, &DB>,
     genesis: &reth_primitives::Genesis,
 ) -> Result<(), InitDatabaseError> {
     // insert and hash accounts to hashing table
     let alloc_accounts =
         genesis.alloc.clone().into_iter().map(|(addr, account)| (addr, Some(account.into())));
-    transaction.insert_account_for_hashing(alloc_accounts)?;
+    provider.insert_account_for_hashing(alloc_accounts)?;
 
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
         // only return Some if there is storage
         account.storage.map(|storage| (addr, storage.into_iter().map(|(k, v)| (k, v.into()))))
     });
-    transaction.insert_storage_for_hashing(alloc_storage)?;
-    transaction.commit()?;
+    provider.insert_storage_for_hashing(alloc_storage)?;
+    provider.commit()?;
+
     Ok(())
 }
 

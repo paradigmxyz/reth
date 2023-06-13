@@ -1,19 +1,20 @@
 //! Unwinding a certain block range
 
-use crate::dirs::{DataDirPath, MaybePlatformPath};
+use crate::{
+    args::utils::genesis_value_parser,
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 use clap::{Parser, Subcommand};
 use reth_db::{
+    cursor::DbCursorRO,
     database::Database,
     mdbx::{Env, WriteMap},
     tables,
     transaction::DbTx,
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::Transaction;
+use reth_provider::ShareableDatabase;
 use std::{ops::RangeInclusive, sync::Arc};
-
-use crate::args::utils::genesis_value_parser;
-use reth_db::cursor::DbCursorRO;
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -68,13 +69,14 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        let mut tx = Transaction::new(&db)?;
+        let shareable_db = ShareableDatabase::new(&db, self.chain.clone());
+        let provider = shareable_db.provider_rw()?;
 
-        let blocks_and_execution = tx
+        let blocks_and_execution = provider
             .take_block_and_execution_range(&self.chain, range)
             .map_err(|err| eyre::eyre!("Transaction error on unwind: {err:?}"))?;
 
-        tx.commit()?;
+        provider.commit()?;
 
         println!("Unwound {} blocks", blocks_and_execution.len());
 

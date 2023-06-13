@@ -1,7 +1,7 @@
 //! Collection of common provider traits.
 
 mod account;
-pub use account::AccountProvider;
+pub use account::{AccountExtProvider, AccountProvider};
 
 mod block;
 pub use block::{BlockProvider, BlockProviderIdExt, BlockSource};

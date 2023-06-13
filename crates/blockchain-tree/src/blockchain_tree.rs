@@ -22,7 +22,7 @@ use reth_provider::{
     chain::{ChainSplit, SplitAt},
     post_state::PostState,
     BlockNumProvider, CanonStateNotification, CanonStateNotificationSender,
-    CanonStateNotifications, Chain, ExecutorFactory, HeaderProvider, Transaction,
+    CanonStateNotifications, Chain, DatabaseProvider, ExecutorFactory, HeaderProvider,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -993,14 +993,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// Canonicalize the given chain and commit it to the database.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
-        let mut tx = Transaction::new(&self.externals.db)?;
+        let mut provider = DatabaseProvider::new_rw(
+            self.externals.db.tx_mut()?,
+            self.externals.chain_spec.clone(),
+        );
 
         let (blocks, state) = chain.into_inner();
 
-        tx.append_blocks_with_post_state(blocks.into_blocks().collect(), state)
+        provider
+            .append_blocks_with_post_state(blocks.into_blocks().collect(), state)
             .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;
 
-        tx.commit()?;
+        provider.commit()?;
 
         Ok(())
     }
@@ -1030,17 +1034,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Option<Chain>, Error> {
         // read data that is needed for new sidechain
 
-        let mut tx = Transaction::new(&self.externals.db)?;
+        let provider = DatabaseProvider::new_rw(
+            self.externals.db.tx_mut()?,
+            self.externals.chain_spec.clone(),
+        );
 
-        let tip = tx.tip_number()?;
+        let tip = provider.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
         info!(target: "blockchain_tree", "Unwinding canonical chain blocks: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
-        let blocks_and_execution = tx
+        let blocks_and_execution = provider
             .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)
             .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
 
-        tx.commit()?;
+        provider.commit()?;
 
         if blocks_and_execution.is_empty() {
             Ok(None)

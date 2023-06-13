@@ -4,7 +4,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 /// Implements the GAT method from:
 /// <https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats>.
@@ -12,9 +12,9 @@ use std::sync::Arc;
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// RO database transaction
-    type TX: DbTx<'a> + Send + Sync;
+    type TX: DbTx<'a> + Send + Sync + Debug;
     /// RW database transaction
-    type TXMut: DbTxMut<'a> + DbTx<'a> + TableImporter<'a> + Send + Sync;
+    type TXMut: DbTxMut<'a> + DbTx<'a> + TableImporter<'a> + Send + Sync + Debug;
 }
 
 /// Main Database trait that spawns transactions to be executed.

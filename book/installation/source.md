@@ -2,7 +2,7 @@
 
 You can build Reth on Linux, macOS, and Windows WSL. 
 
-# Dependencies
+## Dependencies
 
 First, **install Rust** using [rustup](https://rustup.rs/)： 
 
@@ -12,7 +12,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 The rustup installer provides an easy way to update the Rust compiler, and works on all platforms.
 
-> Tips:
+> **Tips**
 >
 > - During installation, when prompted, enter `1` for the default installation.
 > - After Rust installation completes, try running `cargo version` . If it cannot
@@ -25,7 +25,9 @@ operating system:
 - **Ubuntu**: `apt-get install libclang-dev pkg-config build-essential`
 - **macOS**: `brew install llvm pkg-config`
 
-# Build Reth
+These are needed to build bindings for Reth's database.
+
+## Build Reth
 
 With Rust and the dependencies installed, you're ready to build Reth. First, clone the repository:
 
@@ -34,7 +36,7 @@ git clone https://github.com/paradigmxyz/reth
 cd reth
 ```
 
-Then, install Reth into your path directly via:
+Then, install Reth into your `PATH` directly via:
 
 ```bash
 cargo install --locked --path bin/reth --bin reth
@@ -50,22 +52,16 @@ cargo build --release
 
 This will place the reth binary under `./target/release/reth`, and you can copy it to your directory of preference after that.
 
-You can also build Reth with the following rustflags for utilizing faster CPU instructions available on your machine:
+Compilation may take around 10 minutes. Installation was successful if `reth --help` displays the [command-line documentation](../cli/cli.md).
 
-```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --release
-```
-
-Compilation may take around 10 minutes. Installation was successful if `reth --help` displays
-the [command-line documentation](../cli/cli.md).
-
-If you run into any issues, please check the [Troubleshooting](#troubleshooting) section.
-out to us on [Telegram](https://t.me/paradigm_reth).
+If you run into any issues, please check the [Troubleshooting](#troubleshooting) section, or reach out to us on [Telegram](https://t.me/paradigm_reth).
 
 ## Update Reth
 
-You can update Reth to a specific version by running the commands below. The `reth`
-directory will be the location you cloned reth to during the installation process.
+You can update Reth to a specific version by running the commands below.
+
+The `reth` directory will be the location you cloned reth to during the installation process.
+
 `${VERSION}` will be the version you wish to build in the format `vX.X.X`.
 
 ```bash
@@ -75,18 +71,22 @@ git checkout ${VERSION}
 cargo build --release
 ```
 
-## Compilation Profiles
+## Optimizations
+
+**Profiles**
 
 You can customise the compiler settings used to compile Reth via
 [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html).
 
-Reth includes several profiles which can be selected via the `--profile` cargo parameter.
+Reth includes several profiles which can be selected via the Cargo flag `--profile`.
 
 * `release`: default for source builds, enables most optimisations while not taking too long to
   compile.
 * `maxperf`: default for binary releases, enables aggressive optimisations including full LTO.
   Although compiling with this profile improves some benchmarks by around 20% compared to `release`,
   it imposes a _significant_ cost at compile time and is only recommended if you have a fast CPU.
+
+**Rust compiler flags**
 
 You can also use `RUSTFLAGS="-C target-cpu=native"` to enable CPU-specific optimisations. In order to get
 the highest performance out of your build:
@@ -95,12 +95,21 @@ the highest performance out of your build:
 RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 ```
 
+**Features**
+
+Finally, some features may improve performance on your system, most notably `jemalloc`, which replaces the default memory allocator used by reth.
+
+You can enable features by passing them to the `--features` Cargo flag.
+
+> **Note**
+> 
+> The `jemalloc` feature is unstable on Windows due to jemallocator itself.
+
 ## Troubleshooting
 
 ### Command is not found
 
-Reth will be installed to `CARGO_HOME` or `$HOME/.cargo`. This directory
-needs to be on your `PATH` before you can run `$ reth`.
+Reth will be installed to `CARGO_HOME` or `$HOME/.cargo`. This directory needs to be on your `PATH` before you can run `$ reth`.
 
 See ["Configuring the `PATH` environment variable"](https://www.rust-lang.org/tools/install) for more information.
 

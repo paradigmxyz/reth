@@ -12,34 +12,32 @@ Usage: reth node [OPTIONS]
 Options:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
-          
+
           Defaults to the OS-specific data directory:
-          
+
           - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
           - Windows: `{FOLDERID_RoamingAppData}/reth/`
           - macOS: `$HOME/Library/Application Support/reth/`
-          
+
           [default: default]
 
       --config <FILE>
           The path to the configuration file to use.
 
-      --p2p-secret-key <PATH>
-          Secret key to use for this node.
-          
-          This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-          
+
           Possible values are either a built-in chain or the path to a chain specification file.
-          
+
           Built-in chains:
           - mainnet
           - goerli
           - sepolia
-          
+
           [default: mainnet]
+
+      --auto-mine
+          Automatically mine blocks for new transactions
 
   -h, --help
           Print help (see a summary with '-h')
@@ -47,7 +45,7 @@ Options:
 Metrics:
       --metrics <SOCKET>
           Enable Prometheus metrics.
-          
+
           The metrics will be served at the given interface and port.
 
 Networking:
@@ -71,19 +69,27 @@ Networking:
 
       --bootnodes <BOOTNODES>
           Bootnodes to connect to initially.
-          
+
           Will fall back to a network-specific default if not specified.
 
       --peers-file <FILE>
           The path to the known peers file. Connected peers are dumped to this file on nodes
           shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
 
+      --identity <IDENTITY>
+          Custom node identity
+
+      --p2p-secret-key <PATH>
+          Secret key to use for this node.
+
+          This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
+
       --no-persist-peers
           Do not persist peers.
 
       --nat <NAT>
           NAT resolution method
-          
+
           [default: any]
 
       --port <PORT>
@@ -135,13 +141,53 @@ Rpc:
       --authrpc.jwtsecret <PATH>
           Path to a JWT secret to use for authenticated RPC endpoints
 
-      --auto-mine
-          Automatically mine blocks for new transactions
+      --rpc-max-request-size
+          Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+
+      --rpc-max-response-size
+          Set the maximum RPC response payload size for both HTTP and WS in megabytes.
+
+      --rpc-max-subscriptions-per-connection
+          Set the the maximum concurrent subscriptions per connection.
+
+      --rpc-max-connections
+          Maximum number of RPC server connections.
+
+      --rpc-max-tracing-requests
+          Maximum number of concurrent tracing requests.
+
+      --gas-price-oracle
+          Gas price oracle configuration.
+
+      --block-cache-size
+          Max size for cached block data in megabytes.
+
+      --receipt-cache-size
+          Max size for cached receipt data in megabytes.
+
+      --env-cache-size
+          Max size for cached evm env data in megabytes.
+
+Builder:
+      --builder.extradata
+          Block extra data set by the payload builder.
+
+      --builder.gaslimit
+          Target gas ceiling for built blocks.
+
+      --builder.interval
+          The interval at which the job should build a new payload after the last (in seconds).
+
+      --builder.deadline
+          The deadline for when the payload builder job should resolve.
+
+      --builder.max-tasks
+          Maximum number of tasks to spawn for building a payload.
 
 Debug:
       --debug.continuous
           Prompt the downloader to download blocks one at a time.
-          
+
           NOTE: This is for testing purposes only.
 
       --debug.terminate
@@ -149,7 +195,7 @@ Debug:
 
       --debug.tip <TIP>
           Set the chain tip manually for testing purposes.
-          
+
           NOTE: This is a temporary flag
 
       --debug.max-block <MAX_BLOCK>
@@ -173,7 +219,7 @@ Logging:
 
       --log.directory <PATH>
           The path to put log files in
-          
+
           [default: /Users/georgios/Library/Caches/reth/logs]
 
       --log.journald
@@ -181,13 +227,13 @@ Logging:
 
       --log.filter <FILTER>
           The filter to use for logs written to the log file
-          
+
           [default: debug]
 
 Display:
   -v, --verbosity...
           Set the minimum log level.
-          
+
           -v      Errors
           -vv     Warnings
           -vvv    Info

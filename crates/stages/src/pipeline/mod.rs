@@ -4,10 +4,10 @@ use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
-    BlockNumber, H256,
+    BlockNumber, ChainSpec, H256,
 };
-use reth_provider::{providers::get_stage_checkpoint, Transaction};
-use std::pin::Pin;
+use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase};
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -93,6 +93,8 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 pub struct Pipeline<DB: Database> {
     /// The Database
     db: DB,
+    /// Chain spec
+    chain_spec: Arc<ChainSpec>,
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
@@ -245,14 +247,15 @@ where
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let mut tx = Transaction::new(&self.db)?;
+        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut checkpoint = tx.get_stage_checkpoint(stage_id)?.unwrap_or_default();
+            let mut checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
             if checkpoint.block_number < to {
                 debug!(target: "sync::pipeline", from = %checkpoint, %to, "Unwind point too far for stage");
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
@@ -264,7 +267,7 @@ where
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
-                let output = stage.unwind(&mut tx, input).await;
+                let output = stage.unwind(&mut provider_rw, input).await;
                 match output {
                     Ok(unwind_output) => {
                         checkpoint = unwind_output.checkpoint;
@@ -282,12 +285,14 @@ where
                             // doesn't change when we unwind.
                             None,
                         );
-                        tx.save_stage_checkpoint(stage_id, checkpoint)?;
+                        provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
-                        tx.commit()?;
+                        provider_rw.commit()?;
+                        provider_rw =
+                            shareable_db.provider_rw().map_err(PipelineError::Interface)?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -312,10 +317,11 @@ where
         let mut made_progress = false;
         let target = self.max_block.or(previous_stage);
 
-        loop {
-            let mut tx = Transaction::new(&self.db)?;
+        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
-            let prev_checkpoint = tx.get_stage_checkpoint(stage_id)?;
+        loop {
+            let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
@@ -343,7 +349,10 @@ where
                 checkpoint: prev_checkpoint,
             });
 
-            match stage.execute(&mut tx, ExecInput { target, checkpoint: prev_checkpoint }).await {
+            match stage
+                .execute(&mut provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
+                .await
+            {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
@@ -356,7 +365,7 @@ where
                         "Stage committed progress"
                     );
                     self.metrics.stage_checkpoint(stage_id, checkpoint, target);
-                    tx.save_stage_checkpoint(stage_id, checkpoint)?;
+                    provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran {
                         pipeline_position: stage_index + 1,
@@ -366,7 +375,8 @@ where
                     });
 
                     // TODO: Make the commit interval configurable
-                    tx.commit()?;
+                    provider_rw.commit()?;
+                    provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
 
                     if done {
                         let stage_progress = checkpoint.block_number;
@@ -466,7 +476,7 @@ mod tests {
     use reth_interfaces::{
         consensus, provider::ProviderError, test_utils::generators::random_header,
     };
-    use reth_primitives::stage::StageCheckpoint;
+    use reth_primitives::{stage::StageCheckpoint, MAINNET};
     use tokio_stream::StreamExt;
 
     #[test]
@@ -511,7 +521,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -573,7 +583,7 @@ mod tests {
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -683,7 +693,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -776,7 +786,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
@@ -859,7 +869,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db);
+            .build(db, MAINNET.clone());
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
@@ -869,7 +879,7 @@ mod tests {
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))
-            .build(db);
+            .build(db, MAINNET.clone());
         let result = pipeline.run().await;
         assert_matches!(
             result,
