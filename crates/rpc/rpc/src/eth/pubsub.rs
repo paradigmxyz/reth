@@ -27,40 +27,47 @@ use tokio_stream::{
 ///
 /// This handles `eth_subscribe` RPC calls.
 #[derive(Clone)]
-pub struct EthPubSub<Client, Pool, Events, Network> {
+pub struct EthPubSub<Provider, Pool, Events, Network> {
     /// All nested fields bundled together.
-    inner: EthPubSubInner<Client, Pool, Events, Network>,
+    inner: EthPubSubInner<Provider, Pool, Events, Network>,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // === impl EthPubSub ===
 
-impl<Client, Pool, Events, Network> EthPubSub<Client, Pool, Events, Network> {
+impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network> {
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [tokio::task::spawn]
-    pub fn new(client: Client, pool: Pool, chain_events: Events, network: Network) -> Self {
-        Self::with_spawner(client, pool, chain_events, network, Box::<TokioTaskExecutor>::default())
+    pub fn new(provider: Provider, pool: Pool, chain_events: Events, network: Network) -> Self {
+        Self::with_spawner(
+            provider,
+            pool,
+            chain_events,
+            network,
+            Box::<TokioTaskExecutor>::default(),
+        )
     }
 
     /// Creates a new, shareable instance.
     pub fn with_spawner(
-        client: Client,
+        provider: Provider,
         pool: Pool,
         chain_events: Events,
         network: Network,
         subscription_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
-        let inner = EthPubSubInner { client, pool, chain_events, network };
+        let inner = EthPubSubInner { provider, pool, chain_events, network };
         Self { inner, subscription_task_spawner }
     }
 }
 
 #[async_trait::async_trait]
-impl<Client, Pool, Events, Network> EthPubSubApiServer for EthPubSub<Client, Pool, Events, Network>
+impl<Provider, Pool, Events, Network> EthPubSubApiServer
+    for EthPubSub<Provider, Pool, Events, Network>
 where
-    Client: BlockProvider + EvmEnvProvider + Clone + 'static,
+    Provider: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
@@ -83,14 +90,14 @@ where
 }
 
 /// The actual handler for and accepted [`EthPubSub::subscribe`] call.
-async fn handle_accepted<Client, Pool, Events, Network>(
-    pubsub: EthPubSubInner<Client, Pool, Events, Network>,
+async fn handle_accepted<Provider, Pool, Events, Network>(
+    pubsub: EthPubSubInner<Provider, Pool, Events, Network>,
     accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
 ) -> Result<(), jsonrpsee::core::Error>
 where
-    Client: BlockProvider + EvmEnvProvider + Clone + 'static,
+    Provider: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
@@ -185,7 +192,9 @@ where
     }
 }
 
-impl<Client, Pool, Events, Network> std::fmt::Debug for EthPubSub<Client, Pool, Events, Network> {
+impl<Provider, Pool, Events, Network> std::fmt::Debug
+    for EthPubSub<Provider, Pool, Events, Network>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthPubSub").finish_non_exhaustive()
     }
@@ -193,11 +202,11 @@ impl<Client, Pool, Events, Network> std::fmt::Debug for EthPubSub<Client, Pool, 
 
 /// Container type `EthPubSub`
 #[derive(Clone)]
-struct EthPubSubInner<Client, Pool, Events, Network> {
+struct EthPubSubInner<Provider, Pool, Events, Network> {
     /// The transaction pool.
     pool: Pool,
-    /// The client that can interact with the chain.
-    client: Client,
+    /// The provider that can interact with the chain.
+    provider: Provider,
     /// A type that allows to create new event subscriptions.
     chain_events: Events,
     /// The network.
@@ -206,15 +215,15 @@ struct EthPubSubInner<Client, Pool, Events, Network> {
 
 // == impl EthPubSubInner ===
 
-impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
+impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
 where
-    Client: BlockProvider + 'static,
+    Provider: BlockProvider + 'static,
 {
     /// Returns the current sync status for the `syncing` subscription
     async fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
         if is_syncing {
             let current_block =
-                self.client.chain_info().map(|info| info.best_number).unwrap_or_default();
+                self.provider.chain_info().map(|info| info.best_number).unwrap_or_default();
             EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
                 syncing: true,
                 starting_block: 0,
@@ -227,7 +236,7 @@ where
     }
 }
 
-impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
+impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
 where
     Pool: TransactionPool + 'static,
 {
@@ -237,9 +246,9 @@ where
     }
 }
 
-impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
+impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
 where
-    Client: BlockProvider + EvmEnvProvider + 'static,
+    Provider: BlockProvider + EvmEnvProvider + 'static,
     Events: CanonStateSubscriptions + 'static,
     Network: NetworkInfo + 'static,
     Pool: 'static,
