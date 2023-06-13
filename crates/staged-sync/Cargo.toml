@@ -82,6 +82,9 @@ confy = "0.5"
 
 tempfile = "3.4"
 
+[build-dependencies]
+vergen = { version = "8.0.0", features = ["git", "gitcl"] }
+
 [features]
 test-utils = [
     "reth-network/test-utils",

@@ -4,7 +4,7 @@ use crate::{
 };
 use clap::Parser;
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_staged_sync::utils::init::{init_db, init_genesis, DB_VERSION};
 use std::sync::Arc;
 use tracing::info;
 
@@ -49,7 +49,7 @@ impl InitCommand {
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
-        info!(target: "reth::cli", "Database opened");
+        info!(target: "reth::cli", version = DB_VERSION, "Database opened");
 
         info!(target: "reth::cli", "Writing genesis block");
         let hash = init_genesis(db, self.chain)?;

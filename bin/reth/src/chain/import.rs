@@ -17,7 +17,7 @@ use reth_downloaders::{
 };
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::{ChainSpec, H256};
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_staged_sync::utils::init::{init_db, init_genesis, DB_VERSION};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -87,7 +87,7 @@ impl ImportCommand {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
-        info!(target: "reth::cli", "Database opened");
+        info!(target: "reth::cli", version = DB_VERSION, "Database opened");
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 

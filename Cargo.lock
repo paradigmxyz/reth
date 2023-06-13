@@ -5445,6 +5445,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "vergen",
  "walkdir",
 ]
 
