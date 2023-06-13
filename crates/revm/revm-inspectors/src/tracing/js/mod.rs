@@ -2,7 +2,7 @@
 
 use crate::tracing::{
     js::{
-        bindings::{CallFrame, Contract, EvmDb, MemoryObj, OpObj, StackObj, StepLog},
+        bindings::{CallFrame, Contract, EvmDb, FrameResult, MemoryObj, OpObj, StackObj, StepLog},
         builtins::register_builtins,
     },
     types::CallKind,
@@ -165,9 +165,11 @@ impl JsInspector {
         Ok(())
     }
 
-    fn try_exit(&mut self) -> JsResult<()> {
+    fn try_exit(&mut self, frame: FrameResult, db: EvmDb) -> JsResult<()> {
         if let Some(exit_fn) = &self.exit_fn {
-            exit_fn.call(&(self.obj.clone().into()), &[], &mut self.ctx)?;
+            let frame = frame.into_js_object(&mut self.ctx)?;
+            let db = db.into_js_object(&mut self.ctx)?;
+            exit_fn.call(&(self.obj.clone().into()), &[frame.into(), db.into()], &mut self.ctx)?;
         }
         Ok(())
     }
@@ -324,6 +326,15 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         self.gas_inspector.call_end(data, inputs, remaining_gas, ret, out.clone(), is_static);
 
+        if self.exit_fn.is_some() {
+            let frame_result =
+                FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
+            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+            if let Err(err) = self.try_exit(frame_result, db) {
+                return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
+            }
+        }
+
         self.pop_call();
 
         (ret, remaining_gas, out)
@@ -346,6 +357,19 @@ where
             inputs.caller,
         );
 
+        if self.enter_fn.is_some() {
+            let call = self.active_call();
+            let frame = CallFrame {
+                contract: call.contract.clone(),
+                kind: call.kind,
+                gas: inputs.gas_limit,
+            };
+            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+            if let Err(err) = self.try_enter(frame, db) {
+                return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
+            }
+        }
+
         (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::default())
     }
 
@@ -366,7 +390,16 @@ where
     }
 
     fn selfdestruct(&mut self, _contract: B160, _target: B160) {
-        // capture enter
+        if self.enter_fn.is_some() {
+            let call = self.active_call();
+            let frame = CallFrame {
+                contract: call.contract.clone(),
+                kind: call.kind,
+                gas: inputs.gas_limit,
+            };
+            let db = EvmDb::new(Default::default(), self.to_db_service.clone());
+            self.try_enter(frame, db)
+        }
     }
 }
 
