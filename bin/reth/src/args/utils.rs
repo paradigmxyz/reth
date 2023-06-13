@@ -40,10 +40,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         _ => {
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
-            match genesis {
-                AllGenesisFormats::Reth(chain_spec) => Arc::new(chain_spec),
-                _ => return Err(eyre::eyre!("Unexpected genesis format")),
-            }
+            Arc::new(genesis.into())
         }
     })
 }
