@@ -1,16 +1,20 @@
 //! Javascript inspector
 
-use crate::tracing::js::{
-    bindings::{Contract, MemoryObj, OpObj, StackObj, StepLog},
-    builtins::register_builtins,
+use crate::tracing::{
+    js::{
+        bindings::{Contract, MemoryObj, OpObj, StackObj, StepLog},
+        builtins::register_builtins,
+    },
+    types::CallKind,
 };
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::bytes::Bytes;
+use reth_primitives::{bytes::Bytes, Address, U256};
 use revm::{
+    inspectors::GasInspector,
     interpreter::{
-        CallInputs, CreateInputs, Gas, InstructionResult, Interpreter, OpCode,
+        CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter, OpCode,
     },
-    primitives::B160,
+    primitives::{B160, B256},
     Database, EVMData, Inspector,
 };
 
@@ -34,7 +38,12 @@ pub struct JsInspector {
     /// EVM inspector hook functions
     enter_fn: Option<JsObject>,
     exit_fn: Option<JsObject>,
+    /// Executed before each instruction is executed.
     step_fn: Option<JsObject>,
+    /// Keeps track of the current call stack.
+    call_stack: Vec<CallStackItem>,
+    /// The gas inspector used to track remaining gas.
+    gas_inspector: GasInspector,
 }
 
 impl JsInspector {
@@ -99,7 +108,18 @@ impl JsInspector {
                 .map_err(JsInspectorError::SetupCallFailed)?;
         }
 
-        Ok(Self { ctx, config, obj, result_fn, fault_fn, enter_fn, exit_fn, step_fn })
+        Ok(Self {
+            ctx,
+            config,
+            obj,
+            result_fn,
+            fault_fn,
+            enter_fn,
+            exit_fn,
+            step_fn,
+            call_stack: Default::default(),
+            gas_inspector: Default::default(),
+        })
     }
 
     /// Calls the result function and returns the result as [serde_json::Value].
@@ -135,6 +155,22 @@ impl JsInspector {
         }
         Ok(())
     }
+
+    /// Pushes a new call to the stack
+    fn push_call(
+        &mut self,
+        address: Address,
+        data: Bytes,
+        value: U256,
+        kind: CallKind,
+        caller: Address,
+    ) {
+        let call = CallStackItem {
+            contract: Contract { caller, contract: address, value, input: data },
+            kind,
+        };
+        self.call_stack.push(call);
+    }
 }
 
 impl<DB> Inspector<DB> for JsInspector
@@ -143,22 +179,24 @@ where
 {
     fn initialize_interp(
         &mut self,
-        _interp: &mut Interpreter,
-        _data: &mut EVMData<'_, DB>,
-        _is_static: bool,
+        interp: &mut Interpreter,
+        data: &mut EVMData<'_, DB>,
+        is_static: bool,
     ) -> InstructionResult {
-        todo!()
+        self.gas_inspector.initialize_interp(interp, data, is_static)
     }
 
     fn step(
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        _is_static: bool,
+        is_static: bool,
     ) -> InstructionResult {
         if self.step_fn.is_none() {
             return InstructionResult::Continue
         }
+
+        self.gas_inspector.step(interp, data, is_static);
 
         let pc = interp.program_counter();
         let step = StepLog {
@@ -189,61 +227,103 @@ where
         InstructionResult::Continue
     }
 
+    fn log(
+        &mut self,
+        evm_data: &mut EVMData<'_, DB>,
+        address: &B160,
+        topics: &[B256],
+        data: &Bytes,
+    ) {
+        self.gas_inspector.log(evm_data, address, topics, data);
+    }
+
     fn step_end(
         &mut self,
-        _interp: &mut Interpreter,
-        _data: &mut EVMData<'_, DB>,
-        _is_static: bool,
-        _eval: InstructionResult,
+        interp: &mut Interpreter,
+        data: &mut EVMData<'_, DB>,
+        is_static: bool,
+        eval: InstructionResult,
     ) -> InstructionResult {
+        if self.step_fn.is_none() {
+            return InstructionResult::Continue
+        }
+
+        self.gas_inspector.step_end(interp, data, is_static, eval);
+
         InstructionResult::Continue
     }
 
     fn call(
         &mut self,
-        _data: &mut EVMData<'_, DB>,
-        _inputs: &mut CallInputs,
-        _is_static: bool,
+        data: &mut EVMData<'_, DB>,
+        inputs: &mut CallInputs,
+        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        todo!()
+        self.gas_inspector.call(data, inputs, is_static);
+
+        // determine correct `from` and `to` based on the call scheme
+        let (from, to) = match inputs.context.scheme {
+            CallScheme::DelegateCall | CallScheme::CallCode => {
+                (inputs.context.address, inputs.context.code_address)
+            }
+            _ => (inputs.context.caller, inputs.context.address),
+        };
+
+        let value = inputs.transfer.value;
+        self.push_call(to, inputs.input.clone(), value, inputs.context.scheme.into(), from);
+
+        (InstructionResult::Continue, Gas::new(0), Bytes::new())
     }
 
     fn call_end(
         &mut self,
-        _data: &mut EVMData<'_, DB>,
-        _inputs: &CallInputs,
-        _remaining_gas: Gas,
-        _ret: InstructionResult,
-        _out: Bytes,
-        _is_static: bool,
+        data: &mut EVMData<'_, DB>,
+        inputs: &CallInputs,
+        remaining_gas: Gas,
+        ret: InstructionResult,
+        out: Bytes,
+        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        todo!()
+        self.gas_inspector.call_end(data, inputs, remaining_gas, ret, out.clone(), is_static);
+
+        (ret, remaining_gas, out)
     }
 
     fn create(
         &mut self,
-        _data: &mut EVMData<'_, DB>,
-        _inputs: &mut CreateInputs,
+        data: &mut EVMData<'_, DB>,
+        inputs: &mut CreateInputs,
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
-        todo!()
+        self.gas_inspector.create(data, inputs);
+
+        (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::default())
     }
 
     fn create_end(
         &mut self,
-        _data: &mut EVMData<'_, DB>,
-        _inputs: &CreateInputs,
-        _ret: InstructionResult,
-        _address: Option<B160>,
-        _remaining_gas: Gas,
-        _out: Bytes,
+        data: &mut EVMData<'_, DB>,
+        inputs: &CreateInputs,
+        ret: InstructionResult,
+        address: Option<B160>,
+        remaining_gas: Gas,
+        out: Bytes,
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
-        todo!()
+        self.gas_inspector.create_end(data, inputs, ret, address, remaining_gas, out.clone());
+
+        (ret, address, remaining_gas, out)
     }
 
     fn selfdestruct(&mut self, _contract: B160, _target: B160) {
         // capture enter
         todo!()
     }
+}
+
+/// Represents an active call
+#[derive(Debug)]
+struct CallStackItem {
+    contract: Contract,
+    kind: CallKind,
 }
 
 #[derive(Debug, thiserror::Error)]
