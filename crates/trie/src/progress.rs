@@ -34,7 +34,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
             hash_builder: HashBuilder::from(value.state),
             walker_stack: value.walker_stack.into_iter().map(CursorSubNode::from).collect(),
             last_account_key: value.last_account_key,
-            last_walker_key: Nibbles::from(value.last_walker_key),
+            last_walker_key: Nibbles::from_hex(value.last_walker_key),
         }
     }
 }
