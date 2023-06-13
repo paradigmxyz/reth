@@ -1,7 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::stage::StageId;
-use reth_provider::Transaction;
+use reth_provider::DatabaseProviderRW;
 use std::collections::VecDeque;
 
 #[derive(Debug)]
@@ -48,7 +48,7 @@ impl<DB: Database> Stage<DB> for TestStage {
 
     async fn execute(
         &mut self,
-        _: &mut Transaction<'_, DB>,
+        _: &mut DatabaseProviderRW<'_, &DB>,
         _input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         self.exec_outputs
@@ -58,7 +58,7 @@ impl<DB: Database> Stage<DB> for TestStage {
 
     async fn unwind(
         &mut self,
-        _: &mut Transaction<'_, DB>,
+        _: &mut DatabaseProviderRW<'_, &DB>,
         _input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.unwind_outputs

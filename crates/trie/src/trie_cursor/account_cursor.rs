@@ -38,6 +38,7 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
@@ -45,14 +46,15 @@ mod tests {
         tables,
         transaction::DbTxMut,
     };
-    use reth_primitives::hex_literal::hex;
-    use reth_provider::Transaction;
+    use reth_primitives::{hex_literal::hex, MAINNET};
+    use reth_provider::ShareableDatabase;
 
     #[test]
     fn test_account_trie_order() {
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
-        let mut cursor = tx.cursor_write::<tables::AccountsTrie>().unwrap();
+        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+        let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
 
         let data = vec![
             hex!("0303040e").to_vec(),

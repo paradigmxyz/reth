@@ -19,6 +19,7 @@ reth-primitives = { path = "../../crates/primitives" }
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
 reth-net-nat = { path = "../../crates/net/nat" }
 reth-stages = { path = "../stages" }
+reth-interfaces = { path = "../interfaces" }
 
 # io
 serde = "1.0"
