@@ -1,15 +1,25 @@
 //! Type bindings for js tracing inspector
 
-use crate::tracing::js::builtins::{to_bigint_array, to_buf, to_buf_value};
+use crate::tracing::js::builtins::{
+    bytes_to_address, bytes_to_hash, from_buf, to_bigint, to_bigint_array, to_buf, to_buf_value,
+};
 use boa_engine::{
-    native_function::NativeFunction, object::FunctionObjectBuilder, Context, JsArgs, JsError,
-    JsNativeError, JsObject, JsResult, JsValue,
+    native_function::NativeFunction,
+    object::{builtins::JsArrayBuffer, FunctionObjectBuilder},
+    Context, JsArgs, JsError, JsNativeError, JsObject, JsResult, JsValue,
 };
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
-use revm::interpreter::{
-    opcode::{PUSH0, PUSH32},
-    Memory, OpCode, Stack,
+use boa_gc::{empty_trace, Finalize, Gc, Trace};
+use reth_primitives::{bytes::Bytes, Address, H256, KECCAK_EMPTY, U256};
+use revm::{
+    db::DatabaseRef,
+    interpreter::{
+        opcode::{PUSH0, PUSH32},
+        Memory, OpCode, Stack,
+    },
+    primitives::AccountInfo,
+    Database,
 };
+use std::borrow::Borrow;
 
 /// A macro that creates a native function that returns a bigint
 macro_rules! bigint {
@@ -275,7 +285,7 @@ impl StackObj {
 }
 
 /// Represents the contract object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Contract {
     pub(crate) caller: Address,
     pub(crate) contract: Address,
@@ -355,8 +365,171 @@ pub(crate) struct EvmContext {
 }
 
 /// DB is the object that allows the js inspector to interact with the database.
-pub(crate) struct Db<DB> {
-    db: DB,
+pub(crate) struct EvmDb<DB> {
+    db: EvmDBInner<DB>,
+}
+
+impl<DB> EvmDb<DB> {
+    pub(crate) fn new(db: DB) -> Self {
+        Self { db: EvmDBInner { inner: db } }
+    }
+}
+
+impl<DB: DatabaseRef + 'static> EvmDb<DB> {
+    pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
+        let obj = JsObject::default();
+
+        let db = Gc::new(self.db);
+        let exists = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let val = args.get_or_undefined(0).clone();
+                    let db: &EvmDBInner<_> = db.borrow();
+                    let acc = db.read_basic(val, ctx)?;
+                    let exists = acc.is_some();
+                    Ok(JsValue::from(exists))
+                },
+                db.clone(),
+            ),
+        )
+        .length(1)
+        .build();
+
+        let get_balance = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let val = args.get_or_undefined(0).clone();
+                    let db: &EvmDBInner<_> = db.borrow();
+                    let acc = db.read_basic(val, ctx)?;
+                    let balance = acc.map(|acc| acc.balance).unwrap_or_default();
+                    to_bigint(balance, ctx)
+                },
+                db.clone(),
+            ),
+        )
+        .length(1)
+        .build();
+
+        let get_nonce = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let val = args.get_or_undefined(0).clone();
+                    let db: &EvmDBInner<_> = db.borrow();
+                    let acc = db.read_basic(val, ctx)?;
+                    let nonce = acc.map(|acc| acc.nonce).unwrap_or_default();
+                    Ok(JsValue::from(nonce))
+                },
+                db.clone(),
+            ),
+        )
+        .length(1)
+        .build();
+
+        let get_code = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let val = args.get_or_undefined(0).clone();
+                    let db: &EvmDBInner<_> = db.borrow();
+                    Ok(db.read_code(val, ctx)?.into())
+                },
+                db.clone(),
+            ),
+        )
+        .length(1)
+        .build();
+
+        let get_state = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let addr = args.get_or_undefined(0).clone();
+                    let slot = args.get_or_undefined(1).clone();
+                    let db: &EvmDBInner<_> = db.borrow();
+                    Ok(db.read_state(addr, slot, ctx)?.into())
+                },
+                db,
+            ),
+        )
+        .length(2)
+        .build();
+
+        obj.set("getBalance", get_balance, false, context)?;
+        obj.set("getNonce", get_nonce, false, context)?;
+        obj.set("getCode", get_code, false, context)?;
+        obj.set("getState", get_state, false, context)?;
+        obj.set("exists", exists, false, context)?;
+        Ok(obj)
+    }
+}
+
+#[derive(Clone)]
+struct EvmDBInner<DB> {
+    // state: &'a JournaledState,
+    inner: DB,
+}
+
+impl<DB> EvmDBInner<DB>
+where
+    DB: DatabaseRef,
+{
+    fn read_basic(&self, address: JsValue, ctx: &mut Context<'_>) -> JsResult<Option<AccountInfo>> {
+        let buf = from_buf(address, ctx)?;
+        let address = bytes_to_address(buf);
+        match self.inner.basic(address) {
+            Ok(maybe_acc) => Ok(maybe_acc),
+            Err(_) => Err(JsError::from_native(
+                JsNativeError::error()
+                    .with_message(format!("Failed to read address {address:?} from database",)),
+            )),
+        }
+    }
+
+    fn read_code(&self, address: JsValue, ctx: &mut Context<'_>) -> JsResult<JsArrayBuffer> {
+        let acc = self.read_basic(address, ctx)?;
+        let code_hash = acc.map(|acc| acc.code_hash).unwrap_or(KECCAK_EMPTY);
+        if code_hash == KECCAK_EMPTY {
+            return JsArrayBuffer::new(0, ctx)
+        }
+        let code = self.inner.code_by_hash(code_hash).map_err(|_| {
+            JsError::from_native(
+                JsNativeError::error()
+                    .with_message(format!("Failed to read code hash {code_hash:?} from database",)),
+            )
+        })?;
+
+        to_buf(code.bytecode.to_vec(), ctx)
+    }
+
+    fn read_state(
+        &self,
+        address: JsValue,
+        slot: JsValue,
+        ctx: &mut Context<'_>,
+    ) -> JsResult<JsArrayBuffer> {
+        let buf = from_buf(address, ctx)?;
+        let address = bytes_to_address(buf);
+
+        let buf = from_buf(slot, ctx)?;
+        let slot = bytes_to_hash(buf);
+
+        let value = self.inner.storage(address, slot.into()).map_err(|_| {
+            JsError::from_native(JsNativeError::error().with_message(format!(
+                "Failed to read state for {address:?} at {slot:?} from database",
+            )))
+        })?;
+        let value: H256 = value.into();
+        to_buf(value.as_bytes().to_vec(), ctx)
+    }
+}
+
+impl<DB> Finalize for EvmDBInner<DB> {}
+
+unsafe impl<DB> Trace for EvmDBInner<DB> {
+    empty_trace!();
 }
 
 #[cfg(test)]

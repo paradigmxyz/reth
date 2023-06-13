@@ -5556,6 +5556,7 @@ name = "reth-revm-inspectors"
 version = "0.1.0"
 dependencies = [
  "boa_engine",
+ "boa_gc",
  "hashbrown 0.13.2",
  "reth-primitives",
  "reth-rpc-types",

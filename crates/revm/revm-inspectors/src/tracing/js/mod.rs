@@ -2,14 +2,16 @@
 
 use crate::tracing::{
     js::{
-        bindings::{Contract, MemoryObj, OpObj, StackObj, StepLog},
+        bindings::{Contract, EvmDb, MemoryObj, OpObj, StackObj, StepLog},
         builtins::register_builtins,
     },
     types::CallKind,
+    utils::get_create_address,
 };
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
 use reth_primitives::{bytes::Bytes, Address, U256};
 use revm::{
+    db::DatabaseRef,
     inspectors::GasInspector,
     interpreter::{
         CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter, OpCode,
@@ -134,10 +136,14 @@ impl JsInspector {
         self.result_fn.call(&(self.obj.clone().into()), &[], &mut self.ctx)
     }
 
-    fn try_step(&mut self, step: StepLog) -> JsResult<()> {
+    fn try_step<DB>(&mut self, step: StepLog, db: EvmDb<DB>) -> JsResult<()>
+    where
+        DB: DatabaseRef + 'static,
+    {
         if let Some(step_fn) = &self.step_fn {
-            let val = step.into_js_object(&mut self.ctx)?;
-            step_fn.call(&(self.obj.clone().into()), &[val.into()], &mut self.ctx)?;
+            let step = step.into_js_object(&mut self.ctx)?;
+            let db = db.into_js_object(&mut self.ctx)?;
+            step_fn.call(&(self.obj.clone().into()), &[step.into(), db.into()], &mut self.ctx)?;
         }
         Ok(())
     }
@@ -156,6 +162,14 @@ impl JsInspector {
         Ok(())
     }
 
+    /// Returns the currently active call
+    ///
+    /// Panics: if there's no call yet
+    #[track_caller]
+    fn active_call(&self) -> &CallStackItem {
+        self.call_stack.last().expect("call stack is empty")
+    }
+
     /// Pushes a new call to the stack
     fn push_call(
         &mut self,
@@ -171,11 +185,15 @@ impl JsInspector {
         };
         self.call_stack.push(call);
     }
+
+    fn pop_call(&mut self) {
+        self.call_stack.pop();
+    }
 }
 
 impl<DB> Inspector<DB> for JsInspector
 where
-    DB: Database,
+    DB: Database + DatabaseRef + Clone + 'static,
 {
     fn initialize_interp(
         &mut self,
@@ -198,6 +216,8 @@ where
 
         self.gas_inspector.step(interp, data, is_static);
 
+        let db = EvmDb::new(data.db.clone());
+
         let pc = interp.program_counter();
         let step = StepLog {
             stack: StackObj(interp.stack.clone()),
@@ -207,21 +227,15 @@ where
             ),
             memory: MemoryObj(interp.memory.clone()),
             pc: pc as u64,
-            gas: 0,
-            cost: 0,
+            gas: interp.gas.limit(),
+            cost: interp.gas.spend(),
             depth: data.journaled_state.depth(),
-            refund: 0,
+            refund: interp.gas.refunded() as u64,
             error: None,
-            // TODO need to track this in a stack via call/call_end
-            contract: Contract {
-                caller: Default::default(),
-                contract: Default::default(),
-                value: Default::default(),
-                input: Default::default(),
-            },
+            contract: self.active_call().contract.clone(),
         };
 
-        if self.try_step(step).is_err() {
+        if self.try_step(step, db).is_err() {
             return InstructionResult::Revert
         }
         InstructionResult::Continue
@@ -286,6 +300,8 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         self.gas_inspector.call_end(data, inputs, remaining_gas, ret, out.clone(), is_static);
 
+        self.pop_call();
+
         (ret, remaining_gas, out)
     }
 
@@ -295,6 +311,16 @@ where
         inputs: &mut CreateInputs,
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
         self.gas_inspector.create(data, inputs);
+        let _ = data.journaled_state.load_account(inputs.caller, data.db);
+        let nonce = data.journaled_state.account(inputs.caller).info.nonce;
+        let address = get_create_address(inputs, nonce);
+        self.push_call(
+            address,
+            inputs.init_code.clone(),
+            inputs.value,
+            inputs.scheme.into(),
+            inputs.caller,
+        );
 
         (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::default())
     }
@@ -309,6 +335,8 @@ where
         out: Bytes,
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
         self.gas_inspector.create_end(data, inputs, ret, address, remaining_gas, out.clone());
+
+        self.pop_call();
 
         (ret, address, remaining_gas, out)
     }

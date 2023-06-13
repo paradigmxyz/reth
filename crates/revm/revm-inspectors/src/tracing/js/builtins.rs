@@ -5,7 +5,7 @@ use boa_engine::{
     property::Attribute,
     Context, JsArgs, JsError, JsNativeError, JsResult, JsString, JsValue, NativeFunction, Source,
 };
-use reth_primitives::{hex, U256};
+use reth_primitives::{hex, Address, H256, U256};
 
 /// bigIntegerJS is the minified version of https://github.com/peterolson/BigInteger.js.
 pub(crate) const BIG_INT_JS: &str = include_str!("bigint.js");
@@ -71,6 +71,51 @@ pub(crate) fn to_bigint_array(items: &[U256], ctx: &mut Context<'_>) -> JsResult
         arr.push(val, ctx)?;
     }
     Ok(arr)
+}
+
+/// Converts a buffer type to an address.
+///
+/// If the buffer is larger than the address size, it will be cropped from the left
+pub(crate) fn bytes_to_address(buf: Vec<u8>) -> Address {
+    let mut address = Address::default();
+    let mut buf = &buf[..];
+    let address_len = address.0.len();
+    if buf.len() > address_len {
+        // crop from left
+        buf = &buf[buf.len() - address.0.len()..];
+    }
+    let address_slice = &mut address.0[address_len - buf.len()..];
+    address_slice.copy_from_slice(buf);
+    address
+}
+
+/// Converts a buffer type to a hash.
+///
+/// If the buffer is larger than the hash size, it will be cropped from the left
+pub(crate) fn bytes_to_hash(buf: Vec<u8>) -> H256 {
+    let mut hash = H256::default();
+    let mut buf = &buf[..];
+    let hash_len = hash.0.len();
+    if buf.len() > hash_len {
+        // crop from left
+        buf = &buf[buf.len() - hash.0.len()..];
+    }
+    let hash_slice = &mut hash.0[hash_len - buf.len()..];
+    hash_slice.copy_from_slice(buf);
+    hash
+}
+
+/// Converts a U256 to a bigint using the global bigint property
+pub(crate) fn to_bigint(value: U256, ctx: &mut Context<'_>) -> JsResult<JsValue> {
+    let bigint = ctx.global_object().get("bigint", ctx)?;
+    if !bigint.is_callable() {
+        return Ok(JsValue::undefined())
+    }
+    bigint.as_callable().unwrap().call(
+        &JsValue::undefined(),
+        &[JsValue::from(value.to_string())],
+        ctx,
+    )
 }
 
 /// Converts a buffer type to a hex string
