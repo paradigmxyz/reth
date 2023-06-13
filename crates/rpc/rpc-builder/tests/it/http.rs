@@ -157,7 +157,9 @@ where
     TraceApiClient::trace_raw_transaction(client, Bytes::default(), HashSet::default(), None)
         .await
         .unwrap_err();
-    TraceApiClient::trace_call_many(client, vec![], None).await.unwrap();
+    TraceApiClient::trace_call_many(client, vec![], Some(BlockNumberOrTag::Latest.into()))
+        .await
+        .unwrap();
     TraceApiClient::replay_transaction(client, H256::default(), HashSet::default())
         .await
         .err()
