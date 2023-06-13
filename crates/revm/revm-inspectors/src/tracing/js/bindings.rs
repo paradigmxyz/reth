@@ -1,7 +1,11 @@
 //! Type bindings for js tracing inspector
 
-use crate::tracing::js::builtins::{
-    bytes_to_address, bytes_to_hash, from_buf, to_bigint, to_bigint_array, to_buf, to_buf_value,
+use crate::tracing::{
+    js::builtins::{
+        address_to_buf, bytes_to_address, bytes_to_hash, from_buf, to_bigint, to_bigint_array,
+        to_buf, to_buf_value,
+    },
+    types::CallKind,
 };
 use boa_engine::{
     native_function::NativeFunction,
@@ -21,22 +25,12 @@ use revm::{
 };
 use std::borrow::Borrow;
 
-/// A macro that creates a native function that returns a bigint
-macro_rules! bigint {
+/// A macro that creates a native function that returns via [JsValue::from]
+macro_rules! js_value_getter {
     ($value:ident, $ctx:ident) => {
         FunctionObjectBuilder::new(
             $ctx,
-            NativeFunction::from_copy_closure(move |_this, _args, ctx| {
-                let bigint = ctx.global_object().get("bigint", ctx)?;
-                if !bigint.is_callable() {
-                    return Ok(JsValue::undefined())
-                }
-                bigint.as_callable().unwrap().call(
-                    &JsValue::undefined(),
-                    &[JsValue::from($value)],
-                    ctx,
-                )
-            }),
+            NativeFunction::from_copy_closure(move |_this, _args, _ctx| Ok(JsValue::from($value))),
         )
         .length(0)
         .build()
@@ -44,12 +38,12 @@ macro_rules! bigint {
 }
 
 /// A macro that creates a native function that returns a captured JsValue
-macro_rules! capture_getter {
+macro_rules! js_value_capture_getter {
     ($value:ident, $ctx:ident) => {
         FunctionObjectBuilder::new(
             $ctx,
             NativeFunction::from_copy_closure_with_captures(
-                move |_this, _args, input, _ctx| Ok(input.clone()),
+                move |_this, _args, input, _ctx| Ok(JsValue::from(input.clone())),
                 $value,
             ),
         )
@@ -105,12 +99,12 @@ impl StepLog {
         // methods
         let error =
             if let Some(error) = error { JsValue::from(error) } else { JsValue::undefined() };
-        let get_error = capture_getter!(error, context);
-        let get_pc = bigint!(pc, context);
-        let get_gas = bigint!(gas, context);
-        let get_cost = bigint!(cost, context);
-        let get_refund = bigint!(refund, context);
-        let get_depth = bigint!(depth, context);
+        let get_error = js_value_capture_getter!(error, context);
+        let get_pc = js_value_getter!(pc, context);
+        let get_gas = js_value_getter!(gas, context);
+        let get_cost = js_value_getter!(cost, context);
+        let get_refund = js_value_getter!(refund, context);
+        let get_depth = js_value_getter!(depth, context);
 
         obj.set("getPc", get_pc, false, context)?;
         obj.set("getError", get_error, false, context)?;
@@ -321,17 +315,7 @@ impl Contract {
 
         let get_value = FunctionObjectBuilder::new(
             context,
-            NativeFunction::from_copy_closure(move |_this, _args, ctx| {
-                let bigint = ctx.global_object().get("bigint", ctx)?;
-                if !bigint.is_callable() {
-                    return Ok(JsValue::undefined())
-                }
-                bigint.as_callable().unwrap().call(
-                    &JsValue::undefined(),
-                    &[JsValue::from(value.to_string())],
-                    ctx,
-                )
-            }),
+            NativeFunction::from_copy_closure(move |_this, _args, ctx| to_bigint(value, ctx)),
         )
         .length(0)
         .build();
@@ -356,12 +340,181 @@ impl Contract {
     }
 }
 
+/// Represents the call frame object for exit functions
+pub(crate) struct FrameResult {
+    gas_used: u64,
+    output: Bytes,
+    error: Option<String>,
+}
+
+impl FrameResult {
+    pub(crate) fn into_js_object(self, ctx: &mut Context<'_>) -> JsResult<JsObject> {
+        let Self { gas_used, output, error } = self;
+        let obj = JsObject::default();
+
+        let output = to_buf_value(output.to_vec(), ctx)?;
+        let get_output = FunctionObjectBuilder::new(
+            ctx,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, _args, output, _ctx| Ok(output.clone()),
+                output,
+            ),
+        )
+        .length(0)
+        .build();
+
+        let error = error.map(JsValue::from).unwrap_or_default();
+        let get_error = js_value_capture_getter!(error, ctx);
+        let get_gas_used = js_value_getter!(gas_used, ctx);
+
+        obj.set("getGasUsed", get_gas_used, false, ctx)?;
+        obj.set("getOutput", get_output, false, ctx)?;
+        obj.set("getError", get_error, false, ctx)?;
+
+        Ok(obj)
+    }
+}
+
+/// Represents the call frame object for enter functions
+pub(crate) struct CallFrame {
+    contract: Contract,
+    kind: CallKind,
+    gas: u64,
+}
+
+impl CallFrame {
+    pub(crate) fn into_js_object(self, ctx: &mut Context<'_>) -> JsResult<JsObject> {
+        let CallFrame { contract: Contract { caller, contract, value, input }, kind, gas } = self;
+        let obj = JsObject::default();
+
+        let get_from = FunctionObjectBuilder::new(
+            ctx,
+            NativeFunction::from_copy_closure(move |_this, _args, ctx| {
+                to_buf_value(caller.as_bytes().to_vec(), ctx)
+            }),
+        )
+        .length(0)
+        .build();
+
+        let get_to = FunctionObjectBuilder::new(
+            ctx,
+            NativeFunction::from_copy_closure(move |_this, _args, ctx| {
+                to_buf_value(contract.as_bytes().to_vec(), ctx)
+            }),
+        )
+        .length(0)
+        .build();
+
+        let get_value = FunctionObjectBuilder::new(
+            ctx,
+            NativeFunction::from_copy_closure(move |_this, _args, ctx| to_bigint(value, ctx)),
+        )
+        .length(0)
+        .build();
+
+        let input = to_buf_value(input.to_vec(), ctx)?;
+        let get_input = FunctionObjectBuilder::new(
+            ctx,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, _args, input, _ctx| Ok(input.clone()),
+                input,
+            ),
+        )
+        .length(0)
+        .build();
+
+        let get_gas = js_value_getter!(gas, ctx);
+        let ty = kind.to_string();
+        let get_type = js_value_capture_getter!(ty, ctx);
+
+        obj.set("getFrom", get_from, false, ctx)?;
+        obj.set("getTo", get_to, false, ctx)?;
+        obj.set("getValue", get_value, false, ctx)?;
+        obj.set("getInput", get_input, false, ctx)?;
+        obj.set("getGas", get_gas, false, ctx)?;
+        obj.set("getType", get_type, false, ctx)?;
+
+        Ok(obj)
+    }
+}
+
 /// The `ctx` object that represents the context in which the transaction is executed.
 pub(crate) struct EvmContext {
+    /// String, one of the two values CALL and CREATE
+    pub(crate) r#type: String,
+    /// Sender of the transaction
+    pub(crate) from: Address,
+    /// Target of the transaction
+    pub(crate) to: Address,
+    pub(crate) input: Bytes,
+    /// Gas limit
+    pub(crate) gas: u64,
+    /// Number, amount of gas used in executing the transaction (excludes txdata costs)
+    pub(crate) gas_used: u64,
+    /// Number, gas price configured in the transaction being executed
+    pub(crate) gas_price: u64,
+    /// Number, intrinsic gas for the transaction being executed
+    pub(crate) intrinsic_gas: u64,
+    /// big.int Amount to be transferred in wei
+    pub(crate) value: U256,
+    /// Number, block number
+    pub(crate) block: u64,
+    pub(crate) output: Bytes,
+    /// Number, block number
+    pub(crate) time: String,
     // TODO more fields
-    block_hash: Option<H256>,
-    tx_index: Option<usize>,
-    tx_hash: Option<H256>,
+    pub(crate) block_hash: Option<H256>,
+    pub(crate) tx_index: Option<usize>,
+    pub(crate) tx_hash: Option<H256>,
+}
+
+impl EvmContext {
+    pub(crate) fn into_js_object(self, ctx: &mut Context<'_>) -> JsResult<JsObject> {
+        let Self {
+            r#type,
+            from,
+            to,
+            input,
+            gas,
+            gas_used,
+            gas_price,
+            intrinsic_gas,
+            value,
+            block,
+            output,
+            time,
+            block_hash,
+            tx_index,
+            tx_hash,
+        } = self;
+        let obj = JsObject::default();
+
+        // add properties
+
+        obj.set("type", r#type, false, ctx)?;
+        obj.set("from", address_to_buf(from, ctx)?, false, ctx)?;
+        obj.set("to", address_to_buf(to, ctx)?, false, ctx)?;
+        obj.set("input", to_buf(input.to_vec(), ctx)?, false, ctx)?;
+        obj.set("gas", gas, false, ctx)?;
+        obj.set("gasUsed", gas_used, false, ctx)?;
+        obj.set("gasPrice", gas_price, false, ctx)?;
+        obj.set("intrinsicGas", intrinsic_gas, false, ctx)?;
+        obj.set("value", to_bigint(value, ctx)?, false, ctx)?;
+        obj.set("block", block, false, ctx)?;
+        obj.set("output", to_buf(output.to_vec(), ctx)?, false, ctx)?;
+        obj.set("time", time, false, ctx)?;
+        if let Some(block_hash) = block_hash {
+            obj.set("blockHash", to_buf(block_hash.as_bytes().to_vec(), ctx)?, false, ctx)?;
+        }
+        if let Some(tx_index) = tx_index {
+            obj.set("txIndex", tx_index as u64, false, ctx)?;
+        }
+        if let Some(tx_hash) = tx_hash {
+            obj.set("txHash", to_buf(tx_hash.as_bytes().to_vec(), ctx)?, false, ctx)?;
+        }
+
+        Ok(obj)
+    }
 }
 
 /// DB is the object that allows the js inspector to interact with the database.

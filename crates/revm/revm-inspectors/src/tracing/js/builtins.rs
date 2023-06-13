@@ -45,6 +45,11 @@ pub(crate) fn from_buf(val: JsValue, context: &mut Context<'_>) -> JsResult<Vec<
     Err(JsError::from_native(JsNativeError::typ().with_message("invalid buffer type")))
 }
 
+/// Create a new array buffer from the address' bytes.
+pub(crate) fn address_to_buf(addr: Address, context: &mut Context<'_>) -> JsResult<JsArrayBuffer> {
+    to_buf(addr.0.to_vec(), context)
+}
+
 /// Create a new array buffer from byte block.
 pub(crate) fn to_buf(bytes: Vec<u8>, context: &mut Context<'_>) -> JsResult<JsArrayBuffer> {
     JsArrayBuffer::from_byte_block(bytes, context)
