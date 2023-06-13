@@ -7,7 +7,7 @@ use boa_engine::{
 };
 use reth_primitives::{hex, Address, H256, U256};
 
-/// bigIntegerJS is the minified version of https://github.com/peterolson/BigInteger.js.
+/// bigIntegerJS is the minified version of <https://github.com/peterolson/BigInteger.js>.
 pub(crate) const BIG_INT_JS: &str = include_str!("bigint.js");
 
 /// Registers all the builtin functions and global bigint property
