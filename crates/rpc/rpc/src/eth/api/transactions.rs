@@ -199,7 +199,7 @@ where
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
-            let header = if let Some(pending) = self.client().pending_header()? {
+            let header = if let Some(pending) = self.provider().pending_header()? {
                 pending
             } else {
                 // no pending block from the CL yet, so we use the latest block and modify the env
