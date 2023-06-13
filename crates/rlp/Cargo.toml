@@ -19,7 +19,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 reth-rlp-derive = { version = "0.1", path = "./rlp-derive", optional = true }
 
 [dev-dependencies]
-reth-rlp = { path = ".", package = "reth-rlp", features = [
+reth-rlp = { workspace = true, features = [
     "derive",
     "std",
     "ethnum",

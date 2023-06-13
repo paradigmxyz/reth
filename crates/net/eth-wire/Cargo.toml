@@ -10,34 +10,34 @@ repository.workspace = true
 
 [dependencies]
 bytes = "1.4"
-thiserror = "1"
-serde = { version = "1", optional = true }
+thiserror = { workspace = true }
+serde = { workspace = true, optional = true }
 
 # reth
 reth-codecs = { path = "../../storage/codecs" }
-reth-primitives = { path = "../../primitives" }
+reth-primitives = { workspace = true }
 reth-ecies = { path = "../ecies" }
-reth-rlp = { path = "../../rlp", features = [
+reth-rlp = { workspace = true, features = [
     "alloc",
     "derive",
     "std",
     "ethereum-types",
     "smol_str",
 ] }
-reth-metrics = { path = "../../metrics" }
+reth-metrics = { workspace = true }
 
 # used for Chain and builders
 ethers-core = { version = "2.0.7", default-features = false }
 
-tokio = { version = "1.21.2", features = ["full"] }
-tokio-util = { version = "0.7.4", features = ["io", "codec"] }
-futures = "0.3.24"
-tokio-stream = "0.1.11"
-pin-project = "1.0"
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["io", "codec"] }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+pin-project = { workspace = true }
 tracing = { workspace = true }
 snap = "1.0.5"
 smol_str = "0.1"
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
@@ -45,16 +45,16 @@ proptest = { version = "1.0", optional = true }
 proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
-reth-primitives = { path = "../../primitives", features = ["arbitrary"] }
+reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing = { path = "../../tracing" }
 ethers-core = { version = "2.0.7", default-features = false }
 
 test-fuzz = "3.0.4"
-tokio-util = { version = "0.7.4", features = ["io", "codec"] }
+tokio-util = { workspace = true, features = ["io", "codec"] }
 hex-literal = "0.3"
 hex = "0.4"
-rand = "0.8"
-secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
+rand = { workspace = true }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }

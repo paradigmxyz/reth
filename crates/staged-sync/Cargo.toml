@@ -12,18 +12,18 @@ description = "Puts together all the Reth stages in a unified abstraction"
 # reth
 reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 reth-discv4 = { path = "../../crates/net/discv4" }
-reth-network-api = { path = "../../crates/net/network-api" }
+reth-network-api = { workspace = true }
 reth-network = { path = "../../crates/net/network", features = ["serde"] }
 reth-downloaders = { path = "../../crates/net/downloaders" }
-reth-primitives = { path = "../../crates/primitives" }
-reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
+reth-primitives = { workspace = true }
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-net-nat = { path = "../../crates/net/nat" }
 reth-stages = { path = "../stages" }
-reth-interfaces = { path = "../interfaces" }
+reth-interfaces = { workspace = true }
 
 # io
 serde = "1.0"
-serde_json = "1.0.91"
+serde_json = { workspace = true }
 
 # misc
 walkdir = "2.3.2"
@@ -32,11 +32,11 @@ shellexpand = "3.0.0"
 tracing = { workspace = true }
 
 # crypto
-rand = { version = "0.8", optional = true }
-secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
+rand = { workspace = true, optional = true }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # errors
-thiserror = "1"
+thiserror = { workspace = true }
 
 # enr
 enr = { version = "0.8.1", features = ["serde", "rust-secp256k1"], optional = true }
@@ -50,8 +50,8 @@ ethers-middleware = { version = "2.0.7", default-features = false, optional = tr
 ethers-signers = { version = "2.0.7", default-features = false, optional = true }
 
 # async / futures
-async-trait = { version = "0.1", optional = true }
-tokio = { version = "1", features = [
+async-trait = { workspace = true, optional = true }
+tokio = { workspace = true, features = [
     "io-util",
     "net",
     "macros",
@@ -72,11 +72,11 @@ reth-tracing = { path = "../tracing" }
 reth-downloaders = { path = "../net/downloaders" }
 
 # async/futures
-futures = "0.3"
-tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
+futures = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 
 # crypto
-secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 confy = "0.5"
 

@@ -12,20 +12,20 @@ Merkle trie implementation
 
 [dependencies]
 # reth
-reth-primitives = { path = "../primitives" }
-reth-interfaces = { path = "../interfaces" }
-reth-rlp = { path = "../rlp" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
+reth-rlp = { workspace = true }
 reth-db = { path = "../storage/db" }
 
 # tokio
-tokio = { version = "1.21.2", default-features = false, features = ["sync"] }
+tokio = { workspace = true, default-features = false, features = ["sync"] }
 
 # tracing
 tracing = { workspace = true }
 
 # misc 
 hex = "0.4"
-thiserror = "1.0"
+thiserror = { workspace = true }
 derive_more = "0.99"
 
 # test-utils
@@ -33,17 +33,17 @@ triehash = { version = "0.8", optional = true }
 
 [dev-dependencies]
 # reth
-reth-primitives = { path = "../primitives", features = ["test-utils", "arbitrary"] }
+reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { path = "../storage/db", features = ["test-utils"] }
-reth-provider = { path = "../storage/provider" }
+reth-provider = { workspace = true }
 
 # trie
 triehash = "0.8"
 
 # misc
 proptest = "1.0"
-tokio = { version = "1.21.2", default-features = false, features = ["sync", "rt", "macros"] }
-tokio-stream = "0.1.10"
+tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
+tokio-stream = { workspace = true }
 criterion = "0.4"
 
 [features]

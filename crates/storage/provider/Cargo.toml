@@ -10,34 +10,34 @@ description = "Reth storage provider."
 
 [dependencies]
 # reth
-reth-primitives = { path = "../../primitives" }
-reth-interfaces = { path = "../../interfaces" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
 reth-trie = { path = "../../trie" }
 
 # async
-tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = { workspace = true, features = ["sync"] }
 
 # tracing
 tracing = { workspace = true }
 
 # misc
-thiserror = "1.0.37"
+thiserror = { workspace = true }
 auto_impl = "1.0"
 itertools = "0.10"
-pin-project = "1.0"
+pin-project = { workspace = true }
 derive_more = "0.99"
 parking_lot = "0.12"
 
 # test-utils
-reth-rlp = { path = "../../rlp", optional = true }
+reth-rlp = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
-reth-primitives = { path = "../../primitives", features = ["arbitrary", "test-utils"] }
-reth-rlp = { path = "../../rlp" }
+reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
+reth-rlp = { workspace = true }
 reth-trie = { path = "../../trie", features = ["test-utils"] }
 parking_lot = "0.12"
 
