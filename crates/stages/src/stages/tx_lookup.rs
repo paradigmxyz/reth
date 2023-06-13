@@ -64,7 +64,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         let tx_walker = tx_cursor.walk_range(tx_range)?;
 
-        let chunk_size = 100_000 / rayon::current_num_threads();
+        let chunk_size = tx_range.count() / rayon::current_num_threads();
         let mut channels = Vec::with_capacity(chunk_size);
         let mut transaction_count = 0;
 
