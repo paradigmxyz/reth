@@ -59,7 +59,7 @@ mod tests {
     // From manual regression test
     #[test]
     fn encode_leaf_node_nibble() {
-        let nibble = Nibbles { hex_data: hex!("0604060f").to_vec() };
+        let nibble = Nibbles { hex_data: hex!("0604060f").into() };
         let encoded = nibble.encode_path_leaf(true);
         let expected = hex!("20646f").to_vec();
         assert_eq!(encoded, expected);
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn rlp_leaf_node_roundtrip() {
-        let nibble = Nibbles { hex_data: hex!("0604060f").to_vec() };
+        let nibble = Nibbles { hex_data: hex!("0604060f").into() };
         let val = hex!("76657262").to_vec();
         let leaf = LeafNode::new(&nibble, &val);
         let rlp = leaf.rlp(&mut vec![]);
