@@ -197,30 +197,33 @@ where
         f(state)
     }
 
-    async fn evm_env_at(&self, mut at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
-            if let Some(pending) = self.client().pending_header()? {
-                let mut cfg = CfgEnv::default();
-                let mut block_env = BlockEnv::default();
-                self.client().fill_block_env_with_header(&mut block_env, &pending.header)?;
-                self.client().fill_cfg_env_with_header(&mut cfg, &pending.header)?;
-                return Ok((cfg, block_env, pending.hash.into()))
+            let header = if let Some(pending) = self.client().pending_header()? {
+                pending
             } else {
-                // No pending block, use latest
-                at = BlockId::Number(BlockNumberOrTag::Latest);
-                // Update the latest values for the basefee, timestamp and number
-                let block_hash = self
+                // no pending block from the CL yet, so we use the latest block and modify the env
+                // values that we can
+                let mut latest = self
                     .client()
-                    .block_hash_for_id(at)?
+                    .latest_header()?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                let block =
-                    self.block_by_id(at).await?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                let (cfg, mut env) = self.cache().get_evm_env(block_hash).await?;
-                env.basefee = U256::from(block.header.next_block_base_fee().unwrap());
-                env.timestamp = U256::from(block.header.timestamp + 12);
-                env.number = U256::from(block.timestamp);
-                return Ok((cfg, env, block_hash.into()))
-            }
+
+                // child block
+                latest.number += 1;
+                // assumed child block is in the next slot
+                latest.timestamp += 12;
+                // base fee of the child block
+                latest.base_fee_per_gas = latest.next_block_base_fee();
+
+                latest
+            };
+
+            let mut cfg = CfgEnv::default();
+            let mut block_env = BlockEnv::default();
+            self.client().fill_block_env_with_header(&mut block_env, &header)?;
+            self.client().fill_cfg_env_with_header(&mut cfg, &header)?;
+            return Ok((cfg, block_env, header.hash.into()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
