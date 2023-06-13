@@ -99,7 +99,7 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     TestCanonStateSubscriptions,
 > {
     RpcModuleBuilder::default()
-        .with_client(NoopProvider::default())
+        .with_provider(NoopProvider::default())
         .with_pool(testing_pool())
         .with_network(NoopNetwork)
         .with_executor(TokioTaskExecutor::default())

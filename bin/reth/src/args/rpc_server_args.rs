@@ -267,7 +267,7 @@ impl RpcServerArgs {
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
         let (rpc_modules, auth_module) = RpcModuleBuilder::default()
-            .with_client(client)
+            .with_provider(client)
             .with_pool(pool)
             .with_network(network)
             .with_events(events)

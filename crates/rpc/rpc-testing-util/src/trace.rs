@@ -17,8 +17,8 @@ pub type TraceBlockResult = Result<(Vec<LocalizedTransactionTrace>, BlockId), (R
 /// An extension trait for the Trace API.
 #[async_trait::async_trait]
 pub trait TraceApiExt {
-    /// The client type that is used to make the requests.
-    type Client;
+    /// The provider type that is used to make the requests.
+    type Provider;
 
     /// Returns a new stream that yields the traces for the given blocks.
     ///
@@ -39,7 +39,7 @@ pub trait TraceApiExt {
 
 #[async_trait::async_trait]
 impl<T: TraceApiClient + Sync> TraceApiExt for T {
-    type Client = T;
+    type Provider = T;
 
     fn trace_block_buffered<I, B>(&self, params: I, n: usize) -> TraceBlockStream<'_>
     where

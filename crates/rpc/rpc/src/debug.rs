@@ -35,31 +35,31 @@ use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Client, Eth> {
-    inner: Arc<DebugApiInner<Client, Eth>>,
+pub struct DebugApi<Provider, Eth> {
+    inner: Arc<DebugApiInner<Provider, Eth>>,
 }
 
 // === impl DebugApi ===
 
-impl<Client, Eth> DebugApi<Client, Eth> {
+impl<Provider, Eth> DebugApi<Provider, Eth> {
     /// Create a new instance of the [DebugApi]
     pub fn new(
-        client: Client,
+        provider: Provider,
         eth: Eth,
         task_spawner: Box<dyn TaskSpawner>,
         tracing_call_guard: TracingCallGuard,
     ) -> Self {
         let inner =
-            Arc::new(DebugApiInner { client, eth_api: eth, task_spawner, tracing_call_guard });
+            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, tracing_call_guard });
         Self { inner }
     }
 }
 
 // === impl DebugApi ===
 
-impl<Client, Eth> DebugApi<Client, Eth>
+impl<Provider, Eth> DebugApi<Provider, Eth>
 where
-    Client: BlockProviderIdExt + HeaderProvider + 'static,
+    Provider: BlockProviderIdExt + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the future on a new blocking task.
@@ -171,7 +171,7 @@ where
     ) -> EthResult<Vec<TraceResult>> {
         let block_hash = self
             .inner
-            .client
+            .provider
             .block_hash_for_id(block_id)?
             .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
@@ -324,23 +324,23 @@ where
 }
 
 #[async_trait]
-impl<Client, Eth> DebugApiServer for DebugApi<Client, Eth>
+impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
-    Client: BlockProviderIdExt + HeaderProvider + 'static,
+    Provider: BlockProviderIdExt + HeaderProvider + 'static,
     Eth: EthApiSpec + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let header = match block_id {
-            BlockId::Hash(hash) => self.inner.client.header(&hash.into()).to_rpc_result()?,
+            BlockId::Hash(hash) => self.inner.provider.header(&hash.into()).to_rpc_result()?,
             BlockId::Number(number_or_tag) => {
                 let number = self
                     .inner
-                    .client
+                    .provider
                     .convert_block_number(number_or_tag)
                     .to_rpc_result()?
                     .ok_or_else(|| internal_rpc_err("Pending block not supported".to_string()))?;
-                self.inner.client.header_by_number(number).to_rpc_result()?
+                self.inner.provider.header_by_number(number).to_rpc_result()?
             }
         };
 
@@ -354,7 +354,7 @@ where
 
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
-        let block = self.inner.client.block_by_id(block_id).to_rpc_result()?;
+        let block = self.inner.provider.block_by_id(block_id).to_rpc_result()?;
 
         let mut res = Vec::new();
         if let Some(mut block) = block {
@@ -384,7 +384,7 @@ where
     /// Handler for `debug_getRawReceipts`
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
         let receipts =
-            self.inner.client.receipts_by_block_id(block_id).to_rpc_result()?.unwrap_or_default();
+            self.inner.provider.receipts_by_block_id(block_id).to_rpc_result()?.unwrap_or_default();
         let mut all_receipts = Vec::with_capacity(receipts.len());
 
         for receipt in receipts {
@@ -464,21 +464,21 @@ where
     }
 }
 
-impl<Client, Eth> std::fmt::Debug for DebugApi<Client, Eth> {
+impl<Provider, Eth> std::fmt::Debug for DebugApi<Provider, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Client, Eth> Clone for DebugApi<Client, Eth> {
+impl<Provider, Eth> Clone for DebugApi<Provider, Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Client, Eth> {
-    /// The client that can interact with the chain.
-    client: Client,
+struct DebugApiInner<Provider, Eth> {
+    /// The provider that can interact with the chain.
+    provider: Provider,
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to tracing calls

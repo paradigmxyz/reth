@@ -11,7 +11,7 @@ use reth_primitives::{Address, Bytes};
 use serde_json::Value;
 use std::ops::Deref;
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network> {
     pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Bytes> {
         let signer = self.find_signer(&account)?;
         let signature = signer.sign(account, &message).await?;
