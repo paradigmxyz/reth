@@ -1,7 +1,7 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult},
-        revm_utils::{inspect, replay_transactions_until, EvmOverrides},
+        revm_utils::{inspect, prepare_call_env, replay_transactions_until, EvmOverrides},
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
@@ -10,11 +10,16 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256};
-use reth_provider::{BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProviderBox};
+use reth_provider::{
+    BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProvider, StateProviderBox,
+};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
-    tracing::{js::JsInspector, FourByteInspector, TracingInspector, TracingInspectorConfig},
+    tracing::{
+        js::{JsDbRequest, JsInspector},
+        FourByteInspector, TracingInspector, TracingInspectorConfig,
+    },
 };
 use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
@@ -30,7 +35,8 @@ use reth_tasks::TaskSpawner;
 use revm::primitives::Env;
 use revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv};
 use std::{future::Future, sync::Arc};
-use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
+use tokio::sync::{mpsc, oneshot, AcquireError, OwnedSemaphorePermit};
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 /// `debug` API implementation.
 ///
@@ -304,15 +310,28 @@ where
                 },
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
-                    let mut inspector = JsInspector::new(code, config)?;
 
-                    // TODO
+                    let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
+                    let state = self.inner.eth_api.state_at(at)?;
+                    let state = state;
+                    let mut db = SubState::new(State::new(state));
+                    let env = prepare_call_env(cfg, block_env, call, &mut db, overrides)?;
 
-                    // let _ = self
-                    //     .inner
-                    //     .eth_api
-                    //     .inspect_call_at(call, at, overrides, &mut inspector)
-                    //     .await?;
+                    let (tx, rx) = mpsc::channel(1);
+                    let (ready_tx, ready_rx) = oneshot::channel();
+                    let this = self.clone();
+                    self.inner.task_spawner.spawn(Box::pin(async move {
+                        this.js_trace_db_service_task(at, rx, ready_tx).await
+                    }));
+                    // wait for initialization
+                    ready_rx.await.map_err(|_| {
+                        EthApiError::InternalJsTracerError(format!(
+                            "js tracer initialization failed"
+                        ))
+                    })??;
+
+                    let mut inspector = JsInspector::new(code, config, tx)?;
+                    inspect(db, env, &mut inspector)?;
 
                     Err(EthApiError::Unsupported("javascript tracers are unsupported."))
                 }
@@ -331,6 +350,49 @@ where
         let frame = inspector.into_geth_builder().geth_traces(gas_used, config);
 
         Ok(frame.into())
+    }
+
+    /// A services that handles database requests issued from inside the JavaScript tracing engine.
+    async fn js_trace_db_service_task(
+        self,
+        at: BlockId,
+        rx: mpsc::Receiver<JsDbRequest>,
+        on_ready: oneshot::Sender<EthResult<()>>,
+    ) {
+        let state = match self.inner.eth_api.state_at(at) {
+            Ok(state) => {
+                let _ = on_ready.send(Ok(()));
+                state
+            }
+            Err(err) => {
+                let _ = on_ready.send(Err(err));
+                return
+            }
+        };
+
+        let mut stream = ReceiverStream::new(rx);
+        while let Some(req) = stream.next().await {
+            match req {
+                JsDbRequest::Basic { address, resp } => {
+                    let acc = state.basic_account(address).map_err(|err| err.to_string());
+                    let _ = resp.send(acc);
+                }
+                JsDbRequest::Code { code_hash, resp } => {
+                    let code = state
+                        .bytecode_by_hash(code_hash)
+                        .map(|code| code.map(|c| c.bytecode.clone()).unwrap_or_default())
+                        .map_err(|err| err.to_string());
+                    let _ = resp.send(code);
+                }
+                JsDbRequest::StorageAt { address, index, resp } => {
+                    let value = state
+                        .storage(address, index)
+                        .map(|val| val.unwrap_or_default())
+                        .map_err(|err| err.to_string());
+                    let _ = resp.send(value);
+                }
+            }
+        }
     }
 }
 
@@ -548,9 +610,19 @@ fn trace_transaction(
             },
             GethDebugTracerType::JsTracer(code) => {
                 let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
-                let mut inspector = JsInspector::new(code, config)?;
-
-                // TODO
+                let (tx, _rx) = mpsc::channel(1);
+                // let (ready_tx, ready_rx) = oneshot::channel();
+                let _inspector = JsInspector::new(code, config, tx)?;
+                // let this = self.clone();
+                // self.inner.task_spawner.spawn(
+                //     Box::pin(async move {
+                //         this.js_trace_db_service_task( at, rx, ready_tx).await
+                //     })
+                // );
+                //
+                // // wait for initialization
+                // ready_rx.await.map_err(|_| EthApiError::InternalJsTracerError(format!("js tracer
+                // initialization failed")))??; TODO
 
                 Err(EthApiError::Unsupported("javascript tracers are unsupported."))
             }

@@ -9,9 +9,8 @@ use crate::tracing::{
     utils::get_create_address,
 };
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::{bytes::Bytes, Address, U256};
+use reth_primitives::{bytes::Bytes, Account, Address, H256, U256};
 use revm::{
-    db::DatabaseRef,
     inspectors::GasInspector,
     interpreter::{
         CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter, OpCode,
@@ -19,6 +18,7 @@ use revm::{
     primitives::{B160, B256},
     Database, EVMData, Inspector,
 };
+use tokio::sync::mpsc;
 
 pub(crate) mod bindings;
 pub(crate) mod builtins;
@@ -26,6 +26,7 @@ pub(crate) mod builtins;
 /// A javascript inspector that will delegate inspector functions to javascript functions
 ///
 /// See also <https://geth.ethereum.org/docs/developers/evm-tracing/custom-tracer#custom-javascript-tracing>
+#[derive(Debug)]
 pub struct JsInspector {
     ctx: Context<'static>,
     /// The javascript config provided to the inspector.
@@ -46,6 +47,8 @@ pub struct JsInspector {
     call_stack: Vec<CallStackItem>,
     /// The gas inspector used to track remaining gas.
     gas_inspector: GasInspector,
+    /// sender half of a channel to communicate with the database service.
+    to_db: mpsc::Sender<JsDbRequest>,
 }
 
 impl JsInspector {
@@ -60,7 +63,11 @@ impl JsInspector {
     /// - `enter`: a function that will be called when the execution enters a new call.
     /// - `exit`: a function that will be called when the execution exits a call.
     /// - `step`: a function that will be called when the execution steps to the next instruction.
-    pub fn new(code: String, config: serde_json::Value) -> Result<Self, JsInspectorError> {
+    pub fn new(
+        code: String,
+        config: serde_json::Value,
+        to_db: mpsc::Sender<JsDbRequest>,
+    ) -> Result<Self, JsInspectorError> {
         // Instantiate the execution context
         let mut ctx = Context::default();
         register_builtins(&mut ctx)?;
@@ -121,6 +128,7 @@ impl JsInspector {
             step_fn,
             call_stack: Default::default(),
             gas_inspector: Default::default(),
+            to_db,
         })
     }
 
@@ -136,10 +144,7 @@ impl JsInspector {
         self.result_fn.call(&(self.obj.clone().into()), &[], &mut self.ctx)
     }
 
-    fn try_step<DB>(&mut self, step: StepLog, db: EvmDb<DB>) -> JsResult<()>
-    where
-        DB: DatabaseRef + 'static,
-    {
+    fn try_step(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
         if let Some(step_fn) = &self.step_fn {
             let step = step.into_js_object(&mut self.ctx)?;
             let db = db.into_js_object(&mut self.ctx)?;
@@ -148,10 +153,7 @@ impl JsInspector {
         Ok(())
     }
 
-    fn try_enter<DB>(&mut self, frame: CallFrame, db: EvmDb<DB>) -> JsResult<()>
-    where
-        DB: DatabaseRef + 'static,
-    {
+    fn try_enter(&mut self, frame: CallFrame, db: EvmDb) -> JsResult<()> {
         if let Some(enter_fn) = &self.enter_fn {
             let frame = frame.into_js_object(&mut self.ctx)?;
             let db = db.into_js_object(&mut self.ctx)?;
@@ -199,7 +201,7 @@ impl JsInspector {
 
 impl<DB> Inspector<DB> for JsInspector
 where
-    DB: Database + DatabaseRef + Clone + 'static,
+    DB: Database,
 {
     fn initialize_interp(
         &mut self,
@@ -222,7 +224,7 @@ where
 
         self.gas_inspector.step(interp, data, is_static);
 
-        let db = EvmDb::new(data.db.clone());
+        let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db.clone());
 
         let pc = interp.program_counter();
         let step = StepLog {
@@ -299,7 +301,7 @@ where
                 kind: call.kind,
                 gas: inputs.gas_limit,
             };
-            let db = EvmDb::new(data.db.clone());
+            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db.clone());
             if let Err(err) = self.try_enter(frame, db) {
                 return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
             }
@@ -364,6 +366,34 @@ where
         // capture enter
         todo!()
     }
+}
+
+/// Request variants to be sent from the inspector to the database
+#[derive(Debug, Clone)]
+pub enum JsDbRequest {
+    /// Bindings for [Database::basic]
+    Basic {
+        /// The address of the account to be loaded
+        address: Address,
+        /// The response channel
+        resp: std::sync::mpsc::Sender<Result<Option<Account>, String>>,
+    },
+    /// Bindings for [Database::code_by_hash]
+    Code {
+        /// The code hash of the code to be loaded
+        code_hash: H256,
+        /// The response channel
+        resp: std::sync::mpsc::Sender<Result<Bytes, String>>,
+    },
+    /// Bindings for [Database::storage]
+    StorageAt {
+        /// The address of the account
+        address: Address,
+        /// Index of the storage slot
+        index: H256,
+        /// The response channel
+        resp: std::sync::mpsc::Sender<Result<U256, String>>,
+    },
 }
 
 /// Represents an active call

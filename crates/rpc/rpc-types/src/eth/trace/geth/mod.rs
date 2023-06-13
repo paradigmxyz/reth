@@ -244,9 +244,7 @@ impl GethDebugTracerConfig {
     /// Returns the json config if this config is a JS tracer.
     pub fn into_js_config(self) -> Option<serde_json::Value> {
         match self {
-            GethDebugTracerConfig::JsTracer(cfg) => {
-                Some(cfg)
-            }
+            GethDebugTracerConfig::JsTracer(cfg) => Some(cfg),
             _ => None,
         }
     }
