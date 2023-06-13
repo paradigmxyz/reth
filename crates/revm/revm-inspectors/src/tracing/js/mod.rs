@@ -48,7 +48,7 @@ pub struct JsInspector {
     /// The gas inspector used to track remaining gas.
     gas_inspector: GasInspector,
     /// sender half of a channel to communicate with the database service.
-    to_db: mpsc::Sender<JsDbRequest>,
+    to_db_service: mpsc::Sender<JsDbRequest>,
 }
 
 impl JsInspector {
@@ -59,14 +59,17 @@ impl JsInspector {
     ///  - `result`: a function that will be called when the result is requested.
     ///  - `fault`: a function that will be called when the transaction fails.
     ///
-    /// Optional functions are invoking during inspection:
+    /// Optional functions are invoked during inspection:
     /// - `enter`: a function that will be called when the execution enters a new call.
     /// - `exit`: a function that will be called when the execution exits a call.
     /// - `step`: a function that will be called when the execution steps to the next instruction.
+    ///
+    /// This also accepts a sender half of a channel to communicate with the database service so the
+    /// DB can be queried from inside the inspector.
     pub fn new(
         code: String,
         config: serde_json::Value,
-        to_db: mpsc::Sender<JsDbRequest>,
+        to_db_service: mpsc::Sender<JsDbRequest>,
     ) -> Result<Self, JsInspectorError> {
         // Instantiate the execution context
         let mut ctx = Context::default();
@@ -128,7 +131,7 @@ impl JsInspector {
             step_fn,
             call_stack: Default::default(),
             gas_inspector: Default::default(),
-            to_db,
+            to_db_service,
         })
     }
 
@@ -224,7 +227,7 @@ where
 
         self.gas_inspector.step(interp, data, is_static);
 
-        let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db.clone());
+        let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
 
         let pc = interp.program_counter();
         let step = StepLog {
@@ -301,7 +304,7 @@ where
                 kind: call.kind,
                 gas: inputs.gas_limit,
             };
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db.clone());
+            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
             if let Err(err) = self.try_enter(frame, db) {
                 return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
             }
@@ -364,7 +367,6 @@ where
 
     fn selfdestruct(&mut self, _contract: B160, _target: B160) {
         // capture enter
-        todo!()
     }
 }
 

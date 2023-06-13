@@ -100,6 +100,7 @@ where
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
         // replay all transactions of the block
+        let this = self.clone();
         self.inner.eth_api.with_state_at_block(at, move |state| {
             let mut results = Vec::with_capacity(transactions.len());
             let mut db = SubState::new(State::new(state));
@@ -109,7 +110,8 @@ where
                 let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                 let tx = tx_env_with_recovered(&tx);
                 let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                let (result, state_changes) = trace_transaction(opts.clone(), env, &mut db)?;
+                let (result, state_changes) =
+                    this.trace_transaction(opts.clone(), env, at, &mut db)?;
                 results.push(TraceResult::Success { result });
 
                 if transactions.peek().is_some() {
@@ -210,11 +212,11 @@ where
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
-        let state_at = block.parent_hash;
+        let state_at: BlockId = block.parent_hash.into();
         let block_txs = block.body;
 
         self.on_blocking_task(|this| async move {
-            this.inner.eth_api.with_state_at_block(state_at.into(), |state| {
+            this.inner.eth_api.with_state_at_block(state_at, |state| {
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
@@ -229,7 +231,7 @@ where
                 )?;
 
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-                trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
+                this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
             })
         })
         .await
@@ -311,27 +313,20 @@ where
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
 
+                    // for JS tracing we need to setup all async work before we can start tracing
+                    // because JSTracer and all JS types are not Send
                     let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
                     let state = state;
                     let mut db = SubState::new(State::new(state));
                     let env = prepare_call_env(cfg, block_env, call, &mut db, overrides)?;
 
-                    let (tx, rx) = mpsc::channel(1);
-                    let (ready_tx, ready_rx) = oneshot::channel();
-                    let this = self.clone();
-                    self.inner.task_spawner.spawn(Box::pin(async move {
-                        this.js_trace_db_service_task(at, rx, ready_tx).await
-                    }));
-                    // wait for initialization
-                    ready_rx.await.map_err(|_| {
-                        EthApiError::InternalJsTracerError(format!(
-                            "js tracer initialization failed"
-                        ))
-                    })??;
+                    let to_db_service = self.spawn_js_trace_service(at)?;
 
-                    let mut inspector = JsInspector::new(code, config, tx)?;
-                    inspect(db, env, &mut inspector)?;
+                    let mut inspector = JsInspector::new(code, config, to_db_service)?;
+                    let (_res, _env) = inspect(db, env, &mut inspector)?;
+
+                    // TODO(mattsse): get result
 
                     Err(EthApiError::Unsupported("javascript tracers are unsupported."))
                 }
@@ -352,12 +347,112 @@ where
         Ok(frame.into())
     }
 
+    /// Executes the configured transaction with the environment on the given database.
+    ///
+    /// Returns the trace frame and the state that got updated after executing the transaction.
+    ///
+    /// Note: this does not apply any state overrides if they're configured in the `opts`.
+    fn trace_transaction(
+        &self,
+        opts: GethDebugTracingOptions,
+        env: Env,
+        at: BlockId,
+        db: &mut SubState<StateProviderBox<'_>>,
+    ) -> EthResult<(GethTraceFrame, revm_primitives::State)> {
+        let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
+
+        if let Some(tracer) = tracer {
+            // valid matching config
+            if let Some(ref config) = tracer_config {
+                if !config.matches_tracer(&tracer) {
+                    return Err(EthApiError::InvalidTracerConfig)
+                }
+            }
+
+            return match tracer {
+                GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
+                    GethDebugBuiltInTracerType::FourByteTracer => {
+                        let mut inspector = FourByteInspector::default();
+                        let (res, _) = inspect(db, env, &mut inspector)?;
+                        return Ok((FourByteFrame::from(inspector).into(), res.state))
+                    }
+                    GethDebugBuiltInTracerType::CallTracer => {
+                        // we validated the config above
+                        let call_config =
+                            tracer_config.and_then(|c| c.into_call_config()).unwrap_or_default();
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_geth_config(&config),
+                        );
+
+                        let (res, _) = inspect(db, env, &mut inspector)?;
+
+                        let frame = inspector.into_geth_builder().geth_call_traces(call_config);
+
+                        return Ok((frame.into(), res.state))
+                    }
+                    GethDebugBuiltInTracerType::PreStateTracer => {
+                        Err(EthApiError::Unsupported("prestate tracer is unimplemented yet."))
+                    }
+                    GethDebugBuiltInTracerType::NoopTracer => {
+                        Ok((NoopFrame::default().into(), Default::default()))
+                    }
+                },
+                GethDebugTracerType::JsTracer(code) => {
+                    let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
+
+                    // we spawn the database service that will be used by the JS tracer
+                    // TODO(mattsse) this is not quite accurate when tracing a block inside a
+                    // transaction because the service needs access to the committed state changes
+                    let to_db_service = self.spawn_js_trace_service(at)?;
+
+                    let mut inspector = JsInspector::new(code, config, to_db_service)?;
+                    let (_res, _env) = inspect(db, env, &mut inspector)?;
+
+                    // TODO(mattsse): get result
+
+                    Err(EthApiError::Unsupported("javascript tracers are unsupported."))
+                }
+            }
+        }
+
+        // default structlog tracer
+        let inspector_config = TracingInspectorConfig::from_geth_config(&config);
+
+        let mut inspector = TracingInspector::new(inspector_config);
+
+        let (res, _) = inspect(db, env, &mut inspector)?;
+        let gas_used = res.result.gas_used();
+
+        let frame = inspector.into_geth_builder().geth_traces(gas_used, config);
+
+        Ok((frame.into(), res.state))
+    }
+
+    /// Spawns [Self::js_trace_db_service_task] on a new task and returns a channel to send requests
+    /// to it.
+    ///
+    /// Note: This blocks until the service is ready to receive requests.
+    fn spawn_js_trace_service(&self, at: BlockId) -> EthResult<mpsc::Sender<JsDbRequest>> {
+        let (to_db_service, rx) = mpsc::channel(1);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let this = self.clone();
+        self.inner
+            .task_spawner
+            .spawn(Box::pin(async move { this.js_trace_db_service_task(at, rx, ready_tx).await }));
+        // wait for initialization
+        ready_rx.recv().map_err(|_| {
+            EthApiError::InternalJsTracerError(format!("js tracer initialization failed"))
+        })??;
+        Ok(to_db_service)
+    }
+
     /// A services that handles database requests issued from inside the JavaScript tracing engine.
     async fn js_trace_db_service_task(
         self,
         at: BlockId,
         rx: mpsc::Receiver<JsDbRequest>,
-        on_ready: oneshot::Sender<EthResult<()>>,
+        on_ready: std::sync::mpsc::Sender<EthResult<()>>,
     ) {
         let state = match self.inner.eth_api.state_at(at) {
             Ok(state) => {
@@ -558,86 +653,4 @@ struct DebugApiInner<Client, Eth> {
     tracing_call_guard: TracingCallGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
-}
-
-/// Executes the configured transaction with the environment on the given database.
-///
-/// Returns the trace frame and the state that got updated after executing the transaction.
-///
-/// Note: this does not apply any state overrides if they're configured in the `opts`.
-fn trace_transaction(
-    opts: GethDebugTracingOptions,
-    env: Env,
-    db: &mut SubState<StateProviderBox<'_>>,
-) -> EthResult<(GethTraceFrame, revm_primitives::State)> {
-    let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
-
-    if let Some(tracer) = tracer {
-        // valid matching config
-        if let Some(ref config) = tracer_config {
-            if !config.matches_tracer(&tracer) {
-                return Err(EthApiError::InvalidTracerConfig)
-            }
-        }
-
-        return match tracer {
-            GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
-                GethDebugBuiltInTracerType::FourByteTracer => {
-                    let mut inspector = FourByteInspector::default();
-                    let (res, _) = inspect(db, env, &mut inspector)?;
-                    return Ok((FourByteFrame::from(inspector).into(), res.state))
-                }
-                GethDebugBuiltInTracerType::CallTracer => {
-                    // we validated the config above
-                    let call_config =
-                        tracer_config.and_then(|c| c.into_call_config()).unwrap_or_default();
-
-                    let mut inspector =
-                        TracingInspector::new(TracingInspectorConfig::from_geth_config(&config));
-
-                    let (res, _) = inspect(db, env, &mut inspector)?;
-
-                    let frame = inspector.into_geth_builder().geth_call_traces(call_config);
-
-                    return Ok((frame.into(), res.state))
-                }
-                GethDebugBuiltInTracerType::PreStateTracer => {
-                    Err(EthApiError::Unsupported("prestate tracer is unimplemented yet."))
-                }
-                GethDebugBuiltInTracerType::NoopTracer => {
-                    Ok((NoopFrame::default().into(), Default::default()))
-                }
-            },
-            GethDebugTracerType::JsTracer(code) => {
-                let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
-                let (tx, _rx) = mpsc::channel(1);
-                // let (ready_tx, ready_rx) = oneshot::channel();
-                let _inspector = JsInspector::new(code, config, tx)?;
-                // let this = self.clone();
-                // self.inner.task_spawner.spawn(
-                //     Box::pin(async move {
-                //         this.js_trace_db_service_task( at, rx, ready_tx).await
-                //     })
-                // );
-                //
-                // // wait for initialization
-                // ready_rx.await.map_err(|_| EthApiError::InternalJsTracerError(format!("js tracer
-                // initialization failed")))??; TODO
-
-                Err(EthApiError::Unsupported("javascript tracers are unsupported."))
-            }
-        }
-    }
-
-    // default structlog tracer
-    let inspector_config = TracingInspectorConfig::from_geth_config(&config);
-
-    let mut inspector = TracingInspector::new(inspector_config);
-
-    let (res, _) = inspect(db, env, &mut inspector)?;
-    let gas_used = res.result.gas_used();
-
-    let frame = inspector.into_geth_builder().geth_traces(gas_used, config);
-
-    Ok((frame.into(), res.state))
 }
