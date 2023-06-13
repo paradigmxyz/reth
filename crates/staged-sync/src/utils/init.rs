@@ -11,7 +11,7 @@ use std::{fs, io, path::Path, sync::Arc};
 use tracing::{debug, info};
 
 /// The name of the file that contains the version of the database.
-const DB_VERSION_FILE_NAME: &str = "version";
+pub const DB_VERSION_FILE_NAME: &str = "version";
 /// The version of the database stored in the [DB_VERSION_FILE_NAME] file in the same directory as
 /// database. Example: `0.1.0-e43455c2`
 pub const DB_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("VERGEN_GIT_SHA"));
