@@ -1286,7 +1286,7 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::TestExecutorFactory, ShareableDatabase,
+        providers::BlockchainProvider, test_utils::TestExecutorFactory, ProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
@@ -1394,9 +1394,9 @@ mod tests {
             BlockchainTree::new(externals, canon_state_notification_sender, config)
                 .expect("failed to create tree"),
         );
-        let shareable_db = ShareableDatabase::new(db.clone(), chain_spec.clone());
+        let factory = ProviderFactory::new(db.clone(), chain_spec.clone());
         let latest = chain_spec.genesis_header().seal_slow();
-        let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
+        let blockchain_provider = BlockchainProvider::with_latest(factory, tree, latest);
         let (engine, handle) = BeaconConsensusEngine::new(
             NoopFullBlockClient::default(),
             pipeline,
@@ -1561,7 +1561,7 @@ mod tests {
         chain: Arc<ChainSpec>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
-        let factory = ShareableDatabase::new(db, chain);
+        let factory = ProviderFactory::new(db, chain);
         let mut provider = factory.provider_rw().unwrap();
         blocks.try_for_each(|b| provider.insert_block(b.clone(), None)).expect("failed to insert");
         provider.commit().unwrap();

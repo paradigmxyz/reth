@@ -140,7 +140,7 @@ fn stage_checkpoint<DB: Database>(
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_provider::ShareableDatabase;
+    use reth_provider::ProviderFactory;
     use std::collections::BTreeMap;
 
     use super::*;
@@ -210,7 +210,7 @@ mod tests {
     async fn run(tx: &TestTransaction, run_to: u64) {
         let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
         let out = stage.execute(&mut provider, input).await.unwrap();
         assert_eq!(
@@ -235,7 +235,7 @@ mod tests {
             ..Default::default()
         };
         let mut stage = IndexAccountHistoryStage::default();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
         let out = stage.unwind(&mut provider, input).await.unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
@@ -449,7 +449,7 @@ mod tests {
         // run
         {
             let mut stage = IndexAccountHistoryStage { commit_threshold: 4 }; // Two runs required
-            let factory = ShareableDatabase::new(&test_tx.tx, MAINNET.clone());
+            let factory = ProviderFactory::new(&test_tx.tx, MAINNET.clone());
             let mut provider = factory.provider_rw().unwrap();
 
             let mut input = ExecInput { target: Some(5), ..Default::default() };
@@ -538,7 +538,7 @@ mod tests {
         })
         .unwrap();
 
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         assert_matches!(

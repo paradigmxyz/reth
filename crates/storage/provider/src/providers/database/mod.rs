@@ -24,14 +24,14 @@ pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 ///
 /// This provider implements most provider or provider factory traits.
 #[derive(Debug)]
-pub struct ShareableDatabase<DB> {
+pub struct ProviderFactory<DB> {
     /// Database
     db: DB,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
 }
 
-impl<DB: Database> ShareableDatabase<DB> {
+impl<DB: Database> ProviderFactory<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashProvider`]. This may fail if the inner read database transaction fails to open.
@@ -48,20 +48,20 @@ impl<DB: Database> ShareableDatabase<DB> {
     }
 }
 
-impl<DB> ShareableDatabase<DB> {
+impl<DB> ProviderFactory<DB> {
     /// create new database provider
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
         Self { db, chain_spec }
     }
 }
 
-impl<DB: Clone> Clone for ShareableDatabase<DB> {
+impl<DB: Clone> Clone for ProviderFactory<DB> {
     fn clone(&self) -> Self {
         Self { db: self.db.clone(), chain_spec: Arc::clone(&self.chain_spec) }
     }
 }
 
-impl<DB: Database> ShareableDatabase<DB> {
+impl<DB: Database> ProviderFactory<DB> {
     /// Storage provider for latest block
     pub fn latest(&self) -> Result<StateProviderBox<'_>> {
         trace!(target: "providers::db", "Returning latest state provider");
@@ -111,7 +111,7 @@ impl<DB: Database> ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
+impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
         self.provider()?.header(block_hash)
     }
@@ -144,7 +144,7 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
+impl<DB: Database> BlockHashProvider for ProviderFactory<DB> {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         self.provider()?.block_hash(number)
     }
@@ -154,7 +154,7 @@ impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> BlockNumProvider for ShareableDatabase<DB> {
+impl<DB: Database> BlockNumProvider for ProviderFactory<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
         self.provider()?.chain_info()
     }
@@ -172,7 +172,7 @@ impl<DB: Database> BlockNumProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
+impl<DB: Database> BlockProvider for ProviderFactory<DB> {
     fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
         self.provider()?.find_block_by_hash(hash, source)
     }
@@ -194,7 +194,7 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
+impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
         self.provider()?.transaction_id(tx_hash)
     }
@@ -233,7 +233,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
+impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
     fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>> {
         self.provider()?.receipt(id)
     }
@@ -247,7 +247,7 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
+impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -261,13 +261,13 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> StageCheckpointProvider for ShareableDatabase<DB> {
+impl<DB: Database> StageCheckpointProvider for ProviderFactory<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
     }
 }
 
-impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
+impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     fn fill_env_at(
         &self,
         cfg: &mut CfgEnv,
@@ -317,7 +317,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::ShareableDatabase;
+    use super::ProviderFactory;
     use crate::{BlockHashProvider, BlockNumProvider};
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_primitives::{ChainSpecBuilder, H256};
@@ -327,7 +327,7 @@ mod tests {
     fn common_history_provider() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db, Arc::new(chain_spec));
+        let provider = ProviderFactory::new(db, Arc::new(chain_spec));
         let _ = provider.latest();
     }
 
@@ -335,8 +335,8 @@ mod tests {
     fn default_chain_info() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let db = ShareableDatabase::new(db, Arc::new(chain_spec));
-        let provider = db.provider().unwrap();
+        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let provider = factory.provider().unwrap();
 
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);
@@ -347,10 +347,10 @@ mod tests {
     fn provider_flow() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let db = ShareableDatabase::new(db, Arc::new(chain_spec));
-        let provider = db.provider().unwrap();
+        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let provider = factory.provider().unwrap();
         provider.block_hash(0).unwrap();
-        let provider_rw = db.provider_rw().unwrap();
+        let provider_rw = factory.provider_rw().unwrap();
         provider_rw.block_hash(0).unwrap();
         provider.block_hash(0).unwrap();
     }

@@ -15,7 +15,7 @@ use reth_db::mdbx::{Env, EnvKind, WriteMap};
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
@@ -129,7 +129,7 @@ impl Command {
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
         let network = network_config_builder
-            .build(Arc::new(ShareableDatabase::new(noop_db, self.chain.clone())))
+            .build(Arc::new(ProviderFactory::new(noop_db, self.chain.clone())))
             .start_network()
             .await?;
 

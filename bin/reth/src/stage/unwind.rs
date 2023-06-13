@@ -13,7 +13,7 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use std::{ops::RangeInclusive, sync::Arc};
 
 /// `reth stage unwind` command
@@ -69,8 +69,8 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        let shareable_db = ShareableDatabase::new(&db, self.chain.clone());
-        let provider = shareable_db.provider_rw()?;
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let provider = factory.provider_rw()?;
 
         let blocks_and_execution = provider
             .take_block_and_execution_range(&self.chain, range)
