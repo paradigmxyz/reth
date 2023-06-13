@@ -324,11 +324,10 @@ where
                     let to_db_service = self.spawn_js_trace_service(at)?;
 
                     let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                    let (_res, _env) = inspect(db, env, &mut inspector)?;
+                    let (res, env) = inspect(db, env, &mut inspector)?;
 
-                    // TODO(mattsse): get result
-
-                    Err(EthApiError::Unsupported("javascript tracers are unsupported."))
+                    let result = inspector.json_result(res, &env)?;
+                    Ok(GethTraceFrame::JS(result))
                 }
             }
         }
@@ -407,11 +406,11 @@ where
                     let to_db_service = self.spawn_js_trace_service(at)?;
 
                     let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                    let (res, _env) = inspect(db, env, &mut inspector)?;
+                    let (res, env) = inspect(db, env, &mut inspector)?;
 
-                    // TODO(mattsse): get result
-
-                    Err(EthApiError::Unsupported("javascript tracers are unsupported."))
+                    let state = res.state.clone();
+                    let result = inspector.json_result(res, &env)?;
+                    Ok((GethTraceFrame::JS(result), state))
                 }
             }
         }

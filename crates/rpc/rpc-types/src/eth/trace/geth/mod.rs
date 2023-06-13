@@ -100,6 +100,7 @@ pub enum GethTraceFrame {
     FourByteTracer(FourByteFrame),
     CallTracer(CallFrame),
     PreStateTracer(PreStateFrame),
+    JS(serde_json::Value),
 }
 
 impl From<DefaultFrame> for GethTraceFrame {

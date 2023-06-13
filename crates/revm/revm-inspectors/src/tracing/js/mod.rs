@@ -138,12 +138,16 @@ impl JsInspector {
     /// Calls the result function and returns the result as [serde_json::Value].
     ///
     /// Note: This is supposed to be called after the inspection has finished.
-    pub fn json_result(&mut self, res: ResultAndState, env: &Env) -> JsResult<serde_json::Value> {
-        self.result(res, env)?.to_json(&mut self.ctx)
+    pub fn json_result(
+        &mut self,
+        res: ResultAndState,
+        env: &Env,
+    ) -> Result<serde_json::Value, JsInspectorError> {
+        Ok(self.result(res, env)?.to_json(&mut self.ctx)?)
     }
 
     /// Calls the result function and returns the result.
-    pub fn result(&mut self, res: ResultAndState, env: &Env) -> JsResult<JsValue> {
+    pub fn result(&mut self, res: ResultAndState, env: &Env) -> Result<JsValue, JsInspectorError> {
         let ResultAndState { result, state } = res;
         let db = EvmDb::new(state, self.to_db_service.clone());
 
@@ -193,7 +197,11 @@ impl JsInspector {
         };
         let ctx = ctx.into_js_object(&mut self.ctx)?;
         let db = db.into_js_object(&mut self.ctx)?;
-        self.result_fn.call(&(self.obj.clone().into()), &[ctx.into(), db.into()], &mut self.ctx)
+        Ok(self.result_fn.call(
+            &(self.obj.clone().into()),
+            &[ctx.into(), db.into()],
+            &mut self.ctx,
+        )?)
     }
 
     fn try_fault(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
