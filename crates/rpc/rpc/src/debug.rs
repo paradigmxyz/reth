@@ -407,7 +407,7 @@ where
                     let to_db_service = self.spawn_js_trace_service(at)?;
 
                     let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                    let (_res, _env) = inspect(db, env, &mut inspector)?;
+                    let (res, _env) = inspect(db, env, &mut inspector)?;
 
                     // TODO(mattsse): get result
 

@@ -2,20 +2,23 @@
 
 use crate::tracing::{
     js::{
-        bindings::{CallFrame, Contract, EvmDb, FrameResult, MemoryObj, OpObj, StackObj, StepLog},
+        bindings::{
+            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, OpObj, StackObj,
+            StepLog,
+        },
         builtins::register_builtins,
     },
     types::CallKind,
     utils::get_create_address,
 };
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::{bytes::Bytes, Account, Address, H256, U256};
+use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Account, Address, H256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{
         CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter, OpCode,
     },
-    primitives::{B160, B256},
+    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo, B160, B256},
     Database, EVMData, Inspector,
 };
 use tokio::sync::mpsc;
@@ -138,13 +141,66 @@ impl JsInspector {
     /// Calls the result function and returns the result as [serde_json::Value].
     ///
     /// Note: This is supposed to be called after the inspection has finished.
-    pub fn json_result(&mut self) -> JsResult<serde_json::Value> {
-        self.result()?.to_json(&mut self.ctx)
+    pub fn json_result(&mut self, res: ResultAndState, env: &Env) -> JsResult<serde_json::Value> {
+        self.result(res, env)?.to_json(&mut self.ctx)
     }
 
     /// Calls the result function and returns the result.
-    pub fn result(&mut self) -> JsResult<JsValue> {
-        self.result_fn.call(&(self.obj.clone().into()), &[], &mut self.ctx)
+    pub fn result(&mut self, res: ResultAndState, env: &Env) -> JsResult<JsValue> {
+        let ResultAndState { result, state } = res;
+        let db = EvmDb::new(state, self.to_db_service.clone());
+
+        let gas_used = result.gas_used();
+        let mut to = None;
+        let mut output_bytes = None;
+        let mut error = None;
+        match result {
+            ExecutionResult::Success { output, .. } => match output {
+                Output::Call(out) => {
+                    output_bytes = Some(out);
+                }
+                Output::Create(out, addr) => {
+                    to = addr;
+                    output_bytes = Some(out);
+                }
+            },
+            ExecutionResult::Revert { output, .. } => {
+                error = Some(
+                    decode_revert_reason(&output)
+                        .ok_or_else(|| String::from_utf8_lossy(&output).to_string()),
+                );
+            }
+            ExecutionResult::Halt { .. } => {}
+        };
+
+        let ctx = EvmContext {
+            r#type: match env.tx.transact_to {
+                TransactTo::Call(target) => {
+                    to = Some(target);
+                    "CALL"
+                }
+                TransactTo::Create(_) => "CREATE",
+            }
+            .to_string(),
+            from: env.tx.caller,
+            to,
+            input: env.tx.data.clone(),
+            gas: env.tx.gas_limit,
+            gas_used,
+            gas_price: env.tx.gas_price.try_into().unwrap_or(u64::MAX),
+            value: env.tx.value,
+            block: env.block.number.try_into().unwrap_or(u64::MAX),
+            output: output_bytes.unwrap_or_default(),
+            time: env.block.timestamp.to_string(),
+            // TODO: fill in the following fields
+            intrinsic_gas: 0,
+            block_hash: None,
+            tx_index: None,
+            tx_hash: None,
+        };
+        let ctx = ctx.into_js_object(&mut self.ctx)?;
+        let db = db.into_js_object(&mut self.ctx)?;
+        self.result_fn.call(&(self.obj.clone().into()), &[ctx.into(), db.into()], &mut self.ctx)
     }
 
     fn try_step(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
@@ -190,10 +246,12 @@ impl JsInspector {
         value: U256,
         kind: CallKind,
         caller: Address,
+        gas_limit: u64,
     ) -> &CallStackItem {
         let call = CallStackItem {
             contract: Contract { caller, contract: address, value, input: data },
             kind,
+            gas_limit,
         };
         self.call_stack.push(call);
         self.active_call()
@@ -297,7 +355,14 @@ where
         };
 
         let value = inputs.transfer.value;
-        self.push_call(to, inputs.input.clone(), value, inputs.context.scheme.into(), from);
+        self.push_call(
+            to,
+            inputs.input.clone(),
+            value,
+            inputs.context.scheme.into(),
+            from,
+            inputs.gas_limit,
+        );
 
         if self.enter_fn.is_some() {
             let call = self.active_call();
@@ -355,15 +420,13 @@ where
             inputs.value,
             inputs.scheme.into(),
             inputs.caller,
+            inputs.gas_limit,
         );
 
         if self.enter_fn.is_some() {
             let call = self.active_call();
-            let frame = CallFrame {
-                contract: call.contract.clone(),
-                kind: call.kind,
-                gas: inputs.gas_limit,
-            };
+            let frame =
+                CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
             let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
             if let Err(err) = self.try_enter(frame, db) {
                 return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
@@ -392,13 +455,10 @@ where
     fn selfdestruct(&mut self, _contract: B160, _target: B160) {
         if self.enter_fn.is_some() {
             let call = self.active_call();
-            let frame = CallFrame {
-                contract: call.contract.clone(),
-                kind: call.kind,
-                gas: inputs.gas_limit,
-            };
+            let frame =
+                CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
             let db = EvmDb::new(Default::default(), self.to_db_service.clone());
-            self.try_enter(frame, db)
+            let _ = self.try_enter(frame, db);
         }
     }
 }
@@ -436,6 +496,7 @@ pub enum JsDbRequest {
 struct CallStackItem {
     contract: Contract,
     kind: CallKind,
+    gas_limit: u64,
 }
 
 #[derive(Debug, thiserror::Error)]

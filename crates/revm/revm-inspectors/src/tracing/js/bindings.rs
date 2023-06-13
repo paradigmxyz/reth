@@ -458,7 +458,7 @@ pub(crate) struct EvmContext {
     /// Sender of the transaction
     pub(crate) from: Address,
     /// Target of the transaction
-    pub(crate) to: Address,
+    pub(crate) to: Option<Address>,
     pub(crate) input: Bytes,
     /// Gas limit
     pub(crate) gas: u64,
@@ -506,7 +506,12 @@ impl EvmContext {
 
         obj.set("type", r#type, false, ctx)?;
         obj.set("from", address_to_buf(from, ctx)?, false, ctx)?;
-        obj.set("to", address_to_buf(to, ctx)?, false, ctx)?;
+        if let Some(to) = to {
+            obj.set("to", address_to_buf(to, ctx)?, false, ctx)?;
+        } else {
+            obj.set("to", JsValue::null(), false, ctx)?;
+        }
+
         obj.set("input", to_buf(input.to_vec(), ctx)?, false, ctx)?;
         obj.set("gas", gas, false, ctx)?;
         obj.set("gasUsed", gas_used, false, ctx)?;
