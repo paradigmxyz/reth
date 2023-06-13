@@ -12,11 +12,11 @@ use crate::tracing::{
     utils::get_create_address,
 };
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Account, Address, H256, U256};
+use reth_primitives::{bytes::Bytes, Account, Address, H256, U256};
 use revm::{
-    inspectors::GasInspector,
     interpreter::{
-        CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter, OpCode,
+        return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
+        OpCode,
     },
     primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo, B160, B256},
     Database, EVMData, Inspector,
@@ -33,7 +33,7 @@ pub(crate) mod builtins;
 pub struct JsInspector {
     ctx: Context<'static>,
     /// The javascript config provided to the inspector.
-    config: JsValue,
+    _config: JsValue,
     /// The evaluated object that contains the inspector functions.
     obj: JsObject,
 
@@ -48,8 +48,6 @@ pub struct JsInspector {
     step_fn: Option<JsObject>,
     /// Keeps track of the current call stack.
     call_stack: Vec<CallStackItem>,
-    /// The gas inspector used to track remaining gas.
-    gas_inspector: GasInspector,
     /// sender half of a channel to communicate with the database service.
     to_db_service: mpsc::Sender<JsDbRequest>,
 }
@@ -125,7 +123,7 @@ impl JsInspector {
 
         Ok(Self {
             ctx,
-            config,
+            _config: config,
             obj,
             result_fn,
             fault_fn,
@@ -133,7 +131,6 @@ impl JsInspector {
             exit_fn,
             step_fn,
             call_stack: Default::default(),
-            gas_inspector: Default::default(),
             to_db_service,
         })
     }
@@ -153,7 +150,6 @@ impl JsInspector {
         let gas_used = result.gas_used();
         let mut to = None;
         let mut output_bytes = None;
-        let mut error = None;
         match result {
             ExecutionResult::Success { output, .. } => match output {
                 Output::Call(out) => {
@@ -165,10 +161,7 @@ impl JsInspector {
                 }
             },
             ExecutionResult::Revert { output, .. } => {
-                error = Some(
-                    decode_revert_reason(&output)
-                        .ok_or_else(|| String::from_utf8_lossy(&output).to_string()),
-                );
+                output_bytes = Some(output);
             }
             ExecutionResult::Halt { .. } => {}
         };
@@ -201,6 +194,13 @@ impl JsInspector {
         let ctx = ctx.into_js_object(&mut self.ctx)?;
         let db = db.into_js_object(&mut self.ctx)?;
         self.result_fn.call(&(self.obj.clone().into()), &[ctx.into(), db.into()], &mut self.ctx)
+    }
+
+    fn try_fault(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
+        let step = step.into_js_object(&mut self.ctx)?;
+        let db = db.into_js_object(&mut self.ctx)?;
+        self.fault_fn.call(&(self.obj.clone().into()), &[step.into(), db.into()], &mut self.ctx)?;
+        Ok(())
     }
 
     fn try_step(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
@@ -268,24 +268,22 @@ where
 {
     fn initialize_interp(
         &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        is_static: bool,
+        _interp: &mut Interpreter,
+        _data: &mut EVMData<'_, DB>,
+        _is_static: bool,
     ) -> InstructionResult {
-        self.gas_inspector.initialize_interp(interp, data, is_static)
+        InstructionResult::Continue
     }
 
     fn step(
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
+        _is_static: bool,
     ) -> InstructionResult {
         if self.step_fn.is_none() {
             return InstructionResult::Continue
         }
-
-        self.gas_inspector.step(interp, data, is_static);
 
         let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
 
@@ -314,26 +312,46 @@ where
 
     fn log(
         &mut self,
-        evm_data: &mut EVMData<'_, DB>,
-        address: &B160,
-        topics: &[B256],
-        data: &Bytes,
+        _evm_data: &mut EVMData<'_, DB>,
+        _address: &B160,
+        _topics: &[B256],
+        _data: &Bytes,
     ) {
-        self.gas_inspector.log(evm_data, address, topics, data);
     }
 
     fn step_end(
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
+        _is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
         if self.step_fn.is_none() {
             return InstructionResult::Continue
         }
 
-        self.gas_inspector.step_end(interp, data, is_static, eval);
+        if matches!(eval, return_revert!()) {
+            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+
+            let pc = interp.program_counter();
+            let step = StepLog {
+                stack: StackObj(interp.stack.clone()),
+                op: OpObj(
+                    OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+                        .expect("is valid opcode;"),
+                ),
+                memory: MemoryObj(interp.memory.clone()),
+                pc: pc as u64,
+                gas_remaining: interp.gas.remaining(),
+                cost: interp.gas.spend(),
+                depth: data.journaled_state.depth(),
+                refund: interp.gas.refunded() as u64,
+                error: Some(format!("{:?}", eval)),
+                contract: self.active_call().contract.clone(),
+            };
+
+            let _ = self.try_fault(step, db);
+        }
 
         InstructionResult::Continue
     }
@@ -342,10 +360,8 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        is_static: bool,
+        _is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        self.gas_inspector.call(data, inputs, is_static);
-
         // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
             CallScheme::DelegateCall | CallScheme::CallCode => {
@@ -383,14 +399,12 @@ where
     fn call_end(
         &mut self,
         data: &mut EVMData<'_, DB>,
-        inputs: &CallInputs,
+        _inputs: &CallInputs,
         remaining_gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        is_static: bool,
+        _is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        self.gas_inspector.call_end(data, inputs, remaining_gas, ret, out.clone(), is_static);
-
         if self.exit_fn.is_some() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
@@ -410,7 +424,6 @@ where
         data: &mut EVMData<'_, DB>,
         inputs: &mut CreateInputs,
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
-        self.gas_inspector.create(data, inputs);
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
         let address = get_create_address(inputs, nonce);
@@ -439,13 +452,20 @@ where
     fn create_end(
         &mut self,
         data: &mut EVMData<'_, DB>,
-        inputs: &CreateInputs,
+        _inputs: &CreateInputs,
         ret: InstructionResult,
         address: Option<B160>,
         remaining_gas: Gas,
         out: Bytes,
     ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
-        self.gas_inspector.create_end(data, inputs, ret, address, remaining_gas, out.clone());
+        if self.exit_fn.is_some() {
+            let frame_result =
+                FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
+            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+            if let Err(err) = self.try_exit(frame_result, db) {
+                return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
+            }
+        }
 
         self.pop_call();
 
