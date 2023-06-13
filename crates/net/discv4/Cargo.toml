@@ -12,32 +12,32 @@ Ethereum network discovery
 
 [dependencies]
 # reth
-reth-primitives = { path = "../../primitives" }
-reth-rlp = { path = "../../rlp" }
+reth-primitives = { workspace = true }
+reth-rlp = { workspace = true }
 reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-net-common = { path = "../common" }
 reth-net-nat = { path = "../nat" }
 
 # ethereum
 discv5 = { git = "https://github.com/sigp/discv5" }
-secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery", "serde"] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { version = "0.8.1", default-features = false, features = ["rust-secp256k1"] }
 
 # async/futures
-tokio = { version = "1", features = ["io-util", "net", "time"] }
-tokio-stream = "0.1"
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
+tokio-stream = { workspace = true }
 
 # misc
 tracing = { workspace = true }
-thiserror = "1.0"
+thiserror = { workspace = true }
 hex = "0.4"
-rand = { version = "0.8", optional = true }
+rand = { workspace = true, optional = true }
 generic-array = "0.14"
-serde = { version = "1.0", optional = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-rand = "0.8"
-tokio = { version = "1", features = ["macros"] }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["macros"] }
 reth-tracing = { path = "../../tracing" }
 
 [features]
