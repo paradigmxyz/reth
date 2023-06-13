@@ -8,16 +8,16 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-reth-rlp = { path = "../../rlp", features = ["derive", "ethereum-types", "std"] }
-reth-primitives = { path = "../../primitives" }
+reth-rlp = { workspace = true, features = ["derive", "ethereum-types", "std"] }
+reth-primitives = { workspace = true }
 reth-net-common = { path = "../common" }
 
-futures = "0.3.24"
-thiserror = "1.0.37"
-tokio = { version = "1.21.2", features = ["full"] }
-tokio-stream = "0.1.11"
-tokio-util = { version = "0.7.4", features = ["codec"] }
-pin-project = "1.0"
+futures = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
+pin-project = { workspace = true }
 
 educe = "0.4.19"
 tracing = { workspace = true }
@@ -28,10 +28,10 @@ typenum = "1.15.0"
 byteorder = "1.4.3"
 
 # crypto
-rand = "0.8.5"
+rand = { workspace = true }
 ctr = "0.9.2"
 digest = "0.10.5"
-secp256k1 = { version = "0.27.0", features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 sha2 = "0.10.6"
 sha3 = "0.10.5"
 aes = "0.8.1"
