@@ -441,7 +441,7 @@ where
             .spawn(Box::pin(async move { this.js_trace_db_service_task(at, rx, ready_tx).await }));
         // wait for initialization
         ready_rx.recv().map_err(|_| {
-            EthApiError::InternalJsTracerError(format!("js tracer initialization failed"))
+            EthApiError::InternalJsTracerError("js tracer initialization failed".to_string())
         })??;
         Ok(to_db_service)
     }
