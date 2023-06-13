@@ -230,6 +230,11 @@ impl Command {
             while unwind.checkpoint.block_number > self.from {
                 let unwind_output = unwind_stage.unwind(&mut provider_rw, unwind).await?;
                 unwind.checkpoint = unwind_output.checkpoint;
+
+                if self.commit {
+                    provider_rw.commit()?;
+                    provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+                }
             }
         }
 

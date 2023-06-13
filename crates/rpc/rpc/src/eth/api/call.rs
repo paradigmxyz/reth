@@ -31,10 +31,10 @@ use tracing::trace;
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 const MIN_CREATE_GAS: u64 = 53_000u64;
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].

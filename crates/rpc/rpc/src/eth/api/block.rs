@@ -8,9 +8,9 @@ use reth_primitives::BlockId;
 use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Block, Index, RichBlock};
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Returns the uncle headers of the given block
     ///
@@ -20,7 +20,7 @@ where
         block_id: impl Into<BlockId>,
     ) -> EthResult<Option<Vec<reth_primitives::Header>>> {
         let block_id = block_id.into();
-        Ok(self.client().ommers_by_id(block_id)?)
+        Ok(self.provider().ommers_by_id(block_id)?)
     }
 
     pub(crate) async fn ommer_by_block_and_index(
@@ -32,9 +32,9 @@ where
 
         let uncles = if block_id.is_pending() {
             // Pending block can be fetched directly without need for caching
-            self.client().pending_block()?.map(|block| block.ommers)
+            self.provider().pending_block()?.map(|block| block.ommers)
         } else {
-            self.client().ommers_by_id(block_id)?
+            self.provider().ommers_by_id(block_id)?
         }
         .unwrap_or_default();
 
@@ -57,10 +57,10 @@ where
 
         if block_id.is_pending() {
             // Pending block can be fetched directly without need for caching
-            return Ok(self.client().pending_block()?.map(|block| block.body.len()))
+            return Ok(self.provider().pending_block()?.map(|block| block.body.len()))
         }
 
-        let block_hash = match self.client().block_hash_for_id(block_id)? {
+        let block_hash = match self.provider().block_hash_for_id(block_id)? {
             Some(block_hash) => block_hash,
             None => return Ok(None),
         };
@@ -77,10 +77,10 @@ where
 
         if block_id.is_pending() {
             // Pending block can be fetched directly without need for caching
-            return Ok(self.client().pending_block()?)
+            return Ok(self.provider().pending_block()?)
         }
 
-        let block_hash = match self.client().block_hash_for_id(block_id)? {
+        let block_hash = match self.provider().block_hash_for_id(block_id)? {
             Some(block_hash) => block_hash,
             None => return Ok(None),
         };
@@ -103,7 +103,7 @@ where
         };
         let block_hash = block.hash;
         let total_difficulty =
-            self.client().header_td(&block_hash)?.ok_or(EthApiError::UnknownBlockNumber)?;
+            self.provider().header_td(&block_hash)?.ok_or(EthApiError::UnknownBlockNumber)?;
         let block =
             Block::from_block(block.into(), total_difficulty, full.into(), Some(block_hash))?;
         Ok(Some(block.into()))

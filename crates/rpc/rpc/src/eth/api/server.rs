@@ -29,11 +29,11 @@ use serde_json::Value;
 use tracing::trace;
 
 #[async_trait::async_trait]
-impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApiServer for EthApi<Provider, Pool, Network>
 where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
-    Client: BlockProvider
+    Provider: BlockProvider
         + BlockIdProvider
         + BlockProviderIdExt
         + HeaderProvider

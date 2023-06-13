@@ -179,10 +179,10 @@ pub trait EthTransactions: Send + Sync {
 }
 
 #[async_trait]
-impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthTransactions for EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
@@ -199,13 +199,13 @@ where
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
-            let header = if let Some(pending) = self.client().pending_header()? {
+            let header = if let Some(pending) = self.provider().pending_header()? {
                 pending
             } else {
                 // no pending block from the CL yet, so we use the latest block and modify the env
                 // values that we can
                 let mut latest = self
-                    .client()
+                    .provider()
                     .latest_header()?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
@@ -221,13 +221,13 @@ where
 
             let mut cfg = CfgEnv::default();
             let mut block_env = BlockEnv::default();
-            self.client().fill_block_env_with_header(&mut block_env, &header)?;
-            self.client().fill_cfg_env_with_header(&mut cfg, &header)?;
+            self.provider().fill_block_env_with_header(&mut block_env, &header)?;
+            self.provider().fill_cfg_env_with_header(&mut cfg, &header)?;
             return Ok((cfg, block_env, header.hash.into()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
-                .client()
+                .provider()
                 .block_hash_for_id(at)?
                 .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
             let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
@@ -267,7 +267,7 @@ where
         // Try to find the transaction on disk
         let mut resp = self
             .on_blocking_task(|this| async move {
-                match this.client().transaction_by_hash_with_meta(hash)? {
+                match this.provider().transaction_by_hash_with_meta(hash)? {
                     None => Ok(None),
                     Some((tx, meta)) => {
                         let transaction = tx
@@ -345,12 +345,12 @@ where
 
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
         self.on_blocking_task(|this| async move {
-            let (tx, meta) = match this.client().transaction_by_hash_with_meta(hash)? {
+            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
                 Some((tx, meta)) => (tx, meta),
                 None => return Ok(None),
             };
 
-            let receipt = match this.client().receipt_by_hash(hash)? {
+            let receipt = match this.provider().receipt_by_hash(hash)? {
                 Some(recpt) => recpt,
                 None => return Ok(None),
             };
@@ -566,10 +566,10 @@ where
 
 // === impl EthApi ===
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
     pub(crate) fn sign_request(

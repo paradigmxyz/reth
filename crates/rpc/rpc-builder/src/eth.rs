@@ -15,15 +15,15 @@ pub(crate) const DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
-pub struct EthHandlers<Client, Pool, Network, Events> {
+pub struct EthHandlers<Provider, Pool, Network, Events> {
     /// Main `eth_` request handler
-    pub api: EthApi<Client, Pool, Network>,
+    pub api: EthApi<Provider, Pool, Network>,
     /// The async caching layer used by the eth handlers
     pub cache: EthStateCache,
     /// Polling based filter handler available on all transports
-    pub filter: EthFilter<Client, Pool>,
+    pub filter: EthFilter<Provider, Pool>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: EthPubSub<Client, Pool, Events, Network>,
+    pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
 }
 
 /// Additional config values for the eth namespace
