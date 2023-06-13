@@ -291,8 +291,7 @@ where
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         provider_rw.commit()?;
-                        provider_rw =
-                            factory.provider_rw().map_err(PipelineError::Interface)?;
+                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });

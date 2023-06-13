@@ -75,8 +75,7 @@ impl Case for BlockchainTestCase {
 
             // Create the database
             let db = create_test_rw_db();
-            let factory =
-                ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()));
+            let factory = ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()));
             let mut provider = factory.provider_rw().unwrap();
 
             // Insert test state
