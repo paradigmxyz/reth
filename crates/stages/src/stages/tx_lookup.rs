@@ -30,7 +30,7 @@ pub struct TransactionLookupStage {
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { commit_threshold: 5_000_000 }
     }
 }
 
