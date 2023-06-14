@@ -11,7 +11,7 @@ use crate::tracing::{
     types::CallKind,
     utils::get_create_address,
 };
-use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source, JsArgs, NativeFunction};
+use boa_engine::{Context, JsArgs, JsError, JsObject, JsResult, JsValue, NativeFunction, Source};
 use reth_primitives::{bytes::Bytes, Account, Address, H256, U256};
 use revm::{
     interpreter::{
@@ -278,26 +278,30 @@ where
         data: &mut EVMData<'_, DB>,
         _is_static: bool,
     ) -> InstructionResult {
-        
-        let precompiles: hashbrown::HashMap<[u8; 20], revm::precompile::Precompile> = data.precompiles.fun.clone();
-        let is_precompiled = move |_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>| -> JsResult<JsValue> {
-            let val = args.get_or_undefined(0).clone();
-            let buf = from_buf(val, ctx)?;
-        
-            let addr = bytes_to_address(buf);
-        
-            for p in precompiles.keys() {
-                if *p == addr.0 {
-                    return Ok(JsValue::from(true));
+
+        let precompiles: hashbrown::HashMap<[u8; 20], revm::precompile::Precompile> = 
+            data.precompiles.fun.clone();
+        let is_precompiled = 
+            move |_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>| -> JsResult<JsValue> {
+                let val = args.get_or_undefined(0).clone();
+                let buf = from_buf(val, ctx)?;
+            
+                let addr = bytes_to_address(buf);
+            
+                for p in precompiles.keys() {
+                    if *p == addr.0 {
+                        return Ok(JsValue::from(true));
+                    }
                 }
-            }
-        
             Ok(JsValue::from(false))
         };
         
-        self.ctx.register_global_callable("isPrecompiled", 3, unsafe { NativeFunction::from_closure(is_precompiled) }).unwrap();
+        self.ctx
+            .register_global_callable("isPrecompiled", 3, unsafe { 
+                NativeFunction::from_closure(is_precompiled)
+            })
+            .unwrap();
         
-
         InstructionResult::Continue
     }
 

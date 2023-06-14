@@ -6,8 +6,8 @@ use boa_engine::{
     Context, JsArgs, JsError, JsNativeError, JsResult, JsString, JsValue, NativeFunction, Source,
 };
 use reth_primitives::{
-    contract::{create_address, create2_address_from_code},
-    hex, Address, H256, U256, keccak256
+    contract::{create2_address_from_code, create_address},
+    hex, keccak256, Address, H256, U256
 };
 
 /// bigIntegerJS is the minified version of <https://github.com/peterolson/BigInteger.js>.
@@ -134,8 +134,8 @@ pub(crate) fn to_bigint(value: U256, ctx: &mut Context<'_>) -> JsResult<JsValue>
 /// sender with the given salt and code hash, then converts the resulting address back into a byte
 /// buffer for output.
 pub(crate) fn to_contract2(
-    _: &JsValue, 
-    args: &[JsValue], 
+    _: &JsValue,
+    args: &[JsValue],
     ctx: &mut Context<'_>
 ) -> JsResult<JsValue> {
     // Extract the sender's address, salt and initcode from the arguments
@@ -145,15 +145,15 @@ pub(crate) fn to_contract2(
             let s = js_string.to_std_string().unwrap();
             match hex::decode(s) {
                 Ok(bytes) => H256::from_slice(bytes.as_slice()),
-                Err(_) => {return 
-                    Err(JsError::from_native(
+                Err(_) => { 
+                    return Err(JsError::from_native(
                         JsNativeError::typ().with_message("invalid salt hex string"),
                     ))
                 }
             }
         }
-        Err(_) => { return 
-            Err(JsError::from_native(JsNativeError::typ().with_message("invalid salt type")))
+        Err(_) => { 
+            return Err(JsError::from_native(JsNativeError::typ().with_message("invalid salt type")))
         }
     };
     
@@ -178,7 +178,7 @@ pub(crate) fn to_contract2(
 ///  Converts the sender's address to a byte buffer
 pub(crate) fn to_contract(
     _: &JsValue,
-    args: &[JsValue], 
+    args: &[JsValue],
     ctx: &mut Context<'_>
 ) -> JsResult<JsValue> {
     // Extract the sender's address and nonce from the arguments
@@ -198,8 +198,8 @@ pub(crate) fn to_contract(
 
 /// Converts a buffer type to an address
 pub(crate) fn to_address(
-    _: &JsValue, 
-    args: &[JsValue], 
+    _: &JsValue,
+    args: &[JsValue],
     ctx: &mut Context<'_>
 ) -> JsResult<JsValue> {
     let val = args.get_or_undefined(0).clone();
