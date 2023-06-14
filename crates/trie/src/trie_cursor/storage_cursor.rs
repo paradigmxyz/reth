@@ -64,13 +64,13 @@ mod tests {
         trie::{BranchNodeCompact, StorageTrieEntry},
         MAINNET,
     };
-    use reth_provider::ShareableDatabase;
+    use reth_provider::ProviderFactory;
 
     // tests that upsert and seek match on the storagetrie cursor
     #[test]
     fn test_storage_cursor_abstraction() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 

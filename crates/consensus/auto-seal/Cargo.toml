@@ -11,18 +11,18 @@ description = "A consensus impl for local testing purposes"
 [dependencies]
 # reth
 reth-beacon-consensus = { path = "../beacon" }
-reth-primitives = { path = "../../primitives" }
-reth-interfaces = { path = "../../interfaces" }
-reth-provider = { path = "../../storage/provider" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
+reth-provider = { workspace = true }
 reth-stages = { path = "../../stages" }
 reth-revm = { path = "../../revm" }
-reth-transaction-pool = { path = "../../transaction-pool" }
+reth-transaction-pool = { workspace = true }
 
 # async
-futures-util = "0.3"
-tokio = { version = "1", features = ["sync", "time"] }
-tokio-stream = "0.1"
+futures-util = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tokio-stream = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }

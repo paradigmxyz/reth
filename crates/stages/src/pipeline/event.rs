@@ -31,8 +31,6 @@ pub enum PipelineEvent {
         stage_id: StageId,
         /// The result of executing the stage.
         result: ExecOutput,
-        /// Stage completed executing the whole block range
-        done: bool,
     },
     /// Emitted when a stage is about to be unwound.
     Unwinding {
@@ -47,8 +45,6 @@ pub enum PipelineEvent {
         stage_id: StageId,
         /// The result of unwinding the stage.
         result: UnwindOutput,
-        /// Stage completed unwinding the whole block range
-        done: bool,
     },
     /// Emitted when a stage encounters an error either during execution or unwinding.
     Error {

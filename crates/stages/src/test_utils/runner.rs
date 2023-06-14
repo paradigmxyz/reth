@@ -2,7 +2,7 @@ use super::TestTransaction;
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::mdbx::{Env, WriteMap};
 use reth_primitives::MAINNET;
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use std::{borrow::Borrow, sync::Arc};
 use tokio::sync::oneshot;
 
@@ -45,7 +45,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+            let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
             let mut provider = factory.provider_rw().unwrap();
 
             let result = stage.execute(&mut provider, input).await;
@@ -71,7 +71,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+            let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
             let mut provider = factory.provider_rw().unwrap();
 
             let result = stage.unwind(&mut provider, input).await;

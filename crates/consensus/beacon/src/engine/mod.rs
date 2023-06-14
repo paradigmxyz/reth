@@ -1286,7 +1286,7 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::TestExecutorFactory, ShareableDatabase,
+        providers::BlockchainProvider, test_utils::TestExecutorFactory, ProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
@@ -1369,7 +1369,6 @@ mod tests {
         chain_spec: Arc<ChainSpec>,
         pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
         executor_results: Vec<PostState>,
-        max_block: Option<BlockNumber>,
     ) -> (TestBeaconConsensusEngine, TestEnv<Arc<Env<WriteMap>>>) {
         reth_tracing::init_test_tracing();
         let db = create_test_rw_db();
@@ -1381,13 +1380,10 @@ mod tests {
 
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(H256::default());
-        let mut pipeline_builder = Pipeline::builder()
+        let pipeline = Pipeline::builder()
             .add_stages(TestStages::new(pipeline_exec_outputs, Default::default()))
-            .with_tip_sender(tip_tx);
-        if let Some(max_block) = max_block {
-            pipeline_builder = pipeline_builder.with_max_block(max_block);
-        }
-        let pipeline = pipeline_builder.build(db.clone(), chain_spec.clone());
+            .with_tip_sender(tip_tx)
+            .build(db.clone(), chain_spec.clone());
 
         // Setup blockchain tree
         let externals =
@@ -1398,16 +1394,16 @@ mod tests {
             BlockchainTree::new(externals, canon_state_notification_sender, config)
                 .expect("failed to create tree"),
         );
-        let shareable_db = ShareableDatabase::new(db.clone(), chain_spec.clone());
+        let factory = ProviderFactory::new(db.clone(), chain_spec.clone());
         let latest = chain_spec.genesis_header().seal_slow();
-        let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
+        let blockchain_provider = BlockchainProvider::with_latest(factory, tree, latest);
         let (engine, handle) = BeaconConsensusEngine::new(
             NoopFullBlockClient::default(),
             pipeline,
             blockchain_provider,
             Box::<TokioTaskExecutor>::default(),
             Box::<NoopSyncStateUpdater>::default(),
-            max_block,
+            None,
             false,
             payload_builder,
             None,
@@ -1442,7 +1438,6 @@ mod tests {
             chain_spec.clone(),
             VecDeque::from([Err(StageError::ChannelClosed)]),
             Vec::default(),
-            Some(1),
         );
         let res = spawn_consensus_engine(consensus_engine);
 
@@ -1472,7 +1467,6 @@ mod tests {
             chain_spec.clone(),
             VecDeque::from([Err(StageError::ChannelClosed)]),
             Vec::default(),
-            Some(1),
         );
         let mut rx = spawn_consensus_engine(consensus_engine);
 
@@ -1512,11 +1506,10 @@ mod tests {
         let (consensus_engine, env) = setup_consensus_engine(
             chain_spec.clone(),
             VecDeque::from([
-                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1) }),
+                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true }),
                 Err(StageError::ChannelClosed),
             ]),
             Vec::default(),
-            Some(2),
         );
         let rx = spawn_consensus_engine(consensus_engine);
 
@@ -1529,9 +1522,7 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(
-                Err(BeaconConsensusEngineError::Pipeline(n))
-            ) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -1545,12 +1536,15 @@ mod tests {
                 .paris_activated()
                 .build(),
         );
-        let (consensus_engine, env) = setup_consensus_engine(
+        let (mut consensus_engine, env) = setup_consensus_engine(
             chain_spec.clone(),
-            VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(max_block) })]),
+            VecDeque::from([Ok(ExecOutput {
+                checkpoint: StageCheckpoint::new(max_block),
+                done: true,
+            })]),
             Vec::default(),
-            Some(max_block),
         );
+        consensus_engine.sync.set_max_block(max_block);
         let rx = spawn_consensus_engine(consensus_engine);
 
         let _ = env
@@ -1567,7 +1561,7 @@ mod tests {
         chain: Arc<ChainSpec>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
-        let factory = ShareableDatabase::new(db, chain);
+        let factory = ProviderFactory::new(db, chain);
         let mut provider = factory.provider_rw().unwrap();
         blocks.try_for_each(|b| provider.insert_block(b.clone(), None)).expect("failed to insert");
         provider.commit().unwrap();
@@ -1590,9 +1584,11 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                })]),
                 Vec::default(),
-                None,
             );
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
@@ -1619,9 +1615,11 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                })]),
                 Vec::default(),
-                None,
             );
 
             let genesis = random_block(0, None, None, Some(0));
@@ -1666,11 +1664,10 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
                 VecDeque::from([
-                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
                 ]),
                 Vec::default(),
-                None,
             );
 
             let genesis = random_block(0, None, None, Some(0));
@@ -1715,9 +1712,11 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                })]),
                 Vec::default(),
-                None,
             );
 
             let genesis = random_block(0, None, None, Some(0));
@@ -1751,11 +1750,10 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
                 VecDeque::from([
-                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
                 ]),
                 Vec::default(),
-                None,
             );
 
             let genesis = random_block(0, None, None, Some(0));
@@ -1805,11 +1803,10 @@ mod tests {
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
                 VecDeque::from([
-                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
                 ]),
                 Vec::default(),
-                None,
             );
 
             let genesis = random_block(0, None, None, Some(0));
@@ -1852,9 +1849,11 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                })]),
                 Vec::default(),
-                None,
             );
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
@@ -1883,9 +1882,11 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                })]),
                 Vec::default(),
-                None,
             );
 
             let genesis = random_block(0, None, None, Some(0));
@@ -1931,9 +1932,11 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                })]),
                 Vec::default(),
-                None,
             );
 
             let genesis = random_block(0, None, None, Some(0));
@@ -1986,9 +1989,11 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) })]),
+                VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                })]),
                 Vec::from([exec_result2]),
-                None,
             );
 
             insert_blocks(

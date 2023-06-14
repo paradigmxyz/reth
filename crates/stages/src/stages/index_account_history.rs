@@ -38,7 +38,11 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range_with_threshold(self.commit_threshold);
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
+        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
         let mut stage_checkpoint = stage_checkpoint(
             provider,
@@ -59,6 +63,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(*range.end())
                 .with_index_history_stage_checkpoint(stage_checkpoint),
+            done: is_final_range,
         })
     }
 
@@ -68,7 +73,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         let changesets = provider.unwind_account_history_indices(range)?;
@@ -135,7 +140,7 @@ fn stage_checkpoint<DB: Database>(
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_provider::ShareableDatabase;
+    use reth_provider::ProviderFactory;
     use std::collections::BTreeMap;
 
     use super::*;
@@ -205,7 +210,7 @@ mod tests {
     async fn run(tx: &TestTransaction, run_to: u64) {
         let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
         let out = stage.execute(&mut provider, input).await.unwrap();
         assert_eq!(
@@ -217,9 +222,9 @@ mod tests {
                         progress: EntitiesCheckpoint { processed: 2, total: 2 }
                     }
                 ),
+                done: true
             }
         );
-        assert!(out.is_done(input));
         provider.commit().unwrap();
     }
 
@@ -230,7 +235,7 @@ mod tests {
             ..Default::default()
         };
         let mut stage = IndexAccountHistoryStage::default();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
         let out = stage.unwind(&mut provider, input).await.unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
@@ -444,7 +449,7 @@ mod tests {
         // run
         {
             let mut stage = IndexAccountHistoryStage { commit_threshold: 4 }; // Two runs required
-            let factory = ShareableDatabase::new(&test_tx.tx, MAINNET.clone());
+            let factory = ProviderFactory::new(&test_tx.tx, MAINNET.clone());
             let mut provider = factory.provider_rw().unwrap();
 
             let mut input = ExecInput { target: Some(5), ..Default::default() };
@@ -457,10 +462,10 @@ mod tests {
                             block_range: CheckpointBlockRange { from: 1, to: 5 },
                             progress: EntitiesCheckpoint { processed: 1, total: 2 }
                         }
-                    )
+                    ),
+                    done: false
                 }
             );
-            assert!(!out.is_done(input));
             input.checkpoint = Some(out.checkpoint);
 
             let out = stage.execute(&mut provider, input).await.unwrap();
@@ -472,10 +477,10 @@ mod tests {
                             block_range: CheckpointBlockRange { from: 5, to: 5 },
                             progress: EntitiesCheckpoint { processed: 2, total: 2 }
                         }
-                    )
+                    ),
+                    done: true
                 }
             );
-            assert!(out.is_done(input));
 
             provider.commit().unwrap();
         }
@@ -533,7 +538,7 @@ mod tests {
         })
         .unwrap();
 
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         assert_matches!(

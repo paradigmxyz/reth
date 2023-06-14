@@ -26,7 +26,7 @@ syn = { version = "2.0", features = ["full"] }
 convert_case = "0.6.0"
 
 # codecs
-serde = { version = "1.0.*", default-features = false }
+serde = { workspace = true, default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 
 [features]

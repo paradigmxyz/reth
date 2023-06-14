@@ -15,10 +15,10 @@ normal = [
 
 [dependencies]
 # reth
-reth-primitives = { path = "../primitives" }
-reth-interfaces = { path = "../interfaces" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
 reth-db = { path = "../storage/db" }
-reth-provider = { path = "../storage/provider" }
+reth-provider = { workspace = true }
 
 # common
 parking_lot = { version = "0.12" }
@@ -31,12 +31,12 @@ linked_hash_set = "0.1.4"
 
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
-reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
-reth-primitives = { path = "../primitives", features = ["test-utils"] }
-reth-provider = { path = "../storage/provider", features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true , features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 parking_lot = "0.12"
 assert_matches = "1.5"
-tokio = { version = "1", features = ["macros", "sync"] }
+tokio = { workspace = true, features = ["macros", "sync"] }
 
 [features]
 test-utils = []

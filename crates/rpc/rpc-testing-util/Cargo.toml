@@ -12,17 +12,17 @@ Reth RPC testing helpers
 
 [dependencies]
 # reth
-reth-primitives = { path = "../../primitives" }
-reth-rpc-types = { path = "../rpc-types" }
+reth-primitives = { workspace = true }
+reth-rpc-types = { workspace = true }
 reth-rpc-api = { path = "../rpc-api", default-features = false, features = ["client"] }
 
 # async
-async-trait = "0.1"
-futures = "0.3"
+async-trait = { workspace = true }
+futures = { workspace = true }
 
 # misc
 jsonrpsee = { version = "0.18", features = ["client", "async-client"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "rt"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "rt"] }
 

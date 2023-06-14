@@ -210,7 +210,7 @@ where
         // Nothing to sync
         if gap.is_closed() {
             info!(target: "sync::stages::headers", checkpoint = %current_checkpoint, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput { checkpoint: current_checkpoint })
+            return Ok(ExecOutput::done(current_checkpoint))
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -313,10 +313,12 @@ where
             Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(checkpoint)
                     .with_headers_stage_checkpoint(stage_checkpoint),
+                done: true,
             })
         } else {
             Ok(ExecOutput {
                 checkpoint: current_checkpoint.with_headers_stage_checkpoint(stage_checkpoint),
+                done: false,
             })
         }
     }
@@ -388,7 +390,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::random_header;
     use reth_primitives::{stage::StageUnitCheckpoint, H256, MAINNET};
-    use reth_provider::ShareableDatabase;
+    use reth_provider::ProviderFactory;
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
@@ -589,7 +591,7 @@ mod tests {
                     total,
                 }
             }))
-        }}) if block_number == tip.number &&
+        }, done: true }) if block_number == tip.number &&
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);
@@ -600,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn head_and_tip_lookup() {
         let runner = HeadersTestRunner::default();
-        let factory = ShareableDatabase::new(runner.tx().tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(runner.tx().tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let tx = provider.tx_ref();
         let mut stage = runner.stage();
@@ -685,7 +687,7 @@ mod tests {
                     total,
                 }
             }))
-        }}) if block_number == checkpoint &&
+        }, done: false }) if block_number == checkpoint &&
             from == checkpoint && to == previous_stage &&
             processed == checkpoint + 500 && total == tip.number);
 
@@ -708,7 +710,7 @@ mod tests {
                     total,
                 }
             }))
-        }}) if block_number == tip.number &&
+        }, done: true }) if block_number == tip.number &&
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);

@@ -12,12 +12,12 @@ Reth RPC interfaces
 
 [dependencies]
 # reth
-reth-primitives = { path = "../../primitives" }
-reth-rpc-types = { path = "../rpc-types" }
+reth-primitives = { workspace = true }
+reth-rpc-types = { workspace = true }
 
 # misc
 jsonrpsee = { version = "0.18", features = ["server", "macros"] }
-serde_json = "1.0"
+serde_json = { workspace = true }
 
 [features]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
