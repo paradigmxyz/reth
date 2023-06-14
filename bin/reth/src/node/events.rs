@@ -13,6 +13,7 @@ use reth_primitives::{
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,
+    ops::Div,
     pin::Pin,
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -59,7 +60,6 @@ impl NodeState {
                 let notable = self.current_stage.is_none();
                 self.current_stage = Some(stage_id);
                 self.current_checkpoint = checkpoint.unwrap_or_default();
-                self.eta.update(self.current_checkpoint);
 
                 if notable {
                     info!(
@@ -80,6 +80,7 @@ impl NodeState {
                 done,
             } => {
                 self.current_checkpoint = checkpoint;
+                self.eta.update(self.current_checkpoint);
 
                 if done {
                     self.current_stage = None;
@@ -268,52 +269,42 @@ where
 /// checkpoints reported by the pipeline.
 ///
 /// One `Eta` is only valid for a single stage.
+#[derive(Default)]
 struct Eta {
     /// The last stage checkpoint
     last_checkpoint: EntitiesCheckpoint,
     /// The last time the stage reported its checkpoint
-    last_checkpoint_time: Instant,
+    last_checkpoint_time: Option<Instant>,
     /// The amount of checkpoints recorded
-    samples: usize,
-    /// The average amount of progress made per second over all recorded checkpoints
-    velocity: Option<f64>,
-}
-
-impl Default for Eta {
-    fn default() -> Self {
-        Self {
-            last_checkpoint: EntitiesCheckpoint::default(),
-            last_checkpoint_time: Instant::now(),
-            samples: 0,
-            velocity: None,
-        }
-    }
+    samples: u32,
+    /// The current ETA as an average of all previous ETAs
+    eta: Option<Duration>,
 }
 
 impl Eta {
     /// Update the ETA given the checkpoint.
     fn update(&mut self, checkpoint: StageCheckpoint) {
         let current = checkpoint.entities();
-        let processed_since_last = current.processed - self.last_checkpoint.processed;
-        let progress = processed_since_last as f64 / current.total as f64;
-        let current_velocity = progress / self.last_checkpoint_time.elapsed().as_secs_f64();
-
         self.samples += 1;
-        let average_velocity =
-            (self.velocity.unwrap_or_default() + current_velocity) / self.samples as f64;
 
-        self.velocity = Some(average_velocity);
+        if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
+            let processed_since_last = current.processed - self.last_checkpoint.processed;
+            let scalar = current.total as f64 / processed_since_last as f64;
+            let elapsed = last_checkpoint_time.elapsed();
+
+            self.eta =
+                Some((self.eta.unwrap_or_default() + elapsed.mul_f64(scalar)).div(self.samples));
+        }
+
         self.last_checkpoint = current;
-        self.last_checkpoint_time = Instant::now();
+        self.last_checkpoint_time = Some(Instant::now());
     }
 }
 
 impl std::fmt::Display for Eta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(velocity) = self.velocity {
-            let eta_secs = 1. / velocity;
-            let remaining = Duration::from_secs(eta_secs as u64)
-                .checked_sub(self.last_checkpoint_time.elapsed());
+        if let Some((eta, last_checkpoint_time)) = self.eta.zip(self.last_checkpoint_time) {
+            let remaining = eta.checked_sub(last_checkpoint_time.elapsed());
 
             if let Some(remaining) = remaining {
                 return write!(f, "{}", humantime::format_duration(remaining))
