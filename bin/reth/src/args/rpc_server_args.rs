@@ -288,7 +288,7 @@ impl RpcServerArgs {
             handle
         });
 
-        let launch_auth = auth_module.start_server(auth_config, RPC_DEFAULT_MAX_RESPONSE_SIZE_MB).inspect(|_| {
+        let launch_auth = auth_module.start_server(auth_config).inspect(|_| {
             info!(target: "reth::cli", "RPC auth server started");
         });
 
@@ -458,7 +458,7 @@ impl RpcServerArgs {
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
 
-        Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+        Ok(AuthServerConfig::builder(jwt_secret, self.rpc_max_response_size).socket_addr(address).build())
     }
 }
 

@@ -15,16 +15,14 @@ use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc::unbounded_channel;
 
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
-
 /// Localhost with port 0 so a free port is used.
 pub fn test_address() -> SocketAddr {
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
 }
 
 /// Launches a new server for the auth module
-pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
-    let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
+pub async fn launch_auth(secret: JwtSecret, rpc_max_response_size: u32) -> AuthServerHandle {
+    let config = AuthServerConfig::builder(secret, rpc_max_response_size).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
     let beacon_engine_handle = BeaconConsensusEngineHandle::new(tx);
     let engine_api = EngineApi::new(
@@ -34,7 +32,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         spawn_test_payload_service().into(),
     );
     let module = AuthRpcModule::new(engine_api);
-    module.start_server(config, RPC_DEFAULT_MAX_RESPONSE_SIZE_MB).await.unwrap()
+    module.start_server(config).await.unwrap()
 }
 
 /// Launches a new server with http only with the given modules

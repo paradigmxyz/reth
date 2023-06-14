@@ -29,7 +29,7 @@ where
 async fn test_auth_endpoints_http() {
     reth_tracing::init_test_tracing();
     let secret = JwtSecret::random();
-    let handle = launch_auth(secret).await;
+    let handle = launch_auth(secret, 100).await;
     let client = handle.http_client();
     test_basic_engine_calls(&client).await
 }
@@ -38,7 +38,7 @@ async fn test_auth_endpoints_http() {
 async fn test_auth_endpoints_ws() {
     reth_tracing::init_test_tracing();
     let secret = JwtSecret::random();
-    let handle = launch_auth(secret).await;
+    let handle = launch_auth(secret, 100).await;
     let client = handle.ws_client().await;
     test_basic_engine_calls(&client).await
 }

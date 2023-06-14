@@ -122,19 +122,21 @@ pub struct AuthServerConfig {
     pub(crate) socket_addr: SocketAddr,
     /// The secrete for the auth layer of the server.
     pub(crate) secret: JwtSecret,
+    /// The maximum response size for the server.
+    pub(crate) rpc_max_response_size: u32,
 }
 
 // === impl AuthServerConfig ===
 
 impl AuthServerConfig {
     /// Convenience function to create a new `AuthServerConfig`.
-    pub fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
-        AuthServerConfigBuilder::new(secret)
+    pub fn builder(secret: JwtSecret, rpc_max_response_size: u32) -> AuthServerConfigBuilder {
+        AuthServerConfigBuilder::new(secret, rpc_max_response_size)
     }
 
     /// Convenience function to start a server in one step.
-    pub async fn start(self, module: AuthRpcModule, rpc_max_response_size: u32) -> Result<AuthServerHandle, RpcError> {
-        let Self { socket_addr, secret } = self;
+    pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
+        let Self { socket_addr, secret, rpc_max_response_size } = self;
 
         // Create auth middleware.
         let middleware = tower::ServiceBuilder::new()
@@ -160,14 +162,15 @@ impl AuthServerConfig {
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
+    rpc_max_response_size: u32,
 }
 
 // === impl AuthServerConfigBuilder ===
 
 impl AuthServerConfigBuilder {
     /// Create a new `AuthServerConfigBuilder` with the given `secret`.
-    pub fn new(secret: JwtSecret) -> Self {
-        Self { socket_addr: None, secret }
+    pub fn new(secret: JwtSecret, rpc_max_response_size: u32 ) -> Self {
+        Self { socket_addr: None, secret, rpc_max_response_size }
     }
 
     /// Set the socket address for the server.
@@ -194,6 +197,7 @@ impl AuthServerConfigBuilder {
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), constants::DEFAULT_AUTH_PORT)
             }),
             secret: self.secret,
+            rpc_max_response_size: self.rpc_max_response_size,
         }
     }
 }
@@ -226,9 +230,8 @@ impl AuthRpcModule {
     pub async fn start_server(
         self,
         config: AuthServerConfig,
-        rpc_max_response_size: u32,
     ) -> Result<AuthServerHandle, RpcError> {
-        config.start(self, rpc_max_response_size).await
+        config.start(self).await
     }
 }
 
