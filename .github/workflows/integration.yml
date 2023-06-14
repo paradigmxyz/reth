@@ -52,7 +52,10 @@ jobs:
 
       - name: Run tests
         run: |
-          cargo nextest run --locked --workspace --all-features  test_incoming_node_id_blacklist --nocapture
+          cargo llvm-cov nextest --lcov --output-path lcov.info \
+            --locked --workspace --all-features \
+            --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
+            -E 'kind(test)'
 
       - name: Upload coverage data to codecov
         uses: codecov/codecov-action@v3
