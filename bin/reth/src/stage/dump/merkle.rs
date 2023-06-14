@@ -119,17 +119,20 @@ async fn dry_run<DB: Database>(
     let mut provider = shareable_db.provider_rw()?;
     let mut exec_output = false;
     while !exec_output {
-        let exec_input = reth_stages::ExecInput {
-            target: Some(to),
-            checkpoint: Some(StageCheckpoint::new(from)),
-        };
         exec_output = MerkleStage::Execution {
-            // Forces updating the root instead of calculating from scratch
-            clean_threshold: u64::MAX,
+            clean_threshold: u64::MAX, /* Forces updating the root instead of calculating
+                                        * from
+                                        * scratch */
         }
-        .execute(&mut provider, exec_input)
+        .execute(
+            &mut provider,
+            reth_stages::ExecInput {
+                target: Some(to),
+                checkpoint: Some(StageCheckpoint::new(from)),
+            },
+        )
         .await?
-        .is_done(exec_input);
+        .done;
     }
 
     info!(target: "reth::cli", "Success.");
