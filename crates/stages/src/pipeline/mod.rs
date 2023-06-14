@@ -103,7 +103,7 @@ pub struct Pipeline<DB: Database> {
     listeners: EventListeners<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
-    /// A receiver for the current chain tip to sync to.
+    /// A sender for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<H256>>,
     metrics: Metrics,
 }

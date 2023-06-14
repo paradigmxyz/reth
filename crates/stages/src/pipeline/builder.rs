@@ -15,7 +15,7 @@ where
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    /// A receiver for the current chain tip to sync to.
+    /// A sender for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<H256>>,
 }
 

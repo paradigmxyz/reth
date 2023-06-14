@@ -199,7 +199,7 @@ pub trait Stage<DB: Database>: Send + Sync {
     #[allow(clippy::wrong_self_convention)]
     async fn is_execute_done(
         &mut self,
-        _provider: &mut DatabaseProviderRW<'_, &DB>,
+        _provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
         output: ExecOutput,
     ) -> Result<bool, StageError> {

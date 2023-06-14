@@ -319,12 +319,11 @@ where
 
     async fn is_execute_done(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
-        _input: ExecInput,
-        output: ExecOutput,
+        provider: &DatabaseProviderRW<'_, &DB>,
+        input: ExecInput,
+        _output: ExecOutput,
     ) -> Result<bool, StageError> {
-        let gap = self.get_sync_gap(provider.deref(), output.checkpoint.block_number).await?;
-        return Ok(gap.is_closed())
+        self.is_stage_done::<DB>(provider.tx_ref(), input.checkpoint().block_number)
     }
 
     /// Unwind the stage.
