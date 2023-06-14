@@ -469,7 +469,7 @@ where
     fn check_invalid_ancestor(&mut self, head: H256) -> Option<PayloadStatus> {
         let parent_hash = {
             // check if the head was previously marked as invalid
-            let header = self.invalid_headers.get(&head)?.clone();
+            let header = self.invalid_headers.get(&head)?;
             header.parent_hash
         };
 
