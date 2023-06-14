@@ -100,7 +100,6 @@ pub enum GethTraceFrame {
     FourByteTracer(FourByteFrame),
     CallTracer(CallFrame),
     PreStateTracer(PreStateFrame),
-    JS(serde_json::Value),
 }
 
 impl From<DefaultFrame> for GethTraceFrame {
@@ -238,14 +237,6 @@ impl GethDebugTracerConfig {
             GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::CallTracer(cfg)) => {
                 Some(cfg)
             }
-            _ => None,
-        }
-    }
-
-    /// Returns the json config if this config is a JS tracer.
-    pub fn into_js_config(self) -> Option<serde_json::Value> {
-        match self {
-            GethDebugTracerConfig::JsTracer(cfg) => Some(cfg),
             _ => None,
         }
     }
