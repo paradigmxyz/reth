@@ -7,7 +7,7 @@ use boa_engine::{
 };
 use reth_primitives::{
     contract::{create2_address_from_code, create_address},
-    hex, keccak256, Address, H256, U256
+    hex, keccak256, Address, H256, U256,
 };
 
 /// bigIntegerJS is the minified version of <https://github.com/peterolson/BigInteger.js>.
@@ -136,7 +136,7 @@ pub(crate) fn to_bigint(value: U256, ctx: &mut Context<'_>) -> JsResult<JsValue>
 pub(crate) fn to_contract2(
     _: &JsValue,
     args: &[JsValue],
-    ctx: &mut Context<'_>
+    ctx: &mut Context<'_>,
 ) -> JsResult<JsValue> {
     // Extract the sender's address, salt and initcode from the arguments
     let from = args.get_or_undefined(0).clone();
@@ -145,18 +145,18 @@ pub(crate) fn to_contract2(
             let s = js_string.to_std_string().unwrap();
             match hex::decode(s) {
                 Ok(bytes) => H256::from_slice(bytes.as_slice()),
-                Err(_) => { 
+                Err(_) => {
                     return Err(JsError::from_native(
                         JsNativeError::typ().with_message("invalid salt hex string"),
                     ))
                 }
             }
         }
-        Err(_) => { 
+        Err(_) => {
             return Err(JsError::from_native(JsNativeError::typ().with_message("invalid salt type")))
         }
     };
-    
+
     let initcode = args.get_or_undefined(2).clone();
 
     // Convert the sender's address to a byte buffer and then to an Address
@@ -179,7 +179,7 @@ pub(crate) fn to_contract2(
 pub(crate) fn to_contract(
     _: &JsValue,
     args: &[JsValue],
-    ctx: &mut Context<'_>
+    ctx: &mut Context<'_>,
 ) -> JsResult<JsValue> {
     // Extract the sender's address and nonce from the arguments
     let from = args.get_or_undefined(0).clone();
@@ -200,7 +200,7 @@ pub(crate) fn to_contract(
 pub(crate) fn to_address(
     _: &JsValue,
     args: &[JsValue],
-    ctx: &mut Context<'_>
+    ctx: &mut Context<'_>,
 ) -> JsResult<JsValue> {
     let val = args.get_or_undefined(0).clone();
     let buf = from_buf(val, ctx)?;

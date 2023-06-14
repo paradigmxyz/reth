@@ -6,7 +6,7 @@ use crate::tracing::{
             CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, OpObj, StackObj,
             StepLog,
         },
-        builtins::{register_builtins, from_buf, bytes_to_address},
+        builtins::{bytes_to_address, from_buf, register_builtins},
     },
     types::CallKind,
     utils::get_create_address,
@@ -279,25 +279,23 @@ where
         _is_static: bool,
     ) -> InstructionResult {
 
-        let precompiles: hashbrown::HashMap<[u8; 20], revm::precompile::Precompile> = 
+        let precompiles: hashbrown::HashMap<[u8; 20], revm::precompile::Precompile> =
             data.precompiles.fun.clone();
-        let is_precompiled = 
+        let is_precompiled =
             move |_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>| -> JsResult<JsValue> {
                 let val = args.get_or_undefined(0).clone();
                 let buf = from_buf(val, ctx)?;
-            
                 let addr = bytes_to_address(buf);
-            
                 for p in precompiles.keys() {
                     if *p == addr.0 {
-                        return Ok(JsValue::from(true));
+                        return Ok(JsValue::from(true))
                     }
                 }
-            Ok(JsValue::from(false))
-        };
+                Ok(JsValue::from(false))
+            };
         
         self.ctx
-            .register_global_callable("isPrecompiled", 3, unsafe { 
+            .register_global_callable("isPrecompiled", 3, unsafe {
                 NativeFunction::from_closure(is_precompiled)
             })
             .unwrap();
