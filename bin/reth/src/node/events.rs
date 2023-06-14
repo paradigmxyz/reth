@@ -13,7 +13,6 @@ use reth_primitives::{
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,
-    ops::Div,
     pin::Pin,
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -275,9 +274,7 @@ struct Eta {
     last_checkpoint: EntitiesCheckpoint,
     /// The last time the stage reported its checkpoint
     last_checkpoint_time: Option<Instant>,
-    /// The amount of checkpoints recorded
-    samples: u32,
-    /// The current ETA as an average of all previous ETAs
+    /// The current ETA
     eta: Option<Duration>,
 }
 
@@ -285,17 +282,15 @@ impl Eta {
     /// Update the ETA given the checkpoint.
     fn update(&mut self, checkpoint: StageCheckpoint) {
         let current = checkpoint.entities();
-        self.samples += 1;
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
             let processed_since_last = current.processed - self.last_checkpoint.processed;
-            let scalar = current.total as f64 / processed_since_last as f64;
             let elapsed = last_checkpoint_time.elapsed();
+            let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
 
-            self.eta = Some(
-                self.eta.unwrap_or_default() * (self.samples - 1) / self.samples +
-                    elapsed.mul_f64(scalar).div(self.samples),
-            );
+            self.eta = Some(Duration::from_secs_f64(
+                (current.total - current.processed) as f64 / per_second,
+            ));
         }
 
         self.last_checkpoint = current;
