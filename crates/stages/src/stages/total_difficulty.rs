@@ -59,8 +59,6 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let range = input.next_block_range_with_threshold(self.commit_threshold);
         let (start_block, end_block) = range.clone().into_inner();
 
-        debug!(target: "sync::stages::total_difficulty", start_block, end_block, "Commencing sync");
-
         // Acquire cursor over total difficulty and headers tables
         let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
         let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;

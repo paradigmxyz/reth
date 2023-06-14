@@ -131,15 +131,17 @@ where
         match self.mode {
             HeaderSyncMode::Tip(ref mut rx) => {
                 loop {
+                    trace!(target: "sync::stages::headers", %head, "Waiting for the tip to arrive");
                     let _ = rx.changed().await; // TODO: remove this await?
                     let tip = rx.borrow();
+                    trace!(target: "sync::stages::headers", tip = %*tip, %head, "Got the tip");
                     if !tip.is_zero() {
                         return SyncTarget::Tip(*tip)
                     }
                 }
             }
             HeaderSyncMode::Continuous => {
-                tracing::trace!(target: "sync::stages::headers", head, "No next header found, using continuous sync strategy");
+                trace!(target: "sync::stages::headers", head, "No next header found, using continuous sync strategy");
                 SyncTarget::TipNum(head + 1)
             }
         }
