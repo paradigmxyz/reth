@@ -26,7 +26,6 @@ use tokio::task;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
-
     reth_tracing::init_test_tracing();
 
     for _ in 0..3 {
