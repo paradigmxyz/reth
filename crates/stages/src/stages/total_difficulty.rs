@@ -163,7 +163,7 @@ mod tests {
             }}) if block_number == expected_progress && processed == 1 + threshold &&
                 total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
         );
-        assert!(!result.unwrap().is_done(first_input));
+        assert!(!result.unwrap().target_reached(first_input));
 
         // Execute second time
         let second_input = ExecInput {

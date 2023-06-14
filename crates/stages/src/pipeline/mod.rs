@@ -1,4 +1,4 @@
-use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
+use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
@@ -262,18 +262,22 @@ where
                 continue
             }
 
-            let mut done = UnwindInput { checkpoint, unwind_to: to, bad_block }.target_reached();
+            let mut done = stage
+                .is_unwind_done(
+                    UnwindInput { checkpoint, unwind_to: to, bad_block },
+                    UnwindOutput { checkpoint },
+                )
+                .await?;
 
             debug!(target: "sync::pipeline", from = %checkpoint, %to, ?bad_block, "Starting unwind");
             while !done {
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
-                let output = stage.unwind(&mut provider_rw, input).await;
-                match output {
-                    Ok(unwind_output) => {
-                        checkpoint = unwind_output.checkpoint;
-                        done = unwind_output.is_done(input);
+                match stage.unwind(&mut provider_rw, input).await {
+                    Ok(output) => {
+                        checkpoint = output.checkpoint;
+                        done = stage.is_unwind_done(input, output).await?;
                         info!(
                             target: "sync::pipeline",
                             stage = %stage_id,
@@ -292,7 +296,7 @@ where
 
                         self.listeners.notify(PipelineEvent::Unwound {
                             stage_id,
-                            result: unwind_output,
+                            result: output,
                             done,
                         });
 
@@ -355,7 +359,14 @@ where
             });
 
             let input = ExecInput { target, checkpoint: prev_checkpoint };
-            let result = if input.target_reached() {
+            let result = if stage
+                .is_execute_done(
+                    &mut provider_rw,
+                    input,
+                    ExecOutput { checkpoint: input.checkpoint.unwrap_or_default() },
+                )
+                .await?
+            {
                 Ok(ExecOutput { checkpoint: input.checkpoint() })
             } else {
                 stage
@@ -364,8 +375,8 @@ where
             };
 
             match result {
-                Ok(out @ ExecOutput { checkpoint }) => {
-                    let done = out.is_done(input);
+                Ok(output @ ExecOutput { checkpoint }) => {
+                    let done = stage.is_execute_done(&mut provider_rw, input, output).await?;
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
                     info!(
@@ -383,7 +394,7 @@ where
                         pipeline_position: stage_index + 1,
                         pipeline_total: total_stages,
                         stage_id,
-                        result: out.clone(),
+                        result: output,
                         done,
                     });
 

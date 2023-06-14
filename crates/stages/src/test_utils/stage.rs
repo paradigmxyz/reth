@@ -4,7 +4,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     MAINNET,
 };
-use reth_provider::{DatabaseProviderRW, ShareableDatabase};
+use reth_provider::DatabaseProviderRW;
 use std::collections::VecDeque;
 
 #[derive(Debug)]

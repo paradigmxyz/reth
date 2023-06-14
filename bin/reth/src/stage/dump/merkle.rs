@@ -117,19 +117,19 @@ async fn dry_run<DB: Database>(
     info!(target: "reth::cli", "Executing stage.");
     let factory = ProviderFactory::new(&output_db, chain);
     let mut provider = factory.provider_rw()?;
-    let mut exec_output = false;
-    while !exec_output {
+    let mut exec_stage = MerkleStage::Execution {
+        // Forces updating the root instead of calculating from scratch
+        clean_threshold: u64::MAX,
+    };
+
+    let mut exec_done = false;
+    while !exec_done {
         let exec_input = reth_stages::ExecInput {
             target: Some(to),
             checkpoint: Some(StageCheckpoint::new(from)),
         };
-        exec_output = MerkleStage::Execution {
-            // Forces updating the root instead of calculating from scratch
-            clean_threshold: u64::MAX,
-        }
-        .execute(&mut provider, exec_input)
-        .await?
-        .is_done(exec_input);
+        let exec_output = exec_stage.execute(&mut provider, exec_input).await?;
+        exec_done = exec_stage.is_execute_done(&mut provider, exec_input, exec_output).await?;
     }
 
     info!(target: "reth::cli", "Success.");

@@ -313,7 +313,7 @@ mod tests {
                 )
             }
         );
-        assert!(!result.unwrap().is_done(first_input));
+        assert!(!result.unwrap().target_reached(first_input));
 
         // Execute second time to completion
         runner.set_threshold(u64::MAX);
@@ -385,6 +385,7 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl ExecuteStageTestRunner for SenderRecoveryTestRunner {
         type Seed = Vec<SealedBlock>;
 

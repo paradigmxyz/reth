@@ -264,7 +264,7 @@ mod tests {
 
         loop {
             if let Ok(result @ ExecOutput { checkpoint }) = runner.execute(input).await.unwrap() {
-                if !result.is_done(input) {
+                if !result.target_reached(input) {
                     let previous_checkpoint = input
                         .checkpoint
                         .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint())

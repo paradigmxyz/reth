@@ -232,7 +232,7 @@ mod tests {
                 )
             }
         );
-        assert!(out.is_done(input));
+        assert!(stage.is_execute_done(&mut provider, input, out).await.unwrap());
         provider.commit().unwrap();
     }
 
@@ -476,7 +476,7 @@ mod tests {
                     )
                 }
             );
-            assert!(!out.is_done(input));
+            assert!(!stage.is_execute_done(&mut provider, input, out).await.unwrap());
             input.checkpoint = Some(out.checkpoint);
 
             let out = stage.execute(&mut provider, input).await.unwrap();
@@ -491,7 +491,7 @@ mod tests {
                     )
                 }
             );
-            assert!(out.is_done(input));
+            assert!(stage.is_execute_done(&mut provider, input, out).await.unwrap());
 
             provider.commit().unwrap();
         }

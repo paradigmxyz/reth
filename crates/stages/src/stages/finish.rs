@@ -60,6 +60,7 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl ExecuteStageTestRunner for FinishTestRunner {
         type Seed = Vec<SealedHeader>;
 
@@ -87,7 +88,7 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             if let Some(output) = output {
-                assert!(output.is_done(input), "stage should always be done");
+                assert!(output.target_reached(input), "stage should always be done");
                 assert_eq!(
                     output.checkpoint.block_number,
                     input.target(),

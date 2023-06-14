@@ -34,11 +34,6 @@ impl ExecInput {
         current_block.block_number + 1
     }
 
-    /// Returns `true` if the target block number has already been reached.
-    pub fn target_reached(&self) -> bool {
-        ExecOutput { checkpoint: self.checkpoint.unwrap_or_default() }.is_done(*self)
-    }
-
     /// Return the target block number or default.
     pub fn target(&self) -> BlockNumber {
         self.target.unwrap_or_default()
@@ -112,11 +107,6 @@ pub struct UnwindInput {
 }
 
 impl UnwindInput {
-    /// Returns `true` if the target block number has already been reached.
-    pub fn target_reached(&self) -> bool {
-        UnwindOutput { checkpoint: self.checkpoint }.is_done(*self)
-    }
-
     /// Return next block range that needs to be unwound.
     pub fn unwind_block_range(&self) -> RangeInclusive<BlockNumber> {
         self.unwind_block_range_with_threshold(u64::MAX).0
@@ -140,7 +130,7 @@ impl UnwindInput {
 }
 
 /// The output of a stage execution.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ExecOutput {
     /// How far the stage got.
     pub checkpoint: StageCheckpoint,
@@ -149,7 +139,7 @@ pub struct ExecOutput {
 impl ExecOutput {
     /// Returns `true` if the target block number has already been reached,
     /// i.e. `checkpoint.block_number >= target`.
-    pub fn is_done(&self, input: ExecInput) -> bool {
+    pub fn target_reached(&self, input: ExecInput) -> bool {
         if self.checkpoint.block_number > input.target() {
             warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the execution target");
         }
@@ -167,7 +157,7 @@ pub struct UnwindOutput {
 impl UnwindOutput {
     /// Returns `true` if the target block number has already been reached,
     /// i.e. `checkpoint.block_number <= unwind_to`.
-    pub fn is_done(&self, input: UnwindInput) -> bool {
+    pub fn target_reached(&self, input: UnwindInput) -> bool {
         if self.checkpoint.block_number < input.unwind_to {
             warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the unwind target");
         }
@@ -200,10 +190,34 @@ pub trait Stage<DB: Database>: Send + Sync {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
+    /// Returns true if the stage execution is completed for the given input target.
+    ///
+    /// Default behavior is to call the [ExecOutput::target_reached].
+    #[allow(clippy::wrong_self_convention)]
+    async fn is_execute_done(
+        &mut self,
+        _provider: &mut DatabaseProviderRW<'_, &DB>,
+        input: ExecInput,
+        output: ExecOutput,
+    ) -> Result<bool, StageError> {
+        Ok(output.target_reached(input))
+    }
+
     /// Unwind the stage.
     async fn unwind(
         &mut self,
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
+
+    /// Returns true if the stage unwinding is completed for the given input target.
+    ///
+    /// Default behavior is to call the [UnwindOutput::target_reached].
+    async fn is_unwind_done(
+        &self,
+        input: UnwindInput,
+        output: UnwindOutput,
+    ) -> Result<bool, StageError> {
+        Ok(output.target_reached(input))
+    }
 }

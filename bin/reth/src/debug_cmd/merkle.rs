@@ -125,7 +125,8 @@ impl Command {
                     checkpoint: progress.map(StageCheckpoint::new),
                 };
                 let output = account_hashing_stage.execute(&mut provider_rw, input).await?;
-                account_hashing_done = output.is_done(input);
+                account_hashing_done =
+                    account_hashing_stage.is_execute_done(&mut provider_rw, input, output).await?;
             }
 
             let mut storage_hashing_done = false;
@@ -135,7 +136,8 @@ impl Command {
                     checkpoint: progress.map(StageCheckpoint::new),
                 };
                 let output = storage_hashing_stage.execute(&mut provider_rw, input).await?;
-                storage_hashing_done = output.is_done(input);
+                storage_hashing_done =
+                    storage_hashing_stage.is_execute_done(&mut provider_rw, input, output).await?;
             }
 
             let incremental_result = merkle_stage
@@ -165,7 +167,10 @@ impl Command {
                 loop {
                     let clean_result = merkle_stage.execute(&mut provider_rw, clean_input).await;
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
-                    if clean_result.unwrap().is_done(clean_input) {
+                    if merkle_stage
+                        .is_execute_done(&mut provider_rw, clean_input, clean_result.unwrap())
+                        .await?
+                    {
                         break
                     }
                 }

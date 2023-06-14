@@ -207,12 +207,6 @@ where
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
-        // Nothing to sync
-        if gap.is_closed() {
-            info!(target: "sync::stages::headers", checkpoint = %current_checkpoint, target = ?tip, "Target block already reached");
-            return Ok(ExecOutput { checkpoint: current_checkpoint })
-        }
-
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
 
         // let the downloader know what to sync
@@ -319,6 +313,16 @@ where
                 checkpoint: current_checkpoint.with_headers_stage_checkpoint(stage_checkpoint),
             })
         }
+    }
+
+    async fn is_execute_done(
+        &mut self,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
+        _input: ExecInput,
+        output: ExecOutput,
+    ) -> Result<bool, StageError> {
+        let gap = self.get_sync_gap(provider.deref(), output.checkpoint.block_number).await?;
+        return Ok(gap.is_closed())
     }
 
     /// Unwind the stage.

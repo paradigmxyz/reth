@@ -358,11 +358,7 @@ mod tests {
             }}) if block_number > first_run_checkpoint.block_number &&
                 processed == total && total == previous_stage
         );
-        assert_matches!(
-            runner.validate_execution(input, output.ok()),
-            Ok(_),
-            "execution validation"
-        );
+        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.

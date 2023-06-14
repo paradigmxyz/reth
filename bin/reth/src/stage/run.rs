@@ -245,7 +245,7 @@ impl Command {
 
         loop {
             let result = exec_stage.execute(&mut provider_rw, input).await?;
-            if result.is_done(input) {
+            if exec_stage.is_execute_done(&mut provider_rw, input, result).await? {
                 break
             }
 
