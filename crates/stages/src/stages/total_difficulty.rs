@@ -57,7 +57,6 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let tx = provider.tx_ref();
 
         let range = input.next_block_range_with_threshold(self.commit_threshold);
-        let (start_block, end_block) = range.clone().into_inner();
 
         // Acquire cursor over total difficulty and headers tables
         let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
@@ -73,7 +72,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
 
         // Walk over newly inserted headers, update & insert td
-        for entry in cursor_headers.walk_range(range)? {
+        for entry in cursor_headers.walk_range(range.clone())? {
             let (block_number, header) = entry?;
             td += header.difficulty;
 
@@ -84,7 +83,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         }
 
         Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(end_block)
+            checkpoint: StageCheckpoint::new(*range.end())
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
