@@ -54,11 +54,6 @@ impl ForkchoiceStateTracker {
         self.last_valid.as_ref().map(|s| s.head_block_hash)
     }
 
-    /// Returns the last valid finalized hash.
-    pub(crate) fn last_valid_finalized(&self) -> Option<H256> {
-        self.last_valid.as_ref().map(|s| s.finalized_block_hash)
-    }
-
     /// Returns the head hash of the latest received FCU to which we need to sync.
     #[allow(unused)]
     pub(crate) fn sync_target(&self) -> Option<H256> {
