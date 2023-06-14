@@ -24,8 +24,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-/// Default max response size in MB.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
@@ -135,7 +133,7 @@ impl AuthServerConfig {
     }
 
     /// Convenience function to start a server in one step.
-    pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
+    pub async fn start(self, module: AuthRpcModule, rpc_max_response_size: u32) -> Result<AuthServerHandle, RpcError> {
         let Self { socket_addr, secret } = self;
 
         // Create auth middleware.
@@ -144,7 +142,7 @@ impl AuthServerConfig {
 
         // By default, both http and ws are enabled.
         let server = ServerBuilder::new()
-            .max_response_body_size(RPC_DEFAULT_MAX_RESPONSE_SIZE_MB)
+            .max_response_body_size(rpc_max_response_size)
             .set_middleware(middleware)
             .build(socket_addr)
             .await
@@ -228,8 +226,9 @@ impl AuthRpcModule {
     pub async fn start_server(
         self,
         config: AuthServerConfig,
+        rpc_max_response_size: u32,
     ) -> Result<AuthServerHandle, RpcError> {
-        config.start(self).await
+        config.start(self, rpc_max_response_size).await
     }
 }
 

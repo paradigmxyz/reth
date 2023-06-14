@@ -288,7 +288,7 @@ impl RpcServerArgs {
             handle
         });
 
-        let launch_auth = auth_module.start_server(auth_config).inspect(|_| {
+        let launch_auth = auth_module.start_server(auth_config, RPC_DEFAULT_MAX_RESPONSE_SIZE_MB).inspect(|_| {
             info!(target: "reth::cli", "RPC auth server started");
         });
 

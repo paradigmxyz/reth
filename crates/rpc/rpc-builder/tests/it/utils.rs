@@ -15,6 +15,8 @@ use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc::unbounded_channel;
 
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
+
 /// Localhost with port 0 so a free port is used.
 pub fn test_address() -> SocketAddr {
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
@@ -32,7 +34,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         spawn_test_payload_service().into(),
     );
     let module = AuthRpcModule::new(engine_api);
-    module.start_server(config).await.unwrap()
+    module.start_server(config, RPC_DEFAULT_MAX_RESPONSE_SIZE_MB).await.unwrap()
 }
 
 /// Launches a new server with http only with the given modules
