@@ -18,3 +18,14 @@ revm = { workspace = true }
 hashbrown = "0.13"
 
 serde = { workspace = true, features = ["derive"] }
+thiserror = {version = "1.0", optional = true }
+serde_json = { version = "1.0", optional = true }
+
+# js-tracing-inspector
+boa_engine = { git = "https://github.com/boa-dev/boa", optional = true }
+boa_gc = { git = "https://github.com/boa-dev/boa", optional = true }
+tokio = { version = "1", features = ["sync"], optional = true }
+
+[features]
+default = ["js-tracer"]
+js-tracer = ["boa_engine", "boa_gc", "tokio","thiserror", "serde_json"]
