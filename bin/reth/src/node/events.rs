@@ -7,7 +7,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     BlockNumber,
 };
 use reth_stages::{ExecOutput, PipelineEvent};
@@ -15,10 +15,10 @@ use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::time::Interval;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(30);
@@ -29,6 +29,8 @@ struct NodeState {
     network: Option<NetworkHandle>,
     /// The stage currently being executed.
     current_stage: Option<StageId>,
+    /// The ETA for the current stage.
+    eta: Eta,
     /// The current checkpoint of the executing stage.
     current_checkpoint: StageCheckpoint,
     /// The latest canonical block added in the consensus engine.
@@ -40,6 +42,7 @@ impl NodeState {
         Self {
             network,
             current_stage: None,
+            eta: Eta::default(),
             current_checkpoint: StageCheckpoint::new(0),
             latest_canonical_engine_block: None,
         }
@@ -56,14 +59,15 @@ impl NodeState {
                 let notable = self.current_stage.is_none();
                 self.current_stage = Some(stage_id);
                 self.current_checkpoint = checkpoint.unwrap_or_default();
+                self.eta.update(self.current_checkpoint);
 
                 if notable {
                     info!(
-                        target: "reth::cli",
                         pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
                         stage = %stage_id,
                         from = self.current_checkpoint.block_number,
                         checkpoint = %self.current_checkpoint,
+                        eta = %self.eta,
                         "Executing stage",
                     );
                 }
@@ -79,14 +83,15 @@ impl NodeState {
 
                 if done {
                     self.current_stage = None;
+                    self.eta = Eta::default();
                 }
 
                 info!(
-                    target: "reth::cli",
                     pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
                     stage = %stage_id,
-                    progress = checkpoint.block_number,
+                    block = checkpoint.block_number,
                     %checkpoint,
+                    eta = %self.eta,
                     "{}",
                     if done {
                         "Stage finished executing"
@@ -111,7 +116,6 @@ impl NodeState {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
                 info!(
-                    target: "reth::cli",
                     ?head_block_hash,
                     ?safe_block_hash,
                     ?finalized_block_hash,
@@ -122,10 +126,10 @@ impl NodeState {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
                 self.latest_canonical_engine_block = Some(block.number);
 
-                info!(target: "reth::cli", number=block.number, hash=?block.hash, "Block added to canonical chain");
+                info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
-                info!(target: "reth::cli", number=block.number, hash=?block.hash, "Block added to fork chain");
+                info!(number=block.number, hash=?block.hash, "Block added to fork chain");
             }
         }
     }
@@ -133,16 +137,16 @@ impl NodeState {
     fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {
         match event {
             ConsensusLayerHealthEvent::NeverSeen => {
-                warn!(target: "reth::cli", "Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
+                warn!("Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
             }
             ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
-                warn!(target: "reth::cli", ?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
+                warn!(?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
             }
             ConsensusLayerHealthEvent::NeverReceivedUpdates => {
-                warn!(target: "reth::cli", "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+                warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
             }
             ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                warn!(target: "reth::cli", ?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+                warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
             }
         }
     }
@@ -226,6 +230,7 @@ where
                     connected_peers = this.state.num_connected_peers(),
                     %stage,
                     checkpoint = %this.state.current_checkpoint,
+                    eta = %this.state.eta,
                     "Status"
                 );
             } else {
@@ -256,5 +261,65 @@ where
         }
 
         Poll::Pending
+    }
+}
+
+/// A container calculating the estimated time that a stage will complete in, based on stage
+/// checkpoints reported by the pipeline.
+///
+/// One `Eta` is only valid for a single stage.
+struct Eta {
+    /// The last stage checkpoint
+    last_checkpoint: EntitiesCheckpoint,
+    /// The last time the stage reported its checkpoint
+    last_checkpoint_time: Instant,
+    /// The amount of checkpoints recorded
+    samples: usize,
+    /// The average amount of progress made per second over all recorded checkpoints
+    velocity: Option<f64>,
+}
+
+impl Default for Eta {
+    fn default() -> Self {
+        Self {
+            last_checkpoint: EntitiesCheckpoint::default(),
+            last_checkpoint_time: Instant::now(),
+            samples: 0,
+            velocity: None,
+        }
+    }
+}
+
+impl Eta {
+    /// Update the ETA given the checkpoint.
+    fn update(&mut self, checkpoint: StageCheckpoint) {
+        let current = checkpoint.entities();
+        let processed_since_last = current.processed - self.last_checkpoint.processed;
+        let progress = processed_since_last as f64 / current.total as f64;
+        let current_velocity = progress / self.last_checkpoint_time.elapsed().as_secs_f64();
+
+        self.samples += 1;
+        let average_velocity =
+            (self.velocity.unwrap_or_default() + current_velocity) / self.samples as f64;
+
+        self.velocity = Some(average_velocity);
+        self.last_checkpoint = current;
+        self.last_checkpoint_time = Instant::now();
+    }
+}
+
+impl std::fmt::Display for Eta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(velocity) = self.velocity {
+            let eta_secs = 1. / velocity;
+            let remaining = Duration::from_secs(eta_secs as u64)
+                .checked_sub(self.last_checkpoint_time.elapsed());
+
+            if let Some(remaining) = remaining {
+                return write!(f, "{}", humantime::format_duration(remaining))
+            }
+        }
+
+        write!(f, "unknown")
     }
 }
