@@ -31,6 +31,9 @@ pub enum PoolError {
     /// error
     #[error("[{0:?}] {1:?}")]
     Other(TxHash, Box<dyn std::error::Error + Send + Sync>),
+    /// Transaction would cause overdraft
+    #[error("[{0:?}] would cause overdraft")]
+    Overdraft(TxHash),
 }
 
 // === impl PoolError ===
@@ -46,6 +49,7 @@ impl PoolError {
             PoolError::DiscardedOnInsert(hash) => hash,
             PoolError::InvalidTransaction(hash, _) => hash,
             PoolError::Other(hash, _) => hash,
+            PoolError::Overdraft(hash) => hash,
         }
     }
 
@@ -96,6 +100,10 @@ impl PoolError {
             }
             PoolError::Other(_, _) => {
                 // internal error unrelated to the transaction
+                false
+            }
+            PoolError::Overdraft(_) => {
+                // transaction rejected because it would lead to overdraft
                 false
             }
         }

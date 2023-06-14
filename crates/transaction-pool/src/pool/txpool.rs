@@ -306,6 +306,17 @@ impl<T: TransactionOrdering> TxPool<T> {
             .or_default()
             .update(on_chain_nonce, on_chain_balance);
 
+        let total_cost: U256 = self
+            .pending_transactions()
+            .into_iter()
+            .filter(|t| t.sender() == tx.sender() && t.nonce() != tx.nonce())
+            .map(|t| t.cost)
+            .sum();
+
+        if total_cost + tx.cost > on_chain_balance {
+            return Err(PoolError::Overdraft(*tx.hash()))
+        }
+
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
                 self.add_new_transaction(transaction.clone(), replaced_tx, move_to);

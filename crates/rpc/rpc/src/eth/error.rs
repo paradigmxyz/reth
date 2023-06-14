@@ -446,6 +446,8 @@ pub enum RpcPoolError {
     Invalid(#[from] RpcInvalidTransactionError),
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
+    #[error("transaction would cause overdraft")]
+    Overdraft,
 }
 
 impl From<RpcPoolError> for ErrorObject<'static> {
@@ -467,6 +469,7 @@ impl From<PoolError> for RpcPoolError {
             PoolError::InvalidTransaction(_, err) => err.into(),
             PoolError::Other(_, err) => RpcPoolError::Other(err),
             PoolError::AlreadyImported(_) => RpcPoolError::AlreadyKnown,
+            PoolError::Overdraft(_) => RpcPoolError::Overdraft,
         }
     }
 }
