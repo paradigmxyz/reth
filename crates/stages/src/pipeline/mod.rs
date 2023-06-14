@@ -369,7 +369,7 @@ where
                     let done = out.is_done(input);
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
-                    info!(
+                    debug!(
                         target: "sync::pipeline",
                         stage = %stage_id,
                         progress = checkpoint.block_number,
