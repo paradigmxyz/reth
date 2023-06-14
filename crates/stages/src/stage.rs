@@ -148,7 +148,7 @@ impl ExecOutput {
 }
 
 /// The output of a stage unwinding.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindOutput {
     /// The checkpoint at which the stage has unwound to.
     pub checkpoint: StageCheckpoint,
