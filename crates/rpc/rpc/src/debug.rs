@@ -317,7 +317,6 @@ where
                     // because JSTracer and all JS types are not Send
                     let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let state = state;
                     let mut db = SubState::new(State::new(state));
                     let env = prepare_call_env(cfg, block_env, call, &mut db, overrides)?;
 
