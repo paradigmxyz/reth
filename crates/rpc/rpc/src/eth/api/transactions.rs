@@ -2,14 +2,15 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, SignError},
-        revm_utils::{inspect, prepare_call_env, replay_transactions_until, transact},
+        revm_utils::{
+            inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
+            EvmOverrides,
+        },
         utils::recover_raw_transaction,
     },
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
-
-use crate::eth::revm_utils::EvmOverrides;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
@@ -34,6 +35,9 @@ use revm::{
     Inspector,
 };
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
+
+/// Helper alias type for the state's [CacheDB]
+pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
@@ -122,7 +126,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send;
+        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send;
 
     /// Executes the call request at the given [BlockId].
     async fn transact_call_at(
@@ -141,7 +145,18 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send;
+        I: for<'r> Inspector<StateCacheDB<'r>> + Send;
+
+    /// Executes the call request at the given [BlockId]
+    async fn inspect_call_at_and_return_state<'a, I>(
+        &'a self,
+        request: CallRequest,
+        at: BlockId,
+        overrides: EvmOverrides,
+        inspector: I,
+    ) -> EthResult<(ResultAndState, Env, StateCacheDB<'a>)>
+    where
+        I: Inspector<StateCacheDB<'a>> + Send;
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
@@ -456,7 +471,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send,
+        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
@@ -483,9 +498,27 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send,
+        I: for<'r> Inspector<StateCacheDB<'r>> + Send,
     {
         self.with_call_at(request, at, overrides, |db, env| inspect(db, env, inspector)).await
+    }
+
+    async fn inspect_call_at_and_return_state<'a, I>(
+        &'a self,
+        request: CallRequest,
+        at: BlockId,
+        overrides: EvmOverrides,
+        inspector: I,
+    ) -> EthResult<(ResultAndState, Env, StateCacheDB<'a>)>
+    where
+        I: Inspector<StateCacheDB<'a>> + Send,
+    {
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
+        let state = self.state_at(at)?;
+        let mut db = SubState::new(State::new(state));
+
+        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
+        inspect_and_return_db(db, env, inspector)
     }
 
     fn trace_at<F, R>(
