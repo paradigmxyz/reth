@@ -1039,27 +1039,27 @@ where
                         self.try_make_sync_target_canonical(num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
-                        // get the latest valid finalized block or the tip (if we don't have the
-                        // finalized block set)
-                        let fork_ancestor_num = self.forkchoice_state_tracker.last_valid_finalized().and_then(|finalized| {
-                            // now we need to actually fetch these
-                            self.blockchain.block_number(finalized).unwrap_or_else(|err| {
-                                // TODO: store full headers (or BlockNumHash) in forkchoice
-                                // state tracker if valid, so we don't need to fetch at all
-                                error!(target: "consensus::engine", ?finalized, ?err, "Failed to get block number from validated finalized block hash");
-                               None
-                            })
-                        }).unwrap_or_else(|| self.blockchain.canonical_tip().number);
+                        // compare the missing parent with the canonical tip
+                        let canonical_tip_num = self.blockchain.canonical_tip().number;
 
                         // if the number of missing blocks is greater than the max, run the
                         // pipeline
-                        if missing_parent.number >= fork_ancestor_num &&
-                            missing_parent.number - fork_ancestor_num >
+                        if missing_parent.number >= canonical_tip_num &&
+                            missing_parent.number - canonical_tip_num >
                                 self.pipeline_run_threshold
                         {
                             self.sync.set_pipeline_sync_target(missing_parent.hash)
                         } else {
                             // continue downloading the missing parent
+                            //
+                            // this happens if either:
+                            //  * the missing parent block num < canonical tip num
+                            //    * this case represents a missing block on a fork that is shorter
+                            //      than the canonical chain
+                            //  * the missing parent block num >= canonical tip num, but the number
+                            //    of missing blocks is less than the pipeline threshold
+                            //    * this case represents a potentially long range of blocks to
+                            //      download and execute
                             self.sync.download_full_block(missing_parent.hash);
                         }
                     }
