@@ -233,7 +233,7 @@ impl Command {
 
                 if self.commit {
                     provider_rw.commit()?;
-                    provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
                 }
             }
         }
