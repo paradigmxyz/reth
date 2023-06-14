@@ -332,15 +332,25 @@ where
         loop {
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
 
-            let stage_reached_max_block = prev_checkpoint
-                .zip(self.max_block)
-                .map_or(false, |(prev_progress, target)| prev_progress.block_number >= target);
-            if stage_reached_max_block {
+            let input = ExecInput { target, checkpoint: prev_checkpoint };
+
+            let stage_reached_target = if let Some(prev_checkpoint) = prev_checkpoint {
+                stage
+                    .is_execute_done(
+                        &mut provider_rw,
+                        input,
+                        ExecOutput { checkpoint: prev_checkpoint },
+                    )
+                    .await?
+            } else {
+                false
+            };
+            if stage_reached_target {
                 warn!(
                     target: "sync::pipeline",
                     stage = %stage_id,
-                    max_block = self.max_block,
-                    prev_block = prev_checkpoint.map(|progress| progress.block_number),
+                    target = target.unwrap(),
+                    prev_block = prev_checkpoint.unwrap().block_number,
                     "Stage reached target block, skipping."
                 );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
@@ -358,23 +368,7 @@ where
                 checkpoint: prev_checkpoint,
             });
 
-            let input = ExecInput { target, checkpoint: prev_checkpoint };
-            let result = if stage
-                .is_execute_done(
-                    &mut provider_rw,
-                    input,
-                    ExecOutput { checkpoint: input.checkpoint.unwrap_or_default() },
-                )
-                .await?
-            {
-                Ok(ExecOutput { checkpoint: input.checkpoint() })
-            } else {
-                stage
-                    .execute(&mut provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
-                    .await
-            };
-
-            match result {
+            match stage.execute(&mut provider_rw, input).await {
                 Ok(output @ ExecOutput { checkpoint }) => {
                     let done = stage.is_execute_done(&mut provider_rw, input, output).await?;
                     made_progress |=

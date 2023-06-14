@@ -139,11 +139,14 @@ pub struct ExecOutput {
 impl ExecOutput {
     /// Returns `true` if the target block number has already been reached,
     /// i.e. `checkpoint.block_number >= target`.
+    /// If no target is specified, always returns `false`.
     pub fn target_reached(&self, input: ExecInput) -> bool {
-        if self.checkpoint.block_number > input.target() {
+        let Some(target) = input.target else { return false };
+
+        if self.checkpoint.block_number > target {
             warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the execution target");
         }
-        self.checkpoint.block_number >= input.target()
+        self.checkpoint.block_number >= target
     }
 }
 
