@@ -46,7 +46,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::get_stage_checkpoint, BlockProvider, CanonStateSubscriptions, HeaderProvider,
-    ShareableDatabase,
+    ProviderFactory,
 };
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
@@ -199,8 +199,8 @@ impl Command {
         )?);
 
         // setup the blockchain provider
-        let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
-        let blockchain_db = BlockchainProvider::new(shareable_db, blockchain_tree.clone())?;
+        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
+        let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             EthTransactionValidator::new(blockchain_db.clone(), Arc::clone(&self.chain)),
@@ -600,7 +600,7 @@ impl Command {
         executor: TaskExecutor,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
-    ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
+    ) -> NetworkConfig<ProviderFactory<Arc<Env<WriteMap>>>> {
         let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
@@ -615,7 +615,7 @@ impl Command {
                 Ipv4Addr::UNSPECIFIED,
                 self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
-            .build(ShareableDatabase::new(db, self.chain.clone()))
+            .build(ProviderFactory::new(db, self.chain.clone()))
     }
 
     #[allow(clippy::too_many_arguments)]

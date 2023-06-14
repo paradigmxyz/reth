@@ -24,7 +24,7 @@ pub use traits::{
 pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
-    HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ShareableDatabase,
+    HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
 };
 
 /// Execution result

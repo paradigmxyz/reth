@@ -525,7 +525,7 @@ mod tests {
         trie::{BranchNodeCompact, TrieMask},
         Account, Address, H256, MAINNET, U256,
     };
-    use reth_provider::{DatabaseProviderRW, ShareableDatabase};
+    use reth_provider::{DatabaseProviderRW, ProviderFactory};
     use std::{collections::BTreeMap, ops::Mul, str::FromStr};
 
     fn insert_account<'a, TX: DbTxMut<'a>>(
@@ -555,7 +555,7 @@ mod tests {
 
     fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let mut tx = factory.provider_rw().unwrap();
         let hashed_address = H256::from_low_u64_be(1);
 
@@ -622,7 +622,7 @@ mod tests {
 
             let hashed_address = keccak256(address);
             let db = create_test_rw_db();
-            let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+            let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
             let tx = factory.provider_rw().unwrap();
             for (key, value) in &storage {
                 tx.tx_ref().put::<tables::HashedStorage>(
@@ -680,7 +680,7 @@ mod tests {
     // This ensures we return an empty root when there are no storage entries
     fn test_empty_storage_root() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let mut tx = factory.provider_rw().unwrap();
 
         let address = Address::random();
@@ -702,7 +702,7 @@ mod tests {
     // This ensures that the walker goes over all the storage slots
     fn test_storage_root() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let mut tx = factory.provider_rw().unwrap();
 
         let address = Address::random();
@@ -746,7 +746,7 @@ mod tests {
                     state.values().map(|(_, slots)| slots.len()).sum::<usize>();
 
                 let db = create_test_rw_db();
-                let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+                let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
                 let mut tx = factory.provider_rw().unwrap();
 
                 for (address, (account, storage)) in &state {
@@ -785,7 +785,7 @@ mod tests {
 
     fn test_state_root_with_state(state: State) {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let mut tx = factory.provider_rw().unwrap();
 
         for (address, (account, storage)) in &state {
@@ -812,7 +812,7 @@ mod tests {
     #[test]
     fn storage_root_regression() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
         // Some address whose hash starts with 0xB041
         let address3 = Address::from_str("16b07afd1c635f77172e842a000ead9a2a222459").unwrap();
@@ -857,7 +857,7 @@ mod tests {
         );
 
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let mut tx = factory.provider_rw().unwrap();
 
         let mut hashed_account_cursor =
@@ -1164,7 +1164,7 @@ mod tests {
     #[test]
     fn account_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let mut tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&mut tx);
@@ -1190,7 +1190,7 @@ mod tests {
 
     fn account_trie_around_extension_node_with_dbtrie() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let mut tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&mut tx);
@@ -1218,7 +1218,7 @@ mod tests {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
 
                 let db = create_test_rw_db();
-                let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+                let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
                 let mut tx = factory.provider_rw().unwrap();
                 let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
 
@@ -1252,7 +1252,7 @@ mod tests {
     #[test]
     fn storage_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let mut tx = factory.provider_rw().unwrap();
 
         let hashed_address = H256::random();

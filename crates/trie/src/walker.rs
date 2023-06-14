@@ -263,7 +263,7 @@ mod tests {
         cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
     };
     use reth_primitives::{trie::StorageTrieEntry, MAINNET};
-    use reth_provider::ShareableDatabase;
+    use reth_provider::ProviderFactory;
 
     #[test]
     fn walk_nodes_with_common_prefix() {
@@ -290,7 +290,7 @@ mod tests {
 
         let db = create_test_rw_db();
 
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn cursor_rootnode_with_changesets() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
         let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 

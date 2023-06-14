@@ -44,7 +44,7 @@ pub enum TransactionError {
 #[cfg(test)]
 mod test {
     use crate::{
-        insert_canonical_block, test_utils::blocks::*, ShareableDatabase, TransactionsProvider,
+        insert_canonical_block, test_utils::blocks::*, ProviderFactory, TransactionsProvider,
     };
     use reth_db::{
         mdbx::test_utils::create_test_rw_db,
@@ -65,7 +65,7 @@ mod test {
             .shanghai_activated()
             .build();
 
-        let factory = ShareableDatabase::new(db.as_ref(), Arc::new(chain_spec.clone()));
+        let factory = ProviderFactory::new(db.as_ref(), Arc::new(chain_spec.clone()));
         let mut provider = factory.provider_rw().unwrap();
 
         let data = BlockChainTestData::default();
@@ -183,7 +183,7 @@ mod test {
                 .build(),
         );
 
-        let factory = ShareableDatabase::new(db.as_ref(), chain_spec.clone());
+        let factory = ProviderFactory::new(db.as_ref(), chain_spec.clone());
         let mut provider = factory.provider_rw().unwrap();
 
         let data = BlockChainTestData::default();

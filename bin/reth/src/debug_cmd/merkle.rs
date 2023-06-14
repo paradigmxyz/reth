@@ -9,7 +9,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     ChainSpec,
 };
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
@@ -68,8 +68,8 @@ impl Command {
         std::fs::create_dir_all(&db_path)?;
 
         let db = Arc::new(init_db(db_path)?);
-        let shareable_db = ShareableDatabase::new(&db, self.chain.clone());
-        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         let execution_checkpoint_block =
             provider_rw.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;

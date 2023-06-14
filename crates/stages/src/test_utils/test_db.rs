@@ -16,7 +16,7 @@ use reth_primitives::{
     keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
     MAINNET, U256,
 };
-use reth_provider::{DatabaseProviderRW, ShareableDatabase};
+use reth_provider::{DatabaseProviderRW, ProviderFactory};
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
@@ -37,14 +37,14 @@ pub struct TestTransaction {
     /// WriteMap DB
     pub tx: Arc<Env<WriteMap>>,
     pub path: Option<PathBuf>,
-    factory: ShareableDatabase<Arc<Env<WriteMap>>>,
+    factory: ProviderFactory<Arc<Env<WriteMap>>>,
 }
 
 impl Default for TestTransaction {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
         let tx = create_test_db::<WriteMap>(EnvKind::RW);
-        Self { tx: tx.clone(), path: None, factory: ShareableDatabase::new(tx, MAINNET.clone()) }
+        Self { tx: tx.clone(), path: None, factory: ProviderFactory::new(tx, MAINNET.clone()) }
     }
 }
 
@@ -54,7 +54,7 @@ impl TestTransaction {
         Self {
             tx: tx.clone(),
             path: Some(path.to_path_buf()),
-            factory: ShareableDatabase::new(tx, MAINNET.clone()),
+            factory: ProviderFactory::new(tx, MAINNET.clone()),
         }
     }
 

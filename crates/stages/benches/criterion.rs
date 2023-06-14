@@ -6,7 +6,7 @@ use pprof::criterion::{Output, PProfProfiler};
 use reth_db::mdbx::{Env, WriteMap};
 use reth_interfaces::test_utils::TestConsensus;
 use reth_primitives::{stage::StageCheckpoint, MAINNET};
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
@@ -136,7 +136,7 @@ fn measure_stage_with_path<F, S>(
             },
             |_| async {
                 let mut stage = stage.clone();
-                let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+                let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
                 let mut provider = factory.provider_rw().unwrap();
                 stage.execute(&mut provider, input).await.unwrap();
                 provider.commit().unwrap();
