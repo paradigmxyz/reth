@@ -292,8 +292,10 @@ impl Eta {
             let scalar = current.total as f64 / processed_since_last as f64;
             let elapsed = last_checkpoint_time.elapsed();
 
-            self.eta =
-                Some((self.eta.unwrap_or_default() + elapsed.mul_f64(scalar)).div(self.samples));
+            self.eta = Some(
+                self.eta.unwrap_or_default() * (self.samples - 1) / self.samples +
+                    elapsed.mul_f64(scalar).div(self.samples),
+            );
         }
 
         self.last_checkpoint = current;
