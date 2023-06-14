@@ -65,7 +65,8 @@ use reth_interfaces::blockchain_tree::InsertPayloadOk;
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
 
-/// The largest gap for which the tree will be used for sync.
+/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
+/// for more information.
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = 128;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
@@ -237,7 +238,17 @@ where
     invalid_headers: InvalidHeaderCache,
     /// Consensus engine metrics.
     metrics: EngineMetrics,
-    /// The largest gap for which the tree will be used to download and execute ranges of blocks.
+    /// After downloading a block corresponding to a recent forkchoice update, the engine will
+    /// check whether or not we can connect the block to the current canonical chain. If we can't,
+    /// we need to download and execute the missing parents of that block.
+    ///
+    /// When the block can't be connected, its block number will be compared to the canonical head,
+    /// resulting in a heuristic for the number of missing blocks, or the size of the gap between
+    /// the new block and the canonical head.
+    ///
+    /// If the gap is larger than this threshold, the engine will download and execute the missing
+    /// blocks using the pipeline. Otherwise, the engine, sync controller, and blockchain tree will
+    /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
 }
 
