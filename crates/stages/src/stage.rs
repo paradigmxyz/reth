@@ -10,7 +10,6 @@ use std::{
     cmp::{max, min},
     ops::RangeInclusive,
 };
-use tracing::warn;
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -36,7 +35,7 @@ impl ExecInput {
 
     /// Returns `true` if the target block number has already been reached.
     pub fn target_reached(&self) -> bool {
-        ExecOutput { checkpoint: self.checkpoint.unwrap_or_default() }.is_done(*self)
+        self.checkpoint().block_number >= self.target()
     }
 
     /// Return the target block number or default.
@@ -46,7 +45,8 @@ impl ExecInput {
 
     /// Return next block range that needs to be executed.
     pub fn next_block_range(&self) -> RangeInclusive<BlockNumber> {
-        self.next_block_range_with_threshold(u64::MAX)
+        let (range, _) = self.next_block_range_with_threshold(u64::MAX);
+        range
     }
 
     /// Return true if this is the first block range to execute.
@@ -55,15 +55,19 @@ impl ExecInput {
     }
 
     /// Return the next block range to execute.
-    /// Return pair of the block range.
-    pub fn next_block_range_with_threshold(&self, threshold: u64) -> RangeInclusive<BlockNumber> {
+    /// Return pair of the block range and if this is final block range.
+    pub fn next_block_range_with_threshold(
+        &self,
+        threshold: u64,
+    ) -> (RangeInclusive<BlockNumber>, bool) {
         let current_block = self.checkpoint();
         let start = current_block.block_number + 1;
         let target = self.target();
 
         let end = min(target, current_block.block_number.saturating_add(threshold));
 
-        start..=end
+        let is_final_range = end == target;
+        (start..=end, is_final_range)
     }
 
     /// Return the next block range determined the number of transactions within it.
@@ -73,7 +77,7 @@ impl ExecInput {
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         tx_threshold: u64,
-    ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>), StageError> {
+    ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
         let start_block = self.next_block();
         let start_block_body = provider
             .tx_ref()
@@ -96,7 +100,8 @@ impl ExecInput {
                 break
             }
         }
-        Ok((first_tx_number..=last_tx_number, start_block..=end_block_number))
+        let is_final_range = end_block_number >= target_block;
+        Ok((first_tx_number..=last_tx_number, start_block..=end_block_number, is_final_range))
     }
 }
 
@@ -112,11 +117,6 @@ pub struct UnwindInput {
 }
 
 impl UnwindInput {
-    /// Returns `true` if the target block number has already been reached.
-    pub fn target_reached(&self) -> bool {
-        UnwindOutput { checkpoint: self.checkpoint }.is_done(*self)
-    }
-
     /// Return next block range that needs to be unwound.
     pub fn unwind_block_range(&self) -> RangeInclusive<BlockNumber> {
         self.unwind_block_range_with_threshold(u64::MAX).0
@@ -126,7 +126,7 @@ impl UnwindInput {
     pub fn unwind_block_range_with_threshold(
         &self,
         threshold: u64,
-    ) -> (RangeInclusive<BlockNumber>, BlockNumber) {
+    ) -> (RangeInclusive<BlockNumber>, BlockNumber, bool) {
         // +1 is to skip the block we're unwinding to
         let mut start = self.unwind_to + 1;
         let end = self.checkpoint;
@@ -135,7 +135,8 @@ impl UnwindInput {
 
         let unwind_to = start - 1;
 
-        (start..=end.block_number, unwind_to)
+        let is_final_range = unwind_to == self.unwind_to;
+        (start..=end.block_number, unwind_to, is_final_range)
     }
 }
 
@@ -144,16 +145,14 @@ impl UnwindInput {
 pub struct ExecOutput {
     /// How far the stage got.
     pub checkpoint: StageCheckpoint,
+    /// Whether or not the stage is done.
+    pub done: bool,
 }
 
 impl ExecOutput {
-    /// Returns `true` if the target block number has already been reached,
-    /// i.e. `checkpoint.block_number >= target`.
-    pub fn is_done(&self, input: ExecInput) -> bool {
-        if self.checkpoint.block_number > input.target() {
-            warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the execution target");
-        }
-        self.checkpoint.block_number >= input.target()
+    /// Mark the stage as done, checkpointing at the given place.
+    pub fn done(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: true }
     }
 }
 
@@ -162,17 +161,6 @@ impl ExecOutput {
 pub struct UnwindOutput {
     /// The checkpoint at which the stage has unwound to.
     pub checkpoint: StageCheckpoint,
-}
-
-impl UnwindOutput {
-    /// Returns `true` if the target block number has already been reached,
-    /// i.e. `checkpoint.block_number <= unwind_to`.
-    pub fn is_done(&self, input: UnwindInput) -> bool {
-        if self.checkpoint.block_number < input.unwind_to {
-            warn!(target: "sync::pipeline", ?input, output = ?self, "Checkpoint is beyond the unwind target");
-        }
-        self.checkpoint.block_number <= input.unwind_to
-    }
 }
 
 /// A stage is a segmented part of the syncing process of the node.

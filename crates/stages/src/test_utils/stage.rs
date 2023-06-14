@@ -1,49 +1,19 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    MAINNET,
-};
-use reth_provider::{DatabaseProviderRW, ShareableDatabase};
+use reth_primitives::stage::StageId;
+use reth_provider::DatabaseProviderRW;
 use std::collections::VecDeque;
 
 #[derive(Debug)]
 pub struct TestStage {
     id: StageId,
-    checkpoint: Option<StageCheckpoint>,
     exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
     unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
 }
 
 impl TestStage {
     pub fn new(id: StageId) -> Self {
-        Self {
-            id,
-            checkpoint: None,
-            exec_outputs: VecDeque::new(),
-            unwind_outputs: VecDeque::new(),
-        }
-    }
-
-    pub fn with_checkpoint<DB: Database>(
-        mut self,
-        checkpoint: Option<StageCheckpoint>,
-        provider: DatabaseProviderRW<'_, DB>,
-    ) -> Self {
-        if let Some(checkpoint) = checkpoint {
-            provider
-                .save_stage_checkpoint(self.id, checkpoint)
-                .unwrap_or_else(|_| panic!("save stage {} checkpoint", self.id))
-        } else {
-            provider
-                .delete_stage_checkpoint(self.id)
-                .unwrap_or_else(|_| panic!("delete stage {} checkpoint", self.id))
-        }
-
-        provider.commit().expect("provider commit");
-
-        self.checkpoint = checkpoint;
-        self
+        Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new() }
     }
 
     pub fn with_exec(mut self, exec_outputs: VecDeque<Result<ExecOutput, StageError>>) -> Self {

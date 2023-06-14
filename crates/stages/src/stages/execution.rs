@@ -143,6 +143,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
         let start_block = input.next_block();
         let max_block = input.target();
 
@@ -195,9 +199,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         state.write_to_db(provider.tx_ref())?;
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 
+        let done = stage_progress == max_block;
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(stage_progress)
                 .with_execution_stage_checkpoint(stage_checkpoint),
+            done,
         })
     }
 }
@@ -339,7 +345,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let (range, unwind_to) =
+        let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
 
         if range.is_empty() {
@@ -663,7 +669,8 @@ mod tests {
                         total
                     }
                 }))
-            }
+            },
+            done: true
         } if processed == total && total == block.gas_used);
         let mut provider = db.provider_rw().unwrap();
         let tx = provider.tx_mut();

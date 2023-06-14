@@ -72,8 +72,7 @@ impl NodeState {
                 pipeline_position,
                 pipeline_total,
                 stage_id,
-                result: ExecOutput { checkpoint },
-                done,
+                result: ExecOutput { checkpoint, done },
             } => {
                 self.current_checkpoint = checkpoint;
 

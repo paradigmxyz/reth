@@ -135,6 +135,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
         let (from_block, to_block) = input.next_block_range().into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
@@ -232,7 +236,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     },
                 );
 
-                return Ok(ExecOutput { checkpoint })
+                return Ok(ExecOutput { checkpoint, done: false })
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been
@@ -254,7 +258,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 ..Default::default()
             });
 
-        Ok(ExecOutput { checkpoint })
+        Ok(ExecOutput { checkpoint, done: true })
     }
 
     /// Unwind the stage.
@@ -263,7 +267,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress) =
+        let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Aggregate all transition changesets and make a list of accounts that have been changed.
@@ -293,10 +297,14 @@ fn stage_checkpoint_progress<DB: Database>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner};
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
+    };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
     use test_utils::*;
+
+    stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
 
     #[tokio::test]
     async fn execute_clean_account_hashing() {
@@ -327,7 +335,8 @@ mod tests {
                         },
                         ..
                     })),
-                }
+                },
+                done: true,
             }) if block_number == previous_stage &&
                 processed == total &&
                 total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
@@ -384,7 +393,8 @@ mod tests {
                             progress: EntitiesCheckpoint { processed: 5, total }
                         }
                     ))
-                }
+                },
+                done: false
             }) if address == fifth_address &&
                 total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
@@ -410,7 +420,8 @@ mod tests {
                             progress: EntitiesCheckpoint { processed, total }
                         }
                     ))
-                }
+                },
+                done: true
             }) if processed == total &&
                 total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
