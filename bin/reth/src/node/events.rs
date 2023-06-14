@@ -99,17 +99,10 @@ impl NodeState {
         }
     }
 
-    fn handle_network_event(&mut self, event: NetworkEvent) {
-        match event {
-            NetworkEvent::SessionEstablished { peer_id, status, .. } => {
-                info!(target: "reth::cli", connected_peers = self.num_connected_peers(), peer_id = %peer_id, best_block = %status.blockhash, "Peer connected");
-            }
-            NetworkEvent::SessionClosed { peer_id, reason } => {
-                let reason = reason.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
-                debug!(target: "reth::cli", connected_peers = self.num_connected_peers(), peer_id = %peer_id, %reason, "Peer disconnected.");
-            }
-            _ => (),
-        }
+    fn handle_network_event(&mut self, _: NetworkEvent) {
+        // NOTE(onbjerg): This used to log established/disconnecting sessions, but this is already
+        // logged in the networking component. I kept this stub in case we want to catch other
+        // networking events later on.
     }
 
     fn handle_consensus_engine_event(&mut self, event: BeaconConsensusEngineEvent) {
