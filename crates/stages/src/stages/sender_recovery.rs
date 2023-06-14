@@ -101,6 +101,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Chunks are submitted instead of individual transactions to reduce the overhead of work
         // stealing in the threadpool workers.
         let chunk_size = self.commit_threshold as usize / rayon::current_num_threads();
+        // prevents an edge case
+        // where the chunk size is either 0 or too small
+        // to gain anything from using more than 1 thread
+        let chunk_size = chunk_size.max(16);
+
         for chunk in &tx_walker.chunks(chunk_size) {
             // An _unordered_ channel to receive results from a rayon job
             let (recovered_senders_tx, recovered_senders_rx) = mpsc::unbounded_channel();
