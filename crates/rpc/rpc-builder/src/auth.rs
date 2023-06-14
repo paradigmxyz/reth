@@ -169,7 +169,7 @@ pub struct AuthServerConfigBuilder {
 
 impl AuthServerConfigBuilder {
     /// Create a new `AuthServerConfigBuilder` with the given `secret`.
-    pub fn new(secret: JwtSecret, rpc_max_response_size: u32 ) -> Self {
+    pub fn new(secret: JwtSecret, rpc_max_response_size: u32) -> Self {
         Self { socket_addr: None, secret, rpc_max_response_size }
     }
 

@@ -458,7 +458,9 @@ impl RpcServerArgs {
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
 
-        Ok(AuthServerConfig::builder(jwt_secret, self.rpc_max_response_size).socket_addr(address).build())
+        Ok(AuthServerConfig::builder(jwt_secret, self.rpc_max_response_size)
+            .socket_addr(address)
+            .build())
     }
 }
 
