@@ -268,13 +268,6 @@ where
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
         if let Some(tracer) = tracer {
-            // valid matching config
-            if let Some(ref config) = tracer_config {
-                if !config.matches_tracer(&tracer) {
-                    return Err(EthApiError::InvalidTracerConfig)
-                }
-            }
-
             return match tracer {
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
@@ -287,9 +280,9 @@ where
                         return Ok(FourByteFrame::from(inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
-                        // we validated the config above
-                        let call_config =
-                            tracer_config.and_then(|c| c.into_call_config()).unwrap_or_default();
+                        let call_config = tracer_config
+                            .into_call_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_geth_config(&config),
@@ -311,7 +304,7 @@ where
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
                 GethDebugTracerType::JsTracer(code) => {
-                    let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
+                    let config = tracer_config.into_json();
 
                     // for JS tracing we need to setup all async work before we can start tracing
                     // because JSTracer and all JS types are not Send
@@ -360,13 +353,6 @@ where
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
         if let Some(tracer) = tracer {
-            // valid matching config
-            if let Some(ref config) = tracer_config {
-                if !config.matches_tracer(&tracer) {
-                    return Err(EthApiError::InvalidTracerConfig)
-                }
-            }
-
             return match tracer {
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
@@ -375,9 +361,9 @@ where
                         return Ok((FourByteFrame::from(inspector).into(), res.state))
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
-                        // we validated the config above
-                        let call_config =
-                            tracer_config.and_then(|c| c.into_call_config()).unwrap_or_default();
+                        let call_config = tracer_config
+                            .into_call_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_geth_config(&config),
@@ -397,7 +383,7 @@ where
                     }
                 },
                 GethDebugTracerType::JsTracer(code) => {
-                    let config = tracer_config.and_then(|c| c.into_js_config()).unwrap_or_default();
+                    let config = tracer_config.into_json();
 
                     // we spawn the database service that will be used by the JS tracer
                     // TODO(mattsse) this is not quite accurate when tracing a block inside a

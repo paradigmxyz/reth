@@ -3,7 +3,7 @@
 
 use crate::{state::StateOverride, BlockOverrides};
 use reth_primitives::{Bytes, H256, U256};
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::BTreeMap;
 
 // re-exports
@@ -183,30 +183,6 @@ pub enum GethDebugBuiltInTracerType {
     NoopTracer,
 }
 
-/// Configuration for the builtin tracer
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum GethDebugBuiltInTracerConfig {
-    CallTracer(CallConfig),
-    PreStateTracer(PreStateConfig),
-}
-
-// === impl GethDebugBuiltInTracerConfig ===
-
-impl GethDebugBuiltInTracerConfig {
-    /// Returns true if the config matches the given tracer
-    pub fn matches_tracer(&self, tracer: &GethDebugBuiltInTracerType) -> bool {
-        matches!(
-            (self, tracer),
-            (GethDebugBuiltInTracerConfig::CallTracer(_), GethDebugBuiltInTracerType::CallTracer,) |
-                (
-                    GethDebugBuiltInTracerConfig::PreStateTracer(_),
-                    GethDebugBuiltInTracerType::PreStateTracer,
-                )
-        )
-    }
-}
-
 /// Available tracers
 ///
 /// See <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers> and <https://geth.ethereum.org/docs/developers/evm-tracing/custom-tracer>
@@ -220,61 +196,45 @@ pub enum GethDebugTracerType {
 }
 
 /// Configuration of the tracer
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum GethDebugTracerConfig {
-    /// built-in tracer
-    BuiltInTracer(GethDebugBuiltInTracerConfig),
-    /// custom JS tracer
-    JsTracer(serde_json::Value),
-}
+///
+/// This is a simple wrapper around serde_json::Value.
+/// with helpers for deserializing tracer configs.
+#[derive(Debug, PartialEq, Eq, Clone, Default, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct GethDebugTracerConfig(pub serde_json::Value);
 
 // === impl GethDebugTracerConfig ===
 
 impl GethDebugTracerConfig {
-    /// Returns the [CallConfig] if it is a call config.
-    pub fn into_call_config(self) -> Option<CallConfig> {
-        match self {
-            GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::CallTracer(cfg)) => {
-                Some(cfg)
-            }
-            _ => None,
-        }
+    /// Returns if this is a null object
+    pub fn is_null(&self) -> bool {
+        self.0.is_null()
     }
 
-    /// Returns the json config if this config is a JS tracer.
-    pub fn into_js_config(self) -> Option<serde_json::Value> {
-        match self {
-            GethDebugTracerConfig::JsTracer(cfg) => Some(cfg),
-            _ => None,
-        }
+    /// Consumes the config and tries to deserialize it into the given type.
+    pub fn from_value<T: DeserializeOwned>(self) -> Result<T, serde_json::Error> {
+        serde_json::from_value(self.0)
+    }
+
+    /// Returns the [CallConfig] if it is a call config.
+    pub fn into_call_config(self) -> Result<CallConfig, serde_json::Error> {
+        self.from_value()
+    }
+
+    /// Returns the raw json value
+    pub fn into_json(self) -> serde_json::Value {
+        self.0
     }
 
     /// Returns the [PreStateConfig] if it is a call config.
-    pub fn into_pre_state_config(self) -> Option<PreStateConfig> {
-        match self {
-            GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::PreStateTracer(
-                cfg,
-            )) => Some(cfg),
-            _ => None,
-        }
+    pub fn into_pre_state_config(self) -> Result<PreStateConfig, serde_json::Error> {
+        self.from_value()
     }
+}
 
-    /// Returns true if the config matches the given tracer
-    pub fn matches_tracer(&self, tracer: &GethDebugTracerType) -> bool {
-        match (self, tracer) {
-            (_, GethDebugTracerType::BuiltInTracer(tracer)) => self.matches_builtin_tracer(tracer),
-            (GethDebugTracerConfig::JsTracer(_), GethDebugTracerType::JsTracer(_)) => true,
-            _ => false,
-        }
-    }
-
-    /// Returns true if the config matches the given tracer
-    pub fn matches_builtin_tracer(&self, tracer: &GethDebugBuiltInTracerType) -> bool {
-        match (self, tracer) {
-            (GethDebugTracerConfig::BuiltInTracer(config), tracer) => config.matches_tracer(tracer),
-            (GethDebugTracerConfig::JsTracer(_), _) => false,
-        }
+impl From<serde_json::Value> for GethDebugTracerConfig {
+    fn from(value: serde_json::Value) -> Self {
+        GethDebugTracerConfig(value)
     }
 }
 
@@ -291,10 +251,16 @@ pub struct GethDebugTracingOptions {
     /// If `None` then the default structlog tracer is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracer: Option<GethDebugTracerType>,
+    /// Config specific to given `tracer`.
+    ///
+    /// Note default struct logger config are historically embedded in main object.
+    ///
     /// tracerConfig is slated for Geth v1.11.0
     /// See <https://github.com/ethereum/go-ethereum/issues/26513>
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tracer_config: Option<GethDebugTracerConfig>,
+    ///
+    /// This could be [CallConfig] or [PreStateConfig] depending on the tracer.
+    #[serde(default, skip_serializing_if = "GethDebugTracerConfig::is_null")]
+    pub tracer_config: GethDebugTracerConfig,
     /// A string of decimal integers that overrides the JavaScript-based tracing calls default
     /// timeout of 5 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
