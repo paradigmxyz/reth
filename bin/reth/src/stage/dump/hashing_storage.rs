@@ -3,7 +3,7 @@ use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
 use reth_primitives::{stage::StageCheckpoint, ChainSpec};
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use reth_stages::{stages::StorageHashingStage, Stage, UnwindInput};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
@@ -33,8 +33,8 @@ async fn unwind_and_copy<DB: Database>(
     tip_block_number: u64,
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
-    let shareable_db = ShareableDatabase::new(db_tool.db, db_tool.chain.clone());
-    let mut provider = shareable_db.provider_rw()?;
+    let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
+    let mut provider = factory.provider_rw()?;
 
     let mut exec_stage = StorageHashingStage::default();
 
@@ -67,8 +67,8 @@ async fn dry_run<DB: Database>(
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
 
-    let shareable_db = ShareableDatabase::new(&output_db, chain);
-    let mut provider = shareable_db.provider_rw()?;
+    let factory = ProviderFactory::new(&output_db, chain);
+    let mut provider = factory.provider_rw()?;
     let mut exec_stage = StorageHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()

@@ -6,7 +6,7 @@ use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
     BlockNumber, ChainSpec, H256,
 };
-use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase};
+use reth_provider::{providers::get_stage_checkpoint, ProviderFactory};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -247,8 +247,8 @@ where
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -291,8 +291,7 @@ where
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         provider_rw.commit()?;
-                        provider_rw =
-                            shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -317,8 +316,8 @@ where
         let mut made_progress = false;
         let target = self.max_block.or(previous_stage);
 
-        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         loop {
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
@@ -376,7 +375,7 @@ where
 
                     // TODO: Make the commit interval configurable
                     provider_rw.commit()?;
-                    provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
                     if done {
                         let stage_progress = checkpoint.block_number;

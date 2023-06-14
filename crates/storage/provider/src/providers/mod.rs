@@ -46,7 +46,7 @@ use reth_interfaces::blockchain_tree::{error::InsertBlockError, CanonicalOutcome
 #[derive(Clone)]
 pub struct BlockchainProvider<DB, Tree> {
     /// Provider type used to access the database.
-    database: ShareableDatabase<DB>,
+    database: ProviderFactory<DB>,
     /// The blockchain tree instance.
     tree: Tree,
     /// Tracks the chain info wrt forkchoice updates
@@ -56,7 +56,7 @@ pub struct BlockchainProvider<DB, Tree> {
 impl<DB, Tree> BlockchainProvider<DB, Tree> {
     /// Create new  provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker.
-    pub fn with_latest(database: ShareableDatabase<DB>, tree: Tree, latest: SealedHeader) -> Self {
+    pub fn with_latest(database: ProviderFactory<DB>, tree: Tree, latest: SealedHeader) -> Self {
         Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
     }
 }
@@ -67,7 +67,7 @@ where
 {
     /// Create a new provider using only the database and the tree, fetching the latest header from
     /// the database to initialize the provider.
-    pub fn new(database: ShareableDatabase<DB>, tree: Tree) -> Result<Self> {
+    pub fn new(database: ProviderFactory<DB>, tree: Tree) -> Result<Self> {
         let provider = database.provider()?;
         let best: ChainInfo = provider.chain_info()?;
         match provider.header_by_number(best.best_number)? {

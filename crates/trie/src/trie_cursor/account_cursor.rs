@@ -47,12 +47,12 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_primitives::{hex_literal::hex, MAINNET};
-    use reth_provider::ShareableDatabase;
+    use reth_provider::ProviderFactory;
 
     #[test]
     fn test_account_trie_order() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
 

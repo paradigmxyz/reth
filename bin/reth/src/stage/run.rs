@@ -12,7 +12,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
-use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase};
+use reth_provider::{providers::get_stage_checkpoint, ProviderFactory};
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
@@ -120,8 +120,8 @@ impl Command {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
-        let shareable_db = ShareableDatabase::new(&db, self.chain.clone());
-        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -160,7 +160,7 @@ impl Command {
                             p2p_secret_key,
                             default_peers_path,
                         )
-                        .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
+                        .build(Arc::new(ProviderFactory::new(db.clone(), self.chain.clone())))
                         .start_network()
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);
@@ -250,7 +250,7 @@ impl Command {
 
             if self.commit {
                 provider_rw.commit()?;
-                provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+                provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
             }
         }
 
