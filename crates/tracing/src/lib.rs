@@ -22,7 +22,6 @@ use tracing_subscriber::{
 // Re-export tracing crates
 pub use tracing;
 pub use tracing_subscriber;
-use tracing_subscriber::fmt::{format::PrettyFields, FormatFields};
 
 /// A boxed tracing [Layer].
 pub type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
@@ -52,9 +51,8 @@ where
 
     tracing_subscriber::fmt::layer()
         .with_ansi(with_ansi)
-        .with_filter(filter)
         .with_target(with_target)
-        .fmt_fields(PrettyFields)
+        .with_filter(filter)
         .boxed()
 }
 
