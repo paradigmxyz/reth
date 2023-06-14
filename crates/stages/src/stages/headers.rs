@@ -323,6 +323,8 @@ where
         input: ExecInput,
         _output: ExecOutput,
     ) -> Result<bool, StageError> {
+        // We pass `input.checkpoint` instead of `output.checkpoint`, because we check the
+        // congruency of previous checkpoint block number with the highest header in the database.
         self.is_stage_done::<DB>(provider.tx_ref(), input.checkpoint().block_number)
     }
 
