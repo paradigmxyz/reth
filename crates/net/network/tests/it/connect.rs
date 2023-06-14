@@ -321,6 +321,7 @@ async fn test_incoming_node_id_blacklist() {
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
+        tokio::time::sleep(Duration::from_millis(300)).await;
         // get the peer id we should be expecting
         let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
@@ -375,6 +376,7 @@ async fn test_incoming_connect_with_single_geth() {
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // get the peer id we should be expecting
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
         let (reth_p2p, reth_disc) = unused_tcp_udp();
@@ -437,6 +439,7 @@ async fn test_outgoing_connect_with_single_geth() {
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // get the peer id we should be expecting
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
         // add geth as a peer then wait for a `SessionEstablished` event
@@ -482,6 +485,7 @@ async fn test_geth_disconnect() {
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // get the peer id we should be expecting
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
         // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
