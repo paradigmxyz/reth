@@ -27,6 +27,9 @@ pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
 
+#[cfg(feature = "js-tracer")]
+pub mod js;
+
 /// An inspector that collects call traces.
 ///
 /// This [Inspector] can be hooked into the [EVM](revm::EVM) which then calls the inspector
