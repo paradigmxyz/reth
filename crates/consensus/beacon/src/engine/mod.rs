@@ -1532,8 +1532,7 @@ mod tests {
                 pipeline = pipeline.with_max_block(max_block);
             }
 
-            let pipeline = pipeline
-                .build(db.clone(), self.chain_spec.clone());
+            let pipeline = pipeline.build(db.clone(), self.chain_spec.clone());
 
             // Setup blockchain tree
             let externals = TreeExternals::new(
