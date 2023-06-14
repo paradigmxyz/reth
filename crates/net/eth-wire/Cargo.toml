@@ -27,7 +27,7 @@ reth-rlp = { workspace = true, features = [
 reth-metrics = { workspace = true }
 
 # used for Chain and builders
-ethers-core = { version = "2.0.7", default-features = false }
+ethers-core = { workspace = true, default-features = false }
 
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
@@ -47,7 +47,7 @@ proptest-derive = { version = "0.3", optional = true }
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing = { path = "../../tracing" }
-ethers-core = { version = "2.0.7", default-features = false }
+ethers-core = { workspace = true, default-features = false }
 
 test-fuzz = "3.0.4"
 tokio-util = { workspace = true, features = ["io", "codec"] }
