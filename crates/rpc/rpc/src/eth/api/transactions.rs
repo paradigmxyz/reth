@@ -3,7 +3,8 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult, SignError},
         revm_utils::{
-            inspect, prepare_call_env, replay_transactions_until, transact, EvmOverrides,
+            inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
+            EvmOverrides,
         },
         utils::recover_raw_transaction,
     },
@@ -34,7 +35,6 @@ use revm::{
     Inspector,
 };
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
-use crate::eth::revm_utils::inspect_and_return_db;
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;

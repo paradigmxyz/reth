@@ -138,7 +138,11 @@ where
 ///
 /// Even though [Database] is also implemented on `&mut`
 /// this is still useful if there are certain trait bounds on the Inspector's database generic type
-pub(crate) fn inspect_and_return_db<DB, I>(db: DB, env: Env, inspector: I) -> EthResult<(ResultAndState, Env, DB)>
+pub(crate) fn inspect_and_return_db<DB, I>(
+    db: DB,
+    env: Env,
+    inspector: I,
+) -> EthResult<(ResultAndState, Env, DB)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
