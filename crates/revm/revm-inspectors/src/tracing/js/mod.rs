@@ -278,7 +278,6 @@ where
         data: &mut EVMData<'_, DB>,
         _is_static: bool,
     ) -> InstructionResult {
-
         let precompiles: hashbrown::HashMap<[u8; 20], revm::precompile::Precompile> =
             data.precompiles.fun.clone();
         let is_precompiled =
@@ -293,13 +292,11 @@ where
                 }
                 Ok(JsValue::from(false))
             };
-        
         self.ctx
             .register_global_callable("isPrecompiled", 3, unsafe {
                 NativeFunction::from_closure(is_precompiled)
             })
             .unwrap();
-        
         InstructionResult::Continue
     }
 
