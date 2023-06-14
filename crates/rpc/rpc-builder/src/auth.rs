@@ -24,6 +24,8 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+/// Default max response size in MB.
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
@@ -142,7 +144,8 @@ impl AuthServerConfig {
 
         // By default, both http and ws are enabled.
         let server =
-            ServerBuilder::new().set_middleware(middleware).build(socket_addr).await.map_err(
+            ServerBuilder::new().max_response_body_size(RPC_DEFAULT_MAX_RESPONSE_SIZE_MB).
+            set_middleware(middleware).build(socket_addr).await.map_err(
                 |err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)),
             )?;
 
