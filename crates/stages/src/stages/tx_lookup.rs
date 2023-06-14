@@ -54,10 +54,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-        let (tx_range, block_range, is_final_range) =
+        let (tx_range, block_range) =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
 
@@ -138,7 +135,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-            done: is_final_range,
         })
     }
 
@@ -149,7 +145,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
-        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (range, unwind_to) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
@@ -192,15 +188,12 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
+        UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
-
-    // Implement stage test suite.
-    stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
 
     #[tokio::test]
     async fn execute_single_transaction_lookup() {
@@ -234,7 +227,7 @@ mod tests {
                     processed,
                     total
                 }))
-            }, done: true }) if block_number == previous_stage && processed == total &&
+            }}) if block_number == previous_stage && processed == total &&
                 total == runner.tx.table::<tables::Transactions>().unwrap().len() as u64
         );
 
@@ -273,17 +266,17 @@ mod tests {
             .unwrap_or(previous_stage);
         assert_matches!(result, Ok(_));
         assert_eq!(
-            result.unwrap(),
-            ExecOutput {
+            result.as_ref().unwrap(),
+            &ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
                         processed: runner.tx.table::<tables::TxHashNumber>().unwrap().len() as u64,
                         total: total_txs
                     }
-                ),
-                done: false
+                )
             }
         );
+        assert!(!result.unwrap().is_done(first_input));
 
         // Execute second time to completion
         runner.set_threshold(u64::MAX);
@@ -298,8 +291,7 @@ mod tests {
             &ExecOutput {
                 checkpoint: StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
                     EntitiesCheckpoint { processed: total_txs, total: total_txs }
-                ),
-                done: true
+                )
             }
         );
 

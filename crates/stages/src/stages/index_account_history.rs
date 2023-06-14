@@ -38,11 +38,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        let range = input.next_block_range_with_threshold(self.commit_threshold);
 
         let mut stage_checkpoint = stage_checkpoint(
             provider,
@@ -63,7 +59,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(*range.end())
                 .with_index_history_stage_checkpoint(stage_checkpoint),
-            done: is_final_range,
         })
     }
 
@@ -73,7 +68,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, _) =
+        let (range, unwind_progress) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         let changesets = provider.unwind_account_history_indices(range)?;
@@ -222,9 +217,9 @@ mod tests {
                         progress: EntitiesCheckpoint { processed: 2, total: 2 }
                     }
                 ),
-                done: true
             }
         );
+        assert!(out.is_done(input));
         provider.commit().unwrap();
     }
 
@@ -462,10 +457,10 @@ mod tests {
                             block_range: CheckpointBlockRange { from: 1, to: 5 },
                             progress: EntitiesCheckpoint { processed: 1, total: 2 }
                         }
-                    ),
-                    done: false
+                    )
                 }
             );
+            assert!(!out.is_done(input));
             input.checkpoint = Some(out.checkpoint);
 
             let out = stage.execute(&mut provider, input).await.unwrap();
@@ -477,10 +472,10 @@ mod tests {
                             block_range: CheckpointBlockRange { from: 5, to: 5 },
                             progress: EntitiesCheckpoint { processed: 2, total: 2 }
                         }
-                    ),
-                    done: true
+                    )
                 }
             );
+            assert!(out.is_done(input));
 
             provider.commit().unwrap();
         }
