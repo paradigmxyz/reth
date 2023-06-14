@@ -262,12 +262,11 @@ where
                 continue
             }
 
-            let mut done = stage
-                .is_unwind_done(
-                    UnwindInput { checkpoint, unwind_to: to, bad_block },
-                    UnwindOutput { checkpoint },
-                )
-                .await?;
+            let mut done = stage.is_unwind_done(
+                &mut provider_rw,
+                UnwindInput { checkpoint, unwind_to: to, bad_block },
+                UnwindOutput { checkpoint },
+            );
 
             debug!(target: "sync::pipeline", from = %checkpoint, %to, ?bad_block, "Starting unwind");
             while !done {
@@ -277,7 +276,7 @@ where
                 match stage.unwind(&mut provider_rw, input).await {
                     Ok(output) => {
                         checkpoint = output.checkpoint;
-                        done = stage.is_unwind_done(input, output).await?;
+                        done = stage.is_unwind_done(&mut provider_rw, input, output);
                         info!(
                             target: "sync::pipeline",
                             stage = %stage_id,

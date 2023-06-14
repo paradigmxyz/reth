@@ -318,8 +318,8 @@ where
     }
 
     async fn is_execute_done(
-        &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        &self,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
         _output: ExecOutput,
     ) -> Result<bool, StageError> {

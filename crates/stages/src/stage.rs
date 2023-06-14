@@ -196,10 +196,9 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Returns true if the stage execution is completed for the given input target.
     ///
     /// Default behavior is to call the [ExecOutput::target_reached].
-    #[allow(clippy::wrong_self_convention)]
     async fn is_execute_done(
-        &mut self,
-        _provider: &DatabaseProviderRW<'_, &DB>,
+        &self,
+        _provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
         output: ExecOutput,
     ) -> Result<bool, StageError> {
@@ -216,11 +215,12 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Returns true if the stage unwinding is completed for the given input target.
     ///
     /// Default behavior is to call the [UnwindOutput::target_reached].
-    async fn is_unwind_done(
+    fn is_unwind_done(
         &self,
+        _provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
         output: UnwindOutput,
-    ) -> Result<bool, StageError> {
-        Ok(output.target_reached(input))
+    ) -> bool {
+        output.target_reached(input)
     }
 }

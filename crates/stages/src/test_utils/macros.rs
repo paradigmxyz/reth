@@ -33,6 +33,9 @@ macro_rules! stage_test_suite {
                     checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(stage_progress)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
+                let db = runner.tx().inner_raw();
+                let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+
                 let rx = runner.execute(input);
 
                 // Run `after_execution` hook
@@ -40,14 +43,17 @@ macro_rules! stage_test_suite {
 
                 // Assert the successful result
                 let result = rx.await.unwrap();
+                assert_matches::assert_matches!(result, Ok(_));
+
+                let output = result.unwrap();
+                assert!(runner.stage().is_execute_done(&mut factory.provider_rw().unwrap(), input, output).await.unwrap());
                 assert_matches::assert_matches!(
-                    result,
-                    Ok(ref output @ ExecOutput { checkpoint })
-                        if output.is_done(input) && checkpoint.block_number == previous_stage
+                    output,
+                    ExecOutput { checkpoint } if checkpoint.block_number == previous_stage
                 );
 
                 // Validate the stage execution
-                assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+                assert!(runner.validate_execution(input, Some(output)).is_ok(), "execution validation");
             }
 
             // Check that unwind does not panic on no new entries within the input range.
@@ -85,20 +91,26 @@ macro_rules! stage_test_suite {
                     checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(stage_progress)),
                 };
                 let seed = runner.seed_execution(execute_input).expect("failed to seed");
+                let db = runner.tx().inner_raw();
+                let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
 
                 // Run stage execution
                 let rx = runner.execute(execute_input);
                 runner.after_execution(seed).await.expect("failed to run after execution hook");
 
                 // Assert the successful execution result
-                let result = rx.await.unwrap();
-                assert_matches::assert_matches!(
-                    result,
-                    Ok(ref output @ ExecOutput { checkpoint })
-                        if output.is_done(execute_input) && checkpoint.block_number == previous_stage
-                );
-                assert!(runner.validate_execution(execute_input, result.ok()).is_ok(), "execution validation");
+                let stage = runner.stage();
 
+                let result = rx.await.unwrap();
+                assert_matches::assert_matches!(result, Ok(_));
+
+                let execute_output = result.unwrap();
+                assert!(stage.is_execute_done(&mut factory.provider_rw().unwrap(), execute_input, execute_output).await.unwrap());
+                assert_matches::assert_matches!(
+                    execute_output,
+                    ExecOutput { checkpoint } if checkpoint.block_number == previous_stage
+                );
+                assert!(runner.validate_execution(execute_input, Some(execute_output)).is_ok(), "execution validation");
 
                 // Run stage unwind
                 let unwind_input = crate::stage::UnwindInput {
@@ -110,11 +122,14 @@ macro_rules! stage_test_suite {
                 runner.before_unwind(unwind_input).expect("Failed to unwind state");
 
                 let rx = runner.unwind(unwind_input).await;
+                assert_matches::assert_matches!(rx, Ok(_));
+                let unwind_output = rx.unwrap();
+
                 // Assert the successful unwind result
+                assert!(stage.is_unwind_done(&mut factory.provider_rw().unwrap(), unwind_input, unwind_output));
                 assert_matches::assert_matches!(
-                    rx,
-                    Ok(output @ UnwindOutput { checkpoint })
-                        if output.is_done(unwind_input) && checkpoint.block_number == unwind_input.unwind_to
+                    unwind_output,
+                    UnwindOutput { checkpoint } if checkpoint.block_number == unwind_input.unwind_to
                 );
 
                 // Validate the stage unwind
