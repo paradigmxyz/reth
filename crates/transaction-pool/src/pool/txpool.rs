@@ -306,17 +306,6 @@ impl<T: TransactionOrdering> TxPool<T> {
             .or_default()
             .update(on_chain_nonce, on_chain_balance);
 
-        let total_cost: U256 = self
-            .pending_transactions()
-            .into_iter()
-            .filter(|t| t.sender() == tx.sender() && t.nonce() != tx.nonce())
-            .map(|t| t.cost)
-            .sum();
-
-        if total_cost + tx.cost > on_chain_balance {
-            return Err(PoolError::Overdraft(*tx.hash()))
-        }
-
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
                 self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
@@ -361,6 +350,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                         *transaction.hash(),
                         InvalidPoolTransactionError::ExceedsGasLimit(block_gas_limit, tx_gas_limit),
                     )),
+                    InsertErr::Overdraft { transaction } => {
+                        Err(PoolError::Overdraft(*transaction.hash()))
+                    }
                 }
             }
         }
@@ -1107,6 +1099,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 if cumulative_cost > on_chain_balance {
                     // sender lacks sufficient funds to pay for this transaction
                     tx.state.remove(TxState::ENOUGH_BALANCE);
+                    return Err(InsertErr::Overdraft { transaction })
                 } else {
                     tx.state.insert(TxState::ENOUGH_BALANCE);
                 }
@@ -1211,6 +1204,8 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
         block_gas_limit: u64,
         tx_gas_limit: u64,
     },
+    /// Transaction would cause the senders balance to go negative
+    Overdraft { transaction: Arc<ValidPoolTransaction<T>> },
 }
 
 /// Transaction was successfully inserted into the pool
@@ -1320,6 +1315,18 @@ mod tests {
     };
 
     #[test]
+    fn test_insert_overdraft() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let valid_tx = f.validated(tx.clone());
+        let err = pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Overdraft { .. }));
+    }
+
+    #[test]
     fn test_insert_pending() {
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
@@ -1341,7 +1348,7 @@ mod tests {
 
     #[test]
     fn test_simple_insert() {
-        let on_chain_balance = U256::ZERO;
+        let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
@@ -1352,7 +1359,7 @@ mod tests {
         assert!(updates.is_empty());
         assert!(replaced_tx.is_none());
         assert!(state.contains(TxState::NO_NONCE_GAPS));
-        assert!(!state.contains(TxState::ENOUGH_BALANCE));
+        assert!(state.contains(TxState::ENOUGH_BALANCE));
         assert_eq!(move_to, SubPool::Queued);
 
         assert_eq!(pool.len(), 1);
@@ -1373,7 +1380,7 @@ mod tests {
         assert!(updates.is_empty());
         assert!(replaced_tx.is_none());
         assert!(state.contains(TxState::NO_NONCE_GAPS));
-        assert!(!state.contains(TxState::ENOUGH_BALANCE));
+        assert!(state.contains(TxState::ENOUGH_BALANCE));
         assert_eq!(move_to, SubPool::Queued);
 
         assert!(pool.contains(valid_tx.hash()));
@@ -1384,7 +1391,7 @@ mod tests {
 
     #[test]
     fn insert_already_imported() {
-        let on_chain_balance = U256::ZERO;
+        let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
@@ -1399,7 +1406,7 @@ mod tests {
 
     #[test]
     fn insert_replace() {
-        let on_chain_balance = U256::ZERO;
+        let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
@@ -1421,7 +1428,7 @@ mod tests {
     // insert nonce then nonce - 1
     #[test]
     fn insert_previous() {
-        let on_chain_balance = U256::ZERO;
+        let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
