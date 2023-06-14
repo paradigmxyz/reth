@@ -78,7 +78,7 @@ revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 
 [workspace.dependencies]
-## eth
+## reth
 revm = { version = "3" }
 revm-primitives = "1.1"
 reth-primitives = { path = "./crates/primitives" }
@@ -91,6 +91,12 @@ reth-payload-builder = { path = "./crates/payload/builder" }
 reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
 reth-network-api = { path = "./crates/net/network-api" }
+
+## eth
+ethers-core = { version = "2.0.7", default-features = false }
+ethers-providers = { version = "2.0.7", default-features = false }
+ethers-signers = { version = "2.0.7", default-features = false }
+ethers-middleware = { version = "2.0.7", default-features = false }
 
 ## misc
 tracing = "^0.1.0"
