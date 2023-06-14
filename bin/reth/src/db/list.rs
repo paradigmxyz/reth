@@ -1,6 +1,7 @@
 use crate::utils::DbTool;
 use clap::Parser;
 
+use super::tui::DbListTUI;
 use eyre::WrapErr;
 use reth_db::{
     database::Database,
@@ -9,8 +10,6 @@ use reth_db::{
     TableType, TableViewer, Tables,
 };
 use tracing::error;
-
-use super::tui::DbListTUI;
 
 const DEFAULT_NUM_ITEMS: &str = "5";
 
