@@ -5,7 +5,10 @@ use boa_engine::{
     property::Attribute,
     Context, JsArgs, JsError, JsNativeError, JsResult, JsString, JsValue, NativeFunction, Source,
 };
-use reth_primitives::{hex, Address, H256, U256, contract::{create_address, create2_address_from_code}, keccak256};
+use reth_primitives::{
+    contract::{create_address, create2_address_from_code},
+    hex, Address, H256, U256, keccak256
+};
 
 /// bigIntegerJS is the minified version of <https://github.com/peterolson/BigInteger.js>.
 pub(crate) const BIG_INT_JS: &str = include_str!("bigint.js");
@@ -126,10 +129,15 @@ pub(crate) fn to_bigint(value: U256, ctx: &mut Context<'_>) -> JsResult<JsValue>
         ctx,
     )
 }
-/// Takes three arguments: a JavaScript value that represents the sender's address, a string salt value, and the initcode for the contract. 
-/// Compute the address of a contract created by the sender with the given salt and code hash, 
-/// then converts the resulting address back into a byte buffer for output.
-pub(crate) fn to_contract2(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>) -> JsResult<JsValue> {
+/// Takes three arguments: a JavaScript value that represents the sender's address, a string salt
+/// value, and the initcode for the contract. Compute the address of a contract created by the
+/// sender with the given salt and code hash, then converts the resulting address back into a byte
+/// buffer for output.
+pub(crate) fn to_contract2(
+    _: &JsValue, 
+    args: &[JsValue], 
+    ctx: &mut Context<'_>
+) -> JsResult<JsValue> {
     // Extract the sender's address, salt and initcode from the arguments
     let from = args.get_or_undefined(0).clone();
     let salt = match args.get_or_undefined(1).to_string(ctx) {
@@ -137,10 +145,16 @@ pub(crate) fn to_contract2(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>)
             let s = js_string.to_std_string().unwrap();
             match hex::decode(s) {
                 Ok(bytes) => H256::from_slice(bytes.as_slice()),
-                Err(_) => return Err(JsError::from_native(JsNativeError::typ().with_message("invalid salt hex string"))),
+                Err(_) => {return 
+                    Err(JsError::from_native(
+                        JsNativeError::typ().with_message("invalid salt hex string"),
+                    ))
+                }
             }
         }
-        Err(_) => return Err(JsError::from_native(JsNativeError::typ().with_message("invalid salt type"))),
+        Err(_) => { return 
+            Err(JsError::from_native(JsNativeError::typ().with_message("invalid salt type")))
+        }
     };
     
     let initcode = args.get_or_undefined(2).clone();
@@ -151,7 +165,6 @@ pub(crate) fn to_contract2(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>)
 
     // Convert the initcode to a byte buffer
     let code_buf = from_buf(initcode, ctx)?;
-    
     // Compute the code hash
     let code_hash = keccak256(code_buf);
 
@@ -161,8 +174,13 @@ pub(crate) fn to_contract2(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>)
     // Convert the contract address to a byte buffer and return it as an ArrayBuffer
     to_buf_value(contract_addr.0.to_vec(), ctx)
 }
+
 ///  Converts the sender's address to a byte buffer
-pub(crate) fn to_contract(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>) -> JsResult<JsValue> {
+pub(crate) fn to_contract(
+    _: &JsValue,
+    args: &[JsValue], 
+    ctx: &mut Context<'_>
+) -> JsResult<JsValue> {
     // Extract the sender's address and nonce from the arguments
     let from = args.get_or_undefined(0).clone();
     let nonce = args.get_or_undefined(1).to_number(ctx)? as u64;
@@ -179,13 +197,16 @@ pub(crate) fn to_contract(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>) 
 }
 
 /// Converts a buffer type to an address
-pub(crate) fn to_address(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>) -> JsResult<JsValue> {
+pub(crate) fn to_address(
+    _: &JsValue, 
+    args: &[JsValue], 
+    ctx: &mut Context<'_>
+) -> JsResult<JsValue> {
     let val = args.get_or_undefined(0).clone();
     let buf = from_buf(val, ctx)?;
     let address = bytes_to_address(buf);
     to_buf_value(address.0.to_vec(), ctx)
 }
-
 
 /// Converts a buffer type to a word
 pub(crate) fn to_word(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>) -> JsResult<JsValue> {
@@ -194,7 +215,6 @@ pub(crate) fn to_word(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>) -> J
     let hash = bytes_to_hash(buf);
     to_buf_value(hash.0.to_vec(), ctx)
 }
-
 
 /// Converts a buffer type to a hex string
 pub(crate) fn to_hex(_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>) -> JsResult<JsValue> {
