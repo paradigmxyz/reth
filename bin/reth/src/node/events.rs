@@ -303,7 +303,11 @@ impl std::fmt::Display for Eta {
             let remaining = eta.checked_sub(last_checkpoint_time.elapsed());
 
             if let Some(remaining) = remaining {
-                return write!(f, "{}", humantime::format_duration(remaining))
+                return write!(
+                    f,
+                    "{}",
+                    humantime::format_duration(Duration::from_secs(remaining.as_secs()))
+                )
             }
         }
 
