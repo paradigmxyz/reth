@@ -37,9 +37,7 @@ More concretely, our goals are:
 
 The project is **not ready for production use**.
 
-We hope to have full sync implemented sometime in Q1 2023, followed by optimizations. In the meantime, we're working on making sure every crate of the repository is well documented, abstracted and tested.
-
-This project is work in progress and subject to frequent changes as we are still working on wiring up each individual node component into a full syncing pipeline.
+Reth is fully capable of syncing, however, there are still some missing features, and we are still working on performance and stability. Because of this, we are still introducing breaking changes.
 
 It has **not been audited for security purposes** and should not be used in production yet.
 
