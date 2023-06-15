@@ -149,10 +149,7 @@ impl TransactionsProvider for NoopProvider {
         Ok(Vec::default())
     }
 
-    fn transaction_senders_by_tx_range(
-        &self,
-        _range: impl RangeBounds<TxNumber>,
-    ) -> Result<Vec<Address>> {
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         Ok(Vec::default())
     }
 

@@ -50,8 +50,5 @@ pub trait TransactionsProvider: BlockNumProvider + Send + Sync {
     ) -> Result<Vec<TransactionSignedNoHash>>;
 
     /// Get Senders from a tx range.
-    fn transaction_senders_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<Vec<Address>>;
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>>;
 }

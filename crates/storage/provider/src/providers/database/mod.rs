@@ -243,11 +243,8 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
         self.provider()?.transactions_by_tx_range(range)
     }
 
-    fn transaction_senders_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<Vec<Address>> {
-        self.provider()?.transaction_senders_by_tx_range(range)
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        self.provider()?.senders_by_tx_range(range)
     }
 }
 

@@ -1646,10 +1646,7 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
         let (transactions, senders) = if tx_range.is_empty() {
             (vec![], vec![])
         } else {
-            (
-                self.transactions_by_tx_range(tx_range.clone())?,
-                self.transaction_senders_by_tx_range(tx_range)?,
-            )
+            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
         };
 
         let body = transactions
@@ -1787,10 +1784,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    fn transaction_senders_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<Vec<Address>> {
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         Ok(self
             .tx
             .cursor_read::<tables::TxSenders>()?

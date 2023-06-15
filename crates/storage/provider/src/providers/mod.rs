@@ -293,11 +293,8 @@ where
         self.database.provider()?.transactions_by_tx_range(range)
     }
 
-    fn transaction_senders_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<Vec<Address>> {
-        self.database.provider()?.transaction_senders_by_tx_range(range)
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        self.database.provider()?.senders_by_tx_range(range)
     }
 }
 

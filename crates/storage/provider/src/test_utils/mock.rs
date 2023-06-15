@@ -209,10 +209,7 @@ impl TransactionsProvider for MockEthProvider {
         Ok(map.into_values().collect())
     }
 
-    fn transaction_senders_by_tx_range(
-        &self,
-        _range: impl RangeBounds<TxNumber>,
-    ) -> Result<Vec<Address>> {
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         unimplemented!()
     }
 
