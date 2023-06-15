@@ -51,4 +51,9 @@ pub trait TransactionsProvider: BlockNumProvider + Send + Sync {
 
     /// Get Senders from a tx range.
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>>;
+
+    /// Get transaction sender.
+    ///
+    /// Returns None if the transaction is not found.
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>>;
 }

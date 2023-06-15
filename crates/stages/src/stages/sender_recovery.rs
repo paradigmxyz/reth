@@ -437,10 +437,7 @@ mod tests {
                                 provider.transaction_by_id(tx_id)?.expect("no transaction entry");
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");
-                            assert_eq!(
-                                Some(signer),
-                                provider.tx_ref().get::<tables::TxSenders>(tx_id)?
-                            );
+                            assert_eq!(Some(signer), provider.transaction_sender(tx_id)?)
                         }
                     }
                 }

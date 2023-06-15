@@ -246,6 +246,10 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         self.provider()?.senders_by_tx_range(range)
     }
+
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        self.provider()?.transaction_sender(id)
+    }
 }
 
 impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {

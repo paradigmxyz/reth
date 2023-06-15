@@ -1777,6 +1777,10 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .map(|entry| entry.map(|sender| sender.1))
             .collect::<std::result::Result<Vec<_>, _>>()?)
     }
+
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        Ok(self.tx.get::<tables::TxSenders>(id)?)
+    }
 }
 
 impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {

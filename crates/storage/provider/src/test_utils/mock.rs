@@ -219,6 +219,10 @@ impl TransactionsProvider for MockEthProvider {
     ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
         unimplemented!()
     }
+
+    fn transaction_sender(&self, _id: TxNumber) -> Result<Option<Address>> {
+        unimplemented!()
+    }
 }
 
 impl ReceiptProvider for MockEthProvider {

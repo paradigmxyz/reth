@@ -159,6 +159,10 @@ impl TransactionsProvider for NoopProvider {
     ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
         Ok(Vec::default())
     }
+
+    fn transaction_sender(&self, _id: TxNumber) -> Result<Option<Address>> {
+        Ok(None)
+    }
 }
 
 impl ReceiptProvider for NoopProvider {
