@@ -1169,7 +1169,7 @@ where
                             ) {
                                 Ok(synced) => {
                                     if !synced {
-                                        // // We don't have the finalized block in the database, so
+                                        // We don't have the finalized block in the database, so
                                         // we need to run another pipeline.
                                         self.sync.set_pipeline_sync_target(
                                             sync_target_state.finalized_block_hash,
