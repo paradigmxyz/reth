@@ -1,4 +1,4 @@
-use crate::metrics::DownloaderMetrics;
+use crate::metrics::BodyDownloaderMetrics;
 use futures::{Future, FutureExt};
 use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
@@ -38,7 +38,7 @@ use std::{
 pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
     consensus: Arc<dyn Consensus>,
-    metrics: DownloaderMetrics,
+    metrics: BodyDownloaderMetrics,
     // Headers to download. The collection is shrunk as responses are buffered.
     pending_headers: VecDeque<SealedHeader>,
     /// Internal buffer for all blocks
@@ -56,7 +56,7 @@ where
     pub(crate) fn new(
         client: Arc<B>,
         consensus: Arc<dyn Consensus>,
-        metrics: DownloaderMetrics,
+        metrics: BodyDownloaderMetrics,
     ) -> Self {
         Self {
             client,
@@ -235,7 +235,7 @@ mod tests {
     use super::*;
     use crate::{
         bodies::test_utils::zip_blocks,
-        test_utils::{generate_bodies, TestBodiesClient, TEST_SCOPE},
+        test_utils::{generate_bodies, TestBodiesClient},
     };
     use reth_interfaces::{
         p2p::bodies::response::BlockResponse,
@@ -253,7 +253,7 @@ mod tests {
         let fut = BodiesRequestFuture::new(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            DownloaderMetrics::new(TEST_SCOPE),
+            BodyDownloaderMetrics::default(),
         )
         .with_headers(headers.clone());
 
@@ -277,7 +277,7 @@ mod tests {
         let fut = BodiesRequestFuture::new(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            DownloaderMetrics::new(TEST_SCOPE),
+            BodyDownloaderMetrics::default(),
         )
         .with_headers(headers.clone());
 
