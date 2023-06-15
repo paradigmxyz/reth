@@ -16,11 +16,11 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    Block, BlockNumber, BlockWithSenders, Header, TransactionSigned, U256,
+    BlockNumber, Header, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, BlockProvider, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, ProviderError, WithdrawalsProvider,
+    HeaderProvider, LatestStateProviderRef, ProviderError,
 };
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
@@ -84,59 +84,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         Self::new(executor_factory, ExecutionStageThresholds::default())
     }
 
-    // TODO(joshie): This should be in the block provider trait once we consolidate
-    fn read_block_with_senders<DB: Database>(
-        provider: &DatabaseProviderRW<'_, &DB>,
-        block_number: BlockNumber,
-    ) -> Result<(BlockWithSenders, U256), StageError> {
-        let header = provider
-            .header_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        let td = provider
-            .header_td_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        let ommers = provider.ommers(block_number.into())?.unwrap_or_default();
-        let withdrawals = provider.withdrawals_by_block(block_number.into(), header.timestamp)?;
-
-        // Get the block body
-        let body = provider.block_body_indices(block_number)?;
-        let tx_range = body.tx_num_range();
-
-        // Get the transactions in the body
-        let tx = provider.tx_ref();
-        let (transactions, senders) = if tx_range.is_empty() {
-            (Vec::new(), Vec::new())
-        } else {
-            let transactions = tx
-                .cursor_read::<tables::Transactions>()?
-                .walk_range(tx_range.clone())?
-                .map(|entry| entry.map(|tx| tx.1))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let senders = tx
-                .cursor_read::<tables::TxSenders>()?
-                .walk_range(tx_range)?
-                .map(|entry| entry.map(|sender| sender.1))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            (transactions, senders)
-        };
-
-        let body = transactions
-            .into_iter()
-            .map(|tx| {
-                TransactionSigned {
-                    // TODO: This is the fastest way right now to make everything just work with
-                    // a dummy transaction hash.
-                    hash: Default::default(),
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                }
-            })
-            .collect();
-        Ok((Block { header, body, ommers, withdrawals }.with_senders(senders), td))
-    }
-
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &self,
@@ -162,7 +109,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Execute block range
         let mut state = PostState::default();
         for block_number in start_block..=max_block {
-            let (block, td) = Self::read_block_with_senders(provider, block_number)?;
+            let td = provider
+                .header_td_by_number(block_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            let block = provider
+                .block_with_senders(block_number)?
+                .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");

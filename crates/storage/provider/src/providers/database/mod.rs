@@ -9,9 +9,9 @@ use reth_db::{database::Database, models::StoredBlockBodyIndices, tables, transa
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Header, Receipt,
-    SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal,
-    H256, U256,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
+    ChainSpec, Header, Receipt, SealedBlock, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{ops::RangeBounds, sync::Arc};
@@ -189,8 +189,12 @@ impl<DB: Database> BlockProvider for ProviderFactory<DB> {
         self.provider()?.ommers(id)
     }
 
-    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
-        self.provider()?.block_body_indices(num)
+    fn block_body_indices(&self, number: BlockNumber) -> Result<Option<StoredBlockBodyIndices>> {
+        self.provider()?.block_body_indices(number)
+    }
+
+    fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>> {
+        self.provider()?.block_with_senders(number)
     }
 }
 
@@ -230,6 +234,17 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         self.provider()?.transactions_by_block_range(range)
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<TransactionSignedNoHash>> {
+        self.provider()?.transactions_by_tx_range(range)
+    }
+
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        self.provider()?.senders_by_tx_range(range)
     }
 }
 
