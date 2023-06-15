@@ -20,7 +20,7 @@ mod noop;
 mod pre_state;
 
 /// Result type for geth style transaction trace
-pub type TraceResult = crate::trace::common::TraceResult<GethTraceFrame, String>;
+pub type TraceResult = crate::trace::common::TraceResult<GethTrace, String>;
 
 /// blockTraceResult represents the results of tracing a single block when an entire chain is being
 /// traced. ref <https://github.com/ethereum/go-ethereum/blob/ee530c0d5aa70d2c00ab5691a89ab431b73f8165/eth/tracers/api.go#L218-L222>
@@ -34,7 +34,7 @@ pub struct BlockTraceResult {
     pub traces: Vec<TraceResult>,
 }
 
-/// Geth Default trace frame
+/// Geth Default struct log trace frame
 ///
 /// <https://github.com/ethereum/go-ethereum/blob/a9ef135e2dd53682d106c6a2aede9187026cc1de/eth/tracers/logger/logger.go#L406-L411>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,64 +91,55 @@ pub struct StructLog {
     pub error: Option<String>,
 }
 
-/// Tracing response
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum GethTraceFrame {
-    Default(DefaultFrame),
-    NoopTracer(NoopFrame),
-    FourByteTracer(FourByteFrame),
-    CallTracer(CallFrame),
-    PreStateTracer(PreStateFrame),
-    JS(serde_json::Value),
-}
-
-impl From<DefaultFrame> for GethTraceFrame {
-    fn from(value: DefaultFrame) -> Self {
-        GethTraceFrame::Default(value)
-    }
-}
-
-impl From<FourByteFrame> for GethTraceFrame {
-    fn from(value: FourByteFrame) -> Self {
-        GethTraceFrame::FourByteTracer(value)
-    }
-}
-
-impl From<CallFrame> for GethTraceFrame {
-    fn from(value: CallFrame) -> Self {
-        GethTraceFrame::CallTracer(value)
-    }
-}
-
-impl From<PreStateFrame> for GethTraceFrame {
-    fn from(value: PreStateFrame) -> Self {
-        GethTraceFrame::PreStateTracer(value)
-    }
-}
-
-impl From<NoopFrame> for GethTraceFrame {
-    fn from(value: NoopFrame) -> Self {
-        GethTraceFrame::NoopTracer(value)
-    }
-}
-
+/// Tracing response objects
+///
+/// Note: This deserializes untagged, so it's possible that a custom javascript tracer response
+/// matches another variant, for example a js tracer that returns `{}` would be deserialized as
+/// [GethTrace::NoopTracer]
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum GethTrace {
-    Known(GethTraceFrame),
-    Unknown(serde_json::Value),
+    /// The response for the default struct log tracer
+    Default(DefaultFrame),
+    /// The response for call tracer
+    CallTracer(CallFrame),
+    /// The response for four byte tracer
+    FourByteTracer(FourByteFrame),
+    /// The response for pre-state byte tracer
+    PreStateTracer(PreStateFrame),
+    /// An empty json response
+    NoopTracer(NoopFrame),
+    /// Any other trace response, such as custom javascript response objects
+    JS(serde_json::Value),
 }
 
-impl From<GethTraceFrame> for GethTrace {
-    fn from(value: GethTraceFrame) -> Self {
-        GethTrace::Known(value)
+impl From<DefaultFrame> for GethTrace {
+    fn from(value: DefaultFrame) -> Self {
+        GethTrace::Default(value)
     }
 }
 
-impl From<serde_json::Value> for GethTrace {
-    fn from(value: serde_json::Value) -> Self {
-        GethTrace::Unknown(value)
+impl From<FourByteFrame> for GethTrace {
+    fn from(value: FourByteFrame) -> Self {
+        GethTrace::FourByteTracer(value)
+    }
+}
+
+impl From<CallFrame> for GethTrace {
+    fn from(value: CallFrame) -> Self {
+        GethTrace::CallTracer(value)
+    }
+}
+
+impl From<PreStateFrame> for GethTrace {
+    fn from(value: PreStateFrame) -> Self {
+        GethTrace::PreStateTracer(value)
+    }
+}
+
+impl From<NoopFrame> for GethTrace {
+    fn from(value: NoopFrame) -> Self {
+        GethTrace::NoopTracer(value)
     }
 }
 
