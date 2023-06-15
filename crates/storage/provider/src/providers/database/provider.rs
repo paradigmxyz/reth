@@ -215,22 +215,16 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> std::result::Result<BTreeMap<Address, BTreeSet<H256>>, TransactionError> {
-        Ok(self
-            .tx
+        self.tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(BlockNumberAddress::range(range))?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
             // fold all storages and save its old state so we can remove it from HashedStorage
             // it is needed as it is dup table.
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, BTreeSet<H256>>,
-                 (BlockNumberAddress((_, address)), storage_entry)| {
-                    accounts.entry(address).or_default().insert(storage_entry.key);
-                    accounts
-                },
-            ))
+            .try_fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, BTreeSet<H256>>, entry| {
+                let (BlockNumberAddress((_, address)), storage_entry) = entry?;
+                accounts.entry(address).or_default().insert(storage_entry.key);
+                Ok(accounts)
+            })
     }
 
     /// Get plainstate storages
