@@ -1702,14 +1702,14 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
-        let mut results = Vec::default();
+        let mut results = Vec::new();
         let mut body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
         for entry in body_cursor.walk_range(range)? {
             let (_, body) = entry?;
             let tx_num_range = body.tx_num_range();
             if tx_num_range.is_empty() {
-                results.push(Vec::default());
+                results.push(Vec::new());
             } else {
                 results.push(
                     tx_cursor
@@ -1778,13 +1778,9 @@ impl<'this, TX: DbTx<'this>> WithdrawalsProvider for DatabaseProvider<'this, TX>
     }
 
     fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
-        let latest_block_withdrawal = self.tx.cursor_read::<tables::BlockWithdrawals>()?.last();
-        latest_block_withdrawal
-            .map(|block_withdrawal_pair| {
-                block_withdrawal_pair
-                    .and_then(|(_, block_withdrawal)| block_withdrawal.withdrawals.last().cloned())
-            })
-            .map_err(Into::into)
+        let latest_block_withdrawal = self.tx.cursor_read::<tables::BlockWithdrawals>()?.last()?;
+        Ok(latest_block_withdrawal
+            .and_then(|(_, mut block_withdrawal)| block_withdrawal.withdrawals.pop()))
     }
 }
 
