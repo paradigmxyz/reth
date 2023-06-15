@@ -1446,18 +1446,15 @@ impl<'this, TX: DbTx<'this>> AccountExtProvider for DatabaseProvider<'this, TX> 
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<BTreeSet<Address>> {
-        Ok(self
-            .tx
+        self.tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            // fold all account to one set of changed accounts
-            .fold(BTreeSet::new(), |mut accounts: BTreeSet<Address>, (_, account_before)| {
-                accounts.insert(account_before.address);
-                accounts
-            }))
+            .map(|entry| {
+                entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
+            })
+            .collect()
     }
+
     fn basic_accounts(
         &self,
         iter: impl IntoIterator<Item = Address>,
