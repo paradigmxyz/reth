@@ -30,7 +30,7 @@ pub struct TransactionLookupStage {
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { commit_threshold: 5_000_000 }
     }
 }
 
@@ -78,16 +78,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
             let chunk: Vec<_> = chunk.collect();
             transaction_count += chunk.len();
-
-            // closure that will calculate the TxHash
-            let calculate_hash =
-                |entry: Result<(TxNumber, TransactionSignedNoHash), reth_db::DatabaseError>,
-                 rlp_buf: &mut Vec<u8>|
-                 -> Result<(H256, u64), Box<StageError>> {
-                    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
-                    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-                    Ok((H256(keccak256(rlp_buf)), tx_id))
-                };
 
             // Spawn the task onto the global rayon pool
             // This task will send the results through the channel after it has calculated the hash.
@@ -177,6 +167,17 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
+}
+
+/// Calculates the hash of the given transaction
+#[inline]
+fn calculate_hash(
+    entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
+    rlp_buf: &mut Vec<u8>,
+) -> Result<(H256, TxNumber), Box<StageError>> {
+    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
+    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+    Ok((H256(keccak256(rlp_buf)), tx_id))
 }
 
 fn stage_checkpoint<DB: Database>(

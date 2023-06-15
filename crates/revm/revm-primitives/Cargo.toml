@@ -10,6 +10,6 @@ description = "core reth specific revm utilities"
 
 [dependencies]
 # reth 
-reth-primitives = { path = "../../primitives" }
+reth-primitives = { workspace = true }
 
 revm = { workspace = true }

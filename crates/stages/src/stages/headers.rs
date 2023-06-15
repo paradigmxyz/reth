@@ -390,7 +390,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::random_header;
     use reth_primitives::{stage::StageUnitCheckpoint, H256, MAINNET};
-    use reth_provider::ShareableDatabase;
+    use reth_provider::ProviderFactory;
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
@@ -602,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn head_and_tip_lookup() {
         let runner = HeadersTestRunner::default();
-        let factory = ShareableDatabase::new(runner.tx().tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(runner.tx().tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let tx = provider.tx_ref();
         let mut stage = runner.stage();

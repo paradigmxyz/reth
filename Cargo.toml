@@ -78,9 +78,44 @@ revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
 
 [workspace.dependencies]
-## eth
+## reth
 revm = { version = "3" }
 revm-primitives = "1.1"
+reth-primitives = { path = "./crates/primitives" }
+reth-interfaces = { path = "./crates/interfaces" }
+reth-provider = { path = "./crates/storage/provider" }
+reth-rlp = { path = "./crates/rlp" }
+reth-rpc-types = { path = "./crates/rpc/rpc-types" }
+reth-metrics = { path = "./crates/metrics" }
+reth-payload-builder = { path = "./crates/payload/builder" }
+reth-transaction-pool = { path = "./crates/transaction-pool" }
+reth-tasks = { path = "./crates/tasks" }
+reth-network-api = { path = "./crates/net/network-api" }
+
+## eth
+ethers-core = { version = "2.0.7", default-features = false }
+ethers-providers = { version = "2.0.7", default-features = false }
+ethers-signers = { version = "2.0.7", default-features = false }
+ethers-middleware = { version = "2.0.7", default-features = false }
 
 ## misc
 tracing = "^0.1.0"
+thiserror = "1.0.37"
+serde_json = "1.0.94"
+serde = { version = "1.0", default-features = false }
+rand = "0.8.5"
+
+
+## tokio
+tokio-stream = "0.1.11"
+tokio = { version = "1.21", default-features = false }
+tokio-util = { version = "0.7.4", features = ["codec"] }
+
+## async
+async-trait = "0.1.58"
+futures = "0.3.26"
+pin-project = "1.0.12"
+futures-util = "0.3.25"
+
+## crypto
+secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }

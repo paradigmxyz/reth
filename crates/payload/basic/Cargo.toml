@@ -10,22 +10,22 @@ description = "A basic payload builder for reth that uses the txpool API to buil
 
 [dependencies]
 ## reth
-reth-primitives = { path = "../../primitives" }
+reth-primitives = { workspace = true }
 reth-revm = { path = "../../revm" }
-reth-transaction-pool = { path = "../../transaction-pool" }
-reth-rlp = { path = "../../rlp" }
-reth-provider = { path = "../../storage/provider" }
-reth-payload-builder = { path = "../builder" }
-reth-tasks = { path = "../../tasks" }
-reth-metrics = { path = "../../metrics" }
+reth-transaction-pool = { workspace = true }
+reth-rlp = { workspace = true }
+reth-provider = { workspace = true }
+reth-payload-builder = { workspace = true }
+reth-tasks = { workspace = true }
+reth-metrics = { workspace = true }
 
 ## ethereum
 revm = { workspace = true }
 
 ## async
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 futures-core = "0.3"
-futures-util = "0.3"
+futures-util = { workspace = true }
 
 ## misc
 tracing = { workspace = true }

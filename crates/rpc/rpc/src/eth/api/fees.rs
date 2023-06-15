@@ -11,10 +11,10 @@ use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 use std::collections::BTreeMap;
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
@@ -45,7 +45,7 @@ where
             return Ok(FeeHistory::default())
         }
 
-        let Some(previous_to_end_block) = self.inner.client.block_number_for_id(newest_block)? else { return Err(EthApiError::UnknownBlockNumber)};
+        let Some(previous_to_end_block) = self.inner.provider.block_number_for_id(newest_block)? else { return Err(EthApiError::UnknownBlockNumber)};
         let end_block = previous_to_end_block + 1;
 
         if end_block < block_count {
@@ -103,9 +103,9 @@ where
         {
             let header_range = start_block..=end_block;
 
-            let headers = self.inner.client.headers_range(header_range.clone())?;
+            let headers = self.inner.provider.headers_range(header_range.clone())?;
             let transactions_by_block =
-                self.inner.client.transactions_by_block_range(header_range)?;
+                self.inner.provider.transactions_by_block_range(header_range)?;
 
             let header_tx = headers.iter().zip(&transactions_by_block);
 
@@ -168,7 +168,7 @@ where
 
         // get the first block in the range from the db
         let oldest_block_hash =
-            self.inner.client.block_hash(start_block)?.ok_or(EthApiError::UnknownBlockNumber)?;
+            self.inner.provider.block_hash(start_block)?.ok_or(EthApiError::UnknownBlockNumber)?;
 
         // Set the hash in cache items if the block is present in the cache
         if let Some(cache_item) = fee_history_cache_items.get_mut(&start_block) {

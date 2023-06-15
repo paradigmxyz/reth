@@ -1,24 +1,30 @@
-# <h1 align="center"> reth 🏗️🚧 </h1>
-
-**Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol**
-
-![](./assets/reth.jpg)
-
-*The project is still work in progress, see the [disclaimer below](#-warning-under-construction-).*
+# reth 
 
 [![CI status](https://github.com/paradigmxyz/reth/workflows/ci/badge.svg)][gh-ci]
 [![cargo-deny status](https://github.com/paradigmxyz/reth/workflows/deny/badge.svg)][gh-deny]
 [![Codecov](https://img.shields.io/codecov/c/github/paradigmxyz/reth?token=c24SDcMImE)][codecov]
 [![Telegram Chat][tg-badge]][tg-url]
 
+**Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol**
+
+![](./assets/reth.jpg)
+
+**[User Book](https://paradigmxyz.github.io/reth)**
+| **[Developer Docs](./docs)**
+| **[Crate Docs](https://paradigmxyz.github.io/reth/docs)**
+
+*The project is still work in progress, see the [disclaimer below](#status).*
+
 [codecov]: https://app.codecov.io/gh/paradigmxyz/reth
 [gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/ci.yml
 [gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
 
-## What is Reth? What are its goals?
+## What is Reth?
 
 Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is a new Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient. Reth is an Execution Layer (EL) and is compatible with all Ethereum Consensus Layer (CL) implementations that support the [Engine API](https://github.com/ethereum/execution-apis/tree/59e3a719021f48c1ef5653840e3ea5750e6af693/src/engine). It is originally built and driven forward by [Paradigm](https://paradigm.xyz/), and is licensed under the Apache and MIT licenses.
+
+## Goals
 
 As a full Ethereum node, Reth allows users to connect to the Ethereum network and interact with the Ethereum blockchain. This includes sending and receiving transactions/logs/traces, as well as accessing and interacting with smart contracts. Building a successful Ethereum node requires creating a high-quality implementation that is both secure and efficient, as well as being easy to use on consumer hardware. It also requires building a strong community of contributors who can help support and improve the software.
 
@@ -33,15 +39,38 @@ More concretely, our goals are:
 
 ## Status
 
-The project is not ready for use. We hope to have full sync implemented sometime in Q1 2023, followed by optimizations. In the meantime, we're working on making sure every crate of the repository is well documented, abstracted and tested.
+The project is **not ready for production use**.
+
+Reth is fully capable of syncing, however, there are still some missing features, and we are still working on performance and stability. Because of this, we are still introducing breaking changes.
+
+It has **not been audited for security purposes** and should not be used in production yet.
+
+We will be updating the documentation with the completion status of each component, as well as include more contributing guidelines (design docs, architecture diagrams, repository layouts) and "good first issues".
+
+We appreciate your patience until we get there. Until then, we are happy to answer all questions in the Telegram link above.
+
+## For Users
+
+See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how to install and run Reth.
 
 ## For Developers
 
-### Running Reth
+### Using reth as a library
 
-See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how to run Reth.
+You can use individual crates of reth in your project.
 
-### Build & Test
+The crate docs can be found [here](https://paradigmxyz.github.io/reth/docs).
+
+For a general overview of the crates, see [Project Layout](./docs/repo/layout.md).
+
+### Contributing
+
+If you want to contribute, or follow along with contributor discussion, you can use our [main telegram](https://t.me/paradigm_reth) to chat with us about the development of Reth!
+
+- Our contributor guidelines can be found in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+- See our [contributor docs](./docs) for more information on the project. A good starting point is [Project Layout](./docs/repo/layout.md).
+
+### Building and testing
 
 The Minimum Supported Rust Version (MSRV) of this project is [1.70.0](https://blog.rust-lang.org/2023/06/01/Rust-1.70.0.html).
 
@@ -68,16 +97,6 @@ cargo test --workspace --features geth-tests
 
 We recommend using [`cargo nextest`](https://nexte.st/) to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
 
-## Contributing
-
-If you want to contribute, or follow along with contributor discussion, you can use our [main telegram](https://t.me/paradigm_reth) to chat with us about the development of Reth!
-
-See our [contributor docs](./docs) for more information on the project.
-
-A good starting point is [Project Layout](./docs/repo/layout.md) which gives an overview of the repository's structure, and descriptions for each package.
-
-Our contributor guidelines can be found in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
-
 ## Getting Help
 
 If you have any questions, first see if the answer to your question can be found in the [book][book].
@@ -100,16 +119,6 @@ None of this would have been possible without them, so big shoutout to the teams
 * [Geth](https://github.com/ethereum/go-ethereum/): We would like to express our heartfelt gratitude to the go-ethereum team for their outstanding contributions to Ethereum over the years. Their tireless efforts and dedication have helped to shape the Ethereum ecosystem and make it the vibrant and innovative community it is today. Thank you for your hard work and commitment to the project.
 * [Erigon](https://github.com/ledgerwatch/erigon) (fka Turbo-Geth): Erigon pioneered the ["Staged Sync" architecture](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) that Reth is using, as well as [introduced MDBX](https://github.com/ledgerwatch/erigon/wiki/Choice-of-storage-engine) as the database of choice. We thank Erigon for pushing the state of the art research on the performance limits of Ethereum nodes.
 * [Akula](https://github.com/akula-bft/akula/): Reth uses forks of the Apache versions of Akula's [MDBX Bindings](https://github.com/paradigmxyz/reth/pull/132), [FastRLP](https://github.com/paradigmxyz/reth/pull/63) and [ECIES](https://github.com/paradigmxyz/reth/pull/80) . Given that these packages were already released under the Apache License, and they implement standardized solutions, we decided not to reimplement them to iterate faster. We thank the Akula team for their contributions to the Rust Ethereum ecosystem and for publishing these packages.
-
-## 🚧 WARNING: UNDER CONSTRUCTION 🚧
-
-This project is work in progress and subject to frequent changes as we are still working on wiring up each individual node component into a full syncing pipeline.
-
-It has not been audited for security purposes and should not be used in production yet.
-
-We will be updating the documentation with the completion status of each component, as well as include more contributing guidelines (design docs, architecture diagrams, repository layouts) and "good first issues". See the "Contributing and Getting Help" section above for more.
-
-We appreciate your patience until we get there. Until then, we are happy to answer all questions in the Telegram link above.
 
 [book]: https://paradigmxyz.github.io/reth/
 [tg-url]: https://t.me/paradigm_reth

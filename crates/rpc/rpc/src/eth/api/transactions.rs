@@ -2,14 +2,15 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, SignError},
-        revm_utils::{inspect, prepare_call_env, replay_transactions_until, transact},
+        revm_utils::{
+            inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
+            EvmOverrides,
+        },
         utils::recover_raw_transaction,
     },
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
-
-use crate::eth::revm_utils::EvmOverrides;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
@@ -34,6 +35,9 @@ use revm::{
     Inspector,
 };
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
+
+/// Helper alias type for the state's [CacheDB]
+pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
@@ -122,7 +126,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send;
+        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send;
 
     /// Executes the call request at the given [BlockId].
     async fn transact_call_at(
@@ -141,7 +145,18 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send;
+        I: for<'r> Inspector<StateCacheDB<'r>> + Send;
+
+    /// Executes the call request at the given [BlockId]
+    async fn inspect_call_at_and_return_state<'a, I>(
+        &'a self,
+        request: CallRequest,
+        at: BlockId,
+        overrides: EvmOverrides,
+        inspector: I,
+    ) -> EthResult<(ResultAndState, Env, StateCacheDB<'a>)>
+    where
+        I: Inspector<StateCacheDB<'a>> + Send;
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
@@ -179,10 +194,10 @@ pub trait EthTransactions: Send + Sync {
 }
 
 #[async_trait]
-impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthTransactions for EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
@@ -197,22 +212,42 @@ where
         f(state)
     }
 
-    async fn evm_env_at(&self, mut at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
-            if let Some(pending) = self.client().pending_header()? {
-                let mut cfg = CfgEnv::default();
-                let mut block_env = BlockEnv::default();
-                self.client().fill_block_env_with_header(&mut block_env, &pending.header)?;
-                self.client().fill_cfg_env_with_header(&mut cfg, &pending.header)?;
-                return Ok((cfg, block_env, pending.hash.into()))
-            }
-            // No pending block, use latest
-            at = BlockId::Number(BlockNumberOrTag::Latest);
+            let header = if let Some(pending) = self.provider().pending_header()? {
+                pending
+            } else {
+                // no pending block from the CL yet, so we use the latest block and modify the env
+                // values that we can
+                let mut latest = self
+                    .provider()
+                    .latest_header()?
+                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+                // child block
+                latest.number += 1;
+                // assumed child block is in the next slot
+                latest.timestamp += 12;
+                // base fee of the child block
+                latest.base_fee_per_gas = latest.next_block_base_fee();
+
+                latest
+            };
+
+            let mut cfg = CfgEnv::default();
+            let mut block_env = BlockEnv::default();
+            self.provider().fill_block_env_with_header(&mut block_env, &header)?;
+            self.provider().fill_cfg_env_with_header(&mut cfg, &header)?;
+            return Ok((cfg, block_env, header.hash.into()))
+        } else {
+            //  Use cached values if there is no pending block
+            let block_hash = self
+                .provider()
+                .block_hash_for_id(at)?
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
+            Ok((cfg, env, block_hash.into()))
         }
-        let block_hash =
-            self.client().block_hash_for_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
-        Ok((cfg, env, block_hash.into()))
     }
 
     async fn evm_env_for_raw_block(&self, header: &Header) -> EthResult<(CfgEnv, BlockEnv)> {
@@ -247,7 +282,7 @@ where
         // Try to find the transaction on disk
         let mut resp = self
             .on_blocking_task(|this| async move {
-                match this.client().transaction_by_hash_with_meta(hash)? {
+                match this.provider().transaction_by_hash_with_meta(hash)? {
                     None => Ok(None),
                     Some((tx, meta)) => {
                         let transaction = tx
@@ -325,12 +360,12 @@ where
 
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
         self.on_blocking_task(|this| async move {
-            let (tx, meta) = match this.client().transaction_by_hash_with_meta(hash)? {
+            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
                 Some((tx, meta)) => (tx, meta),
                 None => return Ok(None),
             };
 
-            let receipt = match this.client().receipt_by_hash(hash)? {
+            let receipt = match this.provider().receipt_by_hash(hash)? {
                 Some(recpt) => recpt,
                 None => return Ok(None),
             };
@@ -436,7 +471,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send,
+        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
@@ -463,9 +498,27 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send,
+        I: for<'r> Inspector<StateCacheDB<'r>> + Send,
     {
         self.with_call_at(request, at, overrides, |db, env| inspect(db, env, inspector)).await
+    }
+
+    async fn inspect_call_at_and_return_state<'a, I>(
+        &'a self,
+        request: CallRequest,
+        at: BlockId,
+        overrides: EvmOverrides,
+        inspector: I,
+    ) -> EthResult<(ResultAndState, Env, StateCacheDB<'a>)>
+    where
+        I: Inspector<StateCacheDB<'a>> + Send,
+    {
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
+        let state = self.state_at(at)?;
+        let mut db = SubState::new(State::new(state));
+
+        let env = prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
+        inspect_and_return_db(db, env, inspector)
     }
 
     fn trace_at<F, R>(
@@ -546,10 +599,10 @@ where
 
 // === impl EthApi ===
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
     pub(crate) fn sign_request(

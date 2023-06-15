@@ -20,12 +20,10 @@
    1. [admin](./jsonrpc/admin.md)
    1. [rpc](./jsonrpc/rpc.md)
 1. [CLI Reference](./cli/cli.md)
-   1. [reth node](./cli/node.md) -->
+   1. [reth node](./cli/node.md)
    1. [reth db](./cli/db.md)
    1. [reth p2p](./cli/p2p.md)
    1. [reth stage](./cli/stage.md)
-   1. [reth dump-stage](./cli/dump-stage.md)
-   1. [reth drop-stage](./cli/drop-stage.md)
 1. [Developers](./developers/developers.md)
    1. [Contribute](./developers/contribute.md)
    1. [Architecture](./developers/architecture.md)

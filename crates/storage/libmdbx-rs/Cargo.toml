@@ -18,7 +18,7 @@ derive_more = "0.99"
 indexmap = "1"
 libc = "0.2"
 parking_lot = "0.12"
-thiserror = "1"
+thiserror = { workspace = true }
 
 ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
 
@@ -31,7 +31,7 @@ return-borrowed = []
 [dev-dependencies]
 pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion = "0.4"
-rand = "0.8"
+rand = { workspace = true }
 rand_xorshift = "0.3"
 tempfile = "3"
 

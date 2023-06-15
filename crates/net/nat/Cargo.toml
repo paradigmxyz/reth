@@ -20,13 +20,13 @@ igd = { git = "https://github.com/stevefan1999-personal/rust-igd", features = ["
 # misc
 tracing = { workspace = true }
 pin-project-lite = "0.2.9"
-tokio = { version = "1", features = ["time"] }
-thiserror = "1.0"
+tokio = { workspace = true, features = ["time"] }
+thiserror = { workspace = true }
 serde_with = { version = "2.1.0", optional = true }
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }
-tokio = { version = "1", features = ["macros"] }
+tokio = { workspace = true, features = ["macros"] }
 
 [features]
 default = ["serde"]

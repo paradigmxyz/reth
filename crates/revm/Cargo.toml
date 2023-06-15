@@ -10,9 +10,9 @@ description = "reth specific revm utilities"
 
 [dependencies]
 # reth 
-reth-primitives = { path = "../primitives" }
-reth-interfaces = { path = "../interfaces" }
-reth-provider = { path = "../storage/provider" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
+reth-provider = { workspace = true }
 reth-revm-primitives = { path = "./revm-primitives" }
 reth-revm-inspectors = { path = "./revm-inspectors" }
 reth-consensus-common = { path = "../consensus/common" }
@@ -24,5 +24,5 @@ revm = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-reth-rlp = { path = "../rlp" }
+reth-rlp = { workspace = true }
 once_cell = "1.17.0"

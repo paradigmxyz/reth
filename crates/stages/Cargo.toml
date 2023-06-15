@@ -16,26 +16,26 @@ normal = [
 
 [dependencies]
 # reth
-reth-primitives = { path = "../primitives" }
-reth-interfaces = { path = "../interfaces" }
+reth-primitives = { workspace = true }
+reth-interfaces = { workspace = true }
 reth-db = { path = "../storage/db" }
 reth-codecs = { path = "../storage/codecs" }
-reth-provider = { path = "../storage/provider" }
-reth-metrics = { path = "../metrics" }
+reth-provider = { workspace = true }
+reth-metrics = { workspace = true }
 reth-trie = { path = "../trie" }
 
 # async
-tokio = { version = "1.21.2", features = ["sync"] }
-tokio-stream = "0.1.10"
-async-trait = "0.1.57"
-futures-util = "0.3.25"
-pin-project = "1.0.12"
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+pin-project = { workspace = true }
 
 # observability
 tracing = { workspace = true }
 
 # misc
-thiserror = "1.0.37"
+thiserror = { workspace = true }
 aquamarine = "0.3.0"
 itertools = "0.10.5"
 rayon = "1.6.0"
@@ -43,20 +43,20 @@ num-traits = "0.2.15"
 
 [dev-dependencies]
 # reth
-reth-primitives = { path = "../primitives", features = ["arbitrary"] }
+reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
-reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
 reth-blockchain-tree = { path = "../blockchain-tree" }
-reth-rlp = { path = "../rlp" }
+reth-rlp = { workspace = true }
 reth-revm = { path = "../revm" }
 reth-trie = { path = "../trie", features = ["test-utils"] }
 
 itertools = "0.10.5"
-tokio = { version = "*", features = ["rt", "sync", "macros"] }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 assert_matches = "1.5.0"
-rand = "0.8.5"
+rand = { workspace = true }
 paste = "1.0"
 
 # Stage benchmarks

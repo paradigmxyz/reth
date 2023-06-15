@@ -10,7 +10,7 @@ use reth_interfaces::test_utils::generators::{
     random_transition_range,
 };
 use reth_primitives::{Account, Address, SealedBlock, H256, MAINNET};
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::TestTransaction,
@@ -38,7 +38,7 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
 
         // Clear previous run
@@ -66,7 +66,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ShareableDatabase::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let mut provider = factory.provider_rw().unwrap();
 
         StorageHashingStage::default().unwind(&mut provider, unwind).await.unwrap();

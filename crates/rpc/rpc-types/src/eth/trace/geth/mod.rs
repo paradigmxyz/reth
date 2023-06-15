@@ -3,7 +3,7 @@
 
 use crate::{state::StateOverride, BlockOverrides};
 use reth_primitives::{Bytes, H256, U256};
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::BTreeMap;
 
 // re-exports
@@ -20,7 +20,7 @@ mod noop;
 mod pre_state;
 
 /// Result type for geth style transaction trace
-pub type TraceResult = crate::trace::common::TraceResult<GethTraceFrame, String>;
+pub type TraceResult = crate::trace::common::TraceResult<GethTrace, String>;
 
 /// blockTraceResult represents the results of tracing a single block when an entire chain is being
 /// traced. ref <https://github.com/ethereum/go-ethereum/blob/ee530c0d5aa70d2c00ab5691a89ab431b73f8165/eth/tracers/api.go#L218-L222>
@@ -34,7 +34,7 @@ pub struct BlockTraceResult {
     pub traces: Vec<TraceResult>,
 }
 
-/// Geth Default trace frame
+/// Geth Default struct log trace frame
 ///
 /// <https://github.com/ethereum/go-ethereum/blob/a9ef135e2dd53682d106c6a2aede9187026cc1de/eth/tracers/logger/logger.go#L406-L411>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,63 +91,55 @@ pub struct StructLog {
     pub error: Option<String>,
 }
 
-/// Tracing response
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum GethTraceFrame {
-    Default(DefaultFrame),
-    NoopTracer(NoopFrame),
-    FourByteTracer(FourByteFrame),
-    CallTracer(CallFrame),
-    PreStateTracer(PreStateFrame),
-}
-
-impl From<DefaultFrame> for GethTraceFrame {
-    fn from(value: DefaultFrame) -> Self {
-        GethTraceFrame::Default(value)
-    }
-}
-
-impl From<FourByteFrame> for GethTraceFrame {
-    fn from(value: FourByteFrame) -> Self {
-        GethTraceFrame::FourByteTracer(value)
-    }
-}
-
-impl From<CallFrame> for GethTraceFrame {
-    fn from(value: CallFrame) -> Self {
-        GethTraceFrame::CallTracer(value)
-    }
-}
-
-impl From<PreStateFrame> for GethTraceFrame {
-    fn from(value: PreStateFrame) -> Self {
-        GethTraceFrame::PreStateTracer(value)
-    }
-}
-
-impl From<NoopFrame> for GethTraceFrame {
-    fn from(value: NoopFrame) -> Self {
-        GethTraceFrame::NoopTracer(value)
-    }
-}
-
+/// Tracing response objects
+///
+/// Note: This deserializes untagged, so it's possible that a custom javascript tracer response
+/// matches another variant, for example a js tracer that returns `{}` would be deserialized as
+/// [GethTrace::NoopTracer]
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum GethTrace {
-    Known(GethTraceFrame),
-    Unknown(serde_json::Value),
+    /// The response for the default struct log tracer
+    Default(DefaultFrame),
+    /// The response for call tracer
+    CallTracer(CallFrame),
+    /// The response for four byte tracer
+    FourByteTracer(FourByteFrame),
+    /// The response for pre-state byte tracer
+    PreStateTracer(PreStateFrame),
+    /// An empty json response
+    NoopTracer(NoopFrame),
+    /// Any other trace response, such as custom javascript response objects
+    JS(serde_json::Value),
 }
 
-impl From<GethTraceFrame> for GethTrace {
-    fn from(value: GethTraceFrame) -> Self {
-        GethTrace::Known(value)
+impl From<DefaultFrame> for GethTrace {
+    fn from(value: DefaultFrame) -> Self {
+        GethTrace::Default(value)
     }
 }
 
-impl From<serde_json::Value> for GethTrace {
-    fn from(value: serde_json::Value) -> Self {
-        GethTrace::Unknown(value)
+impl From<FourByteFrame> for GethTrace {
+    fn from(value: FourByteFrame) -> Self {
+        GethTrace::FourByteTracer(value)
+    }
+}
+
+impl From<CallFrame> for GethTrace {
+    fn from(value: CallFrame) -> Self {
+        GethTrace::CallTracer(value)
+    }
+}
+
+impl From<PreStateFrame> for GethTrace {
+    fn from(value: PreStateFrame) -> Self {
+        GethTrace::PreStateTracer(value)
+    }
+}
+
+impl From<NoopFrame> for GethTrace {
+    fn from(value: NoopFrame) -> Self {
+        GethTrace::NoopTracer(value)
     }
 }
 
@@ -182,30 +174,6 @@ pub enum GethDebugBuiltInTracerType {
     NoopTracer,
 }
 
-/// Configuration for the builtin tracer
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum GethDebugBuiltInTracerConfig {
-    CallTracer(CallConfig),
-    PreStateTracer(PreStateConfig),
-}
-
-// === impl GethDebugBuiltInTracerConfig ===
-
-impl GethDebugBuiltInTracerConfig {
-    /// Returns true if the config matches the given tracer
-    pub fn matches_tracer(&self, tracer: &GethDebugBuiltInTracerType) -> bool {
-        matches!(
-            (self, tracer),
-            (GethDebugBuiltInTracerConfig::CallTracer(_), GethDebugBuiltInTracerType::CallTracer,) |
-                (
-                    GethDebugBuiltInTracerConfig::PreStateTracer(_),
-                    GethDebugBuiltInTracerType::PreStateTracer,
-                )
-        )
-    }
-}
-
 /// Available tracers
 ///
 /// See <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers> and <https://geth.ethereum.org/docs/developers/evm-tracing/custom-tracer>
@@ -219,53 +187,45 @@ pub enum GethDebugTracerType {
 }
 
 /// Configuration of the tracer
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum GethDebugTracerConfig {
-    /// built-in tracer
-    BuiltInTracer(GethDebugBuiltInTracerConfig),
-    /// custom JS tracer
-    JsTracer(serde_json::Value),
-}
+///
+/// This is a simple wrapper around serde_json::Value.
+/// with helpers for deserializing tracer configs.
+#[derive(Debug, PartialEq, Eq, Clone, Default, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct GethDebugTracerConfig(pub serde_json::Value);
 
 // === impl GethDebugTracerConfig ===
 
 impl GethDebugTracerConfig {
+    /// Returns if this is a null object
+    pub fn is_null(&self) -> bool {
+        self.0.is_null()
+    }
+
+    /// Consumes the config and tries to deserialize it into the given type.
+    pub fn from_value<T: DeserializeOwned>(self) -> Result<T, serde_json::Error> {
+        serde_json::from_value(self.0)
+    }
+
     /// Returns the [CallConfig] if it is a call config.
-    pub fn into_call_config(self) -> Option<CallConfig> {
-        match self {
-            GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::CallTracer(cfg)) => {
-                Some(cfg)
-            }
-            _ => None,
-        }
+    pub fn into_call_config(self) -> Result<CallConfig, serde_json::Error> {
+        self.from_value()
+    }
+
+    /// Returns the raw json value
+    pub fn into_json(self) -> serde_json::Value {
+        self.0
     }
 
     /// Returns the [PreStateConfig] if it is a call config.
-    pub fn into_pre_state_config(self) -> Option<PreStateConfig> {
-        match self {
-            GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::PreStateTracer(
-                cfg,
-            )) => Some(cfg),
-            _ => None,
-        }
+    pub fn into_pre_state_config(self) -> Result<PreStateConfig, serde_json::Error> {
+        self.from_value()
     }
+}
 
-    /// Returns true if the config matches the given tracer
-    pub fn matches_tracer(&self, tracer: &GethDebugTracerType) -> bool {
-        match (self, tracer) {
-            (_, GethDebugTracerType::BuiltInTracer(tracer)) => self.matches_builtin_tracer(tracer),
-            (GethDebugTracerConfig::JsTracer(_), GethDebugTracerType::JsTracer(_)) => true,
-            _ => false,
-        }
-    }
-
-    /// Returns true if the config matches the given tracer
-    pub fn matches_builtin_tracer(&self, tracer: &GethDebugBuiltInTracerType) -> bool {
-        match (self, tracer) {
-            (GethDebugTracerConfig::BuiltInTracer(config), tracer) => config.matches_tracer(tracer),
-            (GethDebugTracerConfig::JsTracer(_), _) => false,
-        }
+impl From<serde_json::Value> for GethDebugTracerConfig {
+    fn from(value: serde_json::Value) -> Self {
+        GethDebugTracerConfig(value)
     }
 }
 
@@ -282,10 +242,16 @@ pub struct GethDebugTracingOptions {
     /// If `None` then the default structlog tracer is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracer: Option<GethDebugTracerType>,
+    /// Config specific to given `tracer`.
+    ///
+    /// Note default struct logger config are historically embedded in main object.
+    ///
     /// tracerConfig is slated for Geth v1.11.0
     /// See <https://github.com/ethereum/go-ethereum/issues/26513>
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tracer_config: Option<GethDebugTracerConfig>,
+    ///
+    /// This could be [CallConfig] or [PreStateConfig] depending on the tracer.
+    #[serde(default, skip_serializing_if = "GethDebugTracerConfig::is_null")]
+    pub tracer_config: GethDebugTracerConfig,
     /// A string of decimal integers that overrides the JavaScript-based tracing calls default
     /// timeout of 5 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -122,16 +122,37 @@ where
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn inspect<S, I>(db: S, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
+pub(crate) fn inspect<DB, I>(db: DB, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
 where
-    S: Database,
-    <S as Database>::Error: Into<EthApiError>,
-    I: Inspector<S>,
+    DB: Database,
+    <DB as Database>::Error: Into<EthApiError>,
+    I: Inspector<DB>,
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
     let res = evm.inspect(inspector)?;
     Ok((res, evm.env))
+}
+
+/// Same as [inspect] but also returns the database again.
+///
+/// Even though [Database] is also implemented on `&mut`
+/// this is still useful if there are certain trait bounds on the Inspector's database generic type
+pub(crate) fn inspect_and_return_db<DB, I>(
+    db: DB,
+    env: Env,
+    inspector: I,
+) -> EthResult<(ResultAndState, Env, DB)>
+where
+    DB: Database,
+    <DB as Database>::Error: Into<EthApiError>,
+    I: Inspector<DB>,
+{
+    let mut evm = revm::EVM::with_env(env);
+    evm.database(db);
+    let res = evm.inspect(inspector)?;
+    let db = evm.take_db();
+    Ok((res, evm.env, db))
 }
 
 /// Replays all the transactions until the target transaction is found.

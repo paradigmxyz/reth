@@ -47,7 +47,7 @@ pub trait EngineApi {
     /// Caution: This should not return the `withdrawals` field
     ///
     /// Note:
-    /// > Client software MAY stop the corresponding build process after serving this call.
+    /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV1")]
     async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayload>;
 
@@ -55,7 +55,7 @@ pub trait EngineApi {
     ///
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call. Note:
-    /// > Client software MAY stop the corresponding build process after serving this call.
+    /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV2")]
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelope>;
 

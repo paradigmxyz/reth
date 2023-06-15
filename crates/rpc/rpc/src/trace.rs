@@ -33,28 +33,28 @@ use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 /// `trace` API implementation.
 ///
 /// This type provides the functionality for handling `trace` related requests.
-pub struct TraceApi<Client, Eth> {
-    inner: Arc<TraceApiInner<Client, Eth>>,
+pub struct TraceApi<Provider, Eth> {
+    inner: Arc<TraceApiInner<Provider, Eth>>,
 }
 
 // === impl TraceApi ===
 
-impl<Client, Eth> TraceApi<Client, Eth> {
-    /// The client that can interact with the chain.
-    pub fn client(&self) -> &Client {
-        &self.inner.client
+impl<Provider, Eth> TraceApi<Provider, Eth> {
+    /// The provider that can interact with the chain.
+    pub fn provider(&self) -> &Provider {
+        &self.inner.provider
     }
 
     /// Create a new instance of the [TraceApi]
     pub fn new(
-        client: Client,
+        provider: Provider,
         eth_api: Eth,
         eth_cache: EthStateCache,
         task_spawner: Box<dyn TaskSpawner>,
         tracing_call_guard: TracingCallGuard,
     ) -> Self {
         let inner = Arc::new(TraceApiInner {
-            client,
+            provider,
             eth_api,
             eth_cache,
             task_spawner,
@@ -73,9 +73,9 @@ impl<Client, Eth> TraceApi<Client, Eth> {
 
 // === impl TraceApi ===
 
-impl<Client, Eth> TraceApi<Client, Eth>
+impl<Provider, Eth> TraceApi<Provider, Eth>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the future on a new blocking task.
@@ -382,9 +382,9 @@ where
 }
 
 #[async_trait]
-impl<Client, Eth> TraceApiServer for TraceApi<Client, Eth>
+impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
@@ -486,20 +486,20 @@ where
     }
 }
 
-impl<Client, Eth> std::fmt::Debug for TraceApi<Client, Eth> {
+impl<Provider, Eth> std::fmt::Debug for TraceApi<Provider, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceApi").finish_non_exhaustive()
     }
 }
-impl<Client, Eth> Clone for TraceApi<Client, Eth> {
+impl<Provider, Eth> Clone for TraceApi<Provider, Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct TraceApiInner<Client, Eth> {
-    /// The client that can interact with the chain.
-    client: Client,
+struct TraceApiInner<Provider, Eth> {
+    /// The provider that can interact with the chain.
+    provider: Provider,
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     /// The async cache frontend for eth-related data
