@@ -1445,11 +1445,19 @@ mod tests {
 
         let headers = downloader.next().await.unwrap();
         assert_eq!(headers, Ok(vec![p0]));
+        let headers = headers.unwrap();
+        assert_eq!(headers.capacity(), headers.len());
 
         let headers = downloader.next().await.unwrap();
         assert_eq!(headers, Ok(vec![p1]));
+        let headers = headers.unwrap();
+        assert_eq!(headers.capacity(), headers.len());
+
         let headers = downloader.next().await.unwrap();
         assert_eq!(headers, Ok(vec![p2]));
+        let headers = headers.unwrap();
+        assert_eq!(headers.capacity(), headers.len());
+
         assert!(downloader.next().await.is_none());
     }
 }
