@@ -745,10 +745,7 @@ mod tests {
         );
         assert_eq!(
             init_state.storage.get(&address),
-            Some(&Storage {
-                storage: HashMap::from([(init_slot, U256::from(1))]),
-                times_wiped: 0
-            })
+            Some(&Storage { storage: HashMap::from([(init_slot, U256::from(1))]), times_wiped: 0 })
         );
 
         let mut post_state = PostState::new();
