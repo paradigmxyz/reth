@@ -13,12 +13,14 @@ use reth_db::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
+    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
+    MAINNET, U256,
 };
-use reth_provider::Transaction;
+use reth_provider::{DatabaseProviderRW, ProviderFactory};
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
+    ops::RangeInclusive,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -35,26 +37,30 @@ pub struct TestTransaction {
     /// WriteMap DB
     pub tx: Arc<Env<WriteMap>>,
     pub path: Option<PathBuf>,
+    factory: ProviderFactory<Arc<Env<WriteMap>>>,
 }
 
 impl Default for TestTransaction {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        Self { tx: create_test_db::<WriteMap>(EnvKind::RW), path: None }
+        let tx = create_test_db::<WriteMap>(EnvKind::RW);
+        Self { tx: tx.clone(), path: None, factory: ProviderFactory::new(tx, MAINNET.clone()) }
     }
 }
 
 impl TestTransaction {
     pub fn new(path: &Path) -> Self {
+        let tx = create_test_db::<WriteMap>(EnvKind::RW);
         Self {
-            tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, path)),
+            tx: tx.clone(),
             path: Some(path.to_path_buf()),
+            factory: ProviderFactory::new(tx, MAINNET.clone()),
         }
     }
 
-    /// Return a database wrapped in [Transaction].
-    pub fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
-        Transaction::new(self.tx.borrow()).expect("failed to create db container")
+    /// Return a database wrapped in [DatabaseProviderRW].
+    pub fn inner(&self) -> DatabaseProviderRW<'_, Arc<Env<WriteMap>>> {
+        self.factory.provider_rw().expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
@@ -68,8 +74,8 @@ impl TestTransaction {
         F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
         let mut tx = self.inner();
-        f(&mut tx)?;
-        tx.commit()?;
+        f(tx.tx_mut())?;
+        tx.commit().expect("failed to commit");
         Ok(())
     }
 
@@ -78,7 +84,7 @@ impl TestTransaction {
     where
         F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, DbError>,
     {
-        f(&self.inner())
+        f(self.inner().tx_ref())
     }
 
     /// Check if the table is empty

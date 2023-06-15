@@ -23,6 +23,7 @@ pub(crate) fn convert_memory(data: &[u8]) -> Vec<String> {
 
 /// Get the gas used, accounting for refunds
 #[inline]
+#[allow(unused)]
 pub(crate) fn gas_used(spec: SpecId, spent: u64, refunded: u64) -> u64 {
     let refund_quotient = if SpecId::enabled(spec, SpecId::LONDON) { 5 } else { 2 };
     spent - (refunded).min(spent / refund_quotient)

@@ -202,10 +202,15 @@ where
 
     /// Retrieves database statistics.
     pub fn db_stat<'txn>(&'txn self, db: &Database<'txn>) -> Result<Stat> {
+        self.db_stat_with_dbi(db.dbi())
+    }
+
+    /// Retrieves database statistics by the given dbi.
+    pub fn db_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
         unsafe {
             let mut stat = Stat::new();
             mdbx_result(txn_execute(&self.txn, |txn| {
-                ffi::mdbx_dbi_stat(txn, db.dbi(), stat.mdb_stat(), size_of::<Stat>())
+                ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>())
             }))?;
             Ok(stat)
         }

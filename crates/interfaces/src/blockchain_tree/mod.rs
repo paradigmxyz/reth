@@ -108,6 +108,11 @@ impl CanonicalOutcome {
             CanonicalOutcome::Committed { head } => head,
         }
     }
+
+    /// Returns true if the block was already canonical.
+    pub fn is_already_canonical(&self) -> bool {
+        matches!(self, CanonicalOutcome::AlreadyCanonical { .. })
+    }
 }
 
 /// From Engine API spec, block inclusion can be valid, accepted or invalid.

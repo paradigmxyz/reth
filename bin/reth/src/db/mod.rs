@@ -1,5 +1,6 @@
 //! Database debugging tool
 use crate::{
+    args::utils::genesis_value_parser,
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
@@ -9,7 +10,6 @@ use eyre::WrapErr;
 use human_bytes::human_bytes;
 use reth_db::{database::Database, tables};
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::sync::Arc;
 use tracing::error;
 
@@ -72,9 +72,12 @@ pub enum Subcommands {
 pub struct ListArgs {
     /// The table name
     table: String, // TODO: Convert to enum
-    /// Where to start iterating
+    /// Skip first N entries
     #[arg(long, short, default_value = "0")]
-    start: usize,
+    skip: usize,
+    /// Reverse the order of the entries. If enabled last table entries are read.
+    #[arg(long, short, default_value = "false")]
+    reverse: bool,
     /// How many items to take from the walker
     #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
     len: usize,
@@ -97,7 +100,7 @@ impl Command {
             reth_db::mdbx::EnvKind::RW,
         )?;
 
-        let mut tool = DbTool::new(&db)?;
+        let mut tool = DbTool::new(&db, self.chain.clone())?;
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
@@ -114,7 +117,10 @@ impl Command {
                 ]);
 
                 tool.db.view(|tx| {
-                    for table in tables::TABLES.iter().map(|(_, name)| name) {
+                    let mut tables =
+                        tables::TABLES.iter().map(|(_, name)| name).collect::<Vec<_>>();
+                    tables.sort();
+                    for table in tables {
                         let table_db =
                             tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 
@@ -168,12 +174,12 @@ impl Command {
                                     }
 
                                     if args.json {
-                                        let list_result = tool.list::<tables::$table>(args.start, args.len)?.into_iter().collect::<Vec<_>>();
+                                        let list_result = tool.list::<tables::$table>(args.skip, args.len,args.reverse)?.into_iter().collect::<Vec<_>>();
                                         println!("{}", serde_json::to_string_pretty(&list_result)?);
                                         Ok(())
                                     } else {
-                                        tui::DbListTUI::<_, tables::$table>::new(|start, count| {
-                                            tool.list::<tables::$table>(start, count).unwrap()
+                                        tui::DbListTUI::<_, tables::$table>::new(|skip, count| {
+                                            tool.list::<tables::$table>(skip, count, args.reverse).unwrap()
                                         }, $start, $len, total_entries).run()
                                     }
                                 })??
@@ -186,7 +192,7 @@ impl Command {
                     }
                 }
 
-                table_tui!(args.table.as_str(), args.start, args.len => [
+                table_tui!(args.table.as_str(), args.skip, args.len => [
                     CanonicalHeaders,
                     HeaderTD,
                     HeaderNumbers,

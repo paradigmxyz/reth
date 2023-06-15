@@ -54,7 +54,7 @@ pub struct HashBuilder {
 impl From<HashBuilderState> for HashBuilder {
     fn from(state: HashBuilderState) -> Self {
         Self {
-            key: Nibbles::from(state.key),
+            key: Nibbles::from_hex(state.key),
             stack: state.stack,
             value: state.value,
             groups: state.groups,
@@ -70,7 +70,7 @@ impl From<HashBuilderState> for HashBuilder {
 impl From<HashBuilder> for HashBuilderState {
     fn from(state: HashBuilder) -> Self {
         Self {
-            key: state.key.hex_data,
+            key: state.key.hex_data.to_vec(),
             stack: state.stack,
             value: state.value,
             groups: state.groups,
@@ -153,7 +153,7 @@ impl HashBuilder {
         // Clears the internal state
         if !self.key.is_empty() {
             self.update(&Nibbles::default());
-            self.key.clear();
+            self.key.hex_data.0.clear();
             self.value = HashBuilderValue::Bytes(vec![]);
         }
         self.current_root()

@@ -114,7 +114,11 @@ pub struct CliContext {
 /// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        // increase stack size, mostly for RPC calls that use the evm: <https://github.com/paradigmxyz/reth/issues/3056> and  <https://github.com/bluealloy/revm/issues/305>
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()
 }
 
 /// Runs the given future to completion or until a critical task panicked

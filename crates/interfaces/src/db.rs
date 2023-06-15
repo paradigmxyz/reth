@@ -28,4 +28,7 @@ pub enum DatabaseError {
     /// Failed to decode a key from a table.
     #[error("Error decoding value.")]
     DecodeError,
+    /// Failed to get database stats.
+    #[error("Database stats error code: {0:?}")]
+    Stats(i32),
 }

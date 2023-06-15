@@ -1,6 +1,6 @@
 //! Command for debugging execution.
 use crate::{
-    args::{get_secret_key, NetworkArgs},
+    args::{get_secret_key, utils::genesis_value_parser, NetworkArgs},
     dirs::{DataDirPath, MaybePlatformPath},
     node::events,
     runner::CliContext,
@@ -26,18 +26,15 @@ use reth_interfaces::{
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
-use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-};
+use reth_provider::{providers::get_stage_checkpoint, ProviderFactory};
+use reth_staged_sync::utils::init::{init_db, init_genesis};
 use reth_stages::{
     sets::DefaultStages,
     stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
         TotalDifficultyStage,
     },
-    Pipeline, StageSet,
+    Pipeline, PipelineError, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -144,14 +141,10 @@ impl Command {
                 })
                 .set(ExecutionStage::new(
                     factory,
-                    ExecutionStageThresholds {
-                        max_blocks: None,
-                        max_changes: None,
-                        max_changesets: None,
-                    },
+                    ExecutionStageThresholds { max_blocks: None, max_changes: None },
                 )),
             )
-            .build(db);
+            .build(db, self.chain.clone());
 
         Ok(pipeline)
     }
@@ -177,7 +170,7 @@ impl Command {
                 Ipv4Addr::UNSPECIFIED,
                 self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
-            .build(ShareableDatabase::new(db, self.chain.clone()))
+            .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -257,6 +250,8 @@ impl Command {
         }
 
         let mut current_max_block = latest_block_number;
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+
         while current_max_block < self.to {
             let next_block = current_max_block + 1;
             let target_block = self.to.min(current_max_block + self.interval);
@@ -271,8 +266,10 @@ impl Command {
 
             // Unwind the pipeline without committing.
             {
-                let tx = Transaction::new(db.as_ref())?;
-                tx.take_block_and_execution_range(&self.chain, next_block..=target_block)?;
+                factory
+                    .provider_rw()
+                    .map_err(PipelineError::Interface)?
+                    .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }
 
             // Update latest block

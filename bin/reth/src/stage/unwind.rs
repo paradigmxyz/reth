@@ -1,19 +1,20 @@
 //! Unwinding a certain block range
 
-use crate::dirs::{DataDirPath, MaybePlatformPath};
+use crate::{
+    args::utils::genesis_value_parser,
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 use clap::{Parser, Subcommand};
 use reth_db::{
+    cursor::DbCursorRO,
     database::Database,
     mdbx::{Env, WriteMap},
     tables,
     transaction::DbTx,
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::Transaction;
-use reth_staged_sync::utils::chainspec::genesis_value_parser;
+use reth_provider::ProviderFactory;
 use std::{ops::RangeInclusive, sync::Arc};
-
-use reth_db::cursor::DbCursorRO;
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -68,13 +69,14 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        let mut tx = Transaction::new(&db)?;
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let provider = factory.provider_rw()?;
 
-        let blocks_and_execution = tx
+        let blocks_and_execution = provider
             .take_block_and_execution_range(&self.chain, range)
             .map_err(|err| eyre::eyre!("Transaction error on unwind: {err:?}"))?;
 
-        tx.commit()?;
+        provider.commit()?;
 
         println!("Unwound {} blocks", blocks_and_execution.len());
 
@@ -109,8 +111,8 @@ impl Subcommands {
                     .ok_or_else(|| eyre::eyre!("Block hash not found in database: {hash:?}"))?,
                 BlockHashOrNumber::Number(num) => *num,
             },
-            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount) + 1,
-        };
+            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount),
+        } + 1;
         Ok(target..=last.0)
     }
 }

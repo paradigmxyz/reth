@@ -68,9 +68,9 @@ mod tests {
         opts.tracing_options.tracer =
             Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::CallTracer));
         opts.tracing_options.tracer_config =
-            Some(GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::CallTracer(
-                CallConfig { only_top_call: Some(true), with_log: Some(true) },
-            )));
+            serde_json::to_value(CallConfig { only_top_call: Some(true), with_log: Some(true) })
+                .unwrap()
+                .into();
 
         assert_eq!(
             serde_json::to_string(&opts).unwrap(),

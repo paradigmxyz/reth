@@ -26,27 +26,27 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-pub struct EthFilter<Client, Pool> {
+pub struct EthFilter<Provider, Pool> {
     /// All nested fields bundled together.
-    inner: Arc<EthFilterInner<Client, Pool>>,
+    inner: Arc<EthFilterInner<Provider, Pool>>,
 }
 
-impl<Client, Pool> EthFilter<Client, Pool> {
+impl<Provider, Pool> EthFilter<Provider, Pool> {
     /// Creates a new, shareable instance.
     ///
-    /// This uses the given pool to get notified about new transactions, the client to interact with
-    /// the blockchain, the cache to fetch cacheable data, like the logs and the
+    /// This uses the given pool to get notified about new transactions, the provider to interact
+    /// with the blockchain, the cache to fetch cacheable data, like the logs and the
     /// max_logs_per_response to limit the amount of logs returned in a single response
     /// `eth_getLogs`
     pub fn new(
-        client: Client,
+        provider: Provider,
         pool: Pool,
         eth_cache: EthStateCache,
         max_logs_per_response: usize,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let inner = EthFilterInner {
-            client,
+            provider,
             active_filters: Default::default(),
             pool,
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
@@ -64,9 +64,9 @@ impl<Client, Pool> EthFilter<Client, Pool> {
     }
 }
 
-impl<Client, Pool> EthFilter<Client, Pool>
+impl<Provider, Pool> EthFilter<Provider, Pool>
 where
-    Client: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
+    Provider: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Executes the given filter on a new task.
@@ -91,7 +91,7 @@ where
 
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
-        let info = self.inner.client.chain_info()?;
+        let info = self.inner.provider.chain_info()?;
         let best_number = info.best_number;
 
         let (start_block, kind) = {
@@ -117,7 +117,7 @@ where
                 for block_num in start_block..best_number {
                     let block_hash = self
                         .inner
-                        .client
+                        .provider
                         .block_hash(block_num)?
                         .ok_or(EthApiError::UnknownBlockNumber)?;
                     block_hashes.push(block_hash);
@@ -128,11 +128,11 @@ where
                 let (from_block_number, to_block_number) = match filter.block_option {
                     FilterBlockOption::Range { from_block, to_block } => {
                         let from = from_block
-                            .map(|num| self.inner.client.convert_block_number(num))
+                            .map(|num| self.inner.provider.convert_block_number(num))
                             .transpose()?
                             .flatten();
                         let to = to_block
-                            .map(|num| self.inner.client.convert_block_number(num))
+                            .map(|num| self.inner.provider.convert_block_number(num))
                             .transpose()?
                             .flatten();
                         logs_utils::get_filter_block_range(from, to, start_block, info)
@@ -176,9 +176,9 @@ where
 }
 
 #[async_trait]
-impl<Client, Pool> EthFilterApiServer for EthFilter<Client, Pool>
+impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
 where
-    Client: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
+    Provider: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
@@ -238,13 +238,13 @@ where
     }
 }
 
-impl<Client, Pool> std::fmt::Debug for EthFilter<Client, Pool> {
+impl<Provider, Pool> std::fmt::Debug for EthFilter<Provider, Pool> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthFilter").finish_non_exhaustive()
     }
 }
 
-impl<Client, Pool> Clone for EthFilter<Client, Pool> {
+impl<Provider, Pool> Clone for EthFilter<Provider, Pool> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
@@ -252,12 +252,12 @@ impl<Client, Pool> Clone for EthFilter<Client, Pool> {
 
 /// Container type `EthFilter`
 #[derive(Debug)]
-struct EthFilterInner<Client, Pool> {
+struct EthFilterInner<Provider, Pool> {
     /// The transaction pool.
     #[allow(unused)] // we need this for non standard full transactions eventually
     pool: Pool,
-    /// The client that can interact with the chain.
-    client: Client,
+    /// The provider that can interact with the chain.
+    provider: Provider,
     /// All currently installed filters.
     active_filters: ActiveFilters,
     /// Provides ids to identify filters
@@ -272,9 +272,9 @@ struct EthFilterInner<Client, Pool> {
     task_spawner: Box<dyn TaskSpawner>,
 }
 
-impl<Client, Pool> EthFilterInner<Client, Pool>
+impl<Provider, Pool> EthFilterInner<Provider, Pool>
 where
-    Client: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
+    Provider: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
@@ -298,16 +298,16 @@ where
             }
             FilterBlockOption::Range { from_block, to_block } => {
                 // compute the range
-                let info = self.client.chain_info()?;
+                let info = self.provider.chain_info()?;
 
                 // we start at the most recent block if unset in filter
                 let start_block = info.best_number;
                 let from = from_block
-                    .map(|num| self.client.convert_block_number(num))
+                    .map(|num| self.provider.convert_block_number(num))
                     .transpose()?
                     .flatten();
                 let to = to_block
-                    .map(|num| self.client.convert_block_number(num))
+                    .map(|num| self.provider.convert_block_number(num))
                     .transpose()?
                     .flatten();
                 let (from_block_number, to_block_number) =
@@ -319,7 +319,7 @@ where
 
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
-        let last_poll_block_number = self.client.best_block_number().to_rpc_result()?;
+        let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
         let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
@@ -338,7 +338,7 @@ where
         &self,
         hash_or_number: BlockHashOrNumber,
     ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        let block_hash = match self.client.convert_block_hash(hash_or_number)? {
+        let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
             Some(hash) => hash,
             None => return Ok(None),
         };
@@ -386,7 +386,7 @@ where
         for (from, to) in
             BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
-            let headers = self.client.headers_range(from..=to)?;
+            let headers = self.provider.headers_range(from..=to)?;
 
             for (idx, header) in headers.iter().enumerate() {
                 // these are consecutive headers, so we can use the parent hash of the next block to

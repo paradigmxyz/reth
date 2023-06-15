@@ -11,7 +11,7 @@ use reth_interfaces::{
         BlockStatus, CanonicalOutcome,
     },
     consensus::{Consensus, ConsensusError},
-    executor::BlockExecutionError,
+    executor::{BlockExecutionError, BlockValidationError},
     Error,
 };
 use reth_primitives::{
@@ -22,7 +22,7 @@ use reth_provider::{
     chain::{ChainSplit, SplitAt},
     post_state::PostState,
     BlockNumProvider, CanonStateNotification, CanonStateNotificationSender,
-    CanonStateNotifications, Chain, ExecutorFactory, HeaderProvider, Transaction,
+    CanonStateNotifications, Chain, DatabaseProvider, ExecutorFactory, HeaderProvider,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -358,8 +358,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // https://github.com/paradigmxyz/reth/issues/1713
 
         let (block_status, chain) = {
-            let db = self.externals.database();
-            let provider = db
+            let factory = self.externals.database();
+            let provider = factory
                 .provider()
                 .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
@@ -378,7 +378,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO)
             {
                 return Err(InsertBlockError::execution_error(
-                    BlockExecutionError::BlockPreMerge { hash: block.hash },
+                    BlockValidationError::BlockPreMerge { hash: block.hash }.into(),
                     block.block,
                 ))
             }
@@ -621,20 +621,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         if let Err(e) =
             self.externals.consensus.validate_header_with_total_difficulty(block, U256::MAX)
         {
-            info!(
-                "Failed to validate header for TD related check with error: {e:?}, block:{:?}",
-                block
+            error!(
+                ?block,
+                "Failed to validate total difficulty for block {}: {e:?}", block.header.hash
             );
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
-            info!("Failed to validate header with error: {e:?}, block:{:?}", block);
+            error!(?block, "Failed to validate header {}: {e:?}", block.header.hash);
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_block(block) {
-            info!("Failed to validate blocks with error: {e:?}, block:{:?}", block);
+            error!(?block, "Failed to validate block {}: {e:?}", block.header.hash);
             return Err(e)
         }
 
@@ -829,9 +829,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // canonical, but in the db. If it is in a sidechain, it is not canonical. If it is not in
         // the db, then it is not canonical.
 
+        let factory = self.externals.database();
+        let provider = factory.provider()?;
+
         let mut header = None;
         if let Some(num) = self.block_indices.get_canonical_block_number(hash) {
-            header = self.externals.database().provider()?.header_by_number(num)?;
+            header = provider.header_by_number(num)?;
         }
 
         if header.is_none() && self.is_block_hash_inside_chain(*hash) {
@@ -839,7 +842,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         if header.is_none() {
-            header = self.externals.database().provider()?.header(hash)?
+            header = provider.header(hash)?
         }
 
         Ok(header.map(|header| header.seal(*hash)))
@@ -868,21 +871,23 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // If block is already canonical don't return error.
         if let Some(header) = self.find_canonical_header(block_hash)? {
-            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical");
-            let td = self
-                .externals
-                .database()
-                .provider()?
-                .header_td(block_hash)?
-                .ok_or(BlockExecutionError::MissingTotalDifficulty { hash: *block_hash })?;
+            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
+            let td = self.externals.database().provider()?.header_td(block_hash)?.ok_or(
+                BlockExecutionError::from(BlockValidationError::MissingTotalDifficulty {
+                    hash: *block_hash,
+                }),
+            )?;
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
-                return Err(BlockExecutionError::BlockPreMerge { hash: *block_hash }.into())
+                return Err(BlockExecutionError::from(BlockValidationError::BlockPreMerge {
+                    hash: *block_hash,
+                })
+                .into())
             }
             return Ok(CanonicalOutcome::AlreadyCanonical { header })
         }
 
         let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
-            info!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
+            error!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
             // TODO: better error
             return Err(BlockExecutionError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
@@ -991,14 +996,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
     /// Canonicalize the given chain and commit it to the database.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
-        let mut tx = Transaction::new(&self.externals.db)?;
+        let mut provider = DatabaseProvider::new_rw(
+            self.externals.db.tx_mut()?,
+            self.externals.chain_spec.clone(),
+        );
 
         let (blocks, state) = chain.into_inner();
 
-        tx.append_blocks_with_post_state(blocks.into_blocks().collect(), state)
+        provider
+            .append_blocks_with_post_state(blocks.into_blocks().collect(), state)
             .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;
 
-        tx.commit()?;
+        provider.commit()?;
 
         Ok(())
     }
@@ -1028,17 +1037,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Option<Chain>, Error> {
         // read data that is needed for new sidechain
 
-        let mut tx = Transaction::new(&self.externals.db)?;
+        let provider = DatabaseProvider::new_rw(
+            self.externals.db.tx_mut()?,
+            self.externals.chain_spec.clone(),
+        );
 
-        let tip = tx.tip_number()?;
+        let tip = provider.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
-        info!(target: "blockchain_tree", "Revert canonical chain range: {:?}", revert_range);
+        info!(target: "blockchain_tree", "Unwinding canonical chain blocks: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
-        let blocks_and_execution = tx
+        let blocks_and_execution = provider
             .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)
             .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
 
-        tx.commit()?;
+        provider.commit()?;
 
         if blocks_and_execution.is_empty() {
             Ok(None)

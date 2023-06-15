@@ -9,10 +9,10 @@ use reth_primitives::{
 #[derive(Debug)]
 pub enum StateRootProgress {
     /// The complete state root computation with updates and computed root.
-    Complete(H256, TrieUpdates),
+    Complete(H256, usize, TrieUpdates),
     /// The intermediate progress of state root computation.
     /// Contains the walker stack, the hash builder and the trie updates.
-    Progress(Box<IntermediateStateRootState>, TrieUpdates),
+    Progress(Box<IntermediateStateRootState>, usize, TrieUpdates),
 }
 
 /// The intermediate state of the state root computation.
@@ -34,7 +34,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
             hash_builder: HashBuilder::from(value.state),
             walker_stack: value.walker_stack.into_iter().map(CursorSubNode::from).collect(),
             last_account_key: value.last_account_key,
-            last_walker_key: Nibbles::from(value.last_walker_key),
+            last_walker_key: Nibbles::from_hex(value.last_walker_key),
         }
     }
 }

@@ -8,6 +8,7 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 
+use crate::args::utils::genesis_value_parser;
 use reth_config::Config;
 use reth_db::database::Database;
 use reth_downloaders::{
@@ -16,10 +17,7 @@ use reth_downloaders::{
 };
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::{ChainSpec, H256};
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-};
+use reth_staged_sync::utils::init::{init_db, init_genesis};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -176,11 +174,10 @@ impl ImportCommand {
                     ExecutionStageThresholds {
                         max_blocks: config.stages.execution.max_blocks,
                         max_changes: config.stages.execution.max_changes,
-                        max_changesets: config.stages.execution.max_changesets,
                     },
                 )),
             )
-            .build(db);
+            .build(db, self.chain.clone());
 
         let events = pipeline.events().map(Into::into);
 

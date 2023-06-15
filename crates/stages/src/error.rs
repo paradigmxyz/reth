@@ -20,6 +20,23 @@ pub enum StageError {
         #[source]
         error: consensus::ConsensusError,
     },
+    /// The stage encountered a downloader error where the responses cannot be attached to the
+    /// current head.
+    #[error(
+        "Stage encountered inconsistent chain. Downloaded header #{header_number} ({header_hash:?}) is detached from local head #{head_number} ({head_hash:?}). Details: {error}.",
+        header_number = header.number,
+        header_hash = header.hash,
+        head_number = local_head.number,
+        head_hash = local_head.hash,
+    )]
+    DetachedHead {
+        /// The local head we attempted to attach to.
+        local_head: SealedHeader,
+        /// The header we attempted to attach.
+        header: SealedHeader,
+        /// The error that occurred when attempting to attach the header.
+        error: Box<consensus::ConsensusError>,
+    },
     /// The stage encountered a database error.
     #[error("An internal database error occurred: {0}")]
     Database(#[from] DbError),
@@ -49,6 +66,9 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
     Download(#[from] DownloadError),
+    /// Internal error
+    #[error(transparent)]
+    Internal(#[from] reth_interfaces::Error),
     /// The stage encountered a recoverable error.
     ///
     /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
@@ -87,6 +107,9 @@ pub enum PipelineError {
     /// The pipeline encountered a database error.
     #[error("A database error occurred.")]
     Database(#[from] DbError),
+    /// The pipeline encountered an irrecoverable error in one of the stages.
+    #[error("An interface error occurred.")]
+    Interface(#[from] reth_interfaces::Error),
     /// The pipeline encountered an error while trying to send an event.
     #[error("The pipeline encountered an error while trying to send an event.")]
     Channel(#[from] SendError<PipelineEvent>),

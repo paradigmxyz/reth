@@ -81,7 +81,7 @@ pub(crate) struct ReceivedForkchoiceState {
 
 /// A simplified representation of [PayloadStatusEnum] specifically for FCU.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum ForkchoiceStatus {
+pub enum ForkchoiceStatus {
     /// The forkchoice state is valid.
     Valid,
     /// The forkchoice state is invalid.

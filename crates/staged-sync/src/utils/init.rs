@@ -6,7 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, H256, U256};
-use reth_provider::{PostState, Transaction, TransactionError};
+use reth_provider::{DatabaseProviderRW, PostState, ProviderFactory, TransactionError};
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -22,13 +22,14 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum InitDatabaseError {
-    /// Attempted to reinitialize database with inconsistent genesis block
-    #[error("Genesis hash mismatch: expected {expected}, got {actual}")]
+    /// An existing genesis block was found in the database, and its hash did not match the hash of
+    /// the chainspec.
+    #[error("Genesis hash in the database does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
     GenesisHashMismatch {
         /// Expected genesis hash.
-        expected: H256,
+        chainspec_hash: H256,
         /// Actual genesis hash.
-        actual: H256,
+        database_hash: H256,
     },
 
     /// Higher level error encountered when using a Transaction.
@@ -38,6 +39,10 @@ pub enum InitDatabaseError {
     /// Low-level database error.
     #[error(transparent)]
     DBError(#[from] reth_db::DatabaseError),
+
+    /// Internal error.
+    #[error(transparent)]
+    InternalError(#[from] reth_interfaces::Error),
 }
 
 /// Write the genesis block if it has not already been written
@@ -48,8 +53,7 @@ pub fn init_genesis<DB: Database>(
 ) -> Result<H256, InitDatabaseError> {
     let genesis = chain.genesis();
 
-    let header = chain.genesis_header();
-    let hash = header.hash_slow();
+    let hash = chain.genesis_hash();
 
     let tx = db.tx()?;
     if let Some((_, db_hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
@@ -58,24 +62,23 @@ pub fn init_genesis<DB: Database>(
             return Ok(hash)
         }
 
-        return Err(InitDatabaseError::GenesisHashMismatch { expected: hash, actual: db_hash })
+        return Err(InitDatabaseError::GenesisHashMismatch {
+            chainspec_hash: hash,
+            database_hash: db_hash,
+        })
     }
 
     drop(tx);
     debug!("Writing genesis block.");
-    let tx = db.tx_mut()?;
 
     // use transaction to insert genesis header
-    let transaction = Transaction::new_raw(&db, tx);
-    insert_genesis_hashes(transaction, genesis)?;
+    let factory = ProviderFactory::new(&db, chain.clone());
+    let provider_rw = factory.provider_rw()?;
+    insert_genesis_hashes(provider_rw, genesis)?;
 
     // Insert header
     let tx = db.tx_mut()?;
-    tx.put::<tables::CanonicalHeaders>(0, hash)?;
-    tx.put::<tables::HeaderNumbers>(hash, 0)?;
-    tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
-    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
-    tx.put::<tables::Headers>(0, header)?;
+    insert_genesis_header::<DB>(&tx, chain.clone())?;
 
     insert_genesis_state::<DB>(&tx, genesis)?;
 
@@ -124,20 +127,37 @@ pub fn insert_genesis_state<DB: Database>(
 
 /// Inserts hashes for the genesis state.
 pub fn insert_genesis_hashes<DB: Database>(
-    mut transaction: Transaction<'_, DB>,
+    provider: DatabaseProviderRW<'_, &DB>,
     genesis: &reth_primitives::Genesis,
 ) -> Result<(), InitDatabaseError> {
     // insert and hash accounts to hashing table
     let alloc_accounts =
         genesis.alloc.clone().into_iter().map(|(addr, account)| (addr, Some(account.into())));
-    transaction.insert_account_for_hashing(alloc_accounts)?;
+    provider.insert_account_for_hashing(alloc_accounts)?;
 
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
         // only return Some if there is storage
         account.storage.map(|storage| (addr, storage.into_iter().map(|(k, v)| (k, v.into()))))
     });
-    transaction.insert_storage_for_hashing(alloc_storage)?;
-    transaction.commit()?;
+    provider.insert_storage_for_hashing(alloc_storage)?;
+    provider.commit()?;
+
+    Ok(())
+}
+
+/// Inserts header for the genesis state.
+pub fn insert_genesis_header<DB: Database>(
+    tx: &<DB as DatabaseGAT<'_>>::TXMut,
+    chain: Arc<ChainSpec>,
+) -> Result<(), InitDatabaseError> {
+    let header = chain.sealed_genesis_header();
+
+    tx.put::<tables::CanonicalHeaders>(0, header.hash)?;
+    tx.put::<tables::HeaderNumbers>(header.hash, 0)?;
+    tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
+    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
+    tx.put::<tables::Headers>(0, header.header)?;
+
     Ok(())
 }
 
@@ -148,12 +168,11 @@ mod tests {
     use reth_primitives::{
         GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
     };
-    use std::sync::Arc;
 
     #[test]
     fn success_init_genesis_mainnet() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, Arc::new(MAINNET.clone())).unwrap();
+        let genesis_hash = init_genesis(db, MAINNET.clone()).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS);
@@ -162,7 +181,7 @@ mod tests {
     #[test]
     fn success_init_genesis_goerli() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, Arc::new(GOERLI.clone())).unwrap();
+        let genesis_hash = init_genesis(db, GOERLI.clone()).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS);
@@ -171,7 +190,7 @@ mod tests {
     #[test]
     fn success_init_genesis_sepolia() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, Arc::new(SEPOLIA.clone())).unwrap();
+        let genesis_hash = init_genesis(db, SEPOLIA.clone()).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS);
@@ -180,16 +199,16 @@ mod tests {
     #[test]
     fn fail_init_inconsistent_db() {
         let db = create_test_rw_db();
-        init_genesis(db.clone(), Arc::new(SEPOLIA.clone())).unwrap();
+        init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(db, Arc::new(MAINNET.clone()));
+        let genesis_hash = init_genesis(db, MAINNET.clone());
 
         assert_eq!(
             genesis_hash.unwrap_err(),
             InitDatabaseError::GenesisHashMismatch {
-                expected: MAINNET_GENESIS,
-                actual: SEPOLIA_GENESIS
+                chainspec_hash: MAINNET_GENESIS,
+                database_hash: SEPOLIA_GENESIS
             }
         )
     }

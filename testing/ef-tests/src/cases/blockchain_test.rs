@@ -5,13 +5,10 @@ use crate::{
     Case, Error, Suite,
 };
 use reth_db::mdbx::test_utils::create_test_rw_db;
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    BlockBody, SealedBlock,
-};
-use reth_provider::Transaction;
+use reth_primitives::{BlockBody, SealedBlock};
+use reth_provider::ProviderFactory;
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
-use std::{collections::BTreeMap, ffi::OsStr, fs, ops::Deref, path::Path, sync::Arc};
+use std::{collections::BTreeMap, ffi::OsStr, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
 #[derive(Debug)]
@@ -78,19 +75,20 @@ impl Case for BlockchainTestCase {
 
             // Create the database
             let db = create_test_rw_db();
-            let mut transaction = Transaction::new(db.as_ref())?;
+            let factory = ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()));
+            let mut provider = factory.provider_rw().unwrap();
 
             // Insert test state
             reth_provider::insert_canonical_block(
-                transaction.deref(),
+                provider.tx_ref(),
                 SealedBlock::new(case.genesis_block_header.clone().into(), BlockBody::default()),
                 None,
             )?;
-            case.pre.write_to_db(transaction.deref())?;
+            case.pre.write_to_db(provider.tx_ref())?;
 
             let mut last_block = None;
             for block in case.blocks.iter() {
-                last_block = Some(block.write_to_db(transaction.deref())?);
+                last_block = Some(block.write_to_db(provider.tx_ref())?);
             }
 
             // Call execution stage
@@ -106,13 +104,8 @@ impl Case for BlockchainTestCase {
                         // ignore error
                         let _ = stage
                             .execute(
-                                &mut transaction,
-                                ExecInput {
-                                    previous_stage: last_block.map(|b| {
-                                        (StageId::Other("Dummy"), StageCheckpoint::new(b))
-                                    }),
-                                    checkpoint: None,
-                                },
+                                &mut provider,
+                                ExecInput { target: last_block, checkpoint: None },
                             )
                             .await;
                     });
@@ -126,13 +119,13 @@ impl Case for BlockchainTestCase {
                 }
                 Some(RootOrState::State(state)) => {
                     for (&address, account) in state.iter() {
-                        account.assert_db(address, transaction.deref())?;
+                        account.assert_db(address, provider.tx_ref())?;
                     }
                 }
                 None => println!("No post-state"),
             }
 
-            transaction.close();
+            drop(provider);
         }
         Ok(())
     }

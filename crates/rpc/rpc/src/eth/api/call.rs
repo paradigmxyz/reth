@@ -5,7 +5,7 @@ use crate::{
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
             build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
-            transact,
+            transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -19,7 +19,7 @@ use reth_revm::{
     access_list::AccessListInspector,
     database::{State, SubState},
 };
-use reth_rpc_types::{state::StateOverride, CallRequest};
+use reth_rpc_types::CallRequest;
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -31,10 +31,10 @@ use tracing::trace;
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 const MIN_CREATE_GAS: u64 = 53_000u64;
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].
@@ -53,13 +53,13 @@ where
         &self,
         request: CallRequest,
         block_number: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
+        overrides: EvmOverrides,
     ) -> EthResult<Bytes> {
         let (res, _env) = self
             .transact_call_at(
                 request,
                 block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                state_overrides,
+                overrides,
             )
             .await?;
 

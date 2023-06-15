@@ -140,7 +140,7 @@ where
                         receipts_root: Default::default(),
                         withdrawals_root: None,
                         logs_bloom: Default::default(),
-                        difficulty: U256::from(1),
+                        difficulty: U256::from(2),
                         number: storage.best_block + 1,
                         gas_limit: 30_000_000,
                         gas_used: 0,
@@ -182,6 +182,11 @@ where
 
                     match executor.execute_transactions(&block, U256::ZERO, Some(senders.clone())) {
                         Ok((post_state, gas_used)) => {
+                            // apply post block changes
+                            let post_state = executor
+                                .apply_post_block_changes(&block, U256::ZERO, post_state)
+                                .unwrap();
+
                             let Block { mut header, body, .. } = block;
 
                             // clear all transactions from pool
@@ -202,10 +207,14 @@ where
                                 BlockBody { transactions: body, ommers: vec![], withdrawals: None };
                             header.gas_used = gas_used;
 
+                            trace!(target: "consensus::auto", ?post_state, ?header, ?body, "executed block, calculating root");
+
                             // calculate the state root
                             let state_root =
                                 executor.db().db.0.state_root(post_state.clone()).unwrap();
                             header.state_root = state_root;
+
+                            trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
                             storage.insert_new_block(header.clone(), body);
 

@@ -90,7 +90,7 @@ where
     EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into()))
         .await
         .unwrap();
-    EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None)
+    EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None, None)
         .await
         .unwrap();
     EthApiClient::syncing(client).await.unwrap();
@@ -157,7 +157,9 @@ where
     TraceApiClient::trace_raw_transaction(client, Bytes::default(), HashSet::default(), None)
         .await
         .unwrap_err();
-    TraceApiClient::trace_call_many(client, vec![], None).await.err().unwrap();
+    TraceApiClient::trace_call_many(client, vec![], Some(BlockNumberOrTag::Latest.into()))
+        .await
+        .unwrap();
     TraceApiClient::replay_transaction(client, H256::default(), HashSet::default())
         .await
         .err()

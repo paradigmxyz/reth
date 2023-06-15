@@ -1,10 +1,15 @@
 //! Support for handling events emitted by node components.
 
+use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
+use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    BlockNumber,
+};
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,
@@ -13,21 +18,31 @@ use std::{
     time::Duration,
 };
 use tokio::time::Interval;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+
+/// Interval of reporting node state.
+const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The current high-level state of the node.
 struct NodeState {
-    /// Connection to the network
+    /// Connection to the network.
     network: Option<NetworkHandle>,
     /// The stage currently being executed.
     current_stage: Option<StageId>,
     /// The current checkpoint of the executing stage.
     current_checkpoint: StageCheckpoint,
+    /// The latest canonical block added in the consensus engine.
+    latest_canonical_engine_block: Option<BlockNumber>,
 }
 
 impl NodeState {
     fn new(network: Option<NetworkHandle>) -> Self {
-        Self { network, current_stage: None, current_checkpoint: StageCheckpoint::new(0) }
+        Self {
+            network,
+            current_stage: None,
+            current_checkpoint: StageCheckpoint::new(0),
+            latest_canonical_engine_block: None,
+        }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -96,16 +111,44 @@ impl NodeState {
         }
     }
 
-    fn handle_consensus_engine_event(&self, event: BeaconConsensusEngineEvent) {
+    fn handle_consensus_engine_event(&mut self, event: BeaconConsensusEngineEvent) {
         match event {
-            BeaconConsensusEngineEvent::ForkchoiceUpdated(state) => {
-                info!(target: "reth::cli", ?state, "Forkchoice updated");
+            BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
+                let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
+                    state;
+                info!(
+                    target: "reth::cli",
+                    ?head_block_hash,
+                    ?safe_block_hash,
+                    ?finalized_block_hash,
+                    ?status,
+                    "Forkchoice updated"
+                );
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
+                self.latest_canonical_engine_block = Some(block.number);
+
                 info!(target: "reth::cli", number=block.number, hash=?block.hash, "Block added to canonical chain");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
                 info!(target: "reth::cli", number=block.number, hash=?block.hash, "Block added to fork chain");
+            }
+        }
+    }
+
+    fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {
+        match event {
+            ConsensusLayerHealthEvent::NeverSeen => {
+                warn!(target: "reth::cli", "Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
+            }
+            ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
+                warn!(target: "reth::cli", ?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
+            }
+            ConsensusLayerHealthEvent::NeverReceivedUpdates => {
+                warn!(target: "reth::cli", "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+            }
+            ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
+                warn!(target: "reth::cli", ?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
             }
         }
     }
@@ -120,6 +163,8 @@ pub enum NodeEvent {
     Pipeline(PipelineEvent),
     /// A consensus engine event.
     ConsensusEngine(BeaconConsensusEngineEvent),
+    /// A Consensus Layer health event.
+    ConsensusLayerHealth(ConsensusLayerHealthEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -140,15 +185,21 @@ impl From<BeaconConsensusEngineEvent> for NodeEvent {
     }
 }
 
+impl From<ConsensusLayerHealthEvent> for NodeEvent {
+    fn from(event: ConsensusLayerHealthEvent) -> Self {
+        NodeEvent::ConsensusLayerHealth(event)
+    }
+}
+
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events(
-    network: Option<NetworkHandle>,
-    events: impl Stream<Item = NodeEvent> + Unpin,
-) {
+pub async fn handle_events<E>(network: Option<NetworkHandle>, events: E)
+where
+    E: Stream<Item = NodeEvent> + Unpin,
+{
     let state = NodeState::new(network);
 
-    let mut info_interval = tokio::time::interval(Duration::from_secs(30));
+    let mut info_interval = tokio::time::interval(INFO_MESSAGE_INTERVAL);
     info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let handler = EventHandler { state, events, info_interval };
@@ -157,17 +208,17 @@ pub async fn handle_events(
 
 /// Handles events emitted by the node and logs them accordingly.
 #[pin_project::pin_project]
-struct EventHandler<St> {
+struct EventHandler<E> {
     state: NodeState,
     #[pin]
-    events: St,
+    events: E,
     #[pin]
     info_interval: Interval,
 }
 
-impl<St> Future for EventHandler<St>
+impl<E> Future for EventHandler<E>
 where
-    St: Stream<Item = NodeEvent> + Unpin,
+    E: Stream<Item = NodeEvent> + Unpin,
 {
     type Output = ();
 
@@ -175,12 +226,22 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            let stage = this
-                .state
-                .current_stage
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| "None".to_string());
-            info!(target: "reth::cli", connected_peers = this.state.num_connected_peers(), %stage, checkpoint = %this.state.current_checkpoint, "Status");
+            if let Some(stage) = this.state.current_stage.map(|id| id.to_string()) {
+                info!(
+                    target: "reth::cli",
+                    connected_peers = this.state.num_connected_peers(),
+                    %stage,
+                    checkpoint = %this.state.current_checkpoint,
+                    "Status"
+                );
+            } else {
+                info!(
+                    target: "reth::cli",
+                    connected_peers = this.state.num_connected_peers(),
+                    latest_block = this.state.latest_canonical_engine_block.unwrap_or(this.state.current_checkpoint.block_number),
+                    "Status"
+                );
+            }
         }
 
         while let Poll::Ready(Some(event)) = this.events.as_mut().poll_next(cx) {
@@ -193,6 +254,9 @@ where
                 }
                 NodeEvent::ConsensusEngine(event) => {
                     this.state.handle_consensus_engine_event(event);
+                }
+                NodeEvent::ConsensusLayerHealth(event) => {
+                    this.state.handle_consensus_layer_health_event(event)
                 }
             }
         }

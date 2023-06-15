@@ -44,10 +44,10 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
     /// Returns the chain id
     fn chain_id(&self) -> U64;
 
-    /// Returns client chain info
+    /// Returns provider chain info
     fn chain_info(&self) -> Result<ChainInfo>;
 
-    /// Returns a list of addresses owned by client.
+    /// Returns a list of addresses owned by provider.
     fn accounts(&self) -> Vec<Address>;
 
     /// Returns `true` if the network is undergoing sync.
@@ -65,25 +65,25 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
-pub struct EthApi<Client, Pool, Network> {
+pub struct EthApi<Provider, Pool, Network> {
     /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Client, Pool, Network>>,
+    inner: Arc<EthApiInner<Provider, Pool, Network>>,
 }
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Client: BlockProviderIdExt,
+    Provider: BlockProviderIdExt,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     pub fn new(
-        client: Client,
+        provider: Provider,
         pool: Pool,
         network: Network,
         eth_cache: EthStateCache,
-        gas_oracle: GasPriceOracle<Client>,
+        gas_oracle: GasPriceOracle<Provider>,
     ) -> Self {
         Self::with_spawner(
-            client,
+            provider,
             pool,
             network,
             eth_cache,
@@ -94,15 +94,15 @@ where
 
     /// Creates a new, shareable instance.
     pub fn with_spawner(
-        client: Client,
+        provider: Provider,
         pool: Pool,
         network: Network,
         eth_cache: EthStateCache,
-        gas_oracle: GasPriceOracle<Client>,
+        gas_oracle: GasPriceOracle<Provider>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         // get the block number of the latest block
-        let latest_block = client
+        let latest_block = provider
             .header_by_number_or_tag(BlockNumberOrTag::Latest)
             .ok()
             .flatten()
@@ -110,7 +110,7 @@ where
             .unwrap_or_default();
 
         let inner = EthApiInner {
-            client,
+            provider,
             pool,
             network,
             signers: Default::default(),
@@ -151,13 +151,13 @@ where
     }
 
     /// Returns the gas oracle frontend
-    pub(crate) fn gas_oracle(&self) -> &GasPriceOracle<Client> {
+    pub(crate) fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
         &self.inner.gas_oracle
     }
 
-    /// Returns the inner `Client`
-    pub fn client(&self) -> &Client {
-        &self.inner.client
+    /// Returns the inner `Provider`
+    pub fn provider(&self) -> &Provider {
+        &self.inner.provider
     }
 
     /// Returns the inner `Network`
@@ -173,12 +173,12 @@ where
 
 // === State access helpers ===
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
 {
     fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
-        self.client().convert_block_number(num)
+        self.provider().convert_block_number(num)
     }
 
     /// Returns the state at the given [BlockId] enum.
@@ -219,40 +219,40 @@ where
 
     /// Returns the state at the given block number
     pub fn state_at_hash(&self, block_hash: H256) -> Result<StateProviderBox<'_>> {
-        self.client().history_by_block_hash(block_hash)
+        self.provider().history_by_block_hash(block_hash)
     }
 
     /// Returns the state at the given block number
     pub fn state_at_number(&self, block_number: u64) -> Result<StateProviderBox<'_>> {
         match self.convert_block_number(BlockNumberOrTag::Latest)? {
             Some(num) if num == block_number => self.latest_state(),
-            _ => self.client().history_by_block_number(block_number),
+            _ => self.provider().history_by_block_number(block_number),
         }
     }
 
     /// Returns the _latest_ state
     pub fn latest_state(&self) -> Result<StateProviderBox<'_>> {
-        self.client().latest()
+        self.provider().latest()
     }
 }
 
-impl<Client, Pool, Events> std::fmt::Debug for EthApi<Client, Pool, Events> {
+impl<Provider, Pool, Events> std::fmt::Debug for EthApi<Provider, Pool, Events> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
     }
 }
 
-impl<Client, Pool, Events> Clone for EthApi<Client, Pool, Events> {
+impl<Provider, Pool, Events> Clone for EthApi<Provider, Pool, Events> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
 #[async_trait]
-impl<Client, Pool, Network> EthApiSpec for EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApiSpec for EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
 {
     /// Returns the current ethereum protocol version.
@@ -270,7 +270,7 @@ where
 
     /// Returns the current info for the chain
     fn chain_info(&self) -> Result<ChainInfo> {
-        self.client().chain_info()
+        self.provider().chain_info()
     }
 
     fn accounts(&self) -> Vec<Address> {
@@ -285,7 +285,7 @@ where
     fn sync_status(&self) -> Result<SyncStatus> {
         let status = if self.is_syncing() {
             let current_block = U256::from(
-                self.client().chain_info().map(|info| info.best_number).unwrap_or_default(),
+                self.provider().chain_info().map(|info| info.best_number).unwrap_or_default(),
             );
             SyncStatus::Info(SyncInfo {
                 starting_block: self.inner.starting_block,
@@ -302,11 +302,11 @@ where
 }
 
 /// Container type `EthApi`
-struct EthApiInner<Client, Pool, Network> {
+struct EthApiInner<Provider, Pool, Network> {
     /// The transaction pool.
     pool: Pool,
-    /// The client that can interact with the chain.
-    client: Client,
+    /// The provider that can interact with the chain.
+    provider: Provider,
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
@@ -314,7 +314,7 @@ struct EthApiInner<Client, Pool, Network> {
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions
-    gas_oracle: GasPriceOracle<Client>,
+    gas_oracle: GasPriceOracle<Provider>,
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.

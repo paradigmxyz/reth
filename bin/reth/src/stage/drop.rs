@@ -1,6 +1,6 @@
 //! Database debugging tool
 use crate::{
-    args::StageEnum,
+    args::{utils::genesis_value_parser, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
@@ -12,7 +12,7 @@ use reth_db::{
     transaction::DbTxMut,
 };
 use reth_primitives::{stage::StageId, ChainSpec};
-use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
+use reth_staged_sync::utils::init::{insert_genesis_header, insert_genesis_state};
 use std::sync::Arc;
 use tracing::info;
 
@@ -59,10 +59,26 @@ impl Command {
 
         let db = Env::<WriteMap>::open(db_path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
 
-        let tool = DbTool::new(&db)?;
+        let tool = DbTool::new(&db, self.chain.clone())?;
 
         tool.db.update(|tx| {
             match &self.stage {
+                StageEnum::Bodies => {
+                    tx.clear::<tables::BlockBodyIndices>()?;
+                    tx.clear::<tables::Transactions>()?;
+                    tx.clear::<tables::TransactionBlock>()?;
+                    tx.clear::<tables::BlockOmmers>()?;
+                    tx.clear::<tables::BlockWithdrawals>()?;
+                    tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
+                    insert_genesis_header::<Env<WriteMap>>(tx, self.chain)?;
+                }
+                StageEnum::Senders => {
+                    tx.clear::<tables::TxSenders>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::SenderRecovery.to_string(),
+                        Default::default(),
+                    )?;
+                }
                 StageEnum::Execution => {
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;
@@ -75,6 +91,20 @@ impl Command {
                         Default::default(),
                     )?;
                     insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
+                }
+                StageEnum::AccountHashing => {
+                    tx.clear::<tables::HashedAccount>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::AccountHashing.to_string(),
+                        Default::default(),
+                    )?;
+                }
+                StageEnum::StorageHashing => {
+                    tx.clear::<tables::HashedStorage>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::StorageHashing.to_string(),
+                        Default::default(),
+                    )?;
                 }
                 StageEnum::Hashing => {
                     // Clear hashed accounts
@@ -118,6 +148,14 @@ impl Command {
                         StageId::IndexStorageHistory.to_string(),
                         Default::default(),
                     )?;
+                }
+                StageEnum::TotalDifficulty => {
+                    tx.clear::<tables::HeaderTD>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::TotalDifficulty.to_string(),
+                        Default::default(),
+                    )?;
+                    insert_genesis_header::<Env<WriteMap>>(tx, self.chain)?;
                 }
                 _ => {
                     info!("Nothing to do for stage {:?}", self.stage);

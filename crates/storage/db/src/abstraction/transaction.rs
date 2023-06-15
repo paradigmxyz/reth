@@ -47,6 +47,8 @@ pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
     fn cursor_dup_read<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError>;
+    /// Returns number of entries in the table.
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
 }
 
 /// Read write transaction that allows writing to database
