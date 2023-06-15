@@ -81,11 +81,6 @@ impl NodeState {
                 self.current_checkpoint = checkpoint;
                 self.eta.update(self.current_checkpoint);
 
-                if done {
-                    self.current_stage = None;
-                    self.eta = Eta::default();
-                }
-
                 info!(
                     pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
                     stage = %stage_id,
@@ -99,6 +94,11 @@ impl NodeState {
                         "Stage committed progress"
                     }
                 );
+
+                if done {
+                    self.current_stage = None;
+                    self.eta = Eta::default();
+                }
             }
             _ => (),
         }
