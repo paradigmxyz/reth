@@ -318,17 +318,14 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> std::result::Result<BTreeSet<Address>, TransactionError> {
-        Ok(self
-            .tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            // fold all account to one set of changed accounts
-            .fold(BTreeSet::new(), |mut accounts: BTreeSet<Address>, (_, account_before)| {
+        self.tx.cursor_read::<tables::AccountChangeSet>()?.walk_range(range)?.try_fold(
+            BTreeSet::new(),
+            |mut accounts: BTreeSet<Address>, entry| {
+                let (_, account_before) = entry?;
                 accounts.insert(account_before.address);
-                accounts
-            }))
+                Ok(accounts)
+            },
+        )
     }
 
     /// Get plainstate account from iterator
