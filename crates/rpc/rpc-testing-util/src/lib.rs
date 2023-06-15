@@ -7,6 +7,7 @@
 
 //! Reth RPC testing utilities.
 
+pub mod debug;
 pub mod trace;
 
 pub mod utils;
