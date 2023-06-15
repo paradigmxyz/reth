@@ -98,8 +98,6 @@ pub trait BlockProvider:
 
     /// Returns the block with senders with matching number from database.
     ///
-    /// ! The transactions have invalid hashes. !
-    ///
     /// Returns `None` if block is not found.
     fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>>;
 }

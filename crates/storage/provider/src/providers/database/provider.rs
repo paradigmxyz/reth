@@ -1629,6 +1629,12 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
 
+    /// Returns the block with senders with matching number from database.
+    ///
+    /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
+    /// spot, and we want fast querying.**
+    ///
+    /// Returns `None` if block is not found.
     fn block_with_senders(&self, block_number: BlockNumber) -> Result<Option<BlockWithSenders>> {
         let header = self
             .header_by_number(block_number)?

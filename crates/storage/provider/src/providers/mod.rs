@@ -239,6 +239,12 @@ where
         self.database.provider()?.block_body_indices(number)
     }
 
+    /// Returns the block with senders with matching number from database.
+    ///
+    /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
+    /// spot, and we want fast querying.**
+    ///
+    /// Returns `None` if block is not found.
     fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>> {
         self.database.provider()?.block_with_senders(number)
     }
