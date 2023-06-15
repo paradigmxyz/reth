@@ -374,7 +374,7 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().block_body_indices(block);
+            let body_result = self.tx.inner_rw().block_body_indices(block);
             match body_result {
                 Ok(body) => self
                     .tx
@@ -433,10 +433,8 @@ mod tests {
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
-                            let transaction: TransactionSigned = provider
-                                .transaction_by_id(tx_id)?
-                                .expect("no transaction entry")
-                                .into();
+                            let transaction: TransactionSigned =
+                                provider.transaction_by_id(tx_id)?.expect("no transaction entry");
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");
                             assert_eq!(

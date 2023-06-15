@@ -41,8 +41,8 @@ use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkMan
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Head, SealedHeader, H256};
 use reth_provider::{
-    providers::get_stage_checkpoint, BlockHashProvider, BlockNumProvider, BlockProvider,
-    CanonStateSubscriptions, HeaderProvider, ProviderFactory,
+    providers::get_stage_checkpoint, BlockHashProvider, BlockProvider, CanonStateSubscriptions,
+    HeaderProvider, ProviderFactory,
 };
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;

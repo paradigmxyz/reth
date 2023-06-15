@@ -483,8 +483,7 @@ mod tests {
                         for block_num in (initial_checkpoint..output.checkpoint.block_number).rev()
                         {
                             // look up the header hash
-                            let hash =
-                                provider.block_hash(block_num.into())?.expect("no header hash");
+                            let hash = provider.block_hash(block_num)?.expect("no header hash");
 
                             // validate the header number
                             assert_eq!(provider.block_number(hash)?, Some(block_num));

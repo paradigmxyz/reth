@@ -271,8 +271,7 @@ mod tests {
                         .expect("no initial header");
                     let mut td: U256 = provider
                         .header_td_by_number(initial_stage_progress)?
-                        .expect("no initial td")
-                        .into();
+                        .expect("no initial td");
 
                     while let Some((next_key, next_header)) = header_cursor.next()? {
                         assert_eq!(current_header.number + 1, next_header.number);

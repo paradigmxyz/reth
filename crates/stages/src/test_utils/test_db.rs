@@ -4,7 +4,7 @@ use reth_db::{
     mdbx::{
         test_utils::{create_test_db, create_test_db_with_path},
         tx::Tx,
-        Env, EnvKind, WriteMap, RW,
+        Env, EnvKind, WriteMap, RO, RW,
     },
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
@@ -63,7 +63,7 @@ impl TestTransaction {
         self.factory.provider_rw().expect("failed to create db container")
     }
 
-    /// Return a database wrapped in [DatabaseProviderRW].
+    /// Return a database wrapped in [DatabaseProviderRO].
     pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<Env<WriteMap>>> {
         self.factory.provider().expect("failed to create db container")
     }
@@ -87,7 +87,7 @@ impl TestTransaction {
     /// Invoke a callback with a read transaction
     pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, DbError>,
+        F: FnOnce(&Tx<'_, RO, WriteMap>) -> Result<R, DbError>,
     {
         f(self.inner().tx_ref())
     }
