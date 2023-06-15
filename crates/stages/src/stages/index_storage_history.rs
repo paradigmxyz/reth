@@ -47,26 +47,12 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
-        let mut stage_checkpoint = stage_checkpoint(
-            provider,
-            input.checkpoint(),
-            // It is important to provide the full block range into the checkpoint,
-            // not the one accounting for commit threshold, to get the correct range end.
-            &input.next_block_range(),
-        )?;
-
-        let indices = provider.get_storage_transition_ids_from_changeset(range.clone())?;
-        let changesets = indices.values().map(|blocks| blocks.len() as u64).sum::<u64>();
+        let indices = tx.get_storage_block_numbers_from_changesets(range.clone())?;
+        indices.values().map(|blocks| blocks.len() as u64).sum::<u64>();
 
         provider.insert_storage_history_index(indices)?;
 
-        stage_checkpoint.progress.processed += changesets;
-
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(*range.end())
-                .with_index_history_stage_checkpoint(stage_checkpoint),
-            done: is_final_range,
-        })
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
     }
 
     /// Unwind the stage.
@@ -103,6 +89,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 /// 3. If none of the above conditions are met, it creates a new [IndexHistoryCheckpoint] with the
 /// given block range and calculates the progress by counting the number of processed entries in the
 /// [tables::StorageChangeSet] table within the given block range.
+#[allow(unused)]
 fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
     checkpoint: StageCheckpoint,
