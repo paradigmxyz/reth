@@ -372,7 +372,7 @@ where
                     let done = stage.is_execute_done(&mut provider_rw, input, output).await?;
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
-                    info!(
+                    debug!(
                         target: "sync::pipeline",
                         stage = %stage_id,
                         progress = checkpoint.block_number,

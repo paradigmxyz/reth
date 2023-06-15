@@ -11,7 +11,16 @@ pub struct CallTraceArena {
 
 impl CallTraceArena {
     /// Pushes a new trace into the arena, returning the trace ID
-    pub(crate) fn push_trace(&mut self, mut entry: usize, new_trace: CallTrace) -> usize {
+    ///
+    /// This appends a new trace to the arena, and also inserts a new entry in the node's parent
+    /// node children set if `attach_to_parent` is `true`. E.g. if calls to precompiles should
+    /// not be included in the call graph this should be called with [PushTraceKind::PushOnly].
+    pub(crate) fn push_trace(
+        &mut self,
+        mut entry: usize,
+        kind: PushTraceKind,
+        new_trace: CallTrace,
+    ) -> usize {
         loop {
             match new_trace.depth {
                 // The entry node, just update it
@@ -22,9 +31,6 @@ impl CallTraceArena {
                 // We found the parent node, add the new trace as a child
                 _ if self.arena[entry].trace.depth == new_trace.depth - 1 => {
                     let id = self.arena.len();
-
-                    let trace_location = self.arena[entry].children.len();
-                    self.arena[entry].ordering.push(LogCallOrder::Call(trace_location));
                     let node = CallTraceNode {
                         parent: Some(entry),
                         trace: new_trace,
@@ -32,7 +38,14 @@ impl CallTraceArena {
                         ..Default::default()
                     };
                     self.arena.push(node);
-                    self.arena[entry].children.push(id);
+
+                    // also track the child in the parent node
+                    if kind.is_attach_to_parent() {
+                        let parent = &mut self.arena[entry];
+                        let trace_location = parent.children.len();
+                        parent.ordering.push(LogCallOrder::Call(trace_location));
+                        parent.children.push(id);
+                    }
 
                     return id
                 }
@@ -42,6 +55,21 @@ impl CallTraceArena {
                 }
             }
         }
+    }
+}
+
+/// How to push a trace into the arena
+pub(crate) enum PushTraceKind {
+    /// This will _only_ push the trace into the arena.
+    PushOnly,
+    /// This will push the trace into the arena, and also insert a new entry in the node's parent
+    /// node children set.
+    PushAndAttachToParent,
+}
+
+impl PushTraceKind {
+    fn is_attach_to_parent(&self) -> bool {
+        matches!(self, PushTraceKind::PushAndAttachToParent)
     }
 }
 
