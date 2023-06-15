@@ -106,6 +106,11 @@ where
         self.run_pipeline_continuously
     }
 
+    /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
+    pub(crate) fn is_pipeline_sync_pending(&self) -> bool {
+        self.pending_pipeline_target.is_some() && self.pipeline_state.is_idle()
+    }
+
     /// Returns `true` if the pipeline is idle.
     pub(crate) fn is_pipeline_idle(&self) -> bool {
         self.pipeline_state.is_idle()
