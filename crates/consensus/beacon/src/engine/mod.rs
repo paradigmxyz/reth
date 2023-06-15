@@ -1193,7 +1193,10 @@ where
                                 sync_target_state.finalized_block_hash,
                             ) {
                                 Ok(synced) => {
-                                    if !synced {
+                                    if synced {
+                                        // we're consider this synced and transition to live sync
+                                        self.sync_state_updater.update_sync_state(SyncState::Idle);
+                                    } else {
                                         // We don't have the finalized block in the database, so
                                         // we need to run another pipeline.
                                         self.sync.set_pipeline_sync_target(
