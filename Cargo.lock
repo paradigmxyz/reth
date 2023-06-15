@@ -5664,6 +5664,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-types",
+ "serde_json",
  "tokio",
 ]
 
