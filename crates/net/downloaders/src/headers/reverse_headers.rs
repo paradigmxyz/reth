@@ -333,7 +333,6 @@ where
                     .count();
                 // removes all headers that are higher than current target
                 self.queued_validated_headers.drain(..skip);
-                self.queued_validated_headers.shrink_to_fit();
             }
         } else {
             // this occurs on the initial sync target request
@@ -627,11 +626,12 @@ where
         // batch_size`, and the total memory allocated by the two buffers will be around double the
         // original size of `queued_validated_headers`.
         //
+        // These are then mem::swapped, leaving `rem` with a large capacity, but small length.
+        //
         // To prevent these allocations from leaking to the consumer, we shrink the capacity of the
-        // two buffers. The total memory allocated should then be not much more than the original
+        // new buffer. The total memory allocated should then be not much more than the original
         // size of `queued_validated_headers`.
         rem.shrink_to_fit();
-        self.queued_validated_headers.shrink_to_fit();
         rem
     }
 }
