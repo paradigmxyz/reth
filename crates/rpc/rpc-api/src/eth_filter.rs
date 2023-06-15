@@ -2,8 +2,8 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_rpc_types::{Filter, FilterChanges, FilterId, Log};
 
 /// Rpc Interface for poll-based ethereum filter API.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "net"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "net"))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthFilterApi {
     /// Creates anew filter and returns its id.
     #[method(name = "newFilter")]

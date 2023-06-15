@@ -1,5 +1,5 @@
 use super::queue::BodiesRequestQueue;
-use crate::{bodies::task::TaskDownloader, metrics::DownloaderMetrics};
+use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
@@ -63,7 +63,7 @@ pub struct BodiesDownloader<B: BodiesClient, DB> {
     /// Queued body responses that can be returned for insertion into the database.
     queued_bodies: Vec<BlockResponse>,
     /// The bodies downloader metrics.
-    metrics: DownloaderMetrics,
+    metrics: BodyDownloaderMetrics,
 }
 
 impl<B, DB> BodiesDownloader<B, DB>
@@ -559,7 +559,7 @@ impl BodiesDownloaderBuilder {
             concurrent_requests_range,
             max_buffered_blocks: max_buffered_responses,
         } = self;
-        let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
+        let metrics = BodyDownloaderMetrics::default();
         let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
         BodiesDownloader {
             client: Arc::new(client),

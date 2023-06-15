@@ -3,14 +3,15 @@ use crate::{
     AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey,
-    StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
+    BlockWithSenders, Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader,
+    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -207,6 +208,17 @@ impl TransactionsProvider for MockEthProvider {
 
         Ok(map.into_values().collect())
     }
+
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        unimplemented!()
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
+        unimplemented!()
+    }
 }
 
 impl ReceiptProvider for MockEthProvider {
@@ -311,6 +323,10 @@ impl BlockProvider for MockEthProvider {
     }
 
     fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
+        Ok(None)
+    }
+
+    fn block_with_senders(&self, _number: BlockNumber) -> Result<Option<BlockWithSenders>> {
         Ok(None)
     }
 }
@@ -476,5 +492,18 @@ impl StateProviderFactory for Arc<MockEthProvider> {
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
         todo!()
+    }
+}
+
+impl WithdrawalsProvider for MockEthProvider {
+    fn latest_withdrawal(&self) -> Result<Option<reth_primitives::Withdrawal>> {
+        unimplemented!()
+    }
+    fn withdrawals_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> Result<Option<Vec<reth_primitives::Withdrawal>>> {
+        unimplemented!()
     }
 }

@@ -303,10 +303,36 @@ impl std::fmt::Display for Eta {
             let remaining = eta.checked_sub(last_checkpoint_time.elapsed());
 
             if let Some(remaining) = remaining {
-                return write!(f, "{}", humantime::format_duration(remaining))
+                return write!(
+                    f,
+                    "{}",
+                    humantime::format_duration(Duration::from_secs(remaining.as_secs()))
+                )
             }
         }
 
         write!(f, "unknown")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::node::events::Eta;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn eta_display_no_milliseconds() {
+        let eta = Eta {
+            last_checkpoint_time: Some(Instant::now()),
+            eta: Some(Duration::from_millis(
+                13 * 60 * 1000 + // Minutes
+                    37 * 1000 + // Seconds
+                    999, // Milliseconds
+            )),
+            ..Default::default()
+        }
+        .to_string();
+
+        assert_eq!(eta, "13m 37s");
     }
 }
