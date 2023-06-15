@@ -1,5 +1,5 @@
 use super::request::BodiesRequestFuture;
-use crate::metrics::DownloaderMetrics;
+use crate::metrics::BodyDownloaderMetrics;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
 use reth_interfaces::{
@@ -23,7 +23,7 @@ pub(crate) struct BodiesRequestQueue<B: BodiesClient> {
     /// Inner body request queue.
     inner: FuturesUnordered<BodiesRequestFuture<B>>,
     /// The downloader metrics.
-    metrics: DownloaderMetrics,
+    metrics: BodyDownloaderMetrics,
     /// Last requested block number.
     pub(crate) last_requested_block_number: Option<BlockNumber>,
 }
@@ -33,7 +33,7 @@ where
     B: BodiesClient + 'static,
 {
     /// Create new instance of request queue.
-    pub(crate) fn new(metrics: DownloaderMetrics) -> Self {
+    pub(crate) fn new(metrics: BodyDownloaderMetrics) -> Self {
         Self { metrics, inner: Default::default(), last_requested_block_number: None }
     }
 
