@@ -894,7 +894,7 @@ mod tests {
         // Check final post-state
         assert_eq!(
             post_state.storage(),
-            &BTreeMap::from([(
+            &HashMap::from([(
                 account1,
                 Storage {
                     times_wiped: 0,
@@ -1256,7 +1256,7 @@ mod tests {
             false,
             &mut post_state,
         );
-        assert_eq!(post_state.accounts(), &BTreeMap::default());
+        assert_eq!(post_state.accounts(), &HashMap::default());
         assert_eq!(post_state.account_changes(), &AccountChanges::default());
 
         // Touch an empty account after state clearing EIP. The account should be destroyed.
@@ -1269,7 +1269,7 @@ mod tests {
             true,
             &mut post_state,
         );
-        assert_eq!(post_state.accounts(), &BTreeMap::from([(address, None)]));
+        assert_eq!(post_state.accounts(), &HashMap::from([(address, None)]));
         assert_eq!(
             post_state.account_changes(),
             &AccountChanges {
@@ -1306,7 +1306,7 @@ mod tests {
         );
         assert_eq!(
             post_state_before_state_clear.accounts(),
-            &BTreeMap::from([
+            &HashMap::from([
                 (address1, Some(Account::default())),
                 (address2, Some(Account::default()))
             ])
@@ -1330,7 +1330,7 @@ mod tests {
             true,
             &mut post_state_after_state_clear,
         );
-        assert_eq!(post_state_after_state_clear.accounts(), &BTreeMap::default());
+        assert_eq!(post_state_after_state_clear.accounts(), &HashMap::default());
         assert_eq!(post_state_after_state_clear.account_changes(), &AccountChanges::default());
     }
 }

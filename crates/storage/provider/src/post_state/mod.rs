@@ -14,7 +14,7 @@ use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 mod account;
 pub use account::AccountChanges;
@@ -60,12 +60,12 @@ pub struct PostState {
     /// The state of all modified accounts after execution.
     ///
     /// If the value contained is `None`, then the account should be deleted.
-    accounts: BTreeMap<Address, Option<Account>>,
+    accounts: HashMap<Address, Option<Account>>,
     /// The state of all modified storage after execution
     ///
     /// If the contained [Storage] is marked as wiped, then all storage values should be cleared
     /// from the database.
-    storage: BTreeMap<Address, Storage>,
+    storage: HashMap<Address, Storage>,
     /// The state of accounts before they were changed in the given block.
     ///
     /// If the value is `None`, then the account is new, otherwise it is a change.
@@ -75,7 +75,7 @@ pub struct PostState {
     /// This map only contains old values for storage slots.
     storage_changes: StorageChanges,
     /// New code created during the execution
-    bytecode: BTreeMap<H256, Bytecode>,
+    bytecode: HashMap<H256, Bytecode>,
     /// The receipt(s) of the executed transaction(s).
     receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
 }
@@ -120,7 +120,7 @@ impl PostState {
     }
 
     /// Get the latest state of all changed accounts.
-    pub fn accounts(&self) -> &BTreeMap<Address, Option<Account>> {
+    pub fn accounts(&self) -> &HashMap<Address, Option<Account>> {
         &self.accounts
     }
 
@@ -146,7 +146,7 @@ impl PostState {
     }
 
     /// Get the latest state of storage.
-    pub fn storage(&self) -> &BTreeMap<Address, Storage> {
+    pub fn storage(&self) -> &HashMap<Address, Storage> {
         &self.storage
     }
 
@@ -156,7 +156,7 @@ impl PostState {
     }
 
     /// Get the newly created bytecodes
-    pub fn bytecodes(&self) -> &BTreeMap<H256, Bytecode> {
+    pub fn bytecodes(&self) -> &HashMap<H256, Bytecode> {
         &self.bytecode
     }
 
@@ -323,7 +323,7 @@ impl PostState {
             .iter()
             .flat_map(|(_, account_changes)| account_changes.iter().map(|(address, _)| *address))
             .collect::<BTreeSet<_>>();
-        let mut account_state: BTreeMap<Address, Option<Account>> = BTreeMap::default();
+        let mut account_state: HashMap<Address, Option<Account>> = HashMap::default();
         for address in changed_accounts {
             let info = removed_account_changes
                 .iter()
@@ -337,7 +337,7 @@ impl PostState {
 
         // Revert changes and recreate the storage state
         let removed_storage_changes = self.storage_changes.drain_above(target_block_number);
-        let mut storage_state: BTreeMap<Address, Storage> = BTreeMap::default();
+        let mut storage_state: HashMap<Address, Storage> = HashMap::default();
         for (_, storage_changes) in self.storage_changes.iter() {
             for (address, storage_change) in storage_changes {
                 let entry = storage_state.entry(*address).or_default();
@@ -717,7 +717,7 @@ mod tests {
 
         let revert_to = 1;
         state.revert_to(revert_to);
-        assert_eq!(state.accounts, BTreeMap::from([(address1, Some(account1))]));
+        assert_eq!(state.accounts, HashMap::from([(address1, Some(account1))]));
         assert_eq!(
             state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
             1
@@ -944,10 +944,10 @@ mod tests {
         // Blocks #1-4
         // Account 1. Info: <none>. Storage: <none>. Times Wiped: 2.
         // Account 2. Info: <none>. Storage: <none>. Times Wiped: 1.
-        assert_eq!(state.accounts, BTreeMap::from([(address1, None), (address2, None)]));
+        assert_eq!(state.accounts, HashMap::from([(address1, None), (address2, None)]));
         assert_eq!(
             state.storage,
-            BTreeMap::from([
+            HashMap::from([
                 (address1, Storage { times_wiped: 2, storage: BTreeMap::default() }),
                 (address2, Storage { times_wiped: 1, storage: BTreeMap::default() })
             ])
@@ -1009,7 +1009,7 @@ mod tests {
         assert_ne!(state_3_4.storage, storage_state_after_block_4);
         assert_eq!(
             state_3_4.storage,
-            BTreeMap::from([
+            HashMap::from([
                 (address1, Storage { times_wiped: 1, storage: BTreeMap::default() }),
                 (address2, Storage { times_wiped: 1, storage: BTreeMap::default() })
             ])
@@ -1629,7 +1629,7 @@ mod tests {
         // Slot 1: 5
         assert_eq!(
             state.storage(),
-            &BTreeMap::from([(
+            &HashMap::from([(
                 address,
                 Storage {
                     storage: BTreeMap::from([
@@ -1770,7 +1770,7 @@ mod tests {
         );
         assert_eq!(
             a.accounts(),
-            &BTreeMap::from([(
+            &HashMap::from([(
                 address,
                 Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None })
             )]),
@@ -1778,7 +1778,7 @@ mod tests {
         );
         assert_eq!(
             a.storage(),
-            &BTreeMap::from([(
+            &HashMap::from([(
                 address,
                 Storage {
                     storage: BTreeMap::from([(U256::from(0), U256::from(2)),]),
