@@ -557,6 +557,9 @@ where
                 Ordering::Equal => {
                     let OrderedHeadersResponse { headers, request, peer_id } =
                         PeekMut::pop(next_response);
+
+                    // shrink the buffer so that it doesn't grow indefinitely
+                    self.buffered_responses.shrink_to_fit();
                     self.metrics.buffered_responses.decrement(1.);
 
                     if let Err(err) = self.process_next_headers(request, headers, peer_id) {
@@ -566,6 +569,9 @@ where
                 Ordering::Greater => {
                     self.metrics.buffered_responses.decrement(1.);
                     PeekMut::pop(next_response);
+
+                    // shrink the buffer so that it doesn't grow indefinitely
+                    self.buffered_responses.shrink_to_fit();
                 }
             }
         }

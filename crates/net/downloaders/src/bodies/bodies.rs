@@ -222,6 +222,8 @@ where
     /// Removes the next response from the buffer.
     fn pop_buffered_response(&mut self) -> Option<OrderedBodiesResponse> {
         let resp = self.buffered_responses.pop()?;
+        // shrink the buffer so that it doesn't grow indefinitely
+        self.buffered_responses.shrink_to_fit();
         self.metrics.buffered_responses.decrement(1.);
         self.num_buffered_blocks -= resp.len();
         self.metrics.buffered_blocks.set(self.num_buffered_blocks as f64);
