@@ -1053,29 +1053,43 @@ where
     /// downloaded
     fn try_make_sync_target_canonical(&mut self, inserted: BlockNumHash) {
         if let Some(target) = self.forkchoice_state_tracker.sync_target_state() {
-            // optimistically try to make the chain canonical, the sync target might have changed
-            // since the block download request was issued (new FCU received)
-            if let Ok(outcome) = self.blockchain.make_canonical(&target.head_block_hash) {
-                let new_head = outcome.into_header();
-                debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
+            // optimistically try to make the head of the current FCU target canonical, the sync
+            // target might have changed since the block download request was issued
+            // (new FCU received)
+            match self.blockchain.make_canonical(&target.head_block_hash) {
+                Ok(outcome) => {
+                    let new_head = outcome.into_header();
+                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
 
-                // we're no longer syncing
-                self.sync_state_updater.update_sync_state(SyncState::Idle);
-                // clear any active block requests
-                self.sync.clear_full_block_requests();
+                    // we're no longer syncing
+                    self.sync_state_updater.update_sync_state(SyncState::Idle);
+                    // clear any active block requests
+                    self.sync.clear_full_block_requests();
 
-                // we can update the FCU blocks
-                let _ = self.update_canon_chain(&target);
-                return
-            }
-
-            // if the inserted block is the currently targeted `finalized` or `safe` block, we will
-            // attempt to make them canonical, because they are also part of the canonical chain and
-            // their missing block range might already be downloaded (buffered).
-            if let Some(target_hash) =
-                ForkchoiceStateHash::find(&target, inserted.hash).filter(|h| !h.is_head())
-            {
-                let _ = self.blockchain.make_canonical(target_hash.as_ref());
+                    // we can update the FCU blocks
+                    let _ = self.update_canon_chain(&target);
+                }
+                Err(err) => {
+                    // if we failed to make the FCU's head canonical, because we don't have that
+                    // block yet, then we can try to make the inserted block canonical if we know
+                    // it's part of the canonical chain: if it's the safe or the finalized block
+                    if matches!(
+                        err,
+                        reth_interfaces::Error::Execution(
+                            BlockExecutionError::BlockHashNotFoundInChain { .. }
+                        )
+                    ) {
+                        // if the inserted block is the currently targeted `finalized` or `safe`
+                        // block, we will attempt to make them canonical,
+                        // because they are also part of the canonical chain and
+                        // their missing block range might already be downloaded (buffered).
+                        if let Some(target_hash) = ForkchoiceStateHash::find(&target, inserted.hash)
+                            .filter(|h| !h.is_head())
+                        {
+                            let _ = self.blockchain.make_canonical(target_hash.as_ref());
+                        }
+                    }
+                }
             }
         }
     }
