@@ -467,7 +467,7 @@ where
             header.parent_hash
         };
 
-        // popualte the latest valid hash field
+        // populate the latest valid hash field
         let status = self.prepare_invalid_response(parent_hash);
 
         Some(status)
@@ -1035,7 +1035,7 @@ where
             Err(err) => {
                 debug!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
                 if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
-                    // non-internal error kinds occurr if the payload is invalid
+                    // non-internal error kinds occur if the payload is invalid
                     self.invalid_headers.insert(err.into_block().header);
                 }
             }
@@ -1319,6 +1319,8 @@ impl InvalidHeaderCache {
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
     fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
+        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
+        header_hash, invalid_ancestor);
         self.headers.insert(header_hash, invalid_ancestor);
     }
 
@@ -1326,6 +1328,8 @@ impl InvalidHeaderCache {
     fn insert(&mut self, invalid_ancestor: SealedHeader) {
         let hash = invalid_ancestor.hash;
         let header = invalid_ancestor.unseal();
+        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
+        hash, header);
         self.headers.insert(hash, Arc::new(header));
     }
 }
