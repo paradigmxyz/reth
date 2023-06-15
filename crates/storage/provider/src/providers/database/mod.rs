@@ -280,6 +280,10 @@ impl<DB: Database> StageCheckpointProvider for ProviderFactory<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
     }
+
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
+        self.provider()?.get_stage_checkpoint_progress(id)
+    }
 }
 
 impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {

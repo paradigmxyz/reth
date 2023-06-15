@@ -12,7 +12,10 @@ use reth_primitives::{
     trie::StoredSubNode,
     BlockNumber, SealedHeader, H256,
 };
-use reth_provider::{DatabaseProviderRW, HeaderProvider, ProviderError};
+use reth_provider::{
+    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointProvider,
+    StageCheckpointWriter,
+};
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;
 use tracing::*;

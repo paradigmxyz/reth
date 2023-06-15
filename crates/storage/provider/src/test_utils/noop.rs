@@ -311,6 +311,10 @@ impl StageCheckpointProvider for NoopProvider {
     fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(None)
     }
+
+    fn get_stage_checkpoint_progress(&self, _id: StageId) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }
 
 impl WithdrawalsProvider for NoopProvider {

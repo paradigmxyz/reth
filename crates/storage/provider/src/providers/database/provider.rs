@@ -1,7 +1,7 @@
 use crate::{
     insert_canonical_block,
     post_state::StorageChangeset,
-    traits::{AccountExtProvider, BlockSource, ReceiptProvider},
+    traits::{AccountExtProvider, BlockSource, ReceiptProvider, StageCheckpointWriter},
     AccountProvider, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
     HeaderProvider, PostState, ProviderError, StageCheckpointProvider, TransactionError,
     TransactionsProvider, WithdrawalsProvider,
@@ -42,8 +42,6 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
 };
-
-use super::get_stage_checkpoint;
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TX>;
@@ -1076,40 +1074,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(())
     }
 
-    /// Get the stage checkpoint.
-    pub fn get_stage_checkpoint(
-        &self,
-        id: StageId,
-    ) -> std::result::Result<Option<StageCheckpoint>, DatabaseError> {
-        get_stage_checkpoint(&self.tx, id)
-    }
-
-    /// Save stage checkpoint.
-    pub fn save_stage_checkpoint(
-        &self,
-        id: StageId,
-        checkpoint: StageCheckpoint,
-    ) -> std::result::Result<(), DatabaseError> {
-        self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)
-    }
-
-    /// Get stage checkpoint progress.
-    pub fn get_stage_checkpoint_progress(
-        &self,
-        id: StageId,
-    ) -> std::result::Result<Option<Vec<u8>>, DatabaseError> {
-        self.tx.get::<tables::SyncStageProgress>(id.to_string())
-    }
-
-    /// Save stage checkpoint progress.
-    pub fn save_stage_checkpoint_progress(
-        &self,
-        id: StageId,
-        checkpoint: Vec<u8>,
-    ) -> std::result::Result<(), DatabaseError> {
-        self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)
-    }
-
     /// Get lastest block number.
     pub fn tip_number(&self) -> std::result::Result<u64, DatabaseError> {
         Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
@@ -1912,5 +1876,22 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for DatabaseProvider<'this, TX> {
 impl<'this, TX: DbTx<'this>> StageCheckpointProvider for DatabaseProvider<'this, TX> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(self.tx.get::<tables::SyncStage>(id.to_string())?)
+    }
+
+    /// Get stage checkpoint progress.
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
+        Ok(self.tx.get::<tables::SyncStageProgress>(id.to_string())?)
+    }
+}
+
+impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this, TX> {
+    /// Save stage checkpoint progress.
+    fn save_stage_checkpoint_progress(&self, id: StageId, checkpoint: Vec<u8>) -> Result<()> {
+        Ok(self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)?)
+    }
+
+    /// Save stage checkpoint.
+    fn save_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) -> Result<()> {
+        Ok(self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)?)
     }
 }
