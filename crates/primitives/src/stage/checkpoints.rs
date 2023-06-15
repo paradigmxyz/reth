@@ -216,6 +216,29 @@ impl StageCheckpoint {
         self.block_number = block_number;
         self
     }
+
+    /// Get the underlying [`EntitiesCheckpoint`] to determine the number of entities processed, and
+    /// the number of total entities to process.
+    pub fn entities(&self) -> EntitiesCheckpoint {
+        match self.stage_checkpoint {
+            Some(
+                StageUnitCheckpoint::Account(AccountHashingCheckpoint {
+                    progress: entities, ..
+                }) |
+                StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+                    progress: entities, ..
+                }) |
+                StageUnitCheckpoint::Entities(entities) |
+                StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }) |
+                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }) |
+                StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
+                    progress: entities,
+                    ..
+                }),
+            ) => entities,
+            None => EntitiesCheckpoint::default(),
+        }
+    }
 }
 
 impl Display for StageCheckpoint {
