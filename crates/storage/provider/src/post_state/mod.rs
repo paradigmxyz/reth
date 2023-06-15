@@ -285,7 +285,7 @@ impl PostState {
                     wiped_storage.extend(their_storage_transition.storage);
                     (wipe, wiped_storage)
                 } else {
-                    (StorageWipe::None, their_storage_transition.storage)
+                    (StorageWipe::None, their_storage_transition.storage.into_iter().collect())
                 };
                 self.storage_changes.insert_for_block_and_address(
                     block_number,
@@ -746,7 +746,7 @@ mod tests {
         assert_eq!(
             init_state.storage.get(&address),
             Some(&Storage {
-                storage: BTreeMap::from([(init_slot, U256::from(1))]),
+                storage: HashMap::from([(init_slot, U256::from(1))]),
                 times_wiped: 0
             })
         );
@@ -778,7 +778,7 @@ mod tests {
         assert!(post_state.storage.get(&address).unwrap().wiped());
         assert_eq!(
             post_state.storage.get(&address).unwrap(),
-            &Storage { times_wiped: 1, storage: BTreeMap::default() }
+            &Storage { times_wiped: 1, storage: HashMap::default() }
         );
 
         // Revert to block 1
@@ -948,8 +948,8 @@ mod tests {
         assert_eq!(
             state.storage,
             HashMap::from([
-                (address1, Storage { times_wiped: 2, storage: BTreeMap::default() }),
-                (address2, Storage { times_wiped: 1, storage: BTreeMap::default() })
+                (address1, Storage { times_wiped: 2, storage: HashMap::default() }),
+                (address2, Storage { times_wiped: 1, storage: HashMap::default() })
             ])
         );
         assert_eq!(
@@ -1010,8 +1010,8 @@ mod tests {
         assert_eq!(
             state_3_4.storage,
             HashMap::from([
-                (address1, Storage { times_wiped: 1, storage: BTreeMap::default() }),
-                (address2, Storage { times_wiped: 1, storage: BTreeMap::default() })
+                (address1, Storage { times_wiped: 1, storage: HashMap::default() }),
+                (address2, Storage { times_wiped: 1, storage: HashMap::default() })
             ])
         );
 
@@ -1493,7 +1493,7 @@ mod tests {
         // Then, we must ensure that *only* the storage from the last transition will be written
         assert_eq!(
             state.account_storage(&address_a).expect("Account A should have some storage").storage,
-            BTreeMap::from([(U256::from(0), U256::from(3)), (U256::from(2), U256::from(4))]),
+            HashMap::from([(U256::from(0), U256::from(3)), (U256::from(2), U256::from(4))]),
             "Account A's storage should only have slots 0 and 2, and they should have values 3 and 4, respectively."
         );
     }
@@ -1632,7 +1632,7 @@ mod tests {
             &HashMap::from([(
                 address,
                 Storage {
-                    storage: BTreeMap::from([
+                    storage: HashMap::from([
                         (U256::from(0), U256::from(2)),
                         (U256::from(1), U256::from(5))
                     ]),
@@ -1781,7 +1781,7 @@ mod tests {
             &HashMap::from([(
                 address,
                 Storage {
-                    storage: BTreeMap::from([(U256::from(0), U256::from(2)),]),
+                    storage: HashMap::from([(U256::from(0), U256::from(2)),]),
                     times_wiped: 0,
                 }
             )]),

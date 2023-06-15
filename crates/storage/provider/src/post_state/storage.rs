@@ -1,6 +1,6 @@
 use derive_more::Deref;
 use reth_primitives::{Address, BlockNumber, U256};
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::{btree_map::Entry, BTreeMap, HashMap};
 
 /// Storage for an account with the old and new values for each slot: (slot -> (old, new)).
 pub type StorageChangeset = BTreeMap<U256, (U256, U256)>;
@@ -55,7 +55,7 @@ pub struct Storage {
     /// The number of times the storage was wiped.
     pub times_wiped: u64,
     /// The storage slots.
-    pub storage: BTreeMap<U256, U256>,
+    pub storage: HashMap<U256, U256>,
 }
 
 impl Storage {

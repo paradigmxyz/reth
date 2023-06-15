@@ -898,7 +898,7 @@ mod tests {
                 account1,
                 Storage {
                     times_wiped: 0,
-                    storage: BTreeMap::from([(U256::from(1), U256::from(2))])
+                    storage: HashMap::from([(U256::from(1), U256::from(2))])
                 }
             )]),
             "Should have changed 1 storage slot"
