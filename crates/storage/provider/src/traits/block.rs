@@ -1,10 +1,12 @@
 use crate::{
     BlockIdProvider, BlockNumProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, Header, SealedBlock, SealedHeader, H256,
+    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
+    SealedBlock, SealedHeader, H256,
 };
 
 /// A helper enum that represents the origin of the requested block.
@@ -44,7 +46,13 @@ impl BlockSource {
 /// the database.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockProvider:
-    BlockNumProvider + HeaderProvider + TransactionsProvider + ReceiptProvider + Send + Sync
+    BlockNumProvider
+    + HeaderProvider
+    + TransactionsProvider
+    + ReceiptProvider
+    + WithdrawalsProvider
+    + Send
+    + Sync
 {
     /// Tries to find in the given block source.
     ///
@@ -87,6 +95,11 @@ pub trait BlockProvider:
     ///
     /// Returns `None` if block is not found.
     fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>>;
+
+    /// Returns the block with senders with matching number from database.
+    ///
+    /// Returns `None` if block is not found.
+    fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>>;
 }
 
 /// Trait extension for `BlockProvider`, for types that implement `BlockId` conversion.

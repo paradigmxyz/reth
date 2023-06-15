@@ -25,10 +25,10 @@ use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec,
-    Hardfork, Head, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxHash,
-    TxNumber, Withdrawal, H256, U256,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -1609,6 +1609,48 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
     fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
+
+    /// Returns the block with senders with matching number from database.
+    ///
+    /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
+    /// spot, and we want fast querying.**
+    ///
+    /// Returns `None` if block is not found.
+    fn block_with_senders(&self, block_number: BlockNumber) -> Result<Option<BlockWithSenders>> {
+        let header = self
+            .header_by_number(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
+        let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
+
+        // Get the block body
+        let body = self
+            .block_body_indices(block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
+        let tx_range = body.tx_num_range();
+
+        let (transactions, senders) = if tx_range.is_empty() {
+            (vec![], vec![])
+        } else {
+            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
+        };
+
+        let body = transactions
+            .into_iter()
+            .map(|tx| {
+                TransactionSigned {
+                    // TODO: This is the fastest way right now to make everything just work with
+                    // a dummy transaction hash.
+                    hash: Default::default(),
+                    signature: tx.signature,
+                    transaction: tx.transaction,
+                }
+            })
+            .collect();
+
+        Ok(Some(Block { header, body, ommers, withdrawals }.with_senders(senders)))
+    }
 }
 
 impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX> {
@@ -1715,6 +1757,27 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             }
         }
         Ok(results)
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<TransactionSignedNoHash>> {
+        Ok(self
+            .tx
+            .cursor_read::<tables::Transactions>()?
+            .walk_range(range)?
+            .map(|entry| entry.map(|tx| tx.1))
+            .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        Ok(self
+            .tx
+            .cursor_read::<tables::TxSenders>()?
+            .walk_range(range)?
+            .map(|entry| entry.map(|sender| sender.1))
+            .collect::<std::result::Result<Vec<_>, _>>()?)
     }
 }
 
