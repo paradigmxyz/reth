@@ -26,4 +26,3 @@
    1. [reth stage](./cli/stage.md)
 1. [Developers](./developers/developers.md)
    1. [Contribute](./developers/contribute.md)
-   1. [Architecture](./developers/architecture.md)
