@@ -1460,4 +1460,47 @@ mod tests {
 
         assert!(downloader.next().await.is_none());
     }
+
+    #[tokio::test]
+    async fn download_one_by_one_larger_request_limit() {
+        reth_tracing::init_test_tracing();
+        let p3 = SealedHeader::default();
+        let p2 = child_header(&p3);
+        let p1 = child_header(&p2);
+        let p0 = child_header(&p1);
+
+        let client = Arc::new(TestHeadersClient::default());
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .stream_batch_size(1)
+            .request_limit(3)
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
+        downloader.update_local_head(p3.clone());
+        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
+
+        client
+            .extend(vec![
+                p0.as_ref().clone(),
+                p1.as_ref().clone(),
+                p2.as_ref().clone(),
+                p3.as_ref().clone(),
+            ])
+            .await;
+
+        let headers = downloader.next().await.unwrap();
+        assert_eq!(headers, Ok(vec![p0]));
+        let headers = headers.unwrap();
+        assert_eq!(headers.capacity(), headers.len());
+
+        let headers = downloader.next().await.unwrap();
+        assert_eq!(headers, Ok(vec![p1]));
+        let headers = headers.unwrap();
+        assert_eq!(headers.capacity(), headers.len());
+
+        let headers = downloader.next().await.unwrap();
+        assert_eq!(headers, Ok(vec![p2]));
+        let headers = headers.unwrap();
+        assert_eq!(headers.capacity(), headers.len());
+
+        assert!(downloader.next().await.is_none());
+    }
 }
