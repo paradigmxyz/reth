@@ -603,8 +603,8 @@ where
     /// Clears all requests/responses.
     fn clear(&mut self) {
         self.lowest_validated_header.take();
-        self.queued_validated_headers.clear();
-        self.buffered_responses.clear();
+        self.queued_validated_headers = Vec::new();
+        self.buffered_responses = BinaryHeap::new();
         self.in_progress_queue.clear();
 
         self.metrics.in_flight_requests.set(0.);

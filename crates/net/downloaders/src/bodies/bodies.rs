@@ -200,8 +200,8 @@ where
         self.download_range = RangeInclusive::new(1, 0);
         self.latest_queued_block_number.take();
         self.in_progress_queue.clear();
-        self.queued_bodies.clear();
-        self.buffered_responses.clear();
+        self.queued_bodies = Vec::new();
+        self.buffered_responses = BinaryHeap::new();
         self.num_buffered_blocks = 0;
 
         // reset metrics
