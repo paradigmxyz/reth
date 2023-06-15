@@ -16,11 +16,11 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    Block, BlockNumber, BlockWithSenders, Header, TransactionSigned, U256,
+    BlockNumber, Header, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, BlockProvider, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, ProviderError, WithdrawalsProvider,
+    HeaderProvider, LatestStateProviderRef, ProviderError,
 };
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;

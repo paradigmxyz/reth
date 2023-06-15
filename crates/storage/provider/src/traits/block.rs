@@ -96,7 +96,9 @@ pub trait BlockProvider:
     /// Returns `None` if block is not found.
     fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>>;
 
-    /// Returns the block with senders with matching number from database
+    /// Returns the block with senders with matching number from database.
+    ///
+    /// ! The transactions have invalid hashes. !
     ///
     /// Returns `None` if block is not found.
     fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>>;
