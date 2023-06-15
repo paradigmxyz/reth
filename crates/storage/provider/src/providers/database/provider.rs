@@ -740,8 +740,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
             let parent_number = range.start().saturating_sub(1);
             let parent_state_root = self
-                .tx
-                .get::<tables::Headers>(parent_number)?
+                .header_by_number(parent_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
                 .state_root;
 
@@ -749,8 +748,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
                 let parent_hash = self
-                    .tx
-                    .get::<tables::CanonicalHeaders>(parent_number)?
+                    .block_hash(parent_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
                 return Err(TransactionError::UnwindStateRootMismatch {
                     got: new_state_root,
