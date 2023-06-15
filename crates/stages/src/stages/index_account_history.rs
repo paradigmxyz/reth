@@ -66,7 +66,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
     use reth_provider::ProviderFactory;
     use std::collections::BTreeMap;
 
