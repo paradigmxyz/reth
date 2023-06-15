@@ -21,7 +21,10 @@ mod fourbyte;
 mod opcount;
 mod types;
 mod utils;
-use crate::tracing::types::{CallTraceNode, StorageChange};
+use crate::tracing::{
+    arena::PushTraceKind,
+    types::{CallTraceNode, StorageChange},
+};
 pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
@@ -126,8 +129,18 @@ impl TracingInspector {
         caller: Address,
         maybe_precompile: Option<bool>,
     ) {
+        // This will only be true if the inspector is configured to exclude precompiles and the call
+        // is to a precompile
+        let push_kind = if maybe_precompile.unwrap_or(false) {
+            // We don't want to track precompiles
+            PushTraceKind::PushOnly
+        } else {
+            PushTraceKind::PushAndAttachToParent
+        };
+
         self.trace_stack.push(self.traces.push_trace(
             0,
+            push_kind,
             CallTrace {
                 depth,
                 address,
