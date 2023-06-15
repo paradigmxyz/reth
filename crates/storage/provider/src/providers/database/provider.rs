@@ -1110,23 +1110,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)
     }
 
-    /// Get lastest block number.
-    pub fn tip_number(&self) -> std::result::Result<u64, DatabaseError> {
-        Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
-    }
-
-    /// Query [tables::CanonicalHeaders] table for block hash by block number
-    pub fn get_block_hash(
-        &self,
-        block_number: BlockNumber,
-    ) -> std::result::Result<BlockHash, TransactionError> {
-        let hash = self
-            .tx
-            .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(hash)
-    }
-
     /// Query the block body by number.
     pub fn block_body_indices(
         &self,
@@ -1137,24 +1120,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .get::<tables::BlockBodyIndices>(number)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
         Ok(body)
-    }
-
-    /// Query the block header by number
-    pub fn get_header(&self, number: BlockNumber) -> std::result::Result<Header, TransactionError> {
-        let header = self
-            .tx
-            .get::<tables::Headers>(number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-        Ok(header)
-    }
-
-    /// Get the total difficulty for a block.
-    pub fn get_td(&self, block: BlockNumber) -> std::result::Result<U256, TransactionError> {
-        let td = self
-            .tx
-            .get::<tables::HeaderTD>(block)?
-            .ok_or(ProviderError::TotalDifficultyNotFound { number: block })?;
-        Ok(td.into())
     }
 
     /// Unwind table by some number key.
