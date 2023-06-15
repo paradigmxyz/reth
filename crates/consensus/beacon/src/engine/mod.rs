@@ -1663,15 +1663,17 @@ mod tests {
                     .paris_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
+            let (mut consensus_engine, env) = setup_consensus_engine(
                 chain_spec.clone(),
                 VecDeque::from([
-                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0) }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(1) }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(1) }),
                 ]),
                 Vec::default(),
-                None,
+                Some(1),
             );
+            // Reset sync engine max_block, so we have only pipeline's one set.
+            consensus_engine.sync.set_max_block(None);
 
             let genesis = random_block(0, None, None, Some(0));
             let block1 = random_block(1, Some(genesis.hash), None, Some(0));
