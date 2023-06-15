@@ -43,8 +43,6 @@ use std::{
     sync::Arc,
 };
 
-use super::get_stage_checkpoint;
-
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TX>;
 
@@ -1072,14 +1070,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
         }
         Ok(())
-    }
-
-    /// Get the stage checkpoint.
-    pub fn get_stage_checkpoint(
-        &self,
-        id: StageId,
-    ) -> std::result::Result<Option<StageCheckpoint>, DatabaseError> {
-        get_stage_checkpoint(&self.tx, id)
     }
 
     /// Save stage checkpoint.

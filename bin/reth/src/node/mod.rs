@@ -41,8 +41,8 @@ use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkMan
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Head, SealedHeader, H256};
 use reth_provider::{
-    providers::get_stage_checkpoint, BlockHashProvider, BlockProvider, CanonStateSubscriptions,
-    HeaderProvider, ProviderFactory,
+    BlockHashProvider, BlockProvider, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
+    StageCheckpointProvider,
 };
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
@@ -508,9 +508,8 @@ impl Command {
     fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::Error> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
-        let head = get_stage_checkpoint(provider.tx_ref(), StageId::Finish)?
-            .unwrap_or_default()
-            .block_number;
+
+        let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
 
         let header = provider
             .header_by_number(head)?

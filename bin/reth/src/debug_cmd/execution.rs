@@ -26,7 +26,7 @@ use reth_interfaces::{
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
-use reth_provider::{providers::get_stage_checkpoint, ProviderFactory};
+use reth_provider::{ProviderFactory, StageCheckpointProvider};
 use reth_staged_sync::utils::init::{init_db, init_genesis};
 use reth_stages::{
     sets::DefaultStages,
@@ -242,15 +242,17 @@ impl Command {
         ctx.task_executor
             .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
 
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let provider = factory.provider().map_err(PipelineError::Interface)?;
+
         let latest_block_number =
-            get_stage_checkpoint(&db.tx()?, StageId::Finish)?.unwrap_or_default().block_number;
+            provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
         if latest_block_number >= self.to {
             info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
             return Ok(())
         }
 
         let mut current_max_block = latest_block_number;
-        let factory = ProviderFactory::new(&db, self.chain.clone());
 
         while current_max_block < self.to {
             let next_block = current_max_block + 1;

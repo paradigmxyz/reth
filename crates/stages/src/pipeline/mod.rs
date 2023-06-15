@@ -6,7 +6,7 @@ use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
     BlockNumber, ChainSpec, H256,
 };
-use reth_provider::{providers::get_stage_checkpoint, ProviderFactory};
+use reth_provider::{ProviderFactory, StageCheckpointProvider};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -137,12 +137,14 @@ where
 
     /// Registers progress metrics for each registered stage
     pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
-        let tx = self.db.tx()?;
+        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+        let provider = factory.provider()?;
+
         for stage in &self.stages {
             let stage_id = stage.id();
             self.metrics.stage_checkpoint(
                 stage_id,
-                get_stage_checkpoint(&tx, stage_id)?.unwrap_or_default(),
+                provider.get_stage_checkpoint(stage_id)?.unwrap_or_default(),
                 None,
             );
         }
@@ -228,8 +230,14 @@ where
                 }
             }
 
+            let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+
             previous_stage = Some(
-                get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default().block_number,
+                factory
+                    .provider()?
+                    .get_stage_checkpoint(stage_id)?
+                    .unwrap_or_default()
+                    .block_number,
             );
         }
 
