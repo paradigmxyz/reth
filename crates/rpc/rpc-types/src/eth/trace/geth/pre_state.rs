@@ -14,6 +14,7 @@ pub enum PreStateFrame {
 pub struct PreStateMode(pub BTreeMap<Address, AccountState>);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DiffMode {
     pub pre: BTreeMap<Address, AccountState>,
     pub post: BTreeMap<Address, AccountState>,
