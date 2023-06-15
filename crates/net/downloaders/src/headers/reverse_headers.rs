@@ -557,9 +557,6 @@ where
                 Ordering::Equal => {
                     let OrderedHeadersResponse { headers, request, peer_id } =
                         PeekMut::pop(next_response);
-
-                    // shrink the buffer so that it doesn't grow indefinitely
-                    self.buffered_responses.shrink_to_fit();
                     self.metrics.buffered_responses.decrement(1.);
 
                     if let Err(err) = self.process_next_headers(request, headers, peer_id) {
@@ -569,9 +566,6 @@ where
                 Ordering::Greater => {
                     self.metrics.buffered_responses.decrement(1.);
                     PeekMut::pop(next_response);
-
-                    // shrink the buffer so that it doesn't grow indefinitely
-                    self.buffered_responses.shrink_to_fit();
                 }
             }
         }
@@ -801,6 +795,9 @@ where
             }
         }
 
+        // shrink the buffer after handling sync target outcomes
+        this.buffered_responses.shrink_to_fit();
+
         // this loop will submit new requests and poll them, if a new batch is ready it is returned
         // The actual work is done by the receiver of the request channel, this means, polling the
         // request future is just reading from a `oneshot::Receiver`. Hence, this loop tries to keep
@@ -829,6 +826,9 @@ where
                     }
                 };
             }
+
+            // shrink the buffer after handling headers outcomes
+            this.buffered_responses.shrink_to_fit();
 
             // marks the loop's exit condition: exit if no requests submitted
             let mut progress = false;
