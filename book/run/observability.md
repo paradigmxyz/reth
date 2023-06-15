@@ -22,7 +22,7 @@ while true; do date; curl -s localhost:9000 | grep -Ev '^(#|$)' | sort; echo; sl
 
 We're finally getting somewhere! As a final step, though, wouldn't it be great to see how these metrics progress over time (and generally, in a GUI)?
 
-### Prometheus & Grafana
+## Prometheus & Grafana
 
 We're going to be using Prometheus to collect metrics off of the endpoint we set up, and use Grafana to scrape the metrics from Prometheus and define a dashboard with them.
 
@@ -55,7 +55,7 @@ To configure the dashboard in Grafana, click on the squares icon in the upper le
 
 And voilá, you should see your dashboard! If you're not yet connected to any peers, the dashboard will look like it's in an empty state, but once you are, you should see it start populating with data.
 
-### Conclusion
+## Conclusion
 
 In this runbook, we took you through starting the node, exposing different log levels, exporting metrics, and finally viewing those metrics in a Grafana dashboard.
 
