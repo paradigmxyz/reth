@@ -1638,9 +1638,9 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
         &self,
         tx_hash: TxHash,
     ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
+        let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlock>()?;
         if let Some(transaction_id) = self.transaction_id(tx_hash)? {
             if let Some(transaction) = self.transaction_by_id(transaction_id)? {
-                let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlock>()?;
                 if let Some(block_number) =
                     transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
                 {
@@ -1680,13 +1680,13 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
         &self,
         id: BlockHashOrNumber,
     ) -> Result<Option<Vec<TransactionSigned>>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
         if let Some(block_number) = self.convert_hash_or_number(id)? {
             if let Some(body) = self.block_body_indices(block_number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
                     let transactions = tx_cursor
                         .walk_range(tx_range)?
                         .map(|result| result.map(|(_, tx)| tx.into()))
