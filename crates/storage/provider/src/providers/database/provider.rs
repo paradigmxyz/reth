@@ -1095,8 +1095,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         id: StageId,
         checkpoint: StageCheckpoint,
     ) -> std::result::Result<(), DatabaseError> {
-        self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)?;
-        Ok(())
+        self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)
     }
 
     /// Get stage checkpoint progress.
@@ -1113,8 +1112,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         id: StageId,
         checkpoint: Vec<u8>,
     ) -> std::result::Result<(), DatabaseError> {
-        self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)?;
-        Ok(())
+        self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)
     }
 
     /// Get lastest block number.
