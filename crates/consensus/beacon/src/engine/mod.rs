@@ -956,27 +956,26 @@ where
         }
     }
 
-    /// Attempt to restore the tree with the finalized block number.
-    /// If the finalized block is missing from the database, trigger the pipeline run.
-    fn restore_tree_if_possible(
+    /// Attempt to restore the tree with the given block hash.
+    ///
+    /// This is invoked after a full pipeline to update the tree with the most recent canonical
+    /// hashes.
+    ///
+    /// If the given block is missing from the database, this will return `false`. Otherwise, `true`
+    /// is returned: the database contains the hash and the tree was updated.
+    fn update_tree_on_finished_pipeline(
         &mut self,
-        state: ForkchoiceState,
-    ) -> Result<(), reth_interfaces::Error> {
-        let needs_pipeline_run = match self.blockchain.block_number(state.finalized_block_hash)? {
+        block_hash: H256,
+    ) -> Result<bool, reth_interfaces::Error> {
+        let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
                 self.blockchain.restore_canonical_hashes(number)?;
-
-                // After restoring the tree, check if the head block is missing.
-                self.blockchain.header(&state.head_block_hash)?.is_none()
+                true
             }
-            None => true,
+            None => false,
         };
-
-        if needs_pipeline_run {
-            self.sync.set_pipeline_sync_target(state.head_block_hash);
-        }
-        Ok(())
+        Ok(synced_to_finalized)
     }
 
     /// Invoked if we successfully downloaded a new block from the network.
@@ -1141,10 +1140,10 @@ where
                             }
                         };
 
-                        // TODO: figure out how to make this less complex:
-                        // restore_tree_if_possible will run the pipeline if the current_state head
-                        // hash is missing. This can arise if we buffer the forkchoice head, and if
-                        // the head is an ancestor of an invalid block.
+                        // Next, we check if we need to schedule another pipeline run or transition
+                        // to live sync via tree.
+                        // This can arise if we buffer the forkchoice head, and if the head is an
+                        // ancestor of an invalid block.
                         //
                         //  * The forkchoice head could be buffered if it were first sent as a
                         //    `newPayload` request.
@@ -1165,8 +1164,18 @@ where
                             .is_none()
                         {
                             // Update the state and hashes of the blockchain tree if possible.
-                            match self.restore_tree_if_possible(sync_target_state) {
-                                Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
+                            match self.update_tree_on_finished_pipeline(
+                                sync_target_state.finalized_block_hash,
+                            ) {
+                                Ok(synced) => {
+                                    if !synced {
+                                        // We don't have the finalized block in the database, so
+                                        // we need to run another pipeline.
+                                        self.sync.set_pipeline_sync_target(
+                                            sync_target_state.finalized_block_hash,
+                                        );
+                                    }
+                                }
                                 Err(error) => {
                                     error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
                                     return Some(Err(error.into()))
