@@ -8,7 +8,7 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::init::{init_db, DB_VERSION};
+use reth_staged_sync::utils::init::init_db;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -99,7 +99,7 @@ impl Command {
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
-        info!(target: "reth::cli", version = DB_VERSION, "Database opened");
+        info!(target: "reth::cli", "Database opened");
 
         let mut tool = DbTool::new(&db, self.chain.clone())?;
 

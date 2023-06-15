@@ -1,3 +1,6 @@
+use crate::utils::versioning::{
+    check_db_version_file, create_db_version_file, update_client_version_file,
+};
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
@@ -7,50 +10,39 @@ use reth_db::{
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, H256, U256};
 use reth_provider::{DatabaseProviderRW, PostState, ProviderFactory, TransactionError};
-use std::{fs, io, path::Path, sync::Arc};
-use tracing::{debug, info};
-
-/// The name of the file that contains the version of the database.
-pub const DB_VERSION_FILE_NAME: &str = "version";
-/// The version of the database stored in the [DB_VERSION_FILE_NAME] file in the same directory as
-/// database. Example: `0.1.0-e43455c2`
-pub const DB_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("VERGEN_GIT_SHA"));
+use std::{fs, path::Path, sync::Arc};
+use tracing::debug;
 
 /// Opens up an existing database or creates a new one at the specified path.
 pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
-    fs::create_dir_all(path.as_ref())?;
+    if is_db_empty(&path) {
+        fs::create_dir_all(&path)?;
+        create_db_version_file(&path)?;
+    } else {
+        check_db_version_file(&path)?;
+    }
+    update_client_version_file(&path)?;
 
     let db = Env::<WriteMap>::open(path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
-    create_version_file(path)?;
 
     db.create_tables()?;
 
     Ok(db)
 }
 
-/// Creates a database version file with [DB_VERSION_FILE_NAME] name containing [DB_VERSION] string.
-/// This function will create a file if it does not exist,
-/// and will entirely replace its contents if it does.
-fn create_version_file<P: AsRef<Path>>(db_path: P) -> io::Result<()> {
-    let version_path = db_path.as_ref().join(DB_VERSION_FILE_NAME);
+/// Check if a db is empty. It does not provide any information on the
+/// validity of the data in it.
+/// We consider a database as non empty when it's a non empty directory.
+fn is_db_empty<P: AsRef<Path>>(path: P) -> bool {
+    let path = path.as_ref();
 
-    // We want to keep these logs on INFO level, so users would have them on any verbosity level.
-    // They're useful in debugging problems related to DB migrations,
-    // so we could see that version was updated from A to B, which is a breaking change.
-    match fs::read_to_string(&version_path) {
-        Ok(old_version) if old_version != DB_VERSION => {
-            info!(old_version, new_version = DB_VERSION, "Database version updated")
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            info!(version = DB_VERSION, "Database version initialized")
-        }
-        Err(err) => {
-            debug!(?err, "Failed to read database version file")
-        }
-        _ => (),
+    if !path.exists() {
+        true
+    } else if let Ok(dir) = path.read_dir() {
+        dir.count() == 0
+    } else {
+        true
     }
-
-    fs::write(version_path, DB_VERSION)
 }
 
 /// Database initialization error type.

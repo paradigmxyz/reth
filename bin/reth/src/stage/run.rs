@@ -13,7 +13,7 @@ use reth_config::Config;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
 use reth_provider::{providers::get_stage_checkpoint, ProviderFactory};
-use reth_staged_sync::utils::init::{init_db, DB_VERSION};
+use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
@@ -120,7 +120,7 @@ impl Command {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
-        info!(target: "reth::cli", version = DB_VERSION, "Database opened");
+        info!(target: "reth::cli", "Database opened");
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
