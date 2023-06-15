@@ -2,7 +2,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_rpc_types::{
     trace::geth::{
-        BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame,
+        BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
         TraceResult,
     },
     CallRequest, RichBlock,
@@ -84,7 +84,7 @@ pub trait DebugApi {
         &self,
         tx_hash: H256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<GethTraceFrame>;
+    ) -> RpcResult<GethTrace>;
 
     /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
     /// block execution using the final state of parent block as the base.
@@ -101,5 +101,5 @@ pub trait DebugApi {
         request: CallRequest,
         block_number: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<GethTraceFrame>;
+    ) -> RpcResult<GethTrace>;
 }

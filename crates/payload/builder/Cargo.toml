@@ -29,7 +29,6 @@ futures-util = { workspace = true }
 thiserror = { workspace = true }
 sha2 = { version = "0.10", default-features = false }
 tracing = { workspace = true }
-hashbrown = "0.13"
 
 [features]
 test-utils = []

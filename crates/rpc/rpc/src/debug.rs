@@ -26,8 +26,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
-        GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame, NoopFrame,
-        TraceResult,
+        GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
     BlockError, CallRequest, RichBlock,
 };
@@ -203,7 +202,7 @@ where
         &self,
         tx_hash: H256,
         opts: GethDebugTracingOptions,
-    ) -> EthResult<GethTraceFrame> {
+    ) -> EthResult<GethTrace> {
         let (transaction, block) = match self.inner.eth_api.transaction_and_block(tx_hash).await? {
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
@@ -244,7 +243,7 @@ where
         call: CallRequest,
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
-    ) -> EthResult<GethTraceFrame> {
+    ) -> EthResult<GethTrace> {
         self.on_blocking_task(|this| async move {
             this.try_debug_trace_call(call, block_id, opts).await
         })
@@ -260,7 +259,7 @@ where
         call: CallRequest,
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
-    ) -> EthResult<GethTraceFrame> {
+    ) -> EthResult<GethTrace> {
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides } =
             opts;
@@ -319,7 +318,7 @@ where
                     let (res, env) = inspect(db, env, &mut inspector)?;
 
                     let result = inspector.json_result(res, &env)?;
-                    Ok(GethTraceFrame::JS(result))
+                    Ok(GethTrace::JS(result))
                 }
             }
         }
@@ -349,7 +348,7 @@ where
         env: Env,
         at: BlockId,
         db: &mut SubState<StateProviderBox<'_>>,
-    ) -> EthResult<(GethTraceFrame, revm_primitives::State)> {
+    ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
         if let Some(tracer) = tracer {
@@ -395,7 +394,7 @@ where
 
                     let state = res.state.clone();
                     let result = inspector.json_result(res, &env)?;
-                    Ok((GethTraceFrame::JS(result), state))
+                    Ok((GethTrace::JS(result), state))
                 }
             }
         }
@@ -598,7 +597,7 @@ where
         &self,
         tx_hash: H256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<GethTraceFrame> {
+    ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default()).await?)
     }
@@ -609,7 +608,7 @@ where
         request: CallRequest,
         block_number: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<GethTraceFrame> {
+    ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
             .await?)
