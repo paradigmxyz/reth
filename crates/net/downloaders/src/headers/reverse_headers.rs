@@ -333,6 +333,7 @@ where
                     .count();
                 // removes all headers that are higher than current target
                 self.queued_validated_headers.drain(..skip);
+                self.queued_validated_headers.shrink_to_fit();
             }
         } else {
             // this occurs on the initial sync target request
@@ -616,6 +617,21 @@ where
         let batch_size = self.stream_batch_size.min(self.queued_validated_headers.len());
         let mut rem = self.queued_validated_headers.split_off(batch_size);
         std::mem::swap(&mut rem, &mut self.queued_validated_headers);
+        // If the downloader consumer does not flush headers at the same rate that the downloader
+        // queues them, then the `queued_validated_headers` buffer can grow unbounded.
+        //
+        // The semantics of `split_off` state that the capacity of the original buffer is
+        // unchanged, so queued_validated_headers will then have only `batch_size` elements, and
+        // its original capacity. Because `rem` is initially populated with elements `[batch_size,
+        // len)` of `queued_validated_headers`, it will have a capacity of at least `len -
+        // batch_size`, and the total memory allocated by the two buffers will be around double the
+        // original size of `queued_validated_headers`.
+        //
+        // To prevent these allocations from leaking to the consumer, we shrink the capacity of the
+        // two buffers. The total memory allocated should then be not much more than the original
+        // size of `queued_validated_headers`.
+        rem.shrink_to_fit();
+        self.queued_validated_headers.shrink_to_fit();
         rem
     }
 }
