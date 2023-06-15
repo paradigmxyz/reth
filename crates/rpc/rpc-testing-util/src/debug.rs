@@ -1,6 +1,6 @@
 //! Helpers for testing debug trace calls.
 
-use reth_rpc_types::trace::geth::{GethDebugTracerConfig, GethDebugTracerType, GethDebugTracingOptions};
+use reth_rpc_types::trace::geth::{GethDebugTracerType, GethDebugTracingOptions};
 const NOOP_TRACER:&str = include_str!("../assets/noop-tracer.js");
 
 /// A javascript tracer that does nothing
@@ -12,7 +12,7 @@ impl From<NoopJsTracer> for GethDebugTracingOptions {
     fn from(_: NoopJsTracer) -> Self {
         GethDebugTracingOptions {
             tracer: Some(GethDebugTracerType::JsTracer(NOOP_TRACER.to_string())),
-            tracer_config: Some(GethDebugTracerConfig::JsTracer(serde_json::Value::Object(Default::default()))),
+            tracer_config: serde_json::Value::Object(Default::default()).into(),
             ..Default::default()
         }
     }
