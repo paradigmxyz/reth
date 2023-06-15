@@ -453,7 +453,6 @@ where
         let status = self.prepare_invalid_response(header.parent_hash);
 
         // insert the head block into the invalid header cache
-        warn!(target: "consensus::engine", "Bad block with header: {:?}", header);
         self.invalid_headers.insert_with_invalid_ancestor(head, header);
 
         Some(status)
@@ -803,7 +802,6 @@ where
         // now check the block itself
         if let Some(status) = self.check_invalid_ancestor(block.parent_hash) {
             // The parent is invalid, so this block is also invalid
-            warn!(target: "consensus::engine", "Bad block with header: {:?}", block.header);
             self.invalid_headers.insert(block.header);
             return Ok(status)
         }
@@ -948,7 +946,6 @@ where
                 let parent_hash = block.parent_hash;
 
                 // keep track of the invalid header
-                warn!(target: "consensus::engine", "Bad block with header: {:?}", block.header);
                 self.invalid_headers.insert(block.header);
 
                 let latest_valid_hash =
@@ -1038,10 +1035,8 @@ where
             Err(err) => {
                 debug!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
                 if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
-                    let block_header = err.into_block().header;
                     // non-internal error kinds occur if the payload is invalid
-                    warn!(target: "consensus::engine", "Bad block with header: {:?}", &block_header);
-                    self.invalid_headers.insert(block_header);
+                    self.invalid_headers.insert(err.into_block().header);
                 }
             }
         }
@@ -1108,8 +1103,6 @@ where
                             trace!(target: "consensus::engine", hash=?bad_block.hash, "Bad block detected in unwind");
 
                             // update the `invalid_headers` cache with the new invalid headers
-                            warn!(target: "consensus::engine", "Bad block with header: {:?}",
-                            bad_block.clone().unseal());
                             self.invalid_headers.insert(bad_block);
                             return None
                         }
@@ -1265,6 +1258,8 @@ impl InvalidHeaderCache {
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
     fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
+        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
+        header_hash, invalid_ancestor);
         self.headers.insert(header_hash, invalid_ancestor);
     }
 
@@ -1272,6 +1267,8 @@ impl InvalidHeaderCache {
     fn insert(&mut self, invalid_ancestor: SealedHeader) {
         let hash = invalid_ancestor.hash;
         let header = invalid_ancestor.unseal();
+        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
+        hash, header);
         self.headers.insert(hash, Arc::new(header));
     }
 }
