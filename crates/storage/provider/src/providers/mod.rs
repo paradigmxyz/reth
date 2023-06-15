@@ -13,9 +13,10 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
-    ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
+    BlockNumberOrTag, BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
@@ -234,8 +235,12 @@ where
         self.database.provider()?.ommers(id)
     }
 
-    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
-        self.database.provider()?.block_body_indices(num)
+    fn block_body_indices(&self, number: BlockNumber) -> Result<Option<StoredBlockBodyIndices>> {
+        self.database.provider()?.block_body_indices(number)
+    }
+
+    fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>> {
+        self.database.provider()?.block_with_senders(number)
     }
 }
 
@@ -279,6 +284,20 @@ where
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         self.database.provider()?.transactions_by_block_range(range)
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<TransactionSignedNoHash>> {
+        self.database.provider()?.transactions_by_tx_range(range)
+    }
+
+    fn transaction_senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<Address>> {
+        self.database.provider()?.transaction_senders_by_tx_range(range)
     }
 }
 
