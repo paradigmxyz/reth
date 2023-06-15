@@ -265,23 +265,22 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> std::result::Result<BTreeMap<(Address, H256), Vec<u64>>, TransactionError> {
-        let storage_changeset = self
-            .tx
-            .cursor_read::<tables::StorageChangeSet>()?
-            .walk_range(BlockNumberAddress::range(range))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut changeset_cursor = self.tx.cursor_read::<tables::StorageChangeSet>()?;
 
-        // fold all storages to one set of changes
-        let storage_changeset_lists = storage_changeset.into_iter().fold(
-            BTreeMap::new(),
-            |mut storages: BTreeMap<(Address, H256), Vec<u64>>, (index, storage)| {
-                storages
-                    .entry((index.address(), storage.key))
-                    .or_default()
-                    .push(index.block_number());
-                storages
-            },
-        );
+        let storage_changeset_lists =
+            changeset_cursor.walk_range(BlockNumberAddress::range(range))?.try_fold(
+                BTreeMap::new(),
+                |mut storages: BTreeMap<(Address, H256), Vec<u64>>,
+                 entry|
+                 -> std::result::Result<_, TransactionError> {
+                    let (index, storage) = entry?;
+                    storages
+                        .entry((index.address(), storage.key))
+                        .or_default()
+                        .push(index.block_number());
+                    Ok(storages)
+                },
+            )?;
 
         Ok(storage_changeset_lists)
     }
@@ -293,22 +292,18 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> std::result::Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
-        let account_changesets = self
-            .tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
 
-        let account_transtions = account_changesets
-            .into_iter()
-            // fold all account to one set of changed accounts
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, Vec<u64>>, (index, account)| {
-                    accounts.entry(account.address).or_default().push(index);
-                    accounts
-                },
-            );
+        let account_transtions = changeset_cursor.walk_range(range)?.try_fold(
+            BTreeMap::new(),
+            |mut accounts: BTreeMap<Address, Vec<u64>>,
+             entry|
+             -> std::result::Result<_, TransactionError> {
+                let (index, account) = entry?;
+                accounts.entry(account.address).or_default().push(index);
+                Ok(accounts)
+            },
+        )?;
 
         Ok(account_transtions)
     }
