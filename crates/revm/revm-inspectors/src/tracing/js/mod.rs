@@ -220,20 +220,18 @@ impl JsInspector {
         Ok(())
     }
 
-    fn try_enter(&mut self, frame: CallFrame, db: EvmDb) -> JsResult<()> {
+    fn try_enter(&mut self, frame: CallFrame) -> JsResult<()> {
         if let Some(enter_fn) = &self.enter_fn {
             let frame = frame.into_js_object(&mut self.ctx)?;
-            let db = db.into_js_object(&mut self.ctx)?;
-            enter_fn.call(&(self.obj.clone().into()), &[frame.into(), db.into()], &mut self.ctx)?;
+            enter_fn.call(&(self.obj.clone().into()), &[frame.into()], &mut self.ctx)?;
         }
         Ok(())
     }
 
-    fn try_exit(&mut self, frame: FrameResult, db: EvmDb) -> JsResult<()> {
+    fn try_exit(&mut self, frame: FrameResult) -> JsResult<()> {
         if let Some(exit_fn) = &self.exit_fn {
             let frame = frame.into_js_object(&mut self.ctx)?;
-            let db = db.into_js_object(&mut self.ctx)?;
-            exit_fn.call(&(self.obj.clone().into()), &[frame.into(), db.into()], &mut self.ctx)?;
+            exit_fn.call(&(self.obj.clone().into()), &[frame.into()], &mut self.ctx)?;
         }
         Ok(())
     }
@@ -366,7 +364,7 @@ where
 
     fn call(
         &mut self,
-        data: &mut EVMData<'_, DB>,
+        _data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
         _is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
@@ -395,8 +393,7 @@ where
                 kind: call.kind,
                 gas: inputs.gas_limit,
             };
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
-            if let Err(err) = self.try_enter(frame, db) {
+            if let Err(err) = self.try_enter(frame) {
                 return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
             }
         }
@@ -406,7 +403,7 @@ where
 
     fn call_end(
         &mut self,
-        data: &mut EVMData<'_, DB>,
+        _data: &mut EVMData<'_, DB>,
         _inputs: &CallInputs,
         remaining_gas: Gas,
         ret: InstructionResult,
@@ -416,8 +413,7 @@ where
         if self.exit_fn.is_some() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
-            if let Err(err) = self.try_exit(frame_result, db) {
+            if let Err(err) = self.try_exit(frame_result) {
                 return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
             }
         }
@@ -448,8 +444,7 @@ where
             let call = self.active_call();
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
-            if let Err(err) = self.try_enter(frame, db) {
+            if let Err(err) = self.try_enter(frame) {
                 return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
             }
         }
@@ -459,7 +454,7 @@ where
 
     fn create_end(
         &mut self,
-        data: &mut EVMData<'_, DB>,
+        _data: &mut EVMData<'_, DB>,
         _inputs: &CreateInputs,
         ret: InstructionResult,
         address: Option<B160>,
@@ -469,8 +464,7 @@ where
         if self.exit_fn.is_some() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
-            if let Err(err) = self.try_exit(frame_result, db) {
+            if let Err(err) = self.try_exit(frame_result) {
                 return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
             }
         }
@@ -485,8 +479,7 @@ where
             let call = self.active_call();
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
-            let db = EvmDb::new(Default::default(), self.to_db_service.clone());
-            let _ = self.try_enter(frame, db);
+            let _ = self.try_enter(frame);
         }
     }
 }
