@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use crate::{error::DecodePacketError, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use enr::{Enr, EnrKey};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
@@ -306,7 +306,7 @@ impl EnrResponse {
     /// See also <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L36>
     pub fn eth_fork_id(&self) -> Option<ForkId> {
         let mut maybe_fork_id = self.enr.0.get(b"eth")?;
-        ForkId::decode(&mut maybe_fork_id).ok()
+        EnrForkIdEntry::decode(&mut maybe_fork_id).ok().map(|entry| entry.fork_id)
     }
 }
 

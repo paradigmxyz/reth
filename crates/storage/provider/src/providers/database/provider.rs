@@ -25,10 +25,10 @@ use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec,
-    Hardfork, Head, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxHash,
-    TxNumber, Withdrawal, H256, U256,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
@@ -120,7 +120,7 @@ fn unwind_account_history_shards<'a, TX: reth_db::transaction::DbTxMutGAT<'a>>(
             break
         }
         cursor.delete_current()?;
-        // check first item and if it is more and eq than `transition_id` delete current
+        // check first item and if it is more and eq than `block_number` delete current
         // item.
         let first = list.iter(0).next().expect("List can't empty");
         if first >= block_number as usize {
@@ -159,7 +159,7 @@ fn unwind_storage_history_shards<'a, TX: reth_db::transaction::DbTxMutGAT<'a>>(
             break
         }
         cursor.delete_current()?;
-        // check first item and if it is more and eq than `transition_id` delete current
+        // check first item and if it is more and eq than `block_number` delete current
         // item.
         let first = list.iter(0).next().expect("List can't empty");
         if first >= block_number as usize {
@@ -252,10 +252,10 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
             .collect::<std::result::Result<Vec<(_, _)>, _>>()
     }
 
-    /// Get all transaction ids where account got changed.
+    /// Get all block numbers where account got changed.
     ///
     /// NOTE: Get inclusive range of blocks.
-    pub fn get_storage_transition_ids_from_changeset(
+    pub fn get_storage_block_numbers_from_changesets(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> std::result::Result<BTreeMap<(Address, H256), Vec<u64>>, TransactionError> {
@@ -279,10 +279,10 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(storage_changeset_lists)
     }
 
-    /// Get all transaction ids where account got changed.
+    /// Get all block numbers where account got changed.
     ///
     /// NOTE: Get inclusive range of blocks.
-    pub fn get_account_transition_ids_from_changeset(
+    pub fn get_account_block_numbers_from_changesets(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> std::result::Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
@@ -363,7 +363,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ) -> std::result::Result<(), TransactionError> {
         let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
 
-        // Aggregate all transition changesets and make a list of accounts that have been changed.
+        // Aggregate all block changesets and make a list of accounts that have been changed.
         self.tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
@@ -406,7 +406,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ) -> std::result::Result<(), TransactionError> {
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
 
-        // Aggregate all transition changesets and make list of accounts that have been changed.
+        // Aggregate all block changesets and make list of accounts that have been changed.
         self.tx
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(range)?
@@ -465,11 +465,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         let last_indices = account_changeset
             .into_iter()
-            // reverse so we can get lowest transition id where we need to unwind account.
+            // reverse so we can get lowest block number where we need to unwind account.
             .rev()
-            // fold all account and get last transition index
+            // fold all account and get last block number
             .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
-                // we just need address and lowest transition id.
+                // we just need address and lowest block number.
                 accounts.insert(account.address, index);
                 accounts
             });
@@ -508,13 +508,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         let last_indices = storage_changesets
             .into_iter()
-            // reverse so we can get lowest transition id where we need to unwind account.
+            // reverse so we can get lowest block number where we need to unwind account.
             .rev()
-            // fold all storages and get last transition index
+            // fold all storages and get last block number
             .fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
-                    // we just need address and lowest transition id.
+                    // we just need address and lowest block number.
                     accounts.insert((index.address(), storage.key), index.block_number());
                     accounts
                 },
@@ -543,7 +543,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     /// of blocks.
     ///
     /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
-    /// the transition indices.
+    /// the transaction ids.
     /// 2. Iterate over the [StorageChangeSet][tables::StorageChangeSet] table
     /// and the [AccountChangeSet][tables::AccountChangeSet] tables in reverse order to reconstruct
     /// the changesets.
@@ -570,7 +570,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             return Ok(Vec::new())
         }
 
-        // We are not removing block meta as it is used to get block transitions.
+        // We are not removing block meta as it is used to get block changesets.
         let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range.clone())?;
 
         // get transaction receipts
@@ -1116,23 +1116,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)
     }
 
-    /// Get lastest block number.
-    pub fn tip_number(&self) -> std::result::Result<u64, DatabaseError> {
-        Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
-    }
-
-    /// Query [tables::CanonicalHeaders] table for block hash by block number
-    pub fn get_block_hash(
-        &self,
-        block_number: BlockNumber,
-    ) -> std::result::Result<BlockHash, TransactionError> {
-        let hash = self
-            .tx
-            .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(hash)
-    }
-
     /// Query the block body by number.
     pub fn block_body_indices(
         &self,
@@ -1143,24 +1126,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             .get::<tables::BlockBodyIndices>(number)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
         Ok(body)
-    }
-
-    /// Query the block header by number
-    pub fn get_header(&self, number: BlockNumber) -> std::result::Result<Header, TransactionError> {
-        let header = self
-            .tx
-            .get::<tables::Headers>(number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-        Ok(header)
-    }
-
-    /// Get the total difficulty for a block.
-    pub fn get_td(&self, block: BlockNumber) -> std::result::Result<U256, TransactionError> {
-        let td = self
-            .tx
-            .get::<tables::HeaderTD>(block)?
-            .ok_or(ProviderError::TotalDifficultyNotFound { number: block })?;
-        Ok(td.into())
     }
 
     /// Unwind table by some number key.
@@ -1378,13 +1343,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ) -> std::result::Result<(), TransactionError> {
         // account history stage
         {
-            let indices = self.get_account_transition_ids_from_changeset(range.clone())?;
+            let indices = self.get_account_block_numbers_from_changesets(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
         // storage history stage
         {
-            let indices = self.get_storage_transition_ids_from_changeset(range)?;
+            let indices = self.get_storage_block_numbers_from_changesets(range)?;
             self.insert_storage_history_index(indices)?;
         }
 
@@ -1394,8 +1359,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     /// Calculate the hashes of all changed accounts and storages, and finally calculate the state
     /// root.
     ///
-    /// The chain goes from `fork_block_number + 1` to `current_block_number`, and hashes are
-    /// calculated from `from_transition_id` to `to_transition_id`.
+    /// The hashes are calculated from `fork_block_number + 1` to `current_block_number`.
     ///
     /// The resulting state root is compared with `expected_state_root`.
     pub fn insert_hashes(
@@ -1615,6 +1579,48 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
     fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
+
+    /// Returns the block with senders with matching number from database.
+    ///
+    /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
+    /// spot, and we want fast querying.**
+    ///
+    /// Returns `None` if block is not found.
+    fn block_with_senders(&self, block_number: BlockNumber) -> Result<Option<BlockWithSenders>> {
+        let header = self
+            .header_by_number(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
+        let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
+
+        // Get the block body
+        let body = self
+            .block_body_indices(block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
+        let tx_range = body.tx_num_range();
+
+        let (transactions, senders) = if tx_range.is_empty() {
+            (vec![], vec![])
+        } else {
+            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
+        };
+
+        let body = transactions
+            .into_iter()
+            .map(|tx| {
+                TransactionSigned {
+                    // TODO: This is the fastest way right now to make everything just work with
+                    // a dummy transaction hash.
+                    hash: Default::default(),
+                    signature: tx.signature,
+                    transaction: tx.transaction,
+                }
+            })
+            .collect();
+
+        Ok(Some(Block { header, body, ommers, withdrawals }.with_senders(senders)))
+    }
 }
 
 impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX> {
@@ -1721,6 +1727,27 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             }
         }
         Ok(results)
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<TransactionSignedNoHash>> {
+        Ok(self
+            .tx
+            .cursor_read::<tables::Transactions>()?
+            .walk_range(range)?
+            .map(|entry| entry.map(|tx| tx.1))
+            .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        Ok(self
+            .tx
+            .cursor_read::<tables::TxSenders>()?
+            .walk_range(range)?
+            .map(|entry| entry.map(|sender| sender.1))
+            .collect::<std::result::Result<Vec<_>, _>>()?)
     }
 }
 

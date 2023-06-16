@@ -3,6 +3,7 @@ use crate::{
     AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
@@ -67,6 +68,13 @@ impl BlockProvider for NoopProvider {
     }
 
     fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
+        Ok(None)
+    }
+
+    fn block_with_senders(
+        &self,
+        _number: BlockNumber,
+    ) -> Result<Option<reth_primitives::BlockWithSenders>> {
         Ok(None)
     }
 }
@@ -138,6 +146,17 @@ impl TransactionsProvider for NoopProvider {
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
+        Ok(Vec::default())
+    }
+
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        Ok(Vec::default())
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
         Ok(Vec::default())
     }
 }
@@ -290,6 +309,19 @@ impl StateProviderFactory for NoopProvider {
 
 impl StageCheckpointProvider for NoopProvider {
     fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
+        Ok(None)
+    }
+}
+
+impl WithdrawalsProvider for NoopProvider {
+    fn latest_withdrawal(&self) -> Result<Option<reth_primitives::Withdrawal>> {
+        Ok(None)
+    }
+    fn withdrawals_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> Result<Option<Vec<reth_primitives::Withdrawal>>> {
         Ok(None)
     }
 }

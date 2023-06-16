@@ -118,3 +118,41 @@ impl From<PayloadStatusEnum> for ForkchoiceStatus {
         ForkchoiceStatus::from_payload_status(&status)
     }
 }
+
+/// A helper type to check represent hashes of a [ForkchoiceState]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ForkchoiceStateHash {
+    Head(H256),
+    Safe(H256),
+    Finalized(H256),
+}
+
+impl ForkchoiceStateHash {
+    /// Tries to find a matching hash in the given [ForkchoiceState].
+    pub(crate) fn find(state: &ForkchoiceState, hash: H256) -> Option<Self> {
+        if state.head_block_hash == hash {
+            Some(ForkchoiceStateHash::Head(hash))
+        } else if state.safe_block_hash == hash {
+            Some(ForkchoiceStateHash::Safe(hash))
+        } else if state.finalized_block_hash == hash {
+            Some(ForkchoiceStateHash::Finalized(hash))
+        } else {
+            None
+        }
+    }
+
+    /// Returns true if this is the head hash of the [ForkchoiceState]
+    pub(crate) fn is_head(&self) -> bool {
+        matches!(self, ForkchoiceStateHash::Head(_))
+    }
+}
+
+impl AsRef<H256> for ForkchoiceStateHash {
+    fn as_ref(&self) -> &H256 {
+        match self {
+            ForkchoiceStateHash::Head(h) => h,
+            ForkchoiceStateHash::Safe(h) => h,
+            ForkchoiceStateHash::Finalized(h) => h,
+        }
+    }
+}
