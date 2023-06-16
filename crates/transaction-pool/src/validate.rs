@@ -4,7 +4,7 @@ use crate::{
     error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
-    MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
+    MAX_INIT_CODE_SIZE, PRICE_BUMP, TX_MAX_SIZE,
 };
 use reth_primitives::{
     Address, ChainSpec, IntoRecoveredTransaction, InvalidTransactionError, TransactionKind,
@@ -369,7 +369,8 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
     /// Returns true if this transaction is underpriced compared to the other.
     pub(crate) fn is_underpriced(&self, other: &Self) -> bool {
-        self.transaction.effective_gas_price() <= other.transaction.effective_gas_price()
+        self.transaction.effective_gas_price() * (100 + PRICE_BUMP) / 100 <=
+            other.transaction.effective_gas_price()
     }
 
     /// Whether the transaction originated locally.
