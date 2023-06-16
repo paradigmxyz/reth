@@ -1,6 +1,14 @@
-use crate::{Address, Bytes, H256};
+use crate::{Address, BlockNumber, Bytes, H256};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpEncodable};
+use std::collections::BTreeMap;
+
+/// The mapping of log address to block number indices (blocks where the logs emitted by this
+/// address occurred).
+pub type LogAddressIndices = BTreeMap<Address, Vec<BlockNumber>>;
+
+/// The mapping of log topic to block number indices (blocks where the topic occurred).
+pub type LogTopicIndices = BTreeMap<H256, Vec<BlockNumber>>;
 
 /// Ethereum Log
 #[main_codec(rlp)]

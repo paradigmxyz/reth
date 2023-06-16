@@ -60,7 +60,7 @@ pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
-pub use log::Log;
+pub use log::{Log, LogAddressIndices, LogTopicIndices};
 pub use net::{
     goerli_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES, MAINNET_BOOTNODES,
     SEPOLIA_BOOTNODES,

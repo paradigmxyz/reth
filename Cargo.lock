@@ -5100,6 +5100,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "criterion",
+ "derive_more",
  "futures",
  "heapless",
  "iai",

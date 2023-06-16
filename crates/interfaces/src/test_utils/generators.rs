@@ -1,14 +1,15 @@
 use rand::{distributions::uniform::SampleRange, seq::SliceRandom, thread_rng, Rng};
 use reth_primitives::{
-    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, SealedBlock, SealedHeader,
-    Signature, StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256,
-    U256,
+    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
+    SealedHeader, Signature, StorageEntry, Transaction, TransactionKind, TransactionSigned,
+    TxLegacy, H160, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
 use std::{
     cmp::{max, min},
     collections::BTreeMap,
     ops::{Range, RangeInclusive, Sub},
+    str::FromStr,
 };
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
@@ -298,6 +299,36 @@ pub fn random_contract_account_range(
         accounts.push((address, account))
     }
     accounts
+}
+
+/// Generate random receipt for transaction
+pub fn random_receipt(transaction: &TransactionSigned, logs_count: Option<u8>) -> Receipt {
+    let mut rng = rand::thread_rng();
+
+    let success = rng.gen::<bool>();
+    let logs_count = logs_count.unwrap_or_else(|| rng.gen::<u8>());
+    Receipt {
+        tx_type: transaction.tx_type(),
+        success,
+        cumulative_gas_used: rng.gen_range(0..=transaction.gas_limit()),
+        logs: if success {
+            (0..logs_count).map(|_| random_log(None, None)).collect()
+        } else {
+            vec![]
+        },
+    }
+}
+
+/// Generate random log
+pub fn random_log(address: Option<Address>, topics_count: Option<u8>) -> Log {
+    let mut rng = rand::thread_rng();
+    let data_byte_count = rng.gen::<u8>();
+    let topics_count = topics_count.unwrap_or_else(|| rng.gen::<u8>());
+    Log {
+        address: address.unwrap_or_else(|| rng.gen()),
+        topics: (0..topics_count).map(|_| rng.gen()).collect(),
+        data: Bytes::from((0..data_byte_count).map(|_| rng.gen::<u8>()).collect::<Vec<_>>()),
+    }
 }
 
 #[cfg(test)]

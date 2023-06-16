@@ -62,9 +62,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
 #[cfg(test)]
 mod tests {
-    use reth_provider::ProviderFactory;
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::test_utils::TestTransaction;
     use reth_db::{
@@ -77,6 +74,8 @@ mod tests {
         BlockNumberList,
     };
     use reth_primitives::{hex_literal::hex, StorageEntry, H160, H256, MAINNET, U256};
+    use reth_provider::ProviderFactory;
+    use std::collections::BTreeMap;
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
     const STORAGE_KEY: H256 =

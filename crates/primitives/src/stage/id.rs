@@ -16,13 +16,14 @@ pub enum StageId {
     MerkleUnwind,
     Execution,
     TransactionLookup,
+    IndexLogHistory,
     Finish,
     Other(&'static str),
 }
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [StageId; 13] = [
+    pub const ALL: [StageId; 14] = [
         StageId::Headers,
         StageId::Bodies,
         StageId::SenderRecovery,
@@ -35,6 +36,7 @@ impl StageId {
         StageId::MerkleUnwind,
         StageId::Execution,
         StageId::TransactionLookup,
+        StageId::IndexLogHistory,
         StageId::Finish,
     ];
 
@@ -53,6 +55,7 @@ impl StageId {
             StageId::MerkleUnwind => "MerkleUnwind",
             StageId::Execution => "Execution",
             StageId::TransactionLookup => "TransactionLookup",
+            StageId::IndexLogHistory => "IndexLogHistory",
             StageId::Finish => "Finish",
             StageId::Other(s) => s,
         }

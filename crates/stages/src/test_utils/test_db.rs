@@ -13,8 +13,8 @@ use reth_db::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
-    MAINNET, U256,
+    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
+    H256, MAINNET, U256,
 };
 use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, ProviderFactory};
 use std::{
@@ -258,6 +258,22 @@ impl TestTransaction {
                     next_tx_num += 1;
                     Ok(())
                 })
+            })
+        })
+    }
+
+    /// Insert ordered collection of [Receipt] into corresponding table.
+    pub fn insert_receipts<'a, I>(&self, receipts: I, tx_offset: Option<u64>) -> Result<(), DbError>
+    where
+        I: Iterator<Item = &'a Receipt>,
+    {
+        self.commit(|tx| {
+            let mut next_tx_num = tx_offset.unwrap_or_default();
+
+            receipts.into_iter().try_for_each(|receipt| {
+                tx.put::<tables::Receipts>(next_tx_num, receipt.clone())?;
+                next_tx_num += 1;
+                Ok(())
             })
         })
     }

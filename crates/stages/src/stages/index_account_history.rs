@@ -64,9 +64,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
 #[cfg(test)]
 mod tests {
-    use reth_provider::ProviderFactory;
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::test_utils::TestTransaction;
     use reth_db::{
@@ -79,6 +76,8 @@ mod tests {
         BlockNumberList,
     };
     use reth_primitives::{hex_literal::hex, H160, MAINNET};
+    use reth_provider::ProviderFactory;
+    use std::collections::BTreeMap;
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
 

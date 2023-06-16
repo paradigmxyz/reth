@@ -39,8 +39,8 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage, HeaderSyncMode,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        IndexAccountHistoryStage, IndexLogHistoryStage, IndexStorageHistoryStage, MerkleStage,
+        SenderRecoveryStage, StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -278,5 +278,6 @@ impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
             .add_stage(TransactionLookupStage::default())
             .add_stage(IndexStorageHistoryStage::default())
             .add_stage(IndexAccountHistoryStage::default())
+            .add_stage(IndexLogHistoryStage::default())
     }
 }
