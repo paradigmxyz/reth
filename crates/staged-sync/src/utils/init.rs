@@ -1,5 +1,6 @@
 use crate::utils::versioning::{
-    check_db_version_file, create_db_version_file, update_client_version_file,
+    client::update_client_version_file,
+    db::{check_db_version_file, create_db_version_file},
 };
 use reth_db::{
     cursor::DbCursorRO,
