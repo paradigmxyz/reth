@@ -39,7 +39,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
-        let indices = provider.get_account_transition_ids_from_changeset(range.clone())?;
+        let indices = provider.get_account_block_numbers_from_changesets(range.clone())?;
         // Insert changeset to history index
         provider.insert_account_history_index(indices)?;
 
