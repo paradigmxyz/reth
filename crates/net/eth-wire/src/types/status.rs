@@ -1,8 +1,9 @@
 use crate::{EthVersion, StatusBuilder};
 
-use ethers_core::utils::Genesis;
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{hex, Chain, ChainSpec, ForkId, Hardfork, Head, H256, MAINNET, U256};
+use reth_primitives::{
+    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, H256, MAINNET, U256,
+};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use std::fmt::{Debug, Display};
 
@@ -46,7 +47,7 @@ pub struct Status {
 impl From<Genesis> for Status {
     fn from(genesis: Genesis) -> Status {
         let chain = genesis.config.chain_id;
-        let total_difficulty = genesis.difficulty.into();
+        let total_difficulty = genesis.difficulty;
         let chainspec = ChainSpec::from(genesis);
 
         Status {
