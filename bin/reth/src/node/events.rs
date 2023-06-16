@@ -30,7 +30,7 @@ struct NodeState {
     /// The stage currently being executed.
     current_stage: Option<StageId>,
     /// The ETA for the current stage.
-    eta: ETA,
+    eta: Eta,
     /// The current checkpoint of the executing stage.
     current_checkpoint: StageCheckpoint,
     /// The latest canonical block added in the consensus engine.
@@ -42,7 +42,7 @@ impl NodeState {
         Self {
             network,
             current_stage: None,
-            eta: ETA::default(),
+            eta: Eta::default(),
             current_checkpoint: StageCheckpoint::new(0),
             latest_canonical_engine_block: None,
         }
@@ -96,7 +96,7 @@ impl NodeState {
 
                 if done {
                     self.current_stage = None;
-                    self.eta = ETA::default();
+                    self.eta = Eta::default();
                 }
             }
             _ => (),
@@ -268,7 +268,7 @@ where
 ///
 /// One `Eta` is only valid for a single stage.
 #[derive(Default)]
-struct ETA {
+struct Eta {
     /// The last stage checkpoint
     last_checkpoint: EntitiesCheckpoint,
     /// The last time the stage reported its checkpoint
@@ -277,7 +277,7 @@ struct ETA {
     eta: Option<Duration>,
 }
 
-impl ETA {
+impl Eta {
     /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, checkpoint: StageCheckpoint) {
         let Some(current) = checkpoint.entities() else { return };
@@ -297,7 +297,7 @@ impl ETA {
     }
 }
 
-impl std::fmt::Display for ETA {
+impl std::fmt::Display for Eta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some((eta, last_checkpoint_time)) = self.eta.zip(self.last_checkpoint_time) {
             let remaining = eta.checked_sub(last_checkpoint_time.elapsed());
@@ -317,12 +317,12 @@ impl std::fmt::Display for ETA {
 
 #[cfg(test)]
 mod tests {
-    use crate::node::events::ETA;
+    use crate::node::events::Eta;
     use std::time::{Duration, Instant};
 
     #[test]
     fn eta_display_no_milliseconds() {
-        let eta = ETA {
+        let eta = Eta {
             last_checkpoint_time: Some(Instant::now()),
             eta: Some(Duration::from_millis(
                 13 * 60 * 1000 + // Minutes
