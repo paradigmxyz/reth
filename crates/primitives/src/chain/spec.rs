@@ -3,17 +3,13 @@ use crate::{
     forkid::ForkFilterKey,
     header::Head,
     proofs::genesis_state_root,
-    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
-    SealedHeader, H160, H256, U256,
+    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header, SealedHeader,
+    H256, U256,
 };
-use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -316,25 +312,8 @@ impl ChainSpec {
     }
 }
 
-impl From<EthersGenesis> for ChainSpec {
-    fn from(genesis: EthersGenesis) -> Self {
-        let alloc = genesis
-            .alloc
-            .iter()
-            .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-            .collect::<HashMap<H160, GenesisAccount>>();
-
-        let genesis_block = Genesis {
-            nonce: genesis.nonce.as_u64(),
-            timestamp: genesis.timestamp.as_u64(),
-            gas_limit: genesis.gas_limit.as_u64(),
-            difficulty: genesis.difficulty.into(),
-            mix_hash: genesis.mix_hash.0.into(),
-            coinbase: genesis.coinbase.0.into(),
-            extra_data: genesis.extra_data.0.into(),
-            alloc,
-        };
-
+impl From<Genesis> for ChainSpec {
+    fn from(genesis: Genesis) -> Self {
         // Block-based hardforks
         let hardfork_opts = vec![
             (Hardfork::Homestead, genesis.config.homestead_block),
@@ -361,7 +340,7 @@ impl From<EthersGenesis> for ChainSpec {
             hardforks.insert(
                 Hardfork::Paris,
                 ForkCondition::TTD {
-                    total_difficulty: ttd.into(),
+                    total_difficulty: ttd,
                     fork_block: genesis.config.merge_netsplit_block,
                 },
             );
@@ -379,7 +358,7 @@ impl From<EthersGenesis> for ChainSpec {
 
         Self {
             chain: genesis.config.chain_id.into(),
-            genesis: genesis_block,
+            genesis,
             genesis_hash: None,
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
@@ -422,7 +401,7 @@ pub enum AllGenesisFormats {
     Reth(ChainSpec),
 }
 
-impl From<EthersGenesis> for AllGenesisFormats {
+impl From<Genesis> for AllGenesisFormats {
     fn from(genesis: Genesis) -> Self {
         Self::Geth(genesis)
     }
@@ -1200,7 +1179,7 @@ mod tests {
         }
         "#;
 
-        let genesis: ethers_core::utils::Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
         let chainspec = ChainSpec::from(genesis);
 
         // assert a bunch of hardforks that should be set
@@ -1339,6 +1318,8 @@ mod tests {
             }
         }
         "#;
+
+        let _genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
         let genesis = serde_json::from_str::<AllGenesisFormats>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);

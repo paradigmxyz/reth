@@ -47,7 +47,7 @@ pub struct Status {
 impl From<Genesis> for Status {
     fn from(genesis: Genesis) -> Status {
         let chain = genesis.config.chain_id;
-        let total_difficulty = genesis.difficulty.into();
+        let total_difficulty = genesis.difficulty;
         let chainspec = ChainSpec::from(genesis);
 
         Status {

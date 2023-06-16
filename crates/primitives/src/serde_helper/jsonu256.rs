@@ -5,7 +5,7 @@ use serde::{
 };
 use std::{fmt, str::FromStr};
 
-/// Wrapper around primitive U256 type to handle edge cases of json parser
+/// Wrapper around primitive U256 type that also supports deserializing numbers
 #[derive(Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct JsonU256(pub U256);
 
@@ -88,6 +88,15 @@ where
 {
     let num = JsonU256::deserialize(deserializer)?;
     Ok(num.into())
+}
+
+/// Supports parsing `U256` numbers as strings via [JsonU256]
+pub fn deserialize_json_u256_opt<'de, D>(deserializer: D) -> Result<Option<U256>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let num = Option::<JsonU256>::deserialize(deserializer)?;
+    Ok(num.map(Into::into))
 }
 
 #[cfg(test)]
