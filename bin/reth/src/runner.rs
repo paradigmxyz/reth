@@ -75,6 +75,12 @@ impl CliRunner {
         let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
         tokio_runtime
             .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
+
+        // drop the tokio runtime on a separate thread because drop blocks until its pools
+        // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
+        // the current thread but we want to exit right away.
+        std::thread::spawn(move || drop(tokio_runtime));
+
         Ok(())
     }
 }
@@ -108,7 +114,11 @@ pub struct CliContext {
 /// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        // increase stack size, mostly for RPC calls that use the evm: <https://github.com/paradigmxyz/reth/issues/3056> and  <https://github.com/bluealloy/revm/issues/305>
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()
 }
 
 /// Runs the given future to completion or until a critical task panicked
@@ -139,7 +149,8 @@ where
 {
     let ctrl_c = tokio::signal::ctrl_c();
 
-    if cfg!(unix) {
+    #[cfg(unix)]
+    {
         let mut stream = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let sigterm = stream.recv();
         pin_mut!(sigterm, ctrl_c, fut);
@@ -153,7 +164,10 @@ where
             },
             res = fut => res?,
         }
-    } else {
+    }
+
+    #[cfg(not(unix))]
+    {
         pin_mut!(ctrl_c, fut);
 
         tokio::select! {

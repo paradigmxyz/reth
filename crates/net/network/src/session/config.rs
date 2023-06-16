@@ -17,8 +17,9 @@ pub const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 pub const PROTOCOL_BREACH_REQUEST_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
 /// Configuration options when creating a [SessionManager](crate::session::SessionManager).
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct SessionsConfig {
     /// Size of the session command buffer (per session task).
     pub session_command_buffer: usize,
@@ -74,7 +75,7 @@ impl SessionsConfig {
 /// Limits for sessions.
 ///
 /// By default, no session limits will be enforced
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SessionLimits {
     max_pending_inbound: Option<u32>,

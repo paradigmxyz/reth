@@ -9,20 +9,24 @@ use reth_primitives::BlockNumber;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     future::Future,
-    ops::Range,
+    ops::RangeInclusive,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio_util::sync::PollSender;
+
+/// The maximum number of [BodyDownloaderResult]s to hold in the buffer.
+pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
 #[derive(Debug)]
 #[pin_project]
 pub struct TaskDownloader {
     #[pin]
-    from_downloader: UnboundedReceiverStream<BodyDownloaderResult>,
-    to_downloader: UnboundedSender<Range<BlockNumber>>,
+    from_downloader: ReceiverStream<BodyDownloaderResult>,
+    to_downloader: UnboundedSender<RangeInclusive<BlockNumber>>,
 }
 
 // === impl TaskDownloader ===
@@ -67,23 +71,23 @@ impl TaskDownloader {
         T: BodyDownloader + 'static,
         S: TaskSpawner,
     {
-        let (bodies_tx, bodies_rx) = mpsc::unbounded_channel();
+        let (bodies_tx, bodies_rx) = mpsc::channel(BODIES_TASK_BUFFER_SIZE);
         let (to_downloader, updates_rx) = mpsc::unbounded_channel();
 
         let downloader = SpawnedDownloader {
-            bodies_tx,
+            bodies_tx: PollSender::new(bodies_tx),
             updates: UnboundedReceiverStream::new(updates_rx),
             downloader,
         };
 
         spawner.spawn(downloader.boxed());
 
-        Self { from_downloader: UnboundedReceiverStream::new(bodies_rx), to_downloader }
+        Self { from_downloader: ReceiverStream::new(bodies_rx), to_downloader }
     }
 }
 
 impl BodyDownloader for TaskDownloader {
-    fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
+    fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         let _ = self.to_downloader.send(range);
         Ok(())
     }
@@ -99,8 +103,8 @@ impl Stream for TaskDownloader {
 
 /// A [BodyDownloader] that runs on its own task
 struct SpawnedDownloader<T> {
-    updates: UnboundedReceiverStream<Range<BlockNumber>>,
-    bodies_tx: UnboundedSender<BodyDownloaderResult>,
+    updates: UnboundedReceiverStream<RangeInclusive<BlockNumber>>,
+    bodies_tx: PollSender<BodyDownloaderResult>,
     downloader: T,
 }
 
@@ -121,22 +125,44 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                     }
                     Poll::Ready(Some(range)) => {
                         if let Err(err) = this.downloader.set_download_range(range) {
-                            tracing::error!(target: "downloaders::bodies", ?err, "Failed to set download range");
-                            let _ = this.bodies_tx.send(Err(err));
+                            tracing::error!(target: "downloaders::bodies", ?err, "Failed to set bodies download range");
+
+                            match ready!(this.bodies_tx.poll_reserve(cx)) {
+                                Ok(()) => {
+                                    if this.bodies_tx.send_item(Err(err)).is_err() {
+                                        // channel closed, this means [TaskDownloader] was dropped,
+                                        // so we can also
+                                        // exit
+                                        return Poll::Ready(())
+                                    }
+                                }
+                                Err(_) => {
+                                    // channel closed, this means [TaskDownloader] was dropped, so
+                                    // we can also exit
+                                    return Poll::Ready(())
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            match ready!(this.downloader.poll_next_unpin(cx)) {
-                Some(bodies) => {
-                    if this.bodies_tx.send(bodies).is_err() {
-                        // channel closed, this means [TaskDownloader] was dropped, so we can also
-                        // exit
-                        return Poll::Ready(())
+            match ready!(this.bodies_tx.poll_reserve(cx)) {
+                Ok(()) => match ready!(this.downloader.poll_next_unpin(cx)) {
+                    Some(bodies) => {
+                        if this.bodies_tx.send_item(bodies).is_err() {
+                            // channel closed, this means [TaskDownloader] was dropped, so we can
+                            // also exit
+                            return Poll::Ready(())
+                        }
                     }
+                    None => return Poll::Pending,
+                },
+                Err(_) => {
+                    // channel closed, this means [TaskDownloader] was dropped, so we can also
+                    // exit
+                    return Poll::Ready(())
                 }
-                None => return Poll::Pending,
             }
         }
     }
@@ -162,7 +188,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(&db, &headers);
 
@@ -176,7 +202,7 @@ mod tests {
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(0..20).expect("failed to set download range");
+        downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,
@@ -186,6 +212,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[allow(clippy::reversed_empty_ranges)]
     async fn set_download_range_error_returned() {
         reth_tracing::init_test_tracing();
 
@@ -197,7 +224,7 @@ mod tests {
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(0..0).expect("failed to set download range");
+        downloader.set_download_range(1..=0).expect("failed to set download range");
         assert_matches!(downloader.next().await, Some(Err(DownloadError::InvalidBodyRange { .. })));
     }
 }

@@ -4,15 +4,17 @@ use reth_beacon_consensus::BeaconEngineMessage;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
-    proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
+    proofs,
+    stage::StageId,
+    Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
     SealedBlockWithSenders, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::{CanonStateNotificationSender, Chain, StateProviderFactory};
+use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     executor::Executor,
 };
-use reth_stages::{stages::FINISH, PipelineEvent};
+use reth_stages::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -85,7 +87,7 @@ impl<Client, Pool: TransactionPool> MiningTask<Client, Pool> {
 
 impl<Client, Pool> Future for MiningTask<Client, Pool>
 where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
+    Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
@@ -122,6 +124,13 @@ where
                 // the pipeline
                 this.insert_task = Some(Box::pin(async move {
                     let mut storage = storage.write().await;
+
+                    // check previous block for base fee
+                    let base_fee_per_gas = storage
+                        .headers
+                        .get(&storage.best_block)
+                        .and_then(|parent| parent.next_block_base_fee());
+
                     let mut header = Header {
                         parent_hash: storage.best_hash,
                         ommers_hash: EMPTY_OMMER_ROOT,
@@ -131,7 +140,7 @@ where
                         receipts_root: Default::default(),
                         withdrawals_root: None,
                         logs_bloom: Default::default(),
-                        difficulty: U256::from(1),
+                        difficulty: U256::from(2),
                         number: storage.best_block + 1,
                         gas_limit: 30_000_000,
                         gas_used: 0,
@@ -141,7 +150,7 @@ where
                             .as_secs(),
                         mix_hash: Default::default(),
                         nonce: 0,
-                        base_fee_per_gas: None,
+                        base_fee_per_gas,
                         extra_data: Default::default(),
                     };
 
@@ -153,7 +162,7 @@ where
                     header.transactions_root = if transactions.is_empty() {
                         EMPTY_TRANSACTIONS
                     } else {
-                        proofs::calculate_transaction_root(transactions.iter())
+                        proofs::calculate_transaction_root(&transactions)
                     };
 
                     let block =
@@ -173,25 +182,39 @@ where
 
                     match executor.execute_transactions(&block, U256::ZERO, Some(senders.clone())) {
                         Ok((post_state, gas_used)) => {
+                            // apply post block changes
+                            let post_state = executor
+                                .apply_post_block_changes(&block, U256::ZERO, post_state)
+                                .unwrap();
+
                             let Block { mut header, body, .. } = block;
 
                             // clear all transactions from pool
-                            pool.remove_transactions(body.iter().map(|tx| tx.hash));
+                            pool.remove_transactions(body.iter().map(|tx| tx.hash()));
 
-                            header.receipts_root = if post_state.receipts().is_empty() {
+                            let receipts = post_state.receipts(header.number);
+                            header.receipts_root = if receipts.is_empty() {
                                 EMPTY_RECEIPTS
                             } else {
-                                let receipts_with_bloom = post_state
-                                    .receipts()
+                                let receipts_with_bloom = receipts
                                     .iter()
                                     .map(|r| r.clone().into())
                                     .collect::<Vec<ReceiptWithBloom>>();
-                                proofs::calculate_receipt_root(receipts_with_bloom.iter())
+                                proofs::calculate_receipt_root(&receipts_with_bloom)
                             };
                             let transactions = body.clone();
                             let body =
                                 BlockBody { transactions: body, ommers: vec![], withdrawals: None };
                             header.gas_used = gas_used;
+
+                            trace!(target: "consensus::auto", ?post_state, ?header, ?body, "executed block, calculating root");
+
+                            // calculate the state root
+                            let state_root =
+                                executor.db().db.0.state_root(post_state.clone()).unwrap();
+                            header.state_root = state_root;
+
+                            trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
                             storage.insert_new_block(header.clone(), body);
 
@@ -221,7 +244,7 @@ where
                                     if let Some(PipelineEvent::Running { stage_id, .. }) =
                                         events.next().await
                                     {
-                                        if stage_id == FINISH {
+                                        if stage_id == StageId::Finish {
                                             debug!(target: "consensus::auto", "received finish stage event");
                                             break
                                         }
@@ -231,15 +254,22 @@ where
 
                             // seal the block
                             let block = Block {
-                                header,
+                                header: header.clone(),
                                 body: transactions,
                                 ommers: vec![],
                                 withdrawals: None,
                             };
                             let sealed_block = block.seal_slow();
+
                             let sealed_block_with_senders =
                                 SealedBlockWithSenders::new(sealed_block, senders)
                                     .expect("senders are valid");
+
+                            // update canon chain for rpc
+                            client.set_canonical_head(header.clone().seal(new_hash));
+                            client.set_safe(header.clone().seal(new_hash));
+                            client.set_finalized(header.clone().seal(new_hash));
+
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
                             let chain =

@@ -5,7 +5,6 @@ use crossterm::{
 };
 use reth_db::table::Table;
 use std::{
-    collections::BTreeMap,
     io,
     time::{Duration, Instant},
 };
@@ -46,15 +45,15 @@ pub(crate) enum ViewMode {
 #[derive(Default)]
 pub(crate) struct DbListTUI<F, T: Table>
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     /// Fetcher for the next page of items.
     ///
     /// The fetcher is passed the index of the first item to fetch, and the number of items to
     /// fetch from that item.
     fetch: F,
-    /// The starting index of the key list in the DB.
-    start: usize,
+    /// Skip N indices of the key list in the DB.
+    skip: usize,
     /// The amount of entries to show per page
     count: usize,
     /// The total number of entries in the database
@@ -66,24 +65,24 @@ where
     /// The state of the key list.
     list_state: ListState,
     /// Entries to show in the TUI.
-    entries: BTreeMap<T::Key, T::Value>,
+    entries: Vec<(T::Key, T::Value)>,
 }
 
 impl<F, T: Table> DbListTUI<F, T>
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     /// Create a new database list TUI
-    pub(crate) fn new(fetch: F, start: usize, count: usize, total_entries: usize) -> Self {
+    pub(crate) fn new(fetch: F, skip: usize, count: usize, total_entries: usize) -> Self {
         Self {
             fetch,
-            start,
+            skip,
             count,
             total_entries,
             mode: ViewMode::Normal,
             input: String::new(),
             list_state: ListState::default(),
-            entries: BTreeMap::new(),
+            entries: Vec::new(),
         }
     }
 
@@ -123,33 +122,33 @@ where
 
     /// Fetch the next page of items
     fn next_page(&mut self) {
-        if self.start + self.count >= self.total_entries {
+        if self.skip + self.count >= self.total_entries {
             return
         }
 
-        self.start += self.count;
+        self.skip += self.count;
         self.fetch_page();
     }
 
     /// Fetch the previous page of items
     fn previous_page(&mut self) {
-        if self.start == 0 {
+        if self.skip == 0 {
             return
         }
 
-        self.start -= self.count;
+        self.skip = self.skip.saturating_sub(self.count);
         self.fetch_page();
     }
 
     /// Go to a specific page.
     fn go_to_page(&mut self, page: usize) {
-        self.start = (self.count * page).min(self.total_entries - self.count);
+        self.skip = (self.count * page).min(self.total_entries - self.count);
         self.fetch_page();
     }
 
     /// Fetch the current page
     fn fetch_page(&mut self) {
-        self.entries = (self.fetch)(self.start, self.count);
+        self.entries = (self.fetch)(self.skip, self.count);
         self.reset();
     }
 
@@ -189,7 +188,7 @@ fn event_loop<B: Backend, F, T: Table>(
     tick_rate: Duration,
 ) -> io::Result<()>
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     let mut last_tick = Instant::now();
     let mut running = true;
@@ -217,7 +216,7 @@ where
 /// Handle incoming events
 fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     if app.mode == ViewMode::GoToPage {
         if let Event::Key(key) = event {
@@ -283,7 +282,7 @@ where
 /// Render the UI
 fn ui<B: Backend, F, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<F, T>)
 where
-    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+    F: FnMut(usize, usize) -> Vec<(T::Key, T::Value)>,
 {
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -297,21 +296,23 @@ where
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(outer_chunks[0]);
 
-        let key_length = format!("{}", app.start + app.count - 1).len();
-        let formatted_keys = app
-            .entries
-            .keys()
+        let key_length = format!("{}", app.skip + app.count - 1).len();
+
+        let entries: Vec<_> = app.entries.iter().map(|(k, _)| k).collect();
+
+        let formatted_keys = entries
+            .into_iter()
             .enumerate()
             .map(|(i, k)| {
-                ListItem::new(format!("[{:0>width$}]: {k:?}", i + app.start, width = key_length))
+                ListItem::new(format!("[{:0>width$}]: {k:?}", i + app.skip, width = key_length))
             })
             .collect::<Vec<ListItem<'_>>>();
 
         let key_list = List::new(formatted_keys)
             .block(Block::default().borders(Borders::ALL).title(format!(
                 "Keys (Showing entries {}-{} out of {} entries)",
-                app.start,
-                app.start + app.entries.len() - 1,
+                app.skip,
+                app.skip + app.entries.len() - 1,
                 app.total_entries
             )))
             .style(Style::default().fg(Color::White))
@@ -320,7 +321,8 @@ where
             .start_corner(Corner::TopLeft);
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
 
-        let values = app.entries.values().collect::<Vec<_>>();
+        let values = app.entries.iter().map(|(_, v)| v).collect::<Vec<_>>();
+
         let value_display = Paragraph::new(
             app.list_state
                 .selected()

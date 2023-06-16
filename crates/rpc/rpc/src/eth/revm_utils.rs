@@ -1,10 +1,13 @@
 //! utilities for working with revm
 
-use crate::eth::error::{EthApiError, EthResult, InvalidTransactionError};
-use reth_primitives::{AccessList, Address, U256};
+use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
+use reth_primitives::{
+    AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
+};
+use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
-    CallRequest,
+    BlockOverrides, CallRequest,
 };
 use revm::{
     db::CacheDB,
@@ -12,8 +15,76 @@ use revm::{
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
 };
-use revm_primitives::{db::DatabaseRef, Bytecode};
+use revm_primitives::{
+    db::{DatabaseCommit, DatabaseRef},
+    Bytecode,
+};
 use tracing::trace;
+
+/// Helper type that bundles various overrides for EVM Execution.
+///
+/// By `Default`, no overrides are included.
+#[derive(Debug, Clone, Default)]
+pub struct EvmOverrides {
+    /// Applies overrides to the state before execution.
+    pub state: Option<StateOverride>,
+    /// Applies overrides to the block before execution.
+    ///
+    /// This is a `Box` because less common and only available in debug trace endpoints.
+    pub block: Option<Box<BlockOverrides>>,
+}
+
+impl EvmOverrides {
+    /// Creates a new instance with the given overrides
+    pub fn new(state: Option<StateOverride>, block: Option<Box<BlockOverrides>>) -> Self {
+        Self { state, block }
+    }
+
+    /// Creates a new instance with the given state overrides.
+    pub fn state(state: Option<StateOverride>) -> Self {
+        Self { state, block: None }
+    }
+}
+
+impl From<Option<StateOverride>> for EvmOverrides {
+    fn from(state: Option<StateOverride>) -> Self {
+        Self::state(state)
+    }
+}
+
+/// Helper type to work with different transaction types when configuring the EVM env.
+///
+/// This makes it easier to handle errors.
+pub(crate) trait FillableTransaction {
+    /// Returns the hash of the transaction.
+    fn hash(&self) -> TxHash;
+
+    /// Fill the transaction environment with the given transaction.
+    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()>;
+}
+
+impl FillableTransaction for TransactionSignedEcRecovered {
+    fn hash(&self) -> TxHash {
+        self.hash
+    }
+
+    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
+        fill_tx_env_with_recovered(tx_env, self);
+        Ok(())
+    }
+}
+impl FillableTransaction for TransactionSigned {
+    fn hash(&self) -> TxHash {
+        self.hash
+    }
+
+    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
+        let signer =
+            self.recover_signer().ok_or_else(|| EthApiError::InvalidTransactionSignature)?;
+        fill_tx_env(tx_env, self, signer);
+        Ok(())
+    }
+}
 
 /// Returns the addresses of the precompiles corresponding to the SpecId.
 pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
@@ -39,10 +110,10 @@ pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn transact<S>(db: S, env: Env) -> EthResult<(ResultAndState, Env)>
+pub(crate) fn transact<DB>(db: DB, env: Env) -> EthResult<(ResultAndState, Env)>
 where
-    S: Database,
-    <S as Database>::Error: Into<EthApiError>,
+    DB: Database,
+    <DB as Database>::Error: Into<EthApiError>,
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
@@ -51,16 +122,72 @@ where
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn inspect<S, I>(db: S, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
+pub(crate) fn inspect<DB, I>(db: DB, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
 where
-    S: Database,
-    <S as Database>::Error: Into<EthApiError>,
-    I: Inspector<S>,
+    DB: Database,
+    <DB as Database>::Error: Into<EthApiError>,
+    I: Inspector<DB>,
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
     let res = evm.inspect(inspector)?;
     Ok((res, evm.env))
+}
+
+/// Same as [inspect] but also returns the database again.
+///
+/// Even though [Database] is also implemented on `&mut`
+/// this is still useful if there are certain trait bounds on the Inspector's database generic type
+pub(crate) fn inspect_and_return_db<DB, I>(
+    db: DB,
+    env: Env,
+    inspector: I,
+) -> EthResult<(ResultAndState, Env, DB)>
+where
+    DB: Database,
+    <DB as Database>::Error: Into<EthApiError>,
+    I: Inspector<DB>,
+{
+    let mut evm = revm::EVM::with_env(env);
+    evm.database(db);
+    let res = evm.inspect(inspector)?;
+    let db = evm.take_db();
+    Ok((res, evm.env, db))
+}
+
+/// Replays all the transactions until the target transaction is found.
+///
+/// All transactions before the target transaction are executed and their changes are written to the
+/// _runtime_ db ([CacheDB]).
+///
+/// Note: This assumes the target transaction is in the given iterator.
+pub(crate) fn replay_transactions_until<DB, I, Tx>(
+    db: &mut CacheDB<DB>,
+    cfg: CfgEnv,
+    block_env: BlockEnv,
+    transactions: I,
+    target_tx_hash: H256,
+) -> EthResult<()>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+    I: IntoIterator<Item = Tx>,
+    Tx: FillableTransaction,
+{
+    let env = Env { cfg, block: block_env, tx: TxEnv::default() };
+    let mut evm = revm::EVM::with_env(env);
+    evm.database(db);
+    for tx in transactions.into_iter() {
+        if tx.hash() == target_tx_hash {
+            // reached the target transaction
+            break
+        }
+
+        tx.try_fill_tx_env(&mut evm.env.tx)?;
+        let res = evm.transact()?;
+        evm.db.as_mut().expect("is set").commit(res.state)
+    }
+    Ok(())
 }
 
 /// Prepares the [Env] for execution.
@@ -71,7 +198,7 @@ pub(crate) fn prepare_call_env<DB>(
     block: BlockEnv,
     request: CallRequest,
     db: &mut CacheDB<DB>,
-    state_overrides: Option<StateOverride>,
+    overrides: EvmOverrides,
 ) -> EthResult<Env>
 where
     DB: DatabaseRef,
@@ -95,8 +222,13 @@ where
     let mut env = build_call_evm_env(cfg, block, request)?;
 
     // apply state overrides
-    if let Some(state_overrides) = state_overrides {
+    if let Some(state_overrides) = overrides.state {
         apply_state_overrides(state_overrides, db)?;
+    }
+
+    // apply block overrides
+    if let Some(block_overrides) = overrides.block {
+        apply_block_overrides(*block_overrides, &mut env.block);
     }
 
     if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
@@ -137,6 +269,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         nonce,
         access_list,
         chain_id,
+        ..
     } = request;
 
     let CallFees { max_priority_fee_per_gas, gas_price } = CallFees::ensure_fees(
@@ -149,9 +282,9 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
     let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
 
     let env = TxEnv {
-        gas_limit: gas_limit.try_into().map_err(|_| InvalidTransactionError::GasUintOverflow)?,
+        gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
         nonce: nonce
-            .map(|n| n.try_into().map_err(|_| InvalidTransactionError::NonceTooHigh))
+            .map(|n| n.try_into().map_err(|_| RpcInvalidTransactionError::NonceTooHigh))
             .transpose()?,
         caller: from.unwrap_or_default(),
         gas_price,
@@ -182,7 +315,7 @@ where
     // subtract transferred value
     allowance = allowance
         .checked_sub(env.value)
-        .ok_or_else(|| InvalidTransactionError::InsufficientFunds)?;
+        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?;
 
     // cap the gas limit
     if let Ok(gas_limit) = allowance.checked_div(env.gas_price).unwrap_or_default().try_into() {
@@ -238,7 +371,7 @@ impl CallFees {
                         // Fail early
                         return Err(
                             // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
-                            InvalidTransactionError::TipAboveFeeCap.into(),
+                            RpcInvalidTransactionError::TipAboveFeeCap.into(),
                         )
                     }
                 }
@@ -246,6 +379,34 @@ impl CallFees {
             }
             _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
         }
+    }
+}
+
+/// Applies the given block overrides to the env
+fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
+    let BlockOverrides { number, difficulty, time, gas_limit, coinbase, random, base_fee } =
+        overrides;
+
+    if let Some(number) = number {
+        env.number = number;
+    }
+    if let Some(difficulty) = difficulty {
+        env.difficulty = difficulty;
+    }
+    if let Some(time) = time {
+        env.timestamp = U256::from(time.as_u64());
+    }
+    if let Some(gas_limit) = gas_limit {
+        env.gas_limit = U256::from(gas_limit.as_u64());
+    }
+    if let Some(coinbase) = coinbase {
+        env.coinbase = coinbase;
+    }
+    if let Some(random) = random {
+        env.prevrandao = Some(random);
+    }
+    if let Some(base_fee) = base_fee {
+        env.basefee = base_fee;
     }
 }
 

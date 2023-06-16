@@ -1,6 +1,5 @@
 //! Contains types required for building a payload.
 
-use reth_consensus_common::validation::calculate_next_block_base_fee;
 use reth_primitives::{Address, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256};
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rlp::Encodable;
@@ -135,11 +134,7 @@ impl PayloadBuilderAttributes {
             prevrandao: Some(self.prev_randao),
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: U256::from(calculate_next_block_base_fee(
-                parent.gas_used,
-                parent.gas_limit,
-                parent.base_fee_per_gas.unwrap_or_default(),
-            )),
+            basefee: U256::from(parent.next_block_base_fee().unwrap_or_default()),
         };
 
         (cfg, block_env)

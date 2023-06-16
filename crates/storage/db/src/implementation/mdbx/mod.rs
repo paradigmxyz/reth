@@ -4,7 +4,7 @@ use crate::{
     database::{Database, DatabaseGAT},
     tables::{TableType, TABLES},
     utils::default_page_size,
-    Error,
+    DatabaseError,
 };
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
@@ -39,20 +39,27 @@ impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
 }
 
 impl<E: EnvironmentKind> Database for Env<E> {
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
-        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::InitTransaction(e.into()))?))
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
+        Ok(Tx::new(
+            self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?,
+        ))
     }
 
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
-        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?))
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
+        Ok(Tx::new(
+            self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?,
+        ))
     }
 }
+
+const GIGABYTE: usize = 1024 * 1024 * 1024;
+const TERABYTE: usize = GIGABYTE * 1024;
 
 impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
     /// It does not create the tables, for that call [`Env::create_tables`].
-    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, Error> {
+    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, DatabaseError> {
         let mode = match kind {
             EnvKind::RO => Mode::ReadOnly,
             EnvKind::RW => Mode::ReadWrite { sync_mode: SyncMode::Durable },
@@ -62,27 +69,32 @@ impl<E: EnvironmentKind> Env<E> {
             inner: Environment::new()
                 .set_max_dbs(TABLES.len())
                 .set_geometry(Geometry {
-                    size: Some(0..(1024 * 1024 * 1024 * 1024 * 4)), // TODO: reevaluate (4 tb)
-                    growth_step: Some(1024 * 1024 * 256),           // TODO: reevaluate (256 mb)
+                    // Maximum database size of 4 terabytes
+                    size: Some(0..(4 * TERABYTE)),
+                    // We grow the database in increments of 4 gigabytes
+                    growth_step: Some(4 * GIGABYTE as isize),
+                    // The database never shrinks
                     shrink_threshold: None,
                     page_size: Some(PageSize::Set(default_page_size())),
                 })
                 .set_flags(EnvironmentFlags {
                     mode,
-                    no_rdahead: true, // TODO: reevaluate
+                    // We disable readahead because it improves performance for linear scans, but
+                    // worsens it for random access (which is our access pattern outside of sync)
+                    no_rdahead: true,
                     coalesce: true,
                     ..Default::default()
                 })
                 .open(path)
-                .map_err(|e| Error::FailedToOpen(e.into()))?,
+                .map_err(|e| DatabaseError::FailedToOpen(e.into()))?,
         };
 
         Ok(env)
     }
 
     /// Creates all the defined tables, if necessary.
-    pub fn create_tables(&self) -> Result<(), Error> {
-        let tx = self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?;
+    pub fn create_tables(&self) -> Result<(), DatabaseError> {
+        let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?;
 
         for (table_type, table) in TABLES {
             let flags = match table_type {
@@ -90,10 +102,10 @@ impl<E: EnvironmentKind> Env<E> {
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
 
-            tx.create_db(Some(table), flags).map_err(|e| Error::TableCreation(e.into()))?;
+            tx.create_db(Some(table), flags).map_err(|e| DatabaseError::TableCreation(e.into()))?;
         }
 
-        tx.commit().map_err(|e| Error::Commit(e.into()))?;
+        tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
 
         Ok(())
     }
@@ -150,7 +162,7 @@ mod tests {
         models::{AccountBeforeTx, ShardedKey},
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         transaction::{DbTx, DbTxMut},
-        AccountChangeSet, Error,
+        AccountChangeSet, DatabaseError,
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H160, H256, U256};
@@ -277,6 +289,47 @@ mod tests {
         assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
         assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
         // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
+    }
+
+    #[test]
+    fn db_cursor_walk_range_on_dup_table() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        let address0 = Address::zero();
+        let address1 = Address::from_low_u64_be(1);
+        let address2 = Address::from_low_u64_be(2);
+
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address0, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address1, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address2, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address0, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address1, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address2, info: None })
+            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSet>(2, AccountBeforeTx { address: address0, info: None }) // <- should not be returned by the walker
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<AccountChangeSet>().unwrap();
+
+        let entries = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(entries.len(), 7);
+
+        let mut walker = cursor.walk_range(0..=1).unwrap();
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address0, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address1, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address2, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address0, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address1, info: None }))));
+        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address2, info: None }))));
         assert_eq!(walker.next(), None);
     }
 
@@ -455,7 +508,7 @@ mod tests {
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         // INSERT (failure)
-        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(Error::Write(-30799)));
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(DatabaseError::Write(-30799)));
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         tx.commit().expect(ERROR_COMMIT);
@@ -466,6 +519,52 @@ mod tests {
         let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
+    }
+
+    #[test]
+    fn db_cursor_insert_dup() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+        let key = Address::random();
+        let subkey1 = H256::random();
+        let subkey2 = H256::random();
+
+        let entry1 = StorageEntry { key: subkey1, value: U256::ZERO };
+        assert!(dup_cursor.insert(key, entry1).is_ok());
+
+        // Can't insert
+        let entry2 = StorageEntry { key: subkey2, value: U256::ZERO };
+        assert!(dup_cursor.insert(key, entry2).is_err());
+    }
+
+    #[test]
+    fn db_cursor_delete_current_non_existent() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let key1 = Address::from_low_u64_be(1);
+        let key2 = Address::from_low_u64_be(2);
+        let key3 = Address::from_low_u64_be(3);
+        let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
+
+        assert!(cursor.insert(key1, Account::default()).is_ok());
+        assert!(cursor.insert(key2, Account::default()).is_ok());
+        assert!(cursor.insert(key3, Account::default()).is_ok());
+
+        // Seek & delete key2
+        cursor.seek_exact(key2).unwrap();
+        assert_eq!(cursor.delete_current(), Ok(()));
+        assert_eq!(cursor.seek_exact(key2), Ok(None));
+
+        // Seek & delete key2 again
+        assert_eq!(cursor.seek_exact(key2), Ok(None));
+        assert_eq!(cursor.delete_current(), Ok(()));
+        // Assert that key1 is still there
+        assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
+        // Assert that key3 was deleted
+        assert_eq!(cursor.seek_exact(key3), Ok(None));
     }
 
     #[test]
@@ -544,7 +643,7 @@ mod tests {
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(-30418)));
+        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(DatabaseError::Write(-30418)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
         tx.commit().expect(ERROR_COMMIT);
 
@@ -619,14 +718,14 @@ mod tests {
                 transition_id,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(Error::Write(-30418))
+            Err(DatabaseError::Write(-30418))
         );
         assert_eq!(
             cursor.append(
                 transition_id - 1,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(Error::Write(-30418))
+            Err(DatabaseError::Write(-30418))
         );
         assert_eq!(
             cursor.append(

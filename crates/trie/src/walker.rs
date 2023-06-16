@@ -1,10 +1,13 @@
 use crate::{
-    cursor::{CursorSubNode, TrieCursor},
     prefix_set::PrefixSet,
-    Nibbles,
+    trie_cursor::{CursorSubNode, TrieCursor},
+    updates::TrieUpdates,
 };
-use reth_db::{table::Key, Error};
-use reth_primitives::{trie::BranchNodeCompact, H256};
+use reth_db::{table::Key, DatabaseError};
+use reth_primitives::{
+    trie::{BranchNodeCompact, Nibbles},
+    H256,
+};
 use std::marker::PhantomData;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
@@ -20,6 +23,8 @@ pub struct TrieWalker<'a, K, C> {
     pub can_skip_current_node: bool,
     /// A `PrefixSet` representing the changes to be applied to the trie.
     pub changes: PrefixSet,
+    /// The trie updates to be applied to the trie.
+    trie_updates: Option<TrieUpdates>,
     __phantom: PhantomData<K>,
 }
 
@@ -30,9 +35,10 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         let mut this = Self {
             cursor,
             changes,
-            can_skip_current_node: false,
             stack: vec![CursorSubNode::default()],
-            __phantom: PhantomData::default(),
+            can_skip_current_node: false,
+            trie_updates: None,
+            __phantom: PhantomData,
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -45,6 +51,39 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         this
     }
 
+    /// Constructs a new TrieWalker from existing stack and a cursor.
+    pub fn from_stack(cursor: &'a mut C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
+        let mut this = Self {
+            cursor,
+            changes,
+            stack,
+            can_skip_current_node: false,
+            trie_updates: None,
+            __phantom: PhantomData,
+        };
+        this.update_skip_node();
+        this
+    }
+
+    /// Sets the flag whether the trie updates should be stored.
+    pub fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.set_updates(retain_updates);
+        self
+    }
+
+    /// Sets the flag whether the trie updates should be stored.
+    pub fn set_updates(&mut self, retain_updates: bool) {
+        if retain_updates {
+            self.trie_updates = Some(TrieUpdates::default());
+        }
+    }
+
+    /// Split the walker into stack and trie updates.
+    pub fn split(mut self) -> (Vec<CursorSubNode>, TrieUpdates) {
+        let trie_updates = self.trie_updates.take();
+        (self.stack, trie_updates.unwrap_or_default())
+    }
+
     /// Prints the current stack of trie nodes.
     pub fn print_stack(&self) {
         println!("====================== STACK ======================");
@@ -54,12 +93,17 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         println!("====================== END STACK ======================\n");
     }
 
+    /// The current length of the trie updates.
+    pub fn updates_len(&self) -> usize {
+        self.trie_updates.as_ref().map(|u| u.len()).unwrap_or(0)
+    }
+
     /// Advances the walker to the next trie node and updates the skip node flag.
     ///
     /// # Returns
     ///
     /// * `Result<Option<Nibbles>, Error>` - The next key in the trie or an error.
-    pub fn advance(&mut self) -> Result<Option<Nibbles>, Error> {
+    pub fn advance(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 // If we can't skip the current node and the children are in the trie,
@@ -82,23 +126,23 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     }
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
-    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, Error> {
+    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let key = self.key().expect("key must exist");
         let entry = if exact {
-            self.cursor.seek_exact(key.hex_data.into())?
+            self.cursor.seek_exact(key.hex_data.to_vec().into())?
         } else {
-            self.cursor.seek(key.hex_data.into())?
+            self.cursor.seek(key.hex_data.to_vec().into())?
         };
 
         if let Some((_, node)) = &entry {
             assert!(!node.state_mask.is_empty());
         }
 
-        Ok(entry.map(|(k, v)| (Nibbles::from(k), v)))
+        Ok(entry.map(|(k, v)| (Nibbles::from_hex(k), v)))
     }
 
     /// Consumes the next node in the trie, updating the stack.
-    fn consume_node(&mut self) -> Result<(), Error> {
+    fn consume_node(&mut self) -> Result<(), DatabaseError> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
@@ -121,14 +165,19 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
         if !self.can_skip_current_node || nibble != -1 {
-            self.cursor.delete_current()?;
+            if let Some((updates, key)) = self.trie_updates.as_mut().zip(self.cursor.current()?) {
+                updates.schedule_delete(key);
+            }
         }
 
         Ok(())
     }
 
     /// Moves to the next sibling node in the trie, updating the stack.
-    fn move_to_next_sibling(&mut self, allow_root_to_child_nibble: bool) -> Result<(), Error> {
+    fn move_to_next_sibling(
+        &mut self,
+        allow_root_to_child_nibble: bool,
+    ) -> Result<(), DatabaseError> {
         let Some(subnode) = self.stack.last_mut() else {
             return Ok(());
         };
@@ -207,10 +256,14 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use crate::cursor::{AccountTrieCursor, StorageTrieCursor};
-    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
-    use reth_provider::Transaction;
+    use crate::trie_cursor::{AccountTrieCursor, StorageTrieCursor};
+    use reth_db::{
+        cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
+    };
+    use reth_primitives::{trie::StorageTrieEntry, MAINNET};
+    use reth_provider::ProviderFactory;
 
     #[test]
     fn walk_nodes_with_common_prefix() {
@@ -236,27 +289,36 @@ mod tests {
         ];
 
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
-        let account_trie =
-            AccountTrieCursor::new(tx.cursor_write::<tables::AccountsTrie>().unwrap());
-        test_cursor(account_trie, &inputs, &expected);
 
-        let storage_trie = StorageTrieCursor::new(
-            tx.cursor_dup_write::<tables::StoragesTrie>().unwrap(),
-            H256::random(),
-        );
-        test_cursor(storage_trie, &inputs, &expected);
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let tx = factory.provider_rw().unwrap();
+
+        let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
+        for (k, v) in &inputs {
+            account_cursor.upsert(k.clone().into(), v.clone()).unwrap();
+        }
+        let account_trie = AccountTrieCursor::new(account_cursor);
+        test_cursor(account_trie, &expected);
+
+        let hashed_address = H256::random();
+        let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        for (k, v) in &inputs {
+            storage_cursor
+                .upsert(
+                    hashed_address,
+                    StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() },
+                )
+                .unwrap();
+        }
+        let storage_trie = StorageTrieCursor::new(storage_cursor, hashed_address);
+        test_cursor(storage_trie, &expected);
     }
 
-    fn test_cursor<K, T>(mut trie: T, inputs: &[(Vec<u8>, BranchNodeCompact)], expected: &[Vec<u8>])
+    fn test_cursor<K, T>(mut trie: T, expected: &[Vec<u8>])
     where
         K: Key + From<Vec<u8>>,
         T: TrieCursor<K>,
     {
-        for (k, v) in inputs {
-            trie.upsert(k.clone().into(), v.clone()).unwrap();
-        }
-
         let mut walker = TrieWalker::new(&mut trie, Default::default());
         assert!(walker.key().unwrap().is_empty());
 
@@ -274,12 +336,9 @@ mod tests {
     #[test]
     fn cursor_rootnode_with_changesets() {
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
-
-        let mut trie = StorageTrieCursor::new(
-            tx.cursor_dup_write::<tables::StoragesTrie>().unwrap(),
-            H256::random(),
-        );
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let tx = factory.provider_rw().unwrap();
+        let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
         let nodes = vec![
             (
@@ -306,13 +365,16 @@ mod tests {
             ),
         ];
 
+        let hashed_address = H256::random();
         for (k, v) in nodes {
-            trie.upsert(k.into(), v).unwrap();
+            cursor.upsert(hashed_address, StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
         }
+
+        let mut trie = StorageTrieCursor::new(cursor, hashed_address);
 
         // No changes
         let mut cursor = TrieWalker::new(&mut trie, Default::default());
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![]))); // root
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![]))); // root
         assert!(cursor.can_skip_current_node); // due to root_hash
         cursor.advance().unwrap(); // skips to the end of trie
         assert_eq!(cursor.key(), None);
@@ -323,15 +385,15 @@ mod tests {
         let mut cursor = TrieWalker::new(&mut trie, changed);
 
         // Root node
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![])));
         // Should not be able to skip state due to the changed values
         assert!(!cursor.can_skip_current_node);
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x2])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x2])));
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x2, 0x1])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x2, 0x1])));
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x4])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x4])));
 
         cursor.advance().unwrap();
         assert_eq!(cursor.key(), None); // the end of trie

@@ -24,7 +24,7 @@ pub(crate) fn zip_blocks<'a>(
                 BlockResponse::Full(SealedBlock {
                     header: header.clone(),
                     body: body.transactions,
-                    ommers: body.ommers.into_iter().map(|o| o.seal_slow()).collect(),
+                    ommers: body.ommers,
                     withdrawals: body.withdrawals,
                 })
             }
@@ -47,7 +47,7 @@ pub(crate) fn create_raw_bodies<'a>(
 
 #[inline]
 pub(crate) fn insert_headers(db: &Env<WriteMap>, headers: &[SealedHeader]) {
-    db.update(|tx| -> Result<(), db::Error> {
+    db.update(|tx| -> Result<(), db::DatabaseError> {
         for header in headers {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
             tx.put::<tables::Headers>(header.number, header.clone().unseal())?;

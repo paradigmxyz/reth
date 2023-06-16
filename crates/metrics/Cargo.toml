@@ -1,0 +1,22 @@
+[package]
+name = "reth-metrics"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "reth metrics utilities"
+
+[dependencies]
+# reth 
+reth-metrics-derive = { path = "./metrics-derive" }
+
+# metrics
+metrics = "0.20.1"
+
+# async
+tokio = { workspace = true, features = ["full"], optional = true }
+
+[features]
+common = ["tokio"]

@@ -1,14 +1,15 @@
 [workspace]
 members = [
     "bin/reth",
+    "crates/config",
     "crates/consensus/auto-seal",
     "crates/consensus/beacon",
     "crates/consensus/common",
     "crates/blockchain-tree",
     "crates/interfaces",
     "crates/payload/builder",
+    "crates/metrics",
     "crates/metrics/metrics-derive",
-    "crates/metrics/common",
     "crates/net/common",
     "crates/net/ecies",
     "crates/net/eth-wire",
@@ -31,6 +32,7 @@ members = [
     "crates/rpc/rpc-builder",
     "crates/rpc/rpc-engine-api",
     "crates/rpc/rpc-types",
+    "crates/rpc/rpc-testing-util",
     "crates/staged-sync",
     "crates/stages",
     "crates/storage/codecs",
@@ -42,15 +44,78 @@ members = [
     "crates/tasks",
     "crates/transaction-pool",
     "crates/trie",
+    "testing/ef-tests",
 ]
-exclude = ["crate-template"]
 default-members = ["bin/reth"]
+
+# Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
+# https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.70" # Remember to update .clippy.toml and README.md
+license = "MIT OR Apache-2.0"
+homepage = "https://paradigmxyz.github.io/reth"
+repository = "https://github.com/paradigmxyz/reth"
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
 inherits = "release"
 debug = true
 
+[profile.maxperf]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+incremental = false
+
 [patch.crates-io]
 # patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
 ruint = { git = "https://github.com/paradigmxyz/uint" }
+
+revm = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
+revm-primitives = { git = "https://github.com/bluealloy/revm/", branch = "release/v25" }
+
+[workspace.dependencies]
+## reth
+revm = { version = "3" }
+revm-primitives = "1.1"
+reth-primitives = { path = "./crates/primitives" }
+reth-interfaces = { path = "./crates/interfaces" }
+reth-provider = { path = "./crates/storage/provider" }
+reth-rlp = { path = "./crates/rlp" }
+reth-rpc-types = { path = "./crates/rpc/rpc-types" }
+reth-metrics = { path = "./crates/metrics" }
+reth-payload-builder = { path = "./crates/payload/builder" }
+reth-transaction-pool = { path = "./crates/transaction-pool" }
+reth-tasks = { path = "./crates/tasks" }
+reth-network-api = { path = "./crates/net/network-api" }
+
+## eth
+ethers-core = { version = "2.0.7", default-features = false }
+ethers-providers = { version = "2.0.7", default-features = false }
+ethers-signers = { version = "2.0.7", default-features = false }
+ethers-middleware = { version = "2.0.7", default-features = false }
+
+## misc
+tracing = "^0.1.0"
+thiserror = "1.0.37"
+serde_json = "1.0.94"
+serde = { version = "1.0", default-features = false }
+rand = "0.8.5"
+
+
+## tokio
+tokio-stream = "0.1.11"
+tokio = { version = "1.21", default-features = false }
+tokio-util = { version = "0.7.4", features = ["codec"] }
+
+## async
+async-trait = "0.1.58"
+futures = "0.3.26"
+pin-project = "1.0.12"
+futures-util = "0.3.25"
+
+## crypto
+secp256k1 = { version = "0.27.0", default-features = false, features = ["global-context", "rand-std", "recovery"] }

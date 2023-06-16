@@ -1,10 +1,5 @@
-use crate::{
-    id::StageId,
-    stage::{ExecOutput, UnwindInput, UnwindOutput},
-};
-use reth_primitives::BlockNumber;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use crate::stage::{ExecOutput, UnwindInput, UnwindOutput};
+use reth_primitives::stage::{StageCheckpoint, StageId};
 
 /// An event emitted by a [Pipeline][crate::Pipeline].
 ///
@@ -17,13 +12,21 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 pub enum PipelineEvent {
     /// Emitted when a stage is about to be run.
     Running {
+        /// 1-indexed ID of the stage that is about to be run out of total stages in the pipeline.
+        pipeline_position: usize,
+        /// Total number of stages in the pipeline.
+        pipeline_total: usize,
         /// The stage that is about to be run.
         stage_id: StageId,
         /// The previous checkpoint of the stage.
-        stage_progress: Option<BlockNumber>,
+        checkpoint: Option<StageCheckpoint>,
     },
     /// Emitted when a stage has run a single time.
     Ran {
+        /// 1-indexed ID of the stage that was run out of total stages in the pipeline.
+        pipeline_position: usize,
+        /// Total number of stages in the pipeline.
+        pipeline_total: usize,
         /// The stage that was run.
         stage_id: StageId,
         /// The result of executing the stage.
@@ -57,28 +60,4 @@ pub enum PipelineEvent {
         /// The stage that was skipped.
         stage_id: StageId,
     },
-}
-
-/// Bundles all listeners for [`PipelineEvent`]s
-// TODO: Make this a generic utility since the same struct exists in `reth/crates/net/network/src/manager.rs` and sort of in `https://github.com/paradigmxyz/reth/blob/01cb6c07df3205ee2bb55853d39302a7dfefc912/crates/net/discv4/src/lib.rs#L662-L671`
-#[derive(Default, Clone, Debug)]
-pub(crate) struct PipelineEventListeners {
-    /// All listeners for events
-    listeners: Vec<mpsc::UnboundedSender<PipelineEvent>>,
-}
-
-impl PipelineEventListeners {
-    /// Send an event to all listeners.
-    ///
-    /// Channels that were closed are removed.
-    pub(crate) fn notify(&mut self, event: PipelineEvent) {
-        self.listeners.retain(|listener| listener.send(event.clone()).is_ok())
-    }
-
-    /// Add a new event listener.
-    pub(crate) fn new_listener(&mut self) -> UnboundedReceiverStream<PipelineEvent> {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        self.listeners.push(sender);
-        UnboundedReceiverStream::new(receiver)
-    }
 }

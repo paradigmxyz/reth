@@ -1,25 +1,25 @@
 //! CLI definition and entrypoint to executable
 use crate::{
-    chain, config, db,
+    chain, config, db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
-    drop_stage, dump_stage, node, p2p,
+    node, p2p,
     runner::CliRunner,
-    stage, test_eth_chain, test_vectors,
+    stage, test_vectors,
+    version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
-    tracing_subscriber::{filter::Directive, registry::LookupSpan},
+    tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
-use std::str::FromStr;
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
     let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
-    if let Some((layer, _guard)) = opt.logs.layer() {
+    if let Some((layer, _guard)) = opt.logs.layer()? {
         layers.push(layer);
     }
     reth_tracing::init(layers);
@@ -32,16 +32,10 @@ pub fn run() -> eyre::Result<()> {
         Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::DumpStage(command) => {
-            // TODO: This should be run_blocking_until_ctrl_c as well, but fails to compile due to
-            // weird compiler GAT issues.
-            runner.run_until_ctrl_c(command.execute())
-        }
-        Commands::DropStage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
     }
 }
 
@@ -60,36 +54,25 @@ pub enum Commands {
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
-    /// Run a single stage.
-    ///
-    /// Note that this won't use the Pipeline and as a result runs stages
-    /// assuming that all the data can be held in memory. It is not recommended
-    /// to run a stage for really large block ranges if your computer does not have
-    /// a lot of memory to store all the data.
+    /// Manipulate individual stages.
     #[command(name = "stage")]
     Stage(stage::Command),
-    /// Dumps a stage from a range into a new database.
-    #[command(name = "dump-stage")]
-    DumpStage(dump_stage::Command),
-    /// Drops a stage's tables from the database.
-    #[command(name = "drop-stage")]
-    DropStage(drop_stage::Command),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
     P2P(p2p::Command),
-    /// Run Ethereum blockchain tests
-    #[command(name = "test-chain")]
-    TestEthChain(test_eth_chain::Command),
     /// Generate Test Vectors
     #[command(name = "test-vectors")]
     TestVectors(test_vectors::Command),
     /// Write config to stdout
     #[command(name = "config")]
     Config(config::Command),
+    /// Various debug routines
+    #[command(name = "debug")]
+    Debug(debug_cmd::Command),
 }
 
 #[derive(Debug, Parser)]
-#[command(author, version = "0.1", about = "Reth", long_about = None)]
+#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
 struct Cli {
     /// The command to run
     #[clap(subcommand)]
@@ -125,27 +108,26 @@ pub struct Logs {
     journald: bool,
 
     /// The filter to use for logs written to the log file.
-    #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "debug")]
+    #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "error")]
     filter: String,
 }
 
 impl Logs {
     /// Builds a tracing layer from the current log options.
-    pub fn layer<S>(&self) -> Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>
+    pub fn layer<S>(&self) -> eyre::Result<Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>>
     where
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
     {
-        let directive = Directive::from_str(self.filter.as_str())
-            .unwrap_or_else(|_| Directive::from_str("debug").unwrap());
+        let filter = EnvFilter::builder().parse(&self.filter)?;
 
         if self.journald {
-            Some((reth_tracing::journald(directive).expect("Could not connect to journald"), None))
+            Ok(Some((reth_tracing::journald(filter).expect("Could not connect to journald"), None)))
         } else if self.persistent {
-            let (layer, guard) = reth_tracing::file(directive, &self.log_directory, "reth.log");
-            Some((layer, Some(guard)))
+            let (layer, guard) = reth_tracing::file(filter, &self.log_directory, "reth.log");
+            Ok(Some((layer, Some(guard))))
         } else {
-            None
+            Ok(None)
         }
     }
 }
@@ -184,7 +166,7 @@ impl Verbosity {
                 _ => Level::TRACE,
             };
 
-            format!("reth::cli={level}").parse().unwrap()
+            format!("{level}").parse().unwrap()
         }
     }
 }
@@ -201,7 +183,12 @@ mod tests {
     fn test_parse_help_all_subcommands() {
         let reth = Cli::command();
         for sub_command in reth.get_subcommands() {
-            let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"]).unwrap_err();
+            let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"])
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("Failed to parse help message {}", sub_command.get_name())
+                });
+
             // --help is treated as error, but
             // > Not a true "error" as it means --help or similar was used. The help message will be sent to stdout.
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);

@@ -1,5 +1,5 @@
 use super::request::BodiesRequestFuture;
-use crate::metrics::DownloaderMetrics;
+use crate::metrics::BodyDownloaderMetrics;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
 use reth_interfaces::{
@@ -7,7 +7,6 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
         error::DownloadResult,
-        priority::Priority,
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
@@ -24,7 +23,7 @@ pub(crate) struct BodiesRequestQueue<B: BodiesClient> {
     /// Inner body request queue.
     inner: FuturesUnordered<BodiesRequestFuture<B>>,
     /// The downloader metrics.
-    metrics: DownloaderMetrics,
+    metrics: BodyDownloaderMetrics,
     /// Last requested block number.
     pub(crate) last_requested_block_number: Option<BlockNumber>,
 }
@@ -34,7 +33,7 @@ where
     B: BodiesClient + 'static,
 {
     /// Create new instance of request queue.
-    pub(crate) fn new(metrics: DownloaderMetrics) -> Self {
+    pub(crate) fn new(metrics: BodyDownloaderMetrics) -> Self {
         Self { metrics, inner: Default::default(), last_requested_block_number: None }
     }
 
@@ -55,13 +54,12 @@ where
     }
 
     /// Add new request to the queue.
-    /// Expects sorted collection of headers.
+    /// Expects a sorted list of headers.
     pub(crate) fn push_new_request(
         &mut self,
         client: Arc<B>,
         consensus: Arc<dyn Consensus>,
         request: Vec<SealedHeader>,
-        priority: Priority,
     ) {
         // Set last max requested block number
         self.last_requested_block_number = request
@@ -71,11 +69,9 @@ where
                 None => last.number,
             })
             .or(self.last_requested_block_number);
-
         // Create request and push into the queue.
         self.inner.push(
-            BodiesRequestFuture::new(client, consensus, priority, self.metrics.clone())
-                .with_headers(request),
+            BodiesRequestFuture::new(client, consensus, self.metrics.clone()).with_headers(request),
         )
     }
 }

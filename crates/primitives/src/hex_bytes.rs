@@ -202,13 +202,13 @@ use proptest::strategy::Strategy;
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for Bytes {
     type Parameters = proptest::arbitrary::ParamsFor<u8>;
-    type Strategy = proptest::prelude::BoxedStrategy<Bytes>;
-
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         proptest::collection::vec(proptest::arbitrary::any_with::<u8>(args), 0..80)
             .prop_map(move |vec| bytes::Bytes::from(vec).into())
             .boxed()
     }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Bytes>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]

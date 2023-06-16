@@ -5,8 +5,9 @@ use crate::{
         download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
-            client::{HeadersClient, HeadersRequest, StatusUpdater},
+            client::{HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
+            error::HeadersDownloaderResult,
         },
         priority::Priority,
     },
@@ -84,20 +85,20 @@ impl HeaderDownloader for TestHeaderDownloader {
 }
 
 impl Stream for TestHeaderDownloader {
-    type Item = Vec<SealedHeader>;
+    type Item = HeadersDownloaderResult<Vec<SealedHeader>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         loop {
             if this.queued_headers.len() == this.batch_size {
-                return Poll::Ready(Some(std::mem::take(&mut this.queued_headers)))
+                return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers))))
             }
             if this.download.is_none() {
                 this.download.insert(this.create_download());
             }
 
             match ready!(this.download.as_mut().unwrap().poll_next_unpin(cx)) {
-                None => return Poll::Ready(Some(std::mem::take(&mut this.queued_headers))),
+                None => return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers)))),
                 Some(header) => this.queued_headers.push(header.unwrap()),
             }
         }
@@ -156,7 +157,7 @@ impl Stream for TestDownload {
             }
 
             let empty = SealedHeader::default();
-            if let Err(error) = this.consensus.pre_validate_header(&empty, &empty) {
+            if let Err(error) = this.consensus.validate_header_against_parent(&empty, &empty) {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
@@ -281,32 +282,17 @@ impl TestConsensus {
     }
 }
 
-/// Status updater for testing.
-///
-/// [`TestStatusUpdater::new()`] creates a new [`TestStatusUpdater`] that is **not** shareable. This
-/// struct wraps the sender side of a [`tokio::sync::watch`] channel. The receiving side of the
-/// channel (which is shareable by cloning it) is also returned.
-#[derive(Debug)]
-pub struct TestStatusUpdater(tokio::sync::watch::Sender<Head>);
-
-impl TestStatusUpdater {
-    /// Create a new test status updater and a receiver to listen to status updates on.
-    pub fn new() -> (Self, tokio::sync::watch::Receiver<Head>) {
-        let (tx, rx) = tokio::sync::watch::channel(Head::default());
-
-        (Self(tx), rx)
-    }
-}
-
-impl StatusUpdater for TestStatusUpdater {
-    fn update_status(&self, head: Head) {
-        self.0.send(head).expect("could not send status update");
-    }
-}
-
 #[async_trait::async_trait]
 impl Consensus for TestConsensus {
-    fn pre_validate_header(
+    fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
+        if self.fail_validation() {
+            Err(consensus::ConsensusError::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_header_against_parent(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
@@ -318,9 +304,9 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn validate_header(
+    fn validate_header_with_total_difficulty(
         &self,
-        header: &SealedHeader,
+        header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
@@ -330,15 +316,11 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn pre_validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::ConsensusError> {
+    fn validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::ConsensusError> {
         if self.fail_validation() {
             Err(consensus::ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
         }
-    }
-
-    fn has_block_reward(&self, _: U256, _: U256) -> bool {
-        true
     }
 }

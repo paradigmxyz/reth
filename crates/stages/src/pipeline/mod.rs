@@ -1,15 +1,13 @@
-use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
+use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_interfaces::sync::{SyncState, SyncStateUpdater};
-use reth_primitives::{BlockNumber, H256};
-use reth_provider::Transaction;
-use std::{
-    fmt::{Debug, Formatter},
-    ops::Deref,
-    pin::Pin,
-    sync::Arc,
+use reth_interfaces::executor::BlockExecutionError;
+use reth_primitives::{
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
+    BlockNumber, ChainSpec, H256,
 };
+use reth_provider::{providers::get_stage_checkpoint, ProviderFactory};
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -21,12 +19,22 @@ mod progress;
 mod set;
 mod sync_metrics;
 
+pub use crate::pipeline::ctrl::ControlFlow;
 pub use builder::*;
-use ctrl::*;
 pub use event::*;
 use progress::*;
 pub use set::*;
 use sync_metrics::*;
+
+/// A container for a queued stage.
+pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
+
+/// The future that returns the owned pipeline and the result of the pipeline run. See
+/// [Pipeline::run_as_fut].
+pub type PipelineFut<DB> = Pin<Box<dyn Future<Output = PipelineWithResult<DB>> + Send>>;
+
+/// The pipeline type itself with the result of [Pipeline::run_as_fut]
+pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineError>);
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
@@ -78,66 +86,47 @@ use sync_metrics::*;
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
-pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
+///
+/// # Defaults
+///
+/// The [DefaultStages](crate::sets::DefaultStages) are used to fully sync reth.
+pub struct Pipeline<DB: Database> {
+    /// The Database
+    db: DB,
+    /// Chain spec
+    chain_spec: Arc<ChainSpec>,
+    /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
+    /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    listeners: PipelineEventListeners,
-    sync_state_updater: Option<U>,
+    /// All listeners for events the pipeline emits.
+    listeners: EventListeners<PipelineEvent>,
+    /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
+    /// A receiver for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<H256>>,
     metrics: Metrics,
 }
 
-/// The future that returns the owned pipeline and the result of the pipeline run. See
-/// [Pipeline::run_as_fut].
-pub type PipelineFut<DB, U> = Pin<Box<dyn Future<Output = PipelineWithResult<DB, U>> + Send>>;
-
-/// The pipeline type itself with the result of [Pipeline::run_as_fut]
-pub type PipelineWithResult<DB, U> = (Pipeline<DB, U>, Result<ControlFlow, PipelineError>);
-
-impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
-    fn default() -> Self {
-        Self {
-            stages: Vec::new(),
-            max_block: None,
-            listeners: PipelineEventListeners::default(),
-            sync_state_updater: None,
-            progress: PipelineProgress::default(),
-            tip_tx: None,
-            metrics: Metrics::default(),
-        }
-    }
-}
-
-impl<DB: Database, U: SyncStateUpdater> Debug for Pipeline<DB, U> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Pipeline")
-            .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
-            .field("max_block", &self.max_block)
-            .finish()
-    }
-}
-
-impl<DB, U> Pipeline<DB, U>
+impl<DB> Pipeline<DB>
 where
     DB: Database + 'static,
-    U: SyncStateUpdater + 'static,
 {
     /// Construct a pipeline using a [`PipelineBuilder`].
-    pub fn builder() -> PipelineBuilder<DB, U> {
+    pub fn builder() -> PipelineBuilder<DB> {
         PipelineBuilder::default()
     }
 
     /// Return the minimum pipeline progress
-    pub fn minimum_progress(&self) -> &Option<u64> {
-        &self.progress.minimum_progress
+    pub fn minimum_progress(&self) -> Option<u64> {
+        self.progress.minimum_progress
     }
 
     /// Set tip for reverse sync.
     #[track_caller]
     pub fn set_tip(&self, tip: H256) {
         let _ = self.tip_tx.as_ref().expect("tip sender is set").send(tip).map_err(|_| {
-            warn!(target: "sync::pipeline", "tip channel closed");
+            warn!(target: "sync::pipeline", "Chain tip channel closed");
         });
     }
 
@@ -147,27 +136,32 @@ where
     }
 
     /// Registers progress metrics for each registered stage
-    fn register_metrics(&mut self, db: Arc<DB>) {
+    pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
+        let tx = self.db.tx()?;
         for stage in &self.stages {
             let stage_id = stage.id();
             self.metrics.stage_checkpoint(
                 stage_id,
-                db.view(|tx| stage_id.get_progress(tx).ok().flatten().unwrap_or_default())
-                    .ok()
-                    .unwrap_or_default(),
+                get_stage_checkpoint(&tx, stage_id)?.unwrap_or_default(),
+                None,
             );
         }
+        Ok(())
     }
 
-    /// Consume the pipeline and run it. Return the pipeline and its result as a future.
+    /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
+    /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, db: Arc<DB>, tip: H256) -> PipelineFut<DB, U> {
+    pub fn run_as_fut(mut self, tip: Option<H256>) -> PipelineFut<DB> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
-        self.register_metrics(db.clone());
+        let _ = self.register_metrics(); // ignore error
         Box::pin(async move {
-            self.set_tip(tip);
-            let result = self.run_loop(db).await;
+            // NOTE: the tip should only be None if we are in continuous sync mode.
+            if let Some(tip) = tip {
+                self.set_tip(tip);
+            }
+            let result = self.run_loop().await;
             trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
             (self, result)
         })
@@ -175,11 +169,11 @@ where
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub async fn run(&mut self, db: Arc<DB>) -> Result<(), PipelineError> {
-        self.register_metrics(db.clone());
+    pub async fn run(&mut self) -> Result<(), PipelineError> {
+        let _ = self.register_metrics(); // ignore error
 
         loop {
-            let next_action = self.run_loop(db.clone()).await?;
+            let next_action = self.run_loop().await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -207,24 +201,15 @@ where
     /// If any stage is unsuccessful at execution, we proceed to
     /// unwind. This will undo the progress across the entire pipeline
     /// up to the block that caused the error.
-    async fn run_loop(&mut self, db: Arc<DB>) -> Result<ControlFlow, PipelineError> {
+    pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
             let stage = &self.stages[stage_index];
             let stage_id = stage.id();
 
-            // Update sync state
-            if let Some(ref updater) = self.sync_state_updater {
-                if stage_id.is_finish() {
-                    updater.update_sync_state(SyncState::Idle);
-                } else {
-                    updater.update_sync_state(SyncState::Syncing);
-                }
-            }
-
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
             let next = self
-                .execute_stage_to_completion(db.as_ref(), previous_stage, stage_index)
+                .execute_stage_to_completion(previous_stage, stage_index)
                 .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
@@ -238,17 +223,14 @@ where
                 }
                 ControlFlow::Continue { progress } => self.progress.update(progress),
                 ControlFlow::Unwind { target, bad_block } => {
-                    // reset the sync state
-                    if let Some(ref updater) = self.sync_state_updater {
-                        updater.update_sync_state(SyncState::Syncing);
-                    }
-                    self.unwind(db.as_ref(), target, bad_block).await?;
+                    self.unwind(target, Some(bad_block.number)).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
 
-            previous_stage =
-                Some((stage_id, db.view(|tx| stage_id.get_progress(tx))??.unwrap_or_default()));
+            previous_stage = Some(
+                get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default().block_number,
+            );
         }
 
         Ok(self.progress.next_ctrl())
@@ -259,41 +241,57 @@ where
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub async fn unwind(
         &mut self,
-        db: &DB,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let mut tx = Transaction::new(db)?;
+        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut stage_progress = stage_id.get_progress(tx.deref())?.unwrap_or_default();
-            if stage_progress < to {
-                debug!(target: "sync::pipeline", from = %stage_progress, %to, "Unwind point too far for stage");
+            let mut checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
+            if checkpoint.block_number < to {
+                debug!(target: "sync::pipeline", from = %checkpoint, %to, "Unwind point too far for stage");
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
                 continue
             }
 
-            debug!(target: "sync::pipeline", from = %stage_progress, %to, ?bad_block, "Starting unwind");
-            while stage_progress > to {
-                let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
+            debug!(target: "sync::pipeline", from = %checkpoint, %to, ?bad_block, "Starting unwind");
+            while checkpoint.block_number > to {
+                let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
-                let output = stage.unwind(&mut tx, input).await;
+                let output = stage.unwind(&mut provider_rw, input).await;
                 match output {
                     Ok(unwind_output) => {
-                        stage_progress = unwind_output.stage_progress;
-                        self.metrics.stage_checkpoint(stage_id, stage_progress);
-                        stage_id.save_progress(tx.deref(), stage_progress)?;
+                        checkpoint = unwind_output.checkpoint;
+                        info!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            unwind_to = to,
+                            progress = checkpoint.block_number,
+                            done = checkpoint.block_number == to,
+                            "Stage unwound"
+                        );
+                        self.metrics.stage_checkpoint(
+                            stage_id, checkpoint,
+                            // We assume it was set in the previous execute iteration, so it
+                            // doesn't change when we unwind.
+                            None,
+                        );
+                        provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
+
+                        provider_rw.commit()?;
+                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -303,64 +301,84 @@ where
             }
         }
 
-        tx.commit()?;
         Ok(())
     }
 
     async fn execute_stage_to_completion(
         &mut self,
-        db: &DB,
-        previous_stage: Option<(StageId, BlockNumber)>,
+        previous_stage: Option<BlockNumber>,
         stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
+        let total_stages = self.stages.len();
+
         let stage = &mut self.stages[stage_index];
         let stage_id = stage.id();
         let mut made_progress = false;
+        let target = self.max_block.or(previous_stage);
+
+        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+
         loop {
-            let mut tx = Transaction::new(db)?;
+            let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
 
-            let prev_progress = stage_id.get_progress(tx.deref())?;
-
-            let stage_reached_max_block = prev_progress
+            let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
-                .map_or(false, |(prev_progress, target)| prev_progress >= target);
+                .map_or(false, |(prev_progress, target)| prev_progress.block_number >= target);
             if stage_reached_max_block {
                 warn!(
                     target: "sync::pipeline",
                     stage = %stage_id,
-                    "Stage reached maximum block, skipping."
+                    max_block = self.max_block,
+                    prev_block = prev_checkpoint.map(|progress| progress.block_number),
+                    "Stage reached target block, skipping."
                 );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
 
                 // We reached the maximum block, so we skip the stage
-                return Ok(ControlFlow::NoProgress { stage_progress: prev_progress })
+                return Ok(ControlFlow::NoProgress {
+                    stage_progress: prev_checkpoint.map(|progress| progress.block_number),
+                })
             }
 
-            self.listeners
-                .notify(PipelineEvent::Running { stage_id, stage_progress: prev_progress });
+            self.listeners.notify(PipelineEvent::Running {
+                pipeline_position: stage_index + 1,
+                pipeline_total: total_stages,
+                stage_id,
+                checkpoint: prev_checkpoint,
+            });
 
             match stage
-                .execute(&mut tx, ExecInput { previous_stage, stage_progress: prev_progress })
+                .execute(&mut provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
                 .await
             {
-                Ok(out @ ExecOutput { stage_progress, done }) => {
-                    made_progress |= stage_progress != prev_progress.unwrap_or_default();
-                    info!(
+                Ok(out @ ExecOutput { checkpoint, done }) => {
+                    made_progress |=
+                        checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
+                    debug!(
                         target: "sync::pipeline",
                         stage = %stage_id,
-                        %stage_progress,
+                        progress = checkpoint.block_number,
+                        %checkpoint,
                         %done,
-                        "Stage made progress"
+                        "Stage committed progress"
                     );
-                    self.metrics.stage_checkpoint(stage_id, stage_progress);
-                    stage_id.save_progress(tx.deref(), stage_progress)?;
+                    self.metrics.stage_checkpoint(stage_id, checkpoint, target);
+                    provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
-                    self.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });
+                    self.listeners.notify(PipelineEvent::Ran {
+                        pipeline_position: stage_index + 1,
+                        pipeline_total: total_stages,
+                        stage_id,
+                        result: out.clone(),
+                    });
 
                     // TODO: Make the commit interval configurable
-                    tx.commit()?;
+                    provider_rw.commit()?;
+                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
                     if done {
+                        let stage_progress = checkpoint.block_number;
                         return Ok(if made_progress {
                             ControlFlow::Continue { progress: stage_progress }
                         } else {
@@ -371,11 +389,20 @@ where
                 Err(err) => {
                     self.listeners.notify(PipelineEvent::Error { stage_id });
 
-                    return if let StageError::Validation { block, error } = err {
+                    let out = if let StageError::DetachedHead { local_head, header, error } = err {
+                        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
+
+                        // We unwind because of a detached head.
+                        let unwind_to = local_head
+                            .number
+                            .saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH)
+                            .max(1);
+                        Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
+                    } else if let StageError::Validation { block, error } = err {
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,
-                            bad_block = %block,
+                            bad_block = %block.number,
                             "Stage encountered a validation error: {error}"
                         );
 
@@ -383,8 +410,27 @@ where
                         // we bail entirely, otherwise we restart the execution loop from the
                         // beginning.
                         Ok(ControlFlow::Unwind {
-                            target: prev_progress.unwrap_or_default(),
-                            bad_block: Some(block),
+                            target: prev_checkpoint.unwrap_or_default().block_number,
+                            bad_block: block,
+                        })
+                    } else if let StageError::ExecutionError {
+                        block,
+                        error: BlockExecutionError::Validation(error),
+                    } = err
+                    {
+                        warn!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            bad_block = %block.number,
+                            "Stage encountered an execution error: {error}"
+                        );
+
+                        // We unwind because of an execution error. If the unwind itself fails, we
+                        // bail entirely, otherwise we restart the execution loop from the
+                        // beginning.
+                        Ok(ControlFlow::Unwind {
+                            target: prev_checkpoint.unwrap_or_default().block_number,
+                            bad_block: block,
                         })
                     } else if err.is_fatal() {
                         error!(
@@ -399,26 +445,37 @@ where
                         warn!(
                             target: "sync::pipeline",
                             stage = %stage_id,
-                            "Stage encountered a non-fatal error: {err}. Retrying"
+                            "Stage encountered a non-fatal error: {err}. Retrying..."
                         );
                         continue
-                    }
+                    };
+                    return out
                 }
             }
         }
     }
 }
 
-/// A container for a queued stage.
-pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
+impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pipeline")
+            .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
+            .field("max_block", &self.max_block)
+            .field("listeners", &self.listeners)
+            .finish()
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestStage, StageId, UnwindOutput};
+    use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
-    use reth_interfaces::{consensus, provider::ProviderError, sync::NoopSyncStateUpdate};
+    use reth_interfaces::{
+        consensus, provider::ProviderError, test_utils::generators::random_header,
+    };
+    use reth_primitives::{stage::StageCheckpoint, MAINNET};
     use tokio_stream::StreamExt;
 
     #[test]
@@ -453,37 +510,51 @@ mod tests {
     async fn run_pipeline() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
-                TestStage::new(StageId("A"))
-                    .add_exec(Ok(ExecOutput { stage_progress: 20, done: true })),
+                TestStage::new(StageId::Other("A"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true })),
             )
             .add_stage(
-                TestStage::new(StageId("B"))
-                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
+                TestStage::new(StageId::Other("B"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build();
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
-            pipeline.run(db).await.unwrap();
+            pipeline.run().await.unwrap();
         });
 
         // Check that the stages were run in order
         assert_eq!(
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
-                PipelineEvent::Ran {
-                    stage_id: StageId("A"),
-                    result: ExecOutput { stage_progress: 20, done: true },
+                PipelineEvent::Running {
+                    pipeline_position: 1,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("A"),
+                    checkpoint: None
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
                 PipelineEvent::Ran {
-                    stage_id: StageId("B"),
-                    result: ExecOutput { stage_progress: 10, done: true },
+                    pipeline_position: 1,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("A"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
+                },
+                PipelineEvent::Running {
+                    pipeline_position: 2,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None
+                },
+                PipelineEvent::Ran {
+                    pipeline_position: 2,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("B"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
             ]
         );
@@ -494,33 +565,33 @@ mod tests {
     async fn unwind_pipeline() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
-                TestStage::new(StageId("A"))
-                    .add_exec(Ok(ExecOutput { stage_progress: 100, done: true }))
-                    .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+                TestStage::new(StageId::Other("A"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .add_stage(
-                TestStage::new(StageId("B"))
-                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                    .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+                TestStage::new(StageId::Other("B"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .add_stage(
-                TestStage::new(StageId("C"))
-                    .add_exec(Ok(ExecOutput { stage_progress: 20, done: true }))
-                    .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+                TestStage::new(StageId::Other("C"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .with_max_block(10)
-            .build();
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
             // Sync first
-            pipeline.run(db.clone()).await.expect("Could not run pipeline");
+            pipeline.run().await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline.unwind(&db, 1, None).await.expect("Could not unwind pipeline");
+            pipeline.unwind(1, None).await.expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order
@@ -528,45 +599,78 @@ mod tests {
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 // Executing
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
-                PipelineEvent::Ran {
-                    stage_id: StageId("A"),
-                    result: ExecOutput { stage_progress: 100, done: true },
+                PipelineEvent::Running {
+                    pipeline_position: 1,
+                    pipeline_total: 3,
+                    stage_id: StageId::Other("A"),
+                    checkpoint: None
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
                 PipelineEvent::Ran {
-                    stage_id: StageId("B"),
-                    result: ExecOutput { stage_progress: 10, done: true },
+                    pipeline_position: 1,
+                    pipeline_total: 3,
+                    stage_id: StageId::Other("A"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
                 },
-                PipelineEvent::Running { stage_id: StageId("C"), stage_progress: None },
+                PipelineEvent::Running {
+                    pipeline_position: 2,
+                    pipeline_total: 3,
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None
+                },
                 PipelineEvent::Ran {
-                    stage_id: StageId("C"),
-                    result: ExecOutput { stage_progress: 20, done: true },
+                    pipeline_position: 2,
+                    pipeline_total: 3,
+                    stage_id: StageId::Other("B"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                },
+                PipelineEvent::Running {
+                    pipeline_position: 3,
+                    pipeline_total: 3,
+                    stage_id: StageId::Other("C"),
+                    checkpoint: None
+                },
+                PipelineEvent::Ran {
+                    pipeline_position: 3,
+                    pipeline_total: 3,
+                    stage_id: StageId::Other("C"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
                 },
                 // Unwinding
                 PipelineEvent::Unwinding {
-                    stage_id: StageId("C"),
-                    input: UnwindInput { stage_progress: 20, unwind_to: 1, bad_block: None }
+                    stage_id: StageId::Other("C"),
+                    input: UnwindInput {
+                        checkpoint: StageCheckpoint::new(20),
+                        unwind_to: 1,
+                        bad_block: None
+                    }
                 },
                 PipelineEvent::Unwound {
-                    stage_id: StageId("C"),
-                    result: UnwindOutput { stage_progress: 1 },
+                    stage_id: StageId::Other("C"),
+                    result: UnwindOutput { checkpoint: StageCheckpoint::new(1) },
                 },
                 PipelineEvent::Unwinding {
-                    stage_id: StageId("B"),
-                    input: UnwindInput { stage_progress: 10, unwind_to: 1, bad_block: None }
+                    stage_id: StageId::Other("B"),
+                    input: UnwindInput {
+                        checkpoint: StageCheckpoint::new(10),
+                        unwind_to: 1,
+                        bad_block: None
+                    }
                 },
                 PipelineEvent::Unwound {
-                    stage_id: StageId("B"),
-                    result: UnwindOutput { stage_progress: 1 },
+                    stage_id: StageId::Other("B"),
+                    result: UnwindOutput { checkpoint: StageCheckpoint::new(1) },
                 },
                 PipelineEvent::Unwinding {
-                    stage_id: StageId("A"),
-                    input: UnwindInput { stage_progress: 100, unwind_to: 1, bad_block: None }
+                    stage_id: StageId::Other("A"),
+                    input: UnwindInput {
+                        checkpoint: StageCheckpoint::new(100),
+                        unwind_to: 1,
+                        bad_block: None
+                    }
                 },
                 PipelineEvent::Unwound {
-                    stage_id: StageId("A"),
-                    result: UnwindOutput { stage_progress: 1 },
+                    stage_id: StageId::Other("A"),
+                    result: UnwindOutput { checkpoint: StageCheckpoint::new(1) },
                 },
             ]
         );
@@ -577,27 +681,27 @@ mod tests {
     async fn unwind_pipeline_with_intermediate_progress() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
-                TestStage::new(StageId("A"))
-                    .add_exec(Ok(ExecOutput { stage_progress: 100, done: true }))
-                    .add_unwind(Ok(UnwindOutput { stage_progress: 50 })),
+                TestStage::new(StageId::Other("A"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(50) })),
             )
             .add_stage(
-                TestStage::new(StageId("B"))
-                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
+                TestStage::new(StageId::Other("B"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build();
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
             // Sync first
-            pipeline.run(db.clone()).await.expect("Could not run pipeline");
+            pipeline.run().await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline.unwind(&db, 50, None).await.expect("Could not unwind pipeline");
+            pipeline.unwind(50, None).await.expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order
@@ -605,26 +709,44 @@ mod tests {
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 // Executing
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
-                PipelineEvent::Ran {
-                    stage_id: StageId("A"),
-                    result: ExecOutput { stage_progress: 100, done: true },
+                PipelineEvent::Running {
+                    pipeline_position: 1,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("A"),
+                    checkpoint: None
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
                 PipelineEvent::Ran {
-                    stage_id: StageId("B"),
-                    result: ExecOutput { stage_progress: 10, done: true },
+                    pipeline_position: 1,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("A"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
+                },
+                PipelineEvent::Running {
+                    pipeline_position: 2,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None
+                },
+                PipelineEvent::Ran {
+                    pipeline_position: 2,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("B"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
                 // Unwinding
                 // Nothing to unwind in stage "B"
-                PipelineEvent::Skipped { stage_id: StageId("B") },
+                PipelineEvent::Skipped { stage_id: StageId::Other("B") },
                 PipelineEvent::Unwinding {
-                    stage_id: StageId("A"),
-                    input: UnwindInput { stage_progress: 100, unwind_to: 50, bad_block: None }
+                    stage_id: StageId::Other("A"),
+                    input: UnwindInput {
+                        checkpoint: StageCheckpoint::new(100),
+                        unwind_to: 50,
+                        bad_block: None
+                    }
                 },
                 PipelineEvent::Unwound {
-                    stage_id: StageId("A"),
-                    result: UnwindOutput { stage_progress: 50 },
+                    stage_id: StageId::Other("A"),
+                    result: UnwindOutput { checkpoint: StageCheckpoint::new(50) },
                 },
             ]
         );
@@ -646,59 +768,89 @@ mod tests {
     async fn run_pipeline_with_unwind() {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
 
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
-                TestStage::new(StageId("A"))
-                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                    .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
-                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
+                TestStage::new(StageId::Other("A"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .add_stage(
-                TestStage::new(StageId("B"))
+                TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Validation {
-                        block: 5,
+                        block: random_header(5, Default::default()),
                         error: consensus::ConsensusError::BaseFeeMissing,
                     }))
-                    .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
-                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build();
+            .build(db, MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
-            pipeline.run(db).await.expect("Could not run pipeline");
+            pipeline.run().await.expect("Could not run pipeline");
         });
 
         // Check that the stages were unwound in reverse order
         assert_eq!(
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
-                PipelineEvent::Ran {
-                    stage_id: StageId("A"),
-                    result: ExecOutput { stage_progress: 10, done: true },
+                PipelineEvent::Running {
+                    pipeline_position: 1,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("A"),
+                    checkpoint: None
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
-                PipelineEvent::Error { stage_id: StageId("B") },
+                PipelineEvent::Ran {
+                    pipeline_position: 1,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("A"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                },
+                PipelineEvent::Running {
+                    pipeline_position: 2,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None
+                },
+                PipelineEvent::Error { stage_id: StageId::Other("B") },
                 PipelineEvent::Unwinding {
-                    stage_id: StageId("A"),
-                    input: UnwindInput { stage_progress: 10, unwind_to: 0, bad_block: Some(5) }
+                    stage_id: StageId::Other("A"),
+                    input: UnwindInput {
+                        checkpoint: StageCheckpoint::new(10),
+                        unwind_to: 0,
+                        bad_block: Some(5)
+                    }
                 },
                 PipelineEvent::Unwound {
-                    stage_id: StageId("A"),
-                    result: UnwindOutput { stage_progress: 0 },
+                    stage_id: StageId::Other("A"),
+                    result: UnwindOutput { checkpoint: StageCheckpoint::new(0) },
                 },
-                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: Some(0) },
-                PipelineEvent::Ran {
-                    stage_id: StageId("A"),
-                    result: ExecOutput { stage_progress: 10, done: true },
+                PipelineEvent::Running {
+                    pipeline_position: 1,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("A"),
+                    checkpoint: Some(StageCheckpoint::new(0))
                 },
-                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
                 PipelineEvent::Ran {
-                    stage_id: StageId("B"),
-                    result: ExecOutput { stage_progress: 10, done: true },
+                    pipeline_position: 1,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("A"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                },
+                PipelineEvent::Running {
+                    pipeline_position: 2,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None
+                },
+                PipelineEvent::Ran {
+                    pipeline_position: 2,
+                    pipeline_total: 2,
+                    stage_id: StageId::Other("B"),
+                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
             ]
         );
@@ -709,29 +861,29 @@ mod tests {
     async fn pipeline_error_handling() {
         // Non-fatal
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
-                TestStage::new(StageId("NonFatal"))
+                TestStage::new(StageId::Other("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
-                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build();
-        let result = pipeline.run(db).await;
+            .build(db, MAINNET.clone());
+        let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
         // Fatal
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
-        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
-            .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
-                StageError::DatabaseIntegrity(ProviderError::BlockBodyIndices { number: 5 }),
+        let mut pipeline = Pipeline::builder()
+            .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
+                StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))
-            .build();
-        let result = pipeline.run(db).await;
+            .build(db, MAINNET.clone());
+        let result = pipeline.run().await;
         assert_matches!(
             result,
             Err(PipelineError::Stage(StageError::DatabaseIntegrity(
-                ProviderError::BlockBodyIndices { number: 5 }
+                ProviderError::BlockBodyIndicesNotFound(5)
             )))
         );
     }

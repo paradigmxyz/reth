@@ -10,7 +10,7 @@ use crate::{
     database::{Database, DatabaseGAT},
     table::{DupSort, Table, TableImporter},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
-    Error,
+    DatabaseError,
 };
 
 /// Mock database used for testing with inner BTreeMap structure
@@ -22,11 +22,11 @@ pub struct DatabaseMock {
 }
 
 impl Database for DatabaseMock {
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
         Ok(TxMock::default())
     }
 
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
         Ok(TxMock::default())
     }
 }
@@ -38,7 +38,7 @@ impl<'a> DatabaseGAT<'a> for DatabaseMock {
 }
 
 /// Mock read only tx
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TxMock {
     /// Table representation
     _table: BTreeMap<Vec<u8>, Vec<u8>>,
@@ -55,11 +55,11 @@ impl<'a> DbTxMutGAT<'a> for TxMock {
 }
 
 impl<'a> DbTx<'a> for TxMock {
-    fn get<T: Table>(&self, _key: T::Key) -> Result<Option<T::Value>, Error> {
+    fn get<T: Table>(&self, _key: T::Key) -> Result<Option<T::Value>, DatabaseError> {
         todo!()
     }
 
-    fn commit(self) -> Result<bool, Error> {
+    fn commit(self) -> Result<bool, DatabaseError> {
         todo!()
     }
 
@@ -67,35 +67,47 @@ impl<'a> DbTx<'a> for TxMock {
         todo!()
     }
 
-    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error> {
+    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
         todo!()
     }
 
-    fn cursor_dup_read<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error> {
+    fn cursor_dup_read<T: DupSort>(
+        &self,
+    ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
+        todo!()
+    }
+
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
         todo!()
     }
 }
 
 impl<'a> DbTxMut<'a> for TxMock {
-    fn put<T: Table>(&self, _key: T::Key, _value: T::Value) -> Result<(), Error> {
+    fn put<T: Table>(&self, _key: T::Key, _value: T::Value) -> Result<(), DatabaseError> {
         todo!()
     }
 
-    fn delete<T: Table>(&self, _key: T::Key, _value: Option<T::Value>) -> Result<bool, Error> {
+    fn delete<T: Table>(
+        &self,
+        _key: T::Key,
+        _value: Option<T::Value>,
+    ) -> Result<bool, DatabaseError> {
         todo!()
     }
 
-    fn cursor_write<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error> {
+    fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
+        todo!()
+    }
+
+    fn cursor_write<T: Table>(
+        &self,
+    ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
         todo!()
     }
 
     fn cursor_dup_write<T: DupSort>(
         &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error> {
-        todo!()
-    }
-
-    fn clear<T: Table>(&self) -> Result<(), Error> {
+    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
         todo!()
     }
 }
@@ -139,7 +151,7 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
     fn walk<'cursor>(
         &'cursor mut self,
         _start_key: Option<T::Key>,
-    ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<Walker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -149,7 +161,7 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
     fn walk_range<'cursor>(
         &'cursor mut self,
         _range: impl RangeBounds<T::Key>,
-    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -159,7 +171,7 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
     fn walk_back<'cursor>(
         &'cursor mut self,
         _start_key: Option<T::Key>,
-    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -192,7 +204,7 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
         &'cursor mut self,
         _key: Option<<T>::Key>,
         _subkey: Option<<T as DupSort>::SubKey>,
-    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error>
+    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -205,7 +217,7 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for CursorMock {
         &mut self,
         _key: <T as Table>::Key,
         _value: <T as Table>::Value,
-    ) -> Result<(), Error> {
+    ) -> Result<(), DatabaseError> {
         todo!()
     }
 
@@ -213,7 +225,7 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for CursorMock {
         &mut self,
         _key: <T as Table>::Key,
         _value: <T as Table>::Value,
-    ) -> Result<(), Error> {
+    ) -> Result<(), DatabaseError> {
         todo!()
     }
 
@@ -221,21 +233,21 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for CursorMock {
         &mut self,
         _key: <T as Table>::Key,
         _value: <T as Table>::Value,
-    ) -> Result<(), Error> {
+    ) -> Result<(), DatabaseError> {
         todo!()
     }
 
-    fn delete_current(&mut self) -> Result<(), Error> {
+    fn delete_current(&mut self) -> Result<(), DatabaseError> {
         todo!()
     }
 }
 
 impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for CursorMock {
-    fn delete_current_duplicates(&mut self) -> Result<(), Error> {
+    fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         todo!()
     }
 
-    fn append_dup(&mut self, _key: <T>::Key, _value: <T>::Value) -> Result<(), Error> {
+    fn append_dup(&mut self, _key: <T>::Key, _value: <T>::Value) -> Result<(), DatabaseError> {
         todo!()
     }
 }

@@ -1,95 +1,166 @@
-use std::ops::RangeInclusive;
-
-use crate::{error::StageError, id::StageId};
+use crate::error::StageError;
 use async_trait::async_trait;
-use reth_db::database::Database;
-use reth_primitives::BlockNumber;
-use reth_provider::Transaction;
+use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    BlockNumber, TxNumber,
+};
+use reth_provider::{DatabaseProviderRW, ProviderError};
+use std::{
+    cmp::{max, min},
+    ops::RangeInclusive,
+};
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
-    /// The stage that was run before the current stage and the block number it reached.
-    pub previous_stage: Option<(StageId, BlockNumber)>,
-    /// The progress of this stage the last time it was executed.
-    pub stage_progress: Option<BlockNumber>,
+    /// The target block number the stage needs to execute towards.
+    pub target: Option<BlockNumber>,
+    /// The checkpoint of this stage the last time it was executed.
+    pub checkpoint: Option<StageCheckpoint>,
 }
 
 impl ExecInput {
-    /// Return the progress of the previous stage or default.
-    pub fn previous_stage_progress(&self) -> BlockNumber {
-        self.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default()
+    /// Return the checkpoint of the stage or default.
+    pub fn checkpoint(&self) -> StageCheckpoint {
+        self.checkpoint.unwrap_or_default()
     }
 
-    /// Return next execution action.
-    ///
-    /// [ExecAction::Done] is returned if there are no blocks to execute in this stage.
-    /// [ExecAction::Run] is returned if the stage should proceed with execution.
-    pub fn next_action(&self, max_threshold: Option<u64>) -> ExecAction {
-        // Extract information about the stage progress
-        let stage_progress = self.stage_progress.unwrap_or_default();
-        let previous_stage_progress = self.previous_stage_progress();
+    /// Return the next block number after the current
+    /// +1 is needed to skip the present block and always start from block number 1, not 0.
+    pub fn next_block(&self) -> BlockNumber {
+        let current_block = self.checkpoint();
+        current_block.block_number + 1
+    }
 
-        let start_block = stage_progress + 1;
-        let end_block = match max_threshold {
-            Some(threshold) => previous_stage_progress.min(stage_progress + threshold),
-            None => previous_stage_progress,
-        };
-        let capped = end_block < previous_stage_progress;
+    /// Returns `true` if the target block number has already been reached.
+    pub fn target_reached(&self) -> bool {
+        self.checkpoint().block_number >= self.target()
+    }
 
-        if start_block <= end_block {
-            ExecAction::Run { range: start_block..=end_block, capped }
-        } else {
-            ExecAction::Done { stage_progress, target: end_block }
+    /// Return the target block number or default.
+    pub fn target(&self) -> BlockNumber {
+        self.target.unwrap_or_default()
+    }
+
+    /// Return next block range that needs to be executed.
+    pub fn next_block_range(&self) -> RangeInclusive<BlockNumber> {
+        let (range, _) = self.next_block_range_with_threshold(u64::MAX);
+        range
+    }
+
+    /// Return true if this is the first block range to execute.
+    pub fn is_first_range(&self) -> bool {
+        self.checkpoint.is_none()
+    }
+
+    /// Return the next block range to execute.
+    /// Return pair of the block range and if this is final block range.
+    pub fn next_block_range_with_threshold(
+        &self,
+        threshold: u64,
+    ) -> (RangeInclusive<BlockNumber>, bool) {
+        let current_block = self.checkpoint();
+        let start = current_block.block_number + 1;
+        let target = self.target();
+
+        let end = min(target, current_block.block_number.saturating_add(threshold));
+
+        let is_final_range = end == target;
+        (start..=end, is_final_range)
+    }
+
+    /// Return the next block range determined the number of transactions within it.
+    /// This function walks the the block indices until either the end of the range is reached or
+    /// the number of transactions exceeds the threshold.
+    pub fn next_block_range_with_transaction_threshold<DB: Database>(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        tx_threshold: u64,
+    ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
+        let start_block = self.next_block();
+        let start_block_body = provider
+            .tx_ref()
+            .get::<tables::BlockBodyIndices>(start_block)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(start_block))?;
+
+        let target_block = self.target();
+
+        let first_tx_number = start_block_body.first_tx_num();
+        let mut last_tx_number = start_block_body.last_tx_num();
+        let mut end_block_number = start_block;
+        let mut body_indices_cursor =
+            provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+        for entry in body_indices_cursor.walk_range(start_block..=target_block)? {
+            let (block, body) = entry?;
+            last_tx_number = body.last_tx_num();
+            end_block_number = block;
+            let tx_count = (first_tx_number..=last_tx_number).count() as u64;
+            if tx_count > tx_threshold {
+                break
+            }
         }
+        let is_final_range = end_block_number >= target_block;
+        Ok((first_tx_number..=last_tx_number, start_block..=end_block_number, is_final_range))
     }
 }
 
 /// Stage unwind input, see [Stage::unwind].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
-    /// The current highest block of the stage.
-    pub stage_progress: BlockNumber,
+    /// The current highest checkpoint of the stage.
+    pub checkpoint: StageCheckpoint,
     /// The block to unwind to.
     pub unwind_to: BlockNumber,
     /// The bad block that caused the unwind, if any.
     pub bad_block: Option<BlockNumber>,
 }
 
+impl UnwindInput {
+    /// Return next block range that needs to be unwound.
+    pub fn unwind_block_range(&self) -> RangeInclusive<BlockNumber> {
+        self.unwind_block_range_with_threshold(u64::MAX).0
+    }
+
+    /// Return the next block range to unwind and the block we're unwinding to.
+    pub fn unwind_block_range_with_threshold(
+        &self,
+        threshold: u64,
+    ) -> (RangeInclusive<BlockNumber>, BlockNumber, bool) {
+        // +1 is to skip the block we're unwinding to
+        let mut start = self.unwind_to + 1;
+        let end = self.checkpoint;
+
+        start = max(start, end.block_number.saturating_sub(threshold));
+
+        let unwind_to = start - 1;
+
+        let is_final_range = unwind_to == self.unwind_to;
+        (start..=end.block_number, unwind_to, is_final_range)
+    }
+}
+
 /// The output of a stage execution.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ExecOutput {
     /// How far the stage got.
-    pub stage_progress: BlockNumber,
+    pub checkpoint: StageCheckpoint,
     /// Whether or not the stage is done.
     pub done: bool,
+}
+
+impl ExecOutput {
+    /// Mark the stage as done, checkpointing at the given place.
+    pub fn done(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: true }
+    }
 }
 
 /// The output of a stage unwinding.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwindOutput {
-    /// The block at which the stage has unwound to.
-    pub stage_progress: BlockNumber,
-}
-
-/// Controls whether a stage should continue execution or not.
-#[derive(Debug)]
-pub enum ExecAction {
-    /// The stage should continue with execution.
-    Run {
-        /// The execution block range
-        range: RangeInclusive<BlockNumber>,
-        /// The flag indicating whether the range was capped
-        /// by some max blocks parameter
-        capped: bool,
-    },
-    /// The stage should terminate since there are no blocks to execute.
-    Done {
-        /// The current stage progress
-        stage_progress: BlockNumber,
-        /// The execution target provided in [ExecInput].
-        target: BlockNumber,
-    },
+    /// The checkpoint at which the stage has unwound to.
+    pub checkpoint: StageCheckpoint,
 }
 
 /// A stage is a segmented part of the syncing process of the node.
@@ -102,8 +173,7 @@ pub enum ExecAction {
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
-/// Stages receive [`Transaction`] which manages the lifecycle of a transaction,
-/// such as when to commit / reopen a new one etc.
+/// Stages receive [`DatabaseProviderRW`].
 #[async_trait]
 pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.
@@ -114,40 +184,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 }
-
-/// Get the next execute action for the stage. Return if the stage has no
-/// blocks to process.
-macro_rules! exec_or_return {
-    ($input: expr, $log_target: literal) => {
-        match $input.next_action(None) {
-            // Next action cannot be capped without a threshold.
-            ExecAction::Run { range, capped: _capped } => range.into_inner(),
-            ExecAction::Done { stage_progress, target } => {
-                info!(target: $log_target, stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
-            }
-        }
-    };
-    ($input: expr, $threshold: expr, $log_target: literal) => {
-        match $input.next_action(Some($threshold)) {
-            ExecAction::Run { range, capped } => (range.into_inner(), capped),
-            ExecAction::Done { stage_progress, target } => {
-                info!(target: $log_target, stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
-            }
-        }
-    };
-}
-
-pub(crate) use exec_or_return;

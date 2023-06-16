@@ -1,30 +1,41 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use num_traits::Zero;
-use reth_codecs::Compact;
 use reth_db::{
     cursor::DbDupCursorRO,
     database::Database,
-    models::TransitionIdAddress,
+    models::BlockNumberAddress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Address, StorageEntry, StorageHashingCheckpoint};
-use reth_provider::Transaction;
+use reth_interfaces::db::DatabaseError;
+use reth_primitives::{
+    keccak256,
+    stage::{
+        CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint, StageId,
+        StorageHashingCheckpoint,
+    },
+    StorageEntry,
+};
+use reth_provider::DatabaseProviderRW;
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
-
-/// The [`StageId`] of the storage hashing stage.
-pub const STORAGE_HASHING: StageId = StageId("StorageHashing");
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
 #[derive(Debug)]
 pub struct StorageHashingStage {
-    /// The threshold (in number of state transitions) for switching between incremental
+    /// The threshold (in number of blocks) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
     /// The maximum number of slots to process before committing.
     pub commit_threshold: u64,
+}
+
+impl StorageHashingStage {
+    /// Create new instance of [StorageHashingStage].
+    pub fn new(clean_threshold: u64, commit_threshold: u64) -> Self {
+        Self { clean_threshold, commit_threshold }
+    }
 }
 
 impl Default for StorageHashingStage {
@@ -33,84 +44,59 @@ impl Default for StorageHashingStage {
     }
 }
 
-impl StorageHashingStage {
-    /// Saves the hashing progress
-    pub fn save_checkpoint<DB: Database>(
-        &mut self,
-        tx: &Transaction<'_, DB>,
-        checkpoint: StorageHashingCheckpoint,
-    ) -> Result<(), StageError> {
-        debug!(target: "sync::stages::storage_hashing::exec", checkpoint = ?checkpoint, "Saving inner storage hashing checkpoint");
-
-        let mut buf = vec![];
-        checkpoint.to_compact(&mut buf);
-
-        Ok(tx.put::<tables::SyncStageProgress>(STORAGE_HASHING.0.into(), buf)?)
-    }
-
-    /// Gets the hashing progress
-    pub fn get_checkpoint<DB: Database>(
-        &self,
-        tx: &Transaction<'_, DB>,
-    ) -> Result<StorageHashingCheckpoint, StageError> {
-        let buf =
-            tx.get::<tables::SyncStageProgress>(STORAGE_HASHING.0.into())?.unwrap_or_default();
-
-        if buf.is_empty() {
-            return Ok(StorageHashingCheckpoint::default())
-        }
-
-        let (checkpoint, _) = StorageHashingCheckpoint::from_compact(&buf, buf.len());
-
-        if checkpoint.address.is_some() {
-            debug!(target: "sync::stages::storage_hashing::exec", checkpoint = ?checkpoint, "Continuing inner storage hashing checkpoint");
-        }
-
-        Ok(checkpoint)
-    }
-}
-
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        STORAGE_HASHING
+        StageId::StorageHashing
     }
 
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
+        let tx = provider.tx_ref();
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
 
-        // read storage changeset, merge it into one changeset and calculate storage hashes.
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        let to_transition = tx.get_block_transition(previous_stage_progress)?;
+        let (from_block, to_block) = input.next_block_range().into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset, along with their storages.
-        if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
-            let mut checkpoint = self.get_checkpoint(tx)?;
+        if to_block - from_block > self.clean_threshold || from_block == 1 {
+            let stage_checkpoint = input
+                .checkpoint
+                .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint());
 
-            if checkpoint.address.is_none() ||
-                // Checkpoint is no longer valid if the range of transitions changed. 
-                // An already hashed storage may have been changed with the new range, and therefore should be hashed again. 
-                checkpoint.to != to_transition ||
-                checkpoint.from != from_transition
-            {
-                tx.clear::<tables::HashedStorage>()?;
+            let (mut current_key, mut current_subkey) = match stage_checkpoint {
+                Some(StorageHashingCheckpoint {
+                         address: address @ Some(_),
+                         storage,
+                         block_range: CheckpointBlockRange { from, to },
+                         ..
+                     })
+                // Checkpoint is only valid if the range of transitions didn't change.
+                // An already hashed storage may have been changed with the new range,
+                // and therefore should be hashed again.
+                if from == from_block && to == to_block =>
+                    {
+                        debug!(target: "sync::stages::storage_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner storage hashing checkpoint");
 
-                checkpoint = StorageHashingCheckpoint::default();
-                self.save_checkpoint(tx, checkpoint)?;
-            }
+                        (address, storage)
+                    }
+                _ => {
+                    // clear table, load all accounts and hash it
+                    tx.clear::<tables::HashedStorage>()?;
 
-            let mut current_key = checkpoint.address.take();
-            let mut current_subkey = checkpoint.storage.take();
+                    (None, None)
+                }
+            };
+
             let mut keccak_address = None;
 
             let mut hashed_batch = BTreeMap::new();
@@ -146,13 +132,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         // There's still some remaining elements on this key, so we need to save
                         // the cursor position for the next
                         // iteration
-
-                        current_key = Some(address);
-                        current_subkey = Some(slot.key);
+                        (current_key, current_subkey) = (Some(address), Some(slot.key));
                     } else {
                         // Go to the next key
-                        current_key = storage.next_no_dup()?.map(|(key, _)| key);
-                        current_subkey = None;
+                        (current_key, current_subkey) = storage
+                            .next_no_dup()?
+                            .map(|(key, storage_entry)| (key, storage_entry.key))
+                            .unzip();
 
                         // Cache keccak256(address) for the next key if it exists
                         if let Some(address) = current_key {
@@ -170,50 +156,71 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 tx.put::<tables::HashedStorage>(addr, StorageEntry { key, value })
             })?;
 
-            if let Some(address) = &current_key {
-                checkpoint.address = Some(*address);
-                checkpoint.storage = current_subkey;
-                checkpoint.from = from_transition;
-                checkpoint.to = to_transition;
-            }
-
-            self.save_checkpoint(tx, checkpoint)?;
-
             if current_key.is_some() {
-                return Ok(ExecOutput { stage_progress, done: false })
+                let checkpoint = input.checkpoint().with_storage_hashing_stage_checkpoint(
+                    StorageHashingCheckpoint {
+                        address: current_key,
+                        storage: current_subkey,
+                        block_range: CheckpointBlockRange { from: from_block, to: to_block },
+                        progress: stage_checkpoint_progress(provider)?,
+                    },
+                );
+
+                return Ok(ExecOutput { checkpoint, done: false })
             }
         } else {
-            // Aggregate all transition changesets and and make list of storages that have been
+            // Aggregate all changesets and and make list of storages that have been
             // changed.
             let lists =
-                tx.get_addresses_and_keys_of_changed_storages(from_transition, to_transition)?;
+                provider.get_addresses_and_keys_of_changed_storages(from_block..=to_block)?;
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
-            let storages = tx.get_plainstate_storages(lists.into_iter())?;
-            tx.insert_storage_for_hashing(storages.into_iter())?;
+            let storages = provider.get_plainstate_storages(lists)?;
+            provider.insert_storage_for_hashing(storages.into_iter())?;
         }
 
-        info!(target: "sync::stages::hashing_storage", "Stage finished");
-        Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
+        // We finished the hashing stage, no future iterations is expected for the same block range,
+        // so no checkpoint is needed.
+        let checkpoint = StageCheckpoint::new(input.target())
+            .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
+                progress: stage_checkpoint_progress(provider)?,
+                ..Default::default()
+            });
+
+        Ok(ExecOutput { checkpoint, done: true })
     }
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+        let (range, unwind_progress, _) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_storage_hashing(
-            TransitionIdAddress((from_transition_rev, Address::zero()))..
-                TransitionIdAddress((to_transition_rev, Address::zero())),
-        )?;
+        provider.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        let mut stage_checkpoint =
+            input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
+
+        stage_checkpoint.progress = stage_checkpoint_progress(provider)?;
+
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_progress)
+                .with_storage_hashing_stage_checkpoint(stage_checkpoint),
+        })
     }
+}
+
+fn stage_checkpoint_progress<DB: Database>(
+    provider: &DatabaseProviderRW<'_, &DB>,
+) -> Result<EntitiesCheckpoint, DatabaseError> {
+    Ok(EntitiesCheckpoint {
+        processed: provider.tx_ref().entries::<tables::HashedStorage>()? as u64,
+        total: provider.tx_ref().entries::<tables::PlainStorageState>()? as u64,
+    })
 }
 
 #[cfg(test)]
@@ -221,17 +228,20 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+        TestTransaction, UnwindStageTestRunner,
     };
+    use assert_matches::assert_matches;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         mdbx::{tx::Tx, WriteMap, RW},
-        models::{StoredBlockBodyIndices, TransitionIdAddress},
+        models::{BlockNumberAddress, StoredBlockBodyIndices},
     };
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
     };
-    use reth_primitives::{SealedBlock, StorageEntry, H256, U256};
+    use reth_primitives::{
+        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
+    };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 
@@ -250,20 +260,44 @@ mod tests {
         // hang on one key. Seed execution inserts more than one storage entry per address.
         runner.set_commit_threshold(1);
 
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+        let mut input = ExecInput {
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
 
         loop {
-            if let Ok(result) = runner.execute(input).await.unwrap() {
-                if !result.done {
+            if let Ok(result @ ExecOutput { checkpoint, done }) =
+                runner.execute(input).await.unwrap()
+            {
+                if !done {
+                    let previous_checkpoint = input
+                        .checkpoint
+                        .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint())
+                        .unwrap_or_default();
+                    assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
+                        progress: EntitiesCheckpoint {
+                            processed,
+                            total,
+                        },
+                        ..
+                    }) if processed == previous_checkpoint.progress.processed + 1 &&
+                        total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64);
+
                     // Continue from checkpoint
+                    input.checkpoint = Some(checkpoint);
                     continue
                 } else {
-                    assert!(result.stage_progress == previous_stage);
+                    assert!(checkpoint.block_number == previous_stage);
+                    assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
+                        progress: EntitiesCheckpoint {
+                            processed,
+                            total,
+                        },
+                        ..
+                    }) if processed == total &&
+                        total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64);
 
                     // Validate the stage execution
                     assert!(
@@ -276,6 +310,147 @@ mod tests {
             }
             panic!("Failed execution");
         }
+    }
+
+    #[tokio::test]
+    async fn execute_clean_storage_hashing_with_commit_threshold() {
+        let (previous_stage, stage_progress) = (500, 100);
+        // Set up the runner
+        let mut runner = StorageHashingTestRunner::default();
+        runner.set_clean_threshold(1);
+        runner.set_commit_threshold(500);
+
+        let mut input = ExecInput {
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        // first run, hash first half of storages.
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+
+        let (progress_address, progress_key) = runner
+            .tx
+            .query(|tx| {
+                let (address, entry) = tx
+                    .cursor_read::<tables::PlainStorageState>()?
+                    .walk(None)?
+                    .nth(500)
+                    .unwrap()
+                    .unwrap();
+                Ok((address, entry.key))
+            })
+            .unwrap();
+
+        assert_matches!(
+            result,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number: 100,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+                        address: Some(address),
+                        storage: Some(storage),
+                        block_range: CheckpointBlockRange {
+                            from: 101,
+                            to: 500,
+                        },
+                        progress: EntitiesCheckpoint {
+                            processed: 500,
+                            total
+                        }
+                    }))
+                },
+                done: false
+            }) if address == progress_address && storage == progress_key &&
+                total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
+        );
+        assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 500);
+
+        // second run with commit threshold of 2 to check if subkey is set.
+        runner.set_commit_threshold(2);
+        let result = result.unwrap();
+        input.checkpoint = Some(result.checkpoint);
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+
+        let (progress_address, progress_key) = runner
+            .tx
+            .query(|tx| {
+                let (address, entry) = tx
+                    .cursor_read::<tables::PlainStorageState>()?
+                    .walk(None)?
+                    .nth(502)
+                    .unwrap()
+                    .unwrap();
+                Ok((address, entry.key))
+            })
+            .unwrap();
+
+        assert_matches!(
+            result,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number: 100,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Storage(
+                        StorageHashingCheckpoint {
+                            address: Some(address),
+                            storage: Some(storage),
+                            block_range: CheckpointBlockRange {
+                                from: 101,
+                                to: 500,
+                            },
+                            progress: EntitiesCheckpoint {
+                                processed: 502,
+                                total
+                            }
+                        }
+                    ))
+                },
+                done: false
+            }) if address == progress_address && storage == progress_key &&
+                total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
+        );
+        assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 502);
+
+        // third last run, hash rest of storages.
+        runner.set_commit_threshold(1000);
+        input.checkpoint = Some(result.unwrap().checkpoint);
+        let rx = runner.execute(input);
+        let result = rx.await.unwrap();
+
+        assert_matches!(
+            result,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number: 500,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Storage(
+                        StorageHashingCheckpoint {
+                            address: None,
+                            storage: None,
+                            block_range: CheckpointBlockRange {
+                                from: 0,
+                                to: 0,
+                            },
+                            progress: EntitiesCheckpoint {
+                                processed,
+                                total
+                            }
+                        }
+                    ))
+                },
+                done: true
+            }) if processed == total &&
+                total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
+        );
+        assert_eq!(
+            runner.tx.table::<tables::HashedStorage>().unwrap().len(),
+            runner.tx.table::<tables::PlainStorageState>().unwrap().len()
+        );
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
     }
 
     struct StorageHashingTestRunner {
@@ -310,72 +485,72 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-            let stage_progress = input.stage_progress.unwrap_or_default();
-            let end = input.previous_stage_progress() + 1;
+            let stage_progress = input.next_block();
+            let end = input.target();
 
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
 
-            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..3);
+            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..3);
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
             let iter = blocks.iter();
-            let (mut next_transition_id, mut next_tx_num) = (0, 0);
-            let mut first_transition_id = next_transition_id;
+            let mut next_tx_num = 0;
             let mut first_tx_num = next_tx_num;
             for progress in iter {
                 // Insert last progress data
+                let block_number = progress.number;
                 self.tx.commit(|tx| {
-                    progress.body.iter().try_for_each(|transaction| {
-                        tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
-                        tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
-
-                        let (addr, _) = accounts
-                            .get_mut(rand::random::<usize>() % n_accounts as usize)
-                            .unwrap();
-
-                        for _ in 0..2 {
-                            let new_entry = StorageEntry {
-                                key: keccak256([rand::random::<u8>()]),
-                                value: U256::from(rand::random::<u8>() % 30 + 1),
-                            };
-                            self.insert_storage_entry(
-                                tx,
-                                (next_transition_id, *addr).into(),
-                                new_entry,
-                                progress.header.number == stage_progress,
+                    progress.body.iter().try_for_each(
+                        |transaction| -> Result<(), reth_db::DatabaseError> {
+                            tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
+                            tx.put::<tables::Transactions>(
+                                next_tx_num,
+                                transaction.clone().into(),
                             )?;
-                        }
 
-                        next_tx_num += 1;
-                        next_transition_id += 1;
-                        Ok(())
-                    })?;
+                            let (addr, _) = accounts
+                                .get_mut(rand::random::<usize>() % n_accounts as usize)
+                                .unwrap();
+
+                            for _ in 0..2 {
+                                let new_entry = StorageEntry {
+                                    key: keccak256([rand::random::<u8>()]),
+                                    value: U256::from(rand::random::<u8>() % 30 + 1),
+                                };
+                                self.insert_storage_entry(
+                                    tx,
+                                    (block_number, *addr).into(),
+                                    new_entry,
+                                    progress.header.number == stage_progress,
+                                )?;
+                            }
+
+                            next_tx_num += 1;
+                            Ok(())
+                        },
+                    )?;
 
                     // Randomize rewards
                     let has_reward: bool = rand::random();
                     if has_reward {
                         self.insert_storage_entry(
                             tx,
-                            (next_transition_id, Address::random()).into(),
+                            (block_number, Address::random()).into(),
                             StorageEntry {
                                 key: keccak256("mining"),
                                 value: U256::from(rand::random::<u32>()),
                             },
                             progress.header.number == stage_progress,
                         )?;
-                        next_transition_id += 1;
                     }
 
                     let body = StoredBlockBodyIndices {
                         first_tx_num,
-                        first_transition_id,
                         tx_count: progress.body.len() as u64,
-                        has_block_change: has_reward,
                     };
 
-                    first_transition_id = next_transition_id;
                     first_tx_num = next_tx_num;
 
                     tx.put::<tables::BlockBodyIndices>(progress.number, body)
@@ -391,8 +566,8 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             if let Some(output) = output {
-                let start_block = input.stage_progress.unwrap_or_default() + 1;
-                let end_block = output.stage_progress;
+                let start_block = input.checkpoint().block_number + 1;
+                let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
                     return Ok(())
                 }
@@ -448,10 +623,10 @@ mod tests {
         fn insert_storage_entry(
             &self,
             tx: &Tx<'_, RW, WriteMap>,
-            tid_address: TransitionIdAddress,
+            tid_address: BlockNumberAddress,
             entry: StorageEntry,
             hash: bool,
-        ) -> Result<(), reth_db::Error> {
+        ) -> Result<(), reth_db::DatabaseError> {
             let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
             let prev_entry =
                 match storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)? {
@@ -486,25 +661,20 @@ mod tests {
 
         fn unwind_storage(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             tracing::debug!("unwinding storage...");
-            let target_transition = self
-                .tx
-                .inner()
-                .get_block_transition(input.unwind_to)
-                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
-
+            let target_block = input.unwind_to;
             self.tx.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                 let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 
                 let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
 
-                while let Some((tid_address, entry)) = rev_changeset_walker.next().transpose()? {
-                    if tid_address.transition_id() < target_transition {
+                while let Some((bn_address, entry)) = rev_changeset_walker.next().transpose()? {
+                    if bn_address.block_number() < target_block {
                         break
                     }
 
                     if storage_cursor
-                        .seek_by_key_subkey(tid_address.address(), entry.key)?
+                        .seek_by_key_subkey(bn_address.address(), entry.key)?
                         .filter(|e| e.key == entry.key)
                         .is_some()
                     {
@@ -512,7 +682,7 @@ mod tests {
                     }
 
                     if entry.value != U256::ZERO {
-                        storage_cursor.upsert(tid_address.address(), entry)?;
+                        storage_cursor.upsert(bn_address.address(), entry)?;
                     }
                 }
                 Ok(())

@@ -9,26 +9,28 @@
 //!
 //! This crate contains Ethereum primitive types and helper functions.
 
+pub mod abi;
 mod account;
+pub mod basefee;
 mod bits;
 mod block;
 pub mod bloom;
 mod chain;
-mod checkpoints;
+mod compression;
 pub mod constants;
 pub mod contract;
-mod error;
-pub mod filter;
 mod forkid;
 mod genesis;
 mod hardfork;
 mod header;
 mod hex_bytes;
 mod integer_list;
+pub mod listener;
 mod log;
 mod net;
 mod peer;
 mod receipt;
+pub mod stage;
 mod storage;
 mod transaction;
 pub mod trie;
@@ -48,7 +50,7 @@ pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
     MAINNET, SEPOLIA,
 };
-pub use checkpoints::{AccountHashingCheckpoint, ProofCheckpoint, StorageHashingCheckpoint};
+pub use compression::*;
 pub use constants::{
     EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
 };
@@ -69,9 +71,10 @@ pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::StorageEntry;
 pub use transaction::{
-    util::secp256k1::sign_message, AccessList, AccessListItem, AccessListWithGasUsed,
-    FromRecoveredTransaction, IntoRecoveredTransaction, InvalidTransactionError, Signature,
-    Transaction, TransactionKind, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    util::secp256k1::{recover_signer, sign_message},
+    AccessList, AccessListItem, AccessListWithGasUsed, FromRecoveredTransaction,
+    IntoRecoveredTransaction, InvalidTransactionError, Signature, Transaction, TransactionKind,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     TxEip1559, TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
@@ -95,8 +98,6 @@ pub type ChainId = u64;
 pub type StorageKey = H256;
 /// An account storage value.
 pub type StorageValue = U256;
-/// The ID of block/transaction transition (represents state transition)
-pub type TransitionId = u64;
 /// Solidity contract functions are addressed using the first four byte of the Keccak-256 hash of
 /// their signature
 pub type Selector = [u8; 4];
@@ -107,7 +108,10 @@ pub use ethers_core::{
     utils as rpc_utils,
 };
 pub use revm_primitives::{B160 as H160, B256 as H256, U256};
-pub use ruint::{aliases::U128, UintTryTo};
+pub use ruint::{
+    aliases::{U128, U8},
+    UintTryTo,
+};
 
 #[doc(hidden)]
 mod __reexport {

@@ -1,6 +1,7 @@
 //! Database debugging tool
 use crate::{
-    dirs::{DbPath, MaybePlatformPath},
+    args::utils::genesis_value_parser,
+    dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
 use clap::{Parser, Subcommand};
@@ -9,25 +10,25 @@ use eyre::WrapErr;
 use human_bytes::human_bytes;
 use reth_db::{database::Database, tables};
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::chainspec::genesis_value_parser;
 use std::sync::Arc;
 use tracing::error;
 
+mod get;
 /// DB List TUI
 mod tui;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the database folder.
+    /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
     ///
-    /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
-    /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(global = true, long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: MaybePlatformPath<DbPath>,
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t, global = true)]
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -42,7 +43,8 @@ pub struct Command {
         value_name = "CHAIN_OR_PATH",
         verbatim_doc_comment,
         default_value = "mainnet",
-        value_parser = genesis_value_parser
+        value_parser = genesis_value_parser,
+        global = true,
     )]
     chain: Arc<ChainSpec>,
 
@@ -59,12 +61,8 @@ pub enum Subcommands {
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
-    /// Seeds the database with random blocks on top of each other
-    Seed {
-        /// How many blocks to generate
-        #[arg(default_value = DEFAULT_NUM_ITEMS)]
-        len: u64,
-    },
+    /// Gets the content of a table for the given key
+    Get(get::Command),
     /// Deletes all database entries
     Drop,
 }
@@ -74,20 +72,26 @@ pub enum Subcommands {
 pub struct ListArgs {
     /// The table name
     table: String, // TODO: Convert to enum
-    /// Where to start iterating
+    /// Skip first N entries
     #[arg(long, short, default_value = "0")]
-    start: usize,
+    skip: usize,
+    /// Reverse the order of the entries. If enabled last table entries are read.
+    #[arg(long, short, default_value = "false")]
+    reverse: bool,
     /// How many items to take from the walker
     #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
     len: usize,
+    /// Dump as JSON instead of using TUI.
+    #[arg(long, short)]
+    json: bool,
 }
 
 impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
-        // add network name to db directory
-        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
-
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let db_path = data_dir.db_path();
         std::fs::create_dir_all(&db_path)?;
 
         // TODO: Auto-impl for Database trait
@@ -96,9 +100,9 @@ impl Command {
             reth_db::mdbx::EnvKind::RW,
         )?;
 
-        let mut tool = DbTool::new(&db)?;
+        let mut tool = DbTool::new(&db, self.chain.clone())?;
 
-        match &self.command {
+        match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
                 let mut stats_table = ComfyTable::new();
@@ -113,7 +117,10 @@ impl Command {
                 ]);
 
                 tool.db.view(|tx| {
-                    for table in tables::TABLES.iter().map(|(_, name)| name) {
+                    let mut tables =
+                        tables::TABLES.iter().map(|(_, name)| name).collect::<Vec<_>>();
+                    tables.sort();
+                    for table in tables {
                         let table_db =
                             tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 
@@ -146,9 +153,6 @@ impl Command {
 
                 println!("{stats_table}");
             }
-            Subcommands::Seed { len } => {
-                tool.seed(*len)?;
-            }
             Subcommands::List(args) => {
                 macro_rules! table_tui {
                     ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
@@ -169,9 +173,15 @@ impl Command {
                                         return Ok(());
                                     }
 
-                                    tui::DbListTUI::<_, tables::$table>::new(|start, count| {
-                                        tool.list::<tables::$table>(start, count).unwrap()
-                                    }, $start, $len, total_entries).run()
+                                    if args.json {
+                                        let list_result = tool.list::<tables::$table>(args.skip, args.len,args.reverse)?.into_iter().collect::<Vec<_>>();
+                                        println!("{}", serde_json::to_string_pretty(&list_result)?);
+                                        Ok(())
+                                    } else {
+                                        tui::DbListTUI::<_, tables::$table>::new(|skip, count| {
+                                            tool.list::<tables::$table>(skip, count, args.reverse).unwrap()
+                                        }, $start, $len, total_entries).run()
+                                    }
                                 })??
                             },)*
                             _ => {
@@ -182,7 +192,7 @@ impl Command {
                     }
                 }
 
-                table_tui!(args.table.as_str(), args.start, args.len => [
+                table_tui!(args.table.as_str(), args.skip, args.len => [
                     CanonicalHeaders,
                     HeaderTD,
                     HeaderNumbers,
@@ -210,11 +220,26 @@ impl Command {
                     SyncStageProgress
                 ]);
             }
+            Subcommands::Get(command) => {
+                command.execute(tool)?;
+            }
             Subcommands::Drop => {
-                tool.drop(self.db.unwrap_or_chain_default(self.chain.chain))?;
+                tool.drop(db_path)?;
             }
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn parse_stats_globals() {
+        let cmd = Command::try_parse_from(["reth", "stats", "--datadir", "../mainnet"]).unwrap();
+        assert_eq!(cmd.datadir.as_ref(), Some(Path::new("../mainnet")));
     }
 }

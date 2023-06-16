@@ -1,10 +1,9 @@
 use crate::{
     table::{Compress, Decompress},
     tables::models::*,
-    Error,
 };
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{trie::*, *};
+use reth_primitives::{stage::StageCheckpoint, trie::*, *};
 
 /// Implements compression for Compact type.
 macro_rules! impl_compression_for_compact {
@@ -21,7 +20,7 @@ macro_rules! impl_compression_for_compact {
 
             impl Decompress for $name
             {
-                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, Error> {
+                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, $crate::DatabaseError> {
                     let value = value.as_ref();
                     let (obj, _) = Compact::from_compact(&value, value.len());
                     Ok(obj)
@@ -46,10 +45,11 @@ impl_compression_for_compact!(
     StoredBlockOmmers,
     StoredBlockWithdrawals,
     Bytecode,
-    ProofCheckpoint
+    AccountBeforeTx,
+    TransactionSignedNoHash,
+    CompactU256,
+    StageCheckpoint
 );
-impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);
-impl_compression_for_compact!(CompactU256);
 
 macro_rules! impl_compression_fixed_compact {
     ($($name:tt),+) => {
@@ -69,7 +69,7 @@ macro_rules! impl_compression_fixed_compact {
 
             impl Decompress for $name
             {
-                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, Error> {
+                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, $crate::DatabaseError> {
                     let value = value.as_ref();
                     let (obj, _) = Compact::from_compact(&value, value.len());
                     Ok(obj)

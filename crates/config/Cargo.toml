@@ -1,0 +1,26 @@
+[package]
+name = "reth-config"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+# reth
+reth-network = { path = "../net/network" }
+reth-net-nat = { path = "../../crates/net/nat" }
+reth-discv4 = { path = "../../crates/net/discv4" }
+reth-downloaders = { path = "../../crates/net/downloaders" }
+
+# io
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+#crypto 
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+
+confy = "0.5"
+
+tempfile = "3.4"

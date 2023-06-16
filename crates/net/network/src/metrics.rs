@@ -1,6 +1,8 @@
-use metrics::{Counter, Gauge};
 use reth_eth_wire::DisconnectReason;
-use reth_metrics_derive::Metrics;
+use reth_metrics::{
+    metrics::{self, Counter, Gauge},
+    Metrics,
+};
 
 /// Metrics for the entire network, handled by NetworkManager
 #[derive(Metrics)]
@@ -8,6 +10,9 @@ use reth_metrics_derive::Metrics;
 pub struct NetworkMetrics {
     /// Number of currently connected peers
     pub(crate) connected_peers: Gauge,
+
+    /// Number of currently backed off peers
+    pub(crate) backed_off_peers: Gauge,
 
     /// Number of peers known to the node
     pub(crate) tracked_peers: Gauge,
@@ -32,6 +37,9 @@ pub struct NetworkMetrics {
 
     /// Number of invalid/malformed messages received from peers
     pub(crate) invalid_messages_received: Counter,
+
+    /// Number of Eth Requests dropped due to channel being at full capacity
+    pub(crate) total_dropped_eth_requests_at_full_capacity: Counter,
 }
 
 /// Metrics for the TransactionsManager
@@ -42,6 +50,10 @@ pub struct TransactionsManagerMetrics {
     pub(crate) propagated_transactions: Counter,
     /// Total number of reported bad transactions
     pub(crate) reported_bad_transactions: Counter,
+    /// Total number of messages with already seen hashes
+    pub(crate) messages_with_already_seen_hashes: Counter,
+    /// Total number of messages with already seen full transactions
+    pub(crate) messages_with_already_seen_transactions: Counter,
 }
 
 /// Metrics for Disconnection types
@@ -111,4 +123,15 @@ impl DisconnectMetrics {
             DisconnectReason::SubprotocolSpecific => self.subprotocol_specific.increment(1),
         }
     }
+}
+
+/// Metrics for the EthRequestHandler
+#[derive(Metrics)]
+#[metrics(scope = "network")]
+pub struct EthRequestHandlerMetrics {
+    /// Number of received headers requests
+    pub(crate) received_headers_requests: Counter,
+
+    /// Number of received bodies requests
+    pub(crate) received_bodies_requests: Counter,
 }

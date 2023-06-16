@@ -18,19 +18,23 @@ macro_rules! stage_test_suite {
                 assert_matches::assert_matches!(result, Ok(_));
 
                 // Validate the stage execution
-                assert_matches::assert_matches!(runner.validate_execution(input, result.unwrap().ok()),Ok(_), "execution validation");
+                assert_matches::assert_matches!(
+                    runner.validate_execution(input, result.unwrap().ok()),
+                    Ok(_),
+                    "execution validation"
+                );
             }
 
             // Run the complete stage execution flow.
             #[tokio::test]
             async fn [< execute_ $name>] () {
-                let (previous_stage, stage_progress) = (500, 100);
+                let (target, current_checkpoint) = (500, 100);
 
                 // Set up the runner
                 let mut runner = $runner::default();
                 let input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, previous_stage)),
-                    stage_progress: Some(stage_progress),
+                    target: Some(target),
+                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
                 let rx = runner.execute(input);
@@ -42,12 +46,16 @@ macro_rules! stage_test_suite {
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(
                     result,
-                    Ok(ExecOutput { done, stage_progress })
-                        if done && stage_progress == previous_stage
+                    Ok(ExecOutput { done, checkpoint })
+                        if done && checkpoint.block_number == target
                 );
 
                 // Validate the stage execution
-                assert_matches::assert_matches!(runner.validate_execution(input, result.ok()),Ok(_), "execution validation");
+                assert_matches::assert_matches!(
+                    runner.validate_execution(input, result.ok()),
+                    Ok(_),
+                    "execution validation"
+                );
             }
 
             // Check that unwind does not panic on no new entries within the input range.
@@ -66,23 +74,27 @@ macro_rules! stage_test_suite {
                 let rx = runner.unwind(input).await;
                 assert_matches::assert_matches!(
                     rx,
-                    Ok(UnwindOutput { stage_progress }) if stage_progress == input.unwind_to
+                    Ok(UnwindOutput { checkpoint }) if checkpoint.block_number == input.unwind_to
                 );
 
                 // Validate the stage unwind
-                assert_matches::assert_matches!(runner.validate_unwind(input),Ok(_), "unwind validation");
+                assert_matches::assert_matches!(
+                    runner.validate_unwind(input),
+                    Ok(_),
+                    "unwind validation"
+                );
             }
 
             // Run complete execute and unwind flow.
             #[tokio::test]
             async fn [< unwind_ $name>] () {
-                let (previous_stage, stage_progress) = (500, 100);
+                let (target, current_checkpoint) = (500, 100);
 
                 // Set up the runner
                 let mut runner = $runner::default();
                 let execute_input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, previous_stage)),
-                    stage_progress: Some(stage_progress),
+                    target: Some(target),
+                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
                 };
                 let seed = runner.seed_execution(execute_input).expect("failed to seed");
 
@@ -94,15 +106,21 @@ macro_rules! stage_test_suite {
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(
                     result,
-                    Ok(ExecOutput { done, stage_progress })
-                        if done && stage_progress == previous_stage
+                    Ok(ExecOutput { done, checkpoint })
+                        if done && checkpoint.block_number == target
                 );
-                assert_matches::assert_matches!(runner.validate_execution(execute_input, result.ok()),Ok(_), "execution validation");
+                assert_matches::assert_matches!(
+                    runner.validate_execution(execute_input, result.ok()),
+                    Ok(_),
+                    "execution validation"
+                );
 
 
                 // Run stage unwind
                 let unwind_input = crate::stage::UnwindInput {
-                    unwind_to: stage_progress, stage_progress: previous_stage, bad_block: None,
+                    unwind_to: current_checkpoint,
+                    checkpoint: reth_primitives::stage::StageCheckpoint::new(target),
+                    bad_block: None,
                 };
 
                 runner.before_unwind(unwind_input).expect("Failed to unwind state");
@@ -111,11 +129,15 @@ macro_rules! stage_test_suite {
                 // Assert the successful unwind result
                 assert_matches::assert_matches!(
                     rx,
-                    Ok(UnwindOutput { stage_progress }) if stage_progress == unwind_input.unwind_to
+                    Ok(UnwindOutput { checkpoint }) if checkpoint.block_number == unwind_input.unwind_to
                 );
 
                 // Validate the stage unwind
-                assert_matches::assert_matches!(runner.validate_unwind(unwind_input),Ok(_), "unwind validation");
+                assert_matches::assert_matches!(
+                    runner.validate_unwind(unwind_input),
+                    Ok(_),
+                    "unwind validation"
+                );
             }
         }
     };
@@ -127,17 +149,17 @@ macro_rules! stage_test_suite_ext {
     ($runner:ident, $name:ident) => {
         crate::test_utils::stage_test_suite!($runner, $name);
 
-         paste::item! {
+        paste::item! {
             /// Check that the execution is short-circuited if the target was already reached.
             #[tokio::test]
             async fn [< execute_already_reached_target_ $name>] () {
-                let stage_progress = 1000;
+                let current_checkpoint = 1000;
 
                 // Set up the runner
                 let mut runner = $runner::default();
                 let input = crate::stage::ExecInput {
-                    previous_stage: Some((crate::test_utils::PREV_STAGE_ID, stage_progress)),
-                    stage_progress: Some(stage_progress),
+                    target: Some(current_checkpoint),
+                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
 
@@ -151,12 +173,16 @@ macro_rules! stage_test_suite_ext {
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(
                     result,
-                    Ok(ExecOutput { done, stage_progress })
-                        if done && stage_progress == stage_progress
+                    Ok(ExecOutput { done, checkpoint })
+                        if done && checkpoint.block_number == current_checkpoint
                 );
 
                 // Validate the stage execution
-                assert_matches::assert_matches!(runner.validate_execution(input, result.ok()),Ok(_), "execution validation");
+                assert_matches::assert_matches!(
+                    runner.validate_execution(input, result.ok()),
+                    Ok(_),
+                    "execution validation"
+                );
             }
         }
     };

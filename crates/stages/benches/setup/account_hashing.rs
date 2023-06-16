@@ -1,11 +1,12 @@
 use super::{constants, StageRange};
 use reth_db::{
-    cursor::DbCursorRO, database::Database, tables, transaction::DbTx, Error as DbError,
+    cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
+use reth_primitives::stage::StageCheckpoint;
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
     test_utils::TestTransaction,
-    ExecInput, StageId, UnwindInput,
+    ExecInput, UnwindInput,
 };
 use std::path::{Path, PathBuf};
 
@@ -35,14 +36,14 @@ fn find_stage_range(db: &Path) -> StageRange {
         .view(|tx| {
             let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let from = cursor.first()?.unwrap().0;
-            let to = cursor.last()?.unwrap().0;
+            let to = StageCheckpoint::new(cursor.last()?.unwrap().0);
 
             stage_range = Some((
                 ExecInput {
-                    previous_stage: Some((StageId("Another"), to)),
-                    stage_progress: Some(from),
+                    target: Some(to.block_number),
+                    checkpoint: Some(StageCheckpoint::new(from)),
                 },
-                UnwindInput { unwind_to: from, stage_progress: to, bad_block: None },
+                UnwindInput { unwind_to: from, checkpoint: to, bad_block: None },
             ));
             Ok::<(), DbError>(())
         })
@@ -53,12 +54,7 @@ fn find_stage_range(db: &Path) -> StageRange {
 }
 
 fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
-    let opts = SeedOpts {
-        blocks: 0..num_blocks + 1,
-        accounts: 0..100_000,
-        txs: 100..150,
-        transitions: 10_000 + 1,
-    };
+    let opts = SeedOpts { blocks: 0..=num_blocks, accounts: 0..100_000, txs: 100..150 };
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("account-hashing-bench");
 
@@ -67,17 +63,9 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         std::fs::create_dir_all(&path).unwrap();
         println!("Account Hashing testdata not found, generating to {:?}", path.display());
         let tx = TestTransaction::new(&path);
-        let mut tx = tx.inner();
-        let _accounts = AccountHashingStage::seed(&mut tx, opts);
+        let mut provider = tx.inner();
+        let _accounts = AccountHashingStage::seed(&mut provider, opts);
+        provider.commit().expect("failed to commit");
     }
-    (
-        path,
-        (
-            ExecInput {
-                previous_stage: Some((StageId("Another"), num_blocks)),
-                ..Default::default()
-            },
-            UnwindInput::default(),
-        ),
-    )
+    (path, (ExecInput { target: Some(num_blocks), ..Default::default() }, UnwindInput::default()))
 }

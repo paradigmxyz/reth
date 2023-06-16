@@ -32,7 +32,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -311,10 +311,15 @@ where
             if peer.request_tx.try_send(req).is_ok() {
                 self.inflight_requests.push(GetPooledTxRequest { peer_id, response: rx })
             }
+
+            if num_already_seen > 0 {
+                self.metrics.messages_with_already_seen_hashes.increment(1);
+                debug!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
+            }
         }
 
         if num_already_seen > 0 {
-            self.report_bad_message(peer_id);
+            self.report_already_seen(peer_id);
         }
     }
 
@@ -349,7 +354,9 @@ where
                 // remove the peer
                 self.peers.remove(&peer_id);
             }
-            NetworkEvent::SessionEstablished { peer_id, messages, version, .. } => {
+            NetworkEvent::SessionEstablished {
+                peer_id, client_version, messages, version, ..
+            } => {
                 // insert a new peer into the peerset
                 self.peers.insert(
                     peer_id,
@@ -359,6 +366,7 @@ where
                         ),
                         request_tx: messages,
                         version,
+                        client_version,
                     },
                 );
 
@@ -386,7 +394,6 @@ where
                     self.network.send_transactions_hashes(peer_id, msg);
                 }
             }
-            // TODO Add remaining events
             _ => {}
         }
     }
@@ -421,11 +428,11 @@ where
                 // If we received the transactions as the response to our GetPooledTransactions
                 // requests (based on received `NewPooledTransactionHashes`) then we already
                 // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`]
-                if source.is_broadcast() && !peer.transactions.insert(tx.hash) {
+                if source.is_broadcast() && !peer.transactions.insert(tx.hash()) {
                     num_already_seen += 1;
                 }
 
-                match self.transactions_by_peers.entry(tx.hash) {
+                match self.transactions_by_peers.entry(tx.hash()) {
                     Entry::Occupied(mut entry) => {
                         // transaction was already inserted
                         entry.get_mut().push(peer_id);
@@ -445,16 +452,27 @@ where
                     }
                 }
             }
+
+            if num_already_seen > 0 {
+                self.metrics.messages_with_already_seen_transactions.increment(1);
+                debug!(target: "net::tx", num_txs=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
+            }
         }
 
         if has_bad_transactions || num_already_seen > 0 {
-            self.report_bad_message(peer_id);
+            self.report_already_seen(peer_id);
         }
     }
 
     fn report_bad_message(&self, peer_id: PeerId) {
         trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
+        self.metrics.reported_bad_transactions.increment(1);
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
+    }
+
+    fn report_already_seen(&self, peer_id: PeerId) {
+        trace!(target: "net::tx", ?peer_id, "Penalizing peer for already seen transaction");
+        self.network.reputation_change(peer_id, ReputationChangeKind::AlreadySeenTransaction);
     }
 
     /// Clear the transaction
@@ -463,7 +481,6 @@ where
     }
 
     /// Penalize the peers that sent the bad transaction
-    #[allow(unused)]
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
@@ -534,7 +551,6 @@ where
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
-                        this.metrics.reported_bad_transactions.increment(1);
                         continue
                     }
                     this.on_good_import(*err.hash());
@@ -568,7 +584,7 @@ struct PropagateTransaction {
 
 impl PropagateTransaction {
     fn hash(&self) -> TxHash {
-        self.transaction.hash
+        self.transaction.hash()
     }
 
     fn new(transaction: Arc<TransactionSigned>) -> Self {
@@ -687,6 +703,9 @@ struct Peer {
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
     version: EthVersion,
+    /// The peer's client version.
+    #[allow(unused)]
+    client_version: Arc<String>,
 }
 
 /// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
@@ -714,7 +733,7 @@ pub enum NetworkTransactionEvent {
 mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
-    use reth_interfaces::sync::{SyncState, SyncStateUpdater};
+    use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
     use reth_provider::test_utils::NoopProvider;
     use reth_rlp::Decodable;
@@ -797,6 +816,8 @@ mod tests {
             match ev {
                 NetworkEvent::SessionEstablished {
                     peer_id,
+                    remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,
@@ -805,6 +826,8 @@ mod tests {
                     // to insert a new peer in transactions peerset
                     transactions.on_network_event(NetworkEvent::SessionEstablished {
                         peer_id,
+                        remote_addr,
+                        client_version,
                         capabilities,
                         messages,
                         status,
@@ -872,12 +895,16 @@ mod tests {
             match ev {
                 NetworkEvent::SessionEstablished {
                     peer_id,
+                    remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,
                     version,
                 } => transactions.on_network_event(NetworkEvent::SessionEstablished {
                     peer_id,
+                    remote_addr,
+                    client_version,
                     capabilities,
                     messages,
                     status,

@@ -8,7 +8,7 @@ use reth_interfaces::{
         headers::client::{HeadersClient, HeadersFut, HeadersRequest},
         priority::Priority,
     },
-    sync::{SyncState, SyncStateProvider, SyncStateUpdater},
+    sync::{NetworkSyncUpdater, SyncState, SyncStateProvider},
 };
 use reth_primitives::{
     Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
@@ -54,9 +54,6 @@ pub struct FileClient {
 
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, BlockBody>,
-
-    /// Represents if we are currently syncing.
-    is_syncing: Arc<AtomicBool>,
 }
 
 /// An error that can occur when constructing and using a [`FileClient`](FileClient).
@@ -114,12 +111,35 @@ impl FileClient {
 
         trace!(blocks = headers.len(), "Initialized file client");
 
-        Ok(Self { headers, hash_to_number, bodies, is_syncing: Arc::new(Default::default()) })
+        Ok(Self { headers, hash_to_number, bodies })
     }
 
     /// Get the tip hash of the chain.
     pub fn tip(&self) -> Option<H256> {
         self.headers.get(&(self.headers.len() as u64)).map(|h| h.hash_slow())
+    }
+
+    /// Returns the highest block number of this client has or `None` if empty
+    pub fn max_block(&self) -> Option<u64> {
+        self.headers.keys().max().copied()
+    }
+
+    /// Returns true if all blocks are canonical (no gaps)
+    pub fn has_canonical_blocks(&self) -> bool {
+        if self.headers.is_empty() {
+            return true
+        }
+        let mut nums = self.headers.keys().copied().collect::<Vec<_>>();
+        nums.sort_unstable();
+        let mut iter = nums.into_iter();
+        let mut lowest = iter.next().expect("not empty");
+        for next in iter {
+            if next != lowest + 1 {
+                return false
+            }
+            lowest = next;
+        }
+        true
     }
 
     /// Use the provided bodies as the file client's block body buffer.
@@ -224,19 +244,6 @@ impl DownloadClient for FileClient {
     }
 }
 
-impl SyncStateProvider for FileClient {
-    fn is_syncing(&self) -> bool {
-        self.is_syncing.load(Ordering::Relaxed)
-    }
-}
-
-impl SyncStateUpdater for FileClient {
-    fn update_sync_state(&self, state: SyncState) {
-        let is_syncing = state.is_syncing();
-        self.is_syncing.store(is_syncing, Ordering::Relaxed)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,7 +279,7 @@ mod tests {
     async fn streams_bodies_from_buffer() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(&db, &headers);
 
@@ -286,7 +293,7 @@ mod tests {
             Arc::new(TestConsensus::default()),
             db,
         );
-        downloader.set_download_range(0..20).expect("failed to set download range");
+        downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,
@@ -321,7 +328,7 @@ mod tests {
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, vec![p0, p1, p2,]);
+        assert_eq!(headers, Ok(vec![p0, p1, p2]));
         assert!(downloader.next().await.is_none());
         assert!(downloader.next().await.is_none());
     }
@@ -330,7 +337,7 @@ mod tests {
     async fn test_download_headers_from_file() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (file, headers, mut bodies) = generate_bodies_file(0..20).await;
+        let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
@@ -342,7 +349,7 @@ mod tests {
         header_downloader.update_sync_target(SyncTarget::Tip(headers.last().unwrap().hash()));
 
         // get headers first
-        let mut downloaded_headers = header_downloader.next().await.unwrap();
+        let mut downloaded_headers = header_downloader.next().await.unwrap().unwrap();
 
         // reverse to make sure it's in the right order before comparing
         downloaded_headers.reverse();
@@ -355,7 +362,7 @@ mod tests {
     async fn test_download_bodies_from_file() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (file, headers, mut bodies) = generate_bodies_file(0..20).await;
+        let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
@@ -368,7 +375,7 @@ mod tests {
             Arc::new(TestConsensus::default()),
             db,
         );
-        downloader.set_download_range(0..20).expect("failed to set download range");
+        downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,

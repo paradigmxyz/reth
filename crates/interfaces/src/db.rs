@@ -1,6 +1,6 @@
 /// Database error type. They are using u32 to represent error code.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
-pub enum Error {
+pub enum DatabaseError {
     /// Failed to open database.
     #[error("Failed to open database: {0:?}")]
     FailedToOpen(i32),
@@ -28,4 +28,7 @@ pub enum Error {
     /// Failed to decode a key from a table.
     #[error("Error decoding value.")]
     DecodeError,
+    /// Failed to get database stats.
+    #[error("Database stats error code: {0:?}")]
+    Stats(i32),
 }

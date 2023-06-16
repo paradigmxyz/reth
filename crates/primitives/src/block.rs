@@ -2,6 +2,7 @@ use crate::{
     Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256,
 };
 use ethers_core::types::{BlockNumber as EthersBlockNumber, U64};
+use fixed_hash::rustc_hex::FromHexError;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -36,7 +37,19 @@ impl Block {
         SealedBlock {
             header: self.header.seal_slow(),
             body: self.body,
-            ommers: self.ommers.into_iter().map(|o| o.seal_slow()).collect(),
+            ommers: self.ommers,
+            withdrawals: self.withdrawals,
+        }
+    }
+
+    /// Seal the block with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    pub fn seal(self, hash: H256) -> SealedBlock {
+        SealedBlock {
+            header: self.header.seal(hash),
+            body: self.body,
+            ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
     }
@@ -105,19 +118,25 @@ pub struct SealedBlock {
     /// Transactions with signatures.
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
-    pub ommers: Vec<SealedHeader>,
+    pub ommers: Vec<Header>,
     /// Block withdrawals.
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl SealedBlock {
+    /// Create a new sealed block instance using the sealed header and block body.
+    pub fn new(header: SealedHeader, body: BlockBody) -> Self {
+        let BlockBody { transactions, ommers, withdrawals } = body;
+        Self { header, body: transactions, ommers, withdrawals }
+    }
+
     /// Header hash.
     pub fn hash(&self) -> H256 {
         self.header.hash()
     }
 
     /// Splits the sealed block into underlying components
-    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<SealedHeader>) {
+    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
         (self.header, self.body, self.ommers)
     }
 
@@ -128,8 +147,15 @@ impl SealedBlock {
 
     /// Seal sealed block with recovered transaction senders.
     pub fn seal_with_senders(self) -> Option<SealedBlockWithSenders> {
-        let senders = self.senders()?;
-        Some(SealedBlockWithSenders { block: self, senders })
+        self.try_seal_with_senders().ok()
+    }
+
+    /// Seal sealed block with recovered transaction senders.
+    pub fn try_seal_with_senders(self) -> Result<SealedBlockWithSenders, Self> {
+        match self.senders() {
+            Some(senders) => Ok(SealedBlockWithSenders { block: self, senders }),
+            None => Err(self),
+        }
     }
 
     /// Unseal the block
@@ -137,9 +163,15 @@ impl SealedBlock {
         Block {
             header: self.header.unseal(),
             body: self.body,
-            ommers: self.ommers.into_iter().map(|o| o.unseal()).collect(),
+            ommers: self.ommers,
             withdrawals: self.withdrawals,
         }
+    }
+}
+
+impl From<SealedBlock> for Block {
+    fn from(block: SealedBlock) -> Self {
+        block.unseal()
     }
 }
 
@@ -162,7 +194,7 @@ impl std::ops::DerefMut for SealedBlock {
 pub struct SealedBlockWithSenders {
     /// Sealed block
     pub block: SealedBlock,
-    /// List of senders that match trasanctions from block.
+    /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
 }
 
@@ -261,6 +293,32 @@ impl Decodable for BlockHashOrNumber {
             // Any data larger than this which is not caught by the Hash decoding should error and
             // is considered an invalid block number.
             Ok(Self::Number(u64::decode(buf)?))
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to parse `{input}` as integer: {pares_int_error} or as hex: {hex_error}")]
+pub struct ParseBlockHashOrNumberError {
+    input: String,
+    pares_int_error: ParseIntError,
+    hex_error: FromHexError,
+}
+
+impl FromStr for BlockHashOrNumber {
+    type Err = ParseBlockHashOrNumberError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match u64::from_str(s) {
+            Ok(val) => Ok(val.into()),
+            Err(pares_int_error) => match H256::from_str(s) {
+                Ok(val) => Ok(val.into()),
+                Err(hex_error) => Err(ParseBlockHashOrNumberError {
+                    input: s.to_string(),
+                    pares_int_error,
+                    hex_error,
+                }),
+            },
         }
     }
 }
@@ -644,7 +702,7 @@ impl AsRef<H256> for RpcBlockHash {
 }
 
 /// Block number and hash.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, Default, PartialEq, Eq)]
 pub struct BlockNumHash {
     /// Block number
     pub number: BlockNumber,

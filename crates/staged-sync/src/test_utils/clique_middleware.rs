@@ -84,7 +84,7 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
         }
 
         // start mining?
-        self.start_mining(None).await?;
+        self.start_mining().await?;
 
         // check that we are mining
         let mining = self.mining().await?;

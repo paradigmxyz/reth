@@ -2,10 +2,10 @@
 
 use crate::{
     eth::{
-        error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
+        error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
             build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
-            transact,
+            transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -13,8 +13,8 @@ use crate::{
 };
 use ethers_core::utils::get_contract_address;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, U256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
+use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::{
     access_list::AccessListInspector,
     database::{State, SubState},
@@ -31,10 +31,10 @@ use tracing::trace;
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 const MIN_CREATE_GAS: u64 = 53_000u64;
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].
@@ -46,6 +46,24 @@ where
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
         self.estimate_gas_with(cfg, block_env, request, state)
+    }
+
+    /// Executes the call request (`eth_call`) and returns the output
+    pub(crate) async fn call(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+        overrides: EvmOverrides,
+    ) -> EthResult<Bytes> {
+        let (res, _env) = self
+            .transact_call_at(
+                request,
+                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+                overrides,
+            )
+            .await?;
+
+        ensure_success(res.result)
     }
 
     /// Estimates the gas usage of the `request` with the state.
@@ -93,7 +111,9 @@ where
                         let available_funds =
                             db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
                         if env.tx.value > available_funds {
-                            return Err(InvalidTransactionError::InsufficientFundsForTransfer.into())
+                            return Err(
+                                RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
+                            )
                         }
                         return Ok(U256::from(MIN_TRANSACTION_GAS))
                     }
@@ -107,7 +127,7 @@ where
             let mut available_funds =
                 db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
             if env.tx.value > available_funds {
-                return Err(InvalidTransactionError::InsufficientFunds.into())
+                return Err(RpcInvalidTransactionError::InsufficientFunds.into())
             }
             // subtract transferred value from available funds
             // SAFETY: value < available_funds, checked above
@@ -133,7 +153,8 @@ where
 
         // Exceptional case: init used too much gas, we need to increase the gas limit and try
         // again
-        if let Err(EthApiError::InvalidTransaction(InvalidTransactionError::GasTooHigh)) = ethres {
+        if let Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh)) = ethres
+        {
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             if request_gas.is_some() || request_gas_price.is_some() {
@@ -147,7 +168,7 @@ where
                 // succeeded
             }
             ExecutionResult::Halt { reason, gas_used } => {
-                return Err(InvalidTransactionError::halt(reason, gas_used).into())
+                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -156,7 +177,7 @@ where
                     Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
                 } else {
                     // the transaction did revert
-                    Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
+                    Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
                 }
             }
         }
@@ -176,8 +197,6 @@ where
             ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
         );
 
-        let _last_highest_gas_limit = highest_gas_limit;
-
         trace!(target: "rpc::eth::estimate", ?env, ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
 
         // binary search
@@ -188,7 +207,7 @@ where
 
             // Exceptional case: init used too much gas, we need to increase the gas limit and try
             // again
-            if let Err(EthApiError::InvalidTransaction(InvalidTransactionError::GasTooHigh)) =
+            if let Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh)) =
                 ethres
             {
                 // increase the lowest gas limit
@@ -218,7 +237,7 @@ where
                         err => {
                             // these should be unreachable because we know the transaction succeeds,
                             // but we consider these cases an error
-                            return Err(InvalidTransactionError::EvmHalt(err).into())
+                            return Err(RpcInvalidTransactionError::EvmHalt(err).into())
                         }
                     }
                 }
@@ -273,11 +292,11 @@ where
 
         match result.result {
             ExecutionResult::Halt { reason, .. } => Err(match reason {
-                Halt::NonceOverflow => InvalidTransactionError::NonceMaxValue,
-                halt => InvalidTransactionError::EvmHalt(halt),
+                Halt::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
+                halt => RpcInvalidTransactionError::EvmHalt(halt),
             }),
             ExecutionResult::Revert { output, .. } => {
-                Err(InvalidTransactionError::Revert(RevertError::new(output)))
+                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)))
             }
             ExecutionResult::Success { .. } => Ok(()),
         }?;
@@ -306,12 +325,12 @@ where
         ExecutionResult::Success { .. } => {
             // transaction succeeded by manually increasing the gas limit to
             // highest, which means the caller lacks funds to pay for the tx
-            InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit)).into()
+            RpcInvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit)).into()
         }
         ExecutionResult::Revert { output, .. } => {
             // reverted again after bumping the limit
-            InvalidTransactionError::Revert(RevertError::new(output)).into()
+            RpcInvalidTransactionError::Revert(RevertError::new(output)).into()
         }
-        ExecutionResult::Halt { reason, .. } => InvalidTransactionError::EvmHalt(reason).into(),
+        ExecutionResult::Halt { reason, .. } => RpcInvalidTransactionError::EvmHalt(reason).into(),
     }
 }

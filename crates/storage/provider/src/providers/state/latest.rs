@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
-    StateProvider,
+    PostState, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -55,6 +55,14 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for LatestStateProviderRef<'a, 'b, 
     }
 }
 
+impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for LatestStateProviderRef<'a, 'b, TX> {
+    fn state_root(&self, post_state: PostState) -> Result<H256> {
+        post_state
+            .state_root_slow(self.db)
+            .map_err(|err| reth_interfaces::Error::Database(err.into()))
+    }
+}
+
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> {
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
@@ -82,7 +90,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
             .db
             .cursor_read::<tables::Headers>()?
             .last()?
-            .ok_or(ProviderError::Header { number: 0 })?
+            .ok_or_else(|| ProviderError::HeaderNotFound(0.into()))?
             .1
             .state_root;
 

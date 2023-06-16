@@ -1,10 +1,15 @@
 use rand::{distributions::uniform::SampleRange, seq::SliceRandom, thread_rng, Rng};
 use reth_primitives::{
-    proofs, sign_message, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature,
-    StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
+    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, SealedBlock, SealedHeader,
+    Signature, StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256,
+    U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
-use std::{collections::BTreeMap, ops::Sub};
+use std::{
+    cmp::{max, min},
+    collections::BTreeMap,
+    ops::{Range, RangeInclusive, Sub},
+};
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
 // relevant crates?
@@ -67,6 +72,11 @@ pub fn random_signed_tx() -> TransactionSigned {
     let secp = Secp256k1::new();
     let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
     let tx = random_tx();
+    sign_tx_with_key_pair(key_pair, tx)
+}
+
+/// Signs the [Transaction] with the given key pair.
+pub fn sign_tx_with_key_pair(key_pair: KeyPair, tx: Transaction) -> TransactionSigned {
     let signature =
         sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
     TransactionSigned::from_transaction_and_signature(tx, signature)
@@ -105,8 +115,8 @@ pub fn random_block(
         (0..ommers_count).map(|_| random_header(number, parent).unseal()).collect::<Vec<_>>();
 
     // Calculate roots
-    let transactions_root = proofs::calculate_transaction_root(transactions.iter());
-    let ommers_hash = proofs::calculate_ommers_root(ommers.iter());
+    let transactions_root = proofs::calculate_transaction_root(&transactions);
+    let ommers_hash = proofs::calculate_ommers_root(&ommers);
 
     SealedBlock {
         header: Header {
@@ -121,7 +131,7 @@ pub fn random_block(
         }
         .seal_slow(),
         body: transactions,
-        ommers: ommers.into_iter().map(Header::seal_slow).collect(),
+        ommers,
         withdrawals: None,
     }
 }
@@ -133,13 +143,13 @@ pub fn random_block(
 ///
 /// See [random_block] for considerations when validating the generated blocks.
 pub fn random_block_range(
-    block_numbers: std::ops::Range<u64>,
+    block_numbers: RangeInclusive<BlockNumber>,
     head: H256,
-    tx_count: std::ops::Range<u8>,
+    tx_count: Range<u8>,
 ) -> Vec<SealedBlock> {
     let mut rng = rand::thread_rng();
     let mut blocks =
-        Vec::with_capacity(block_numbers.end.saturating_sub(block_numbers.start) as usize);
+        Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
         blocks.push(random_block(
             idx,
@@ -177,10 +187,9 @@ where
 
     let valid_addresses = state.keys().copied().collect();
 
-    let num_transitions: usize = blocks.into_iter().map(|block| block.body.len()).sum();
-    let mut transitions = Vec::with_capacity(num_transitions);
+    let mut transitions = Vec::new();
 
-    (0..num_transitions).for_each(|i| {
+    blocks.into_iter().for_each(|block| {
         let mut transition = Vec::new();
         let (from, to, mut transfer, new_entries) =
             random_account_change(&valid_addresses, n_changes.clone(), key_range.clone());
@@ -189,7 +198,7 @@ where
         let (prev_from, _) = state.get_mut(&from).unwrap();
         transition.push((from, *prev_from, Vec::new()));
 
-        transfer = transfer.min(prev_from.balance).max(U256::from(1));
+        transfer = max(min(transfer, prev_from.balance), U256::from(1));
         prev_from.balance = prev_from.balance.wrapping_sub(transfer);
 
         // deposit in receiving account and update storage

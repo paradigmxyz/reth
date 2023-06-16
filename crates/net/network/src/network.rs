@@ -5,13 +5,10 @@ use crate::{
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_interfaces::{
-    p2p::headers::client::StatusUpdater,
-    sync::{SyncState, SyncStateProvider, SyncStateUpdater},
-};
+use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
-    NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, ReputationChangeKind,
+    NetworkError, NetworkInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
 use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
 use reth_rpc_types::NetworkStatus;
@@ -57,7 +54,7 @@ impl NetworkHandle {
             peers,
             network_mode,
             bandwidth_meter,
-            is_syncing: Arc::new(Default::default()),
+            is_syncing: Arc::new(AtomicBool::new(false)),
             chain_id,
         };
         Self { inner: Arc::new(inner) }
@@ -184,6 +181,7 @@ impl PeersInfo for NetworkHandle {
     }
 }
 
+#[async_trait]
 impl Peers for NetworkHandle {
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
@@ -213,6 +211,12 @@ impl Peers for NetworkHandle {
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
     }
+
+    async fn reputation_by_id(&self, peer_id: PeerId) -> Result<Option<Reputation>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetReputationById(peer_id, tx));
+        Ok(rx.await?)
+    }
 }
 
 #[async_trait]
@@ -236,23 +240,21 @@ impl NetworkInfo for NetworkHandle {
     }
 }
 
-impl StatusUpdater for NetworkHandle {
-    /// Update the status of the node.
-    fn update_status(&self, head: Head) {
-        self.send_message(NetworkHandleMessage::StatusUpdate { head });
-    }
-}
-
 impl SyncStateProvider for NetworkHandle {
     fn is_syncing(&self) -> bool {
         self.inner.is_syncing.load(Ordering::Relaxed)
     }
 }
 
-impl SyncStateUpdater for NetworkHandle {
+impl NetworkSyncUpdater for NetworkHandle {
     fn update_sync_state(&self, state: SyncState) {
         let is_syncing = state.is_syncing();
         self.inner.is_syncing.store(is_syncing, Ordering::Relaxed)
+    }
+
+    /// Update the status of the node.
+    fn update_status(&self, head: Head) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { head });
     }
 }
 
@@ -314,6 +316,8 @@ pub(crate) enum NetworkHandleMessage {
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
+    /// Get the reputation for a specific peer
+    GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Gracefully shutdown network
     Shutdown(oneshot::Sender<()>),
 }

@@ -41,13 +41,13 @@ pub enum FieldTypes {
 }
 
 /// Derives the `Compact` trait and its from/to implementations.
-pub fn derive(input: TokenStream) -> TokenStream {
+pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let mut output = quote! {};
 
     let DeriveInput { ident, data, .. } = parse_macro_input!(input);
     let fields = get_fields(&data);
-    output.extend(generate_flag_struct(&ident, &fields));
-    output.extend(generate_from_to(&ident, &fields));
+    output.extend(generate_flag_struct(&ident, &fields, is_zstd));
+    output.extend(generate_from_to(&ident, &fields, is_zstd));
     output.into()
 }
 
@@ -144,7 +144,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["H256", "H160", "Address", "Bloom"]
+                    if ["H256", "H160", "Address", "Bloom", "TxHash"]
                         .contains(&path.ident.to_string().as_str())
                     {
                         return true
@@ -160,11 +160,11 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
 /// length.
 pub fn get_bit_size(ftype: &str) -> u8 {
     match ftype {
-        "bool" | "Option" => 1,
+        "TransactionKind" | "bool" | "Option" | "Signature" => 1,
         "TxType" => 2,
-        "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "TransitionId" | "NumTransactions" => 4,
+        "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
-        "U256" | "TxHash" => 6,
+        "U256" => 6,
         _ => 0,
     }
 }
@@ -201,8 +201,8 @@ mod tests {
         let mut output = quote! {};
         let DeriveInput { ident, data, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
-        output.extend(generate_flag_struct(&ident, &fields));
-        output.extend(generate_from_to(&ident, &fields));
+        output.extend(generate_flag_struct(&ident, &fields, false));
+        output.extend(generate_from_to(&ident, &fields, false));
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
@@ -211,7 +211,7 @@ mod tests {
                 use bytes::Buf;
                 use modular_bitfield::prelude::*;
 
-                #[doc=r" Fieldset that facilitates compacting the parent type."]
+                #[doc="Fieldset that facilitates compacting the parent type. Used bytes: 2 | Unused bits: 1"]
                 #[bitfield]
                 #[derive(Clone, Copy, Debug, Default)]
                 pub struct TestStructFlags {
@@ -251,7 +251,7 @@ mod tests {
             impl Compact for TestStruct {
                 fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
-                    let mut total_len = 0;
+                    let mut total_length = 0;
                     let mut buffer = bytes::BytesMut::new();
                     let f_u64_len = self.f_u64.to_compact(&mut buffer);
                     flags.set_f_u64_len(f_u64_len as u8);
@@ -270,10 +270,10 @@ mod tests {
                     let f_vec_empty_len = self.f_vec_empty.to_compact(&mut buffer);
                     let f_vec_some_len = self.f_vec_some.specialized_to_compact(&mut buffer);
                     let flags = flags.into_bytes();
-                    total_len += flags.len() + buffer.len();
+                    total_length += flags.len() + buffer.len();
                     buf.put_slice(&flags);
                     buf.put(buffer);
-                    total_len
+                    total_length
                 }
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
                     let (flags, mut buf) = TestStructFlags::from(buf);

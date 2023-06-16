@@ -1,13 +1,17 @@
-use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
+use crate::{
+    compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
+    keccak256, Address, Bytes, ChainId, TxHash, H256,
+};
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
+use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
@@ -167,8 +171,8 @@ pub struct TxEip1559 {
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive_arbitrary(compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
     /// Legacy transaction.
     Legacy(TxLegacy),
@@ -176,6 +180,117 @@ pub enum Transaction {
     Eip2930(TxEip2930),
     /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
     Eip1559(TxEip1559),
+}
+
+impl Transaction {
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {
+        Encodable::encode(self, out);
+    }
+
+    /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
+    /// hash that for eip2718 does not require rlp header
+    pub fn encode_with_signature(
+        &self,
+        signature: &Signature,
+        out: &mut dyn bytes::BufMut,
+        with_header: bool,
+    ) {
+        match self {
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
+                // do nothing w/ with_header
+                let payload_length =
+                    self.fields_len() + signature.payload_len_with_eip155_chain_id(*chain_id);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode_with_eip155_chain_id(out, *chain_id);
+            }
+            _ => {
+                let payload_length = self.fields_len() + signature.payload_len();
+                if with_header {
+                    Header {
+                        list: false,
+                        payload_length: 1 + length_of_length(payload_length) + payload_length,
+                    }
+                    .encode(out);
+                }
+                out.put_u8(self.tx_type() as u8);
+                let header = Header { list: true, payload_length };
+                header.encode(out);
+                self.encode_fields(out);
+                signature.encode(out);
+            }
+        }
+    }
+
+    /// This sets the transaction's nonce.
+    pub fn set_nonce(&mut self, nonce: u64) {
+        match self {
+            Transaction::Legacy(tx) => tx.nonce = nonce,
+            Transaction::Eip2930(tx) => tx.nonce = nonce,
+            Transaction::Eip1559(tx) => tx.nonce = nonce,
+        }
+    }
+
+    /// This sets the transaction's value.
+    pub fn set_value(&mut self, value: u128) {
+        match self {
+            Transaction::Legacy(tx) => tx.value = value,
+            Transaction::Eip2930(tx) => tx.value = value,
+            Transaction::Eip1559(tx) => tx.value = value,
+        }
+    }
+
+    /// This sets the transaction's input field.
+    pub fn set_input(&mut self, input: Bytes) {
+        match self {
+            Transaction::Legacy(tx) => tx.input = input,
+            Transaction::Eip2930(tx) => tx.input = input,
+            Transaction::Eip1559(tx) => tx.input = input,
+        }
+    }
+}
+
+impl Compact for Transaction {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            Transaction::Legacy(tx) => {
+                tx.to_compact(buf);
+                0
+            }
+            Transaction::Eip2930(tx) => {
+                tx.to_compact(buf);
+                1
+            }
+            Transaction::Eip1559(tx) => {
+                tx.to_compact(buf);
+                2
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => {
+                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
+                (Transaction::Legacy(tx), buf)
+            }
+            1 => {
+                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
+                (Transaction::Eip2930(tx), buf)
+            }
+            2 => {
+                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
+                (Transaction::Eip1559(tx), buf)
+            }
+            _ => unreachable!("Junk data in database: unknown Transaction variant"),
+        }
+    }
 }
 
 // === impl Transaction ===
@@ -217,6 +332,11 @@ impl Transaction {
         }
     }
 
+    /// Get the transaction's nonce.
+    pub fn to(&self) -> Option<Address> {
+        self.kind().to()
+    }
+
     /// Get transaction type
     pub fn tx_type(&self) -> TxType {
         match self {
@@ -227,8 +347,8 @@ impl Transaction {
     }
 
     /// Gets the transaction's value field.
-    pub fn value(&self) -> &u128 {
-        match self {
+    pub fn value(&self) -> u128 {
+        *match self {
             Transaction::Legacy(TxLegacy { value, .. }) => value,
             Transaction::Eip2930(TxEip2930 { value, .. }) => value,
             Transaction::Eip1559(TxEip1559 { value, .. }) => value,
@@ -278,7 +398,58 @@ impl Transaction {
         }
     }
 
-    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
+    /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
+    /// otherwise return the gas price.
+    ///
+    /// # Warning
+    ///
+    /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
+    /// non-EIP-1559 transactions.
+    pub(crate) fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            Transaction::Legacy(TxLegacy { gas_price, .. }) |
+            Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+                *max_priority_fee_per_gas
+            }
+        }
+    }
+
+    /// Returns the effective gas price for the given base fee.
+    ///
+    /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        let dynamic_tx = match self {
+            Transaction::Legacy(tx) => return tx.gas_price,
+            Transaction::Eip2930(tx) => return tx.gas_price,
+            Transaction::Eip1559(dynamic_tx) => dynamic_tx,
+        };
+
+        dynamic_tx.effective_gas_price(base_fee)
+    }
+
+    // TODO: dedup with effective_tip_per_gas
+    /// Determine the effective gas limit for the given transaction and base fee.
+    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
+    /// transactions is returned.
+    ///
+    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
+    pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
+        if let Some(base_fee) = base_fee {
+            let max_fee_per_gas = self.max_fee_per_gas();
+            if max_fee_per_gas < base_fee as u128 {
+                None
+            } else {
+                let effective_max_fee = max_fee_per_gas - base_fee as u128;
+                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
+            }
+        } else {
+            Some(self.priority_fee_or_price())
+        }
+    }
+
+    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee:
+    /// `min(maxFeePerGas - baseFee, maxPriorityFeePerGas)`
     ///
     /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
     pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
@@ -511,15 +682,71 @@ impl Encodable for Transaction {
     }
 }
 
+impl TxEip1559 {
+    /// Returns the effective gas price for the given `base_fee`.
+    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        match base_fee {
+            None => self.max_fee_per_gas,
+            Some(base_fee) => {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas - base_fee as u128;
+                if tip > self.max_priority_fee_per_gas {
+                    self.max_priority_fee_per_gas + base_fee as u128
+                } else {
+                    // otherwise return the max fee per gas
+                    self.max_fee_per_gas
+                }
+            }
+        }
+    }
+}
+
 /// Whether or not the transaction is a contract creation.
-#[main_codec]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive_arbitrary(compact, rlp)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum TransactionKind {
     /// A transaction that creates a contract.
     #[default]
     Create,
     /// A transaction that calls a contract or transfer.
     Call(Address),
+}
+
+impl TransactionKind {
+    /// Returns the address of the contract that will be called or will receive the transfer.
+    pub fn to(self) -> Option<Address> {
+        match self {
+            TransactionKind::Create => None,
+            TransactionKind::Call(to) => Some(to),
+        }
+    }
+}
+
+impl Compact for TransactionKind {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            TransactionKind::Create => 0,
+            TransactionKind::Call(address) => {
+                address.to_compact(buf);
+                1
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => (TransactionKind::Create, buf),
+            1 => {
+                let (addr, buf) = Address::from_compact(buf, buf.len());
+                (TransactionKind::Call(addr), buf)
+            }
+            _ => unreachable!("Junk data in database: unknown TransactionKind variant"),
+        }
+    }
 }
 
 impl Encodable for TransactionKind {
@@ -553,10 +780,122 @@ impl Decodable for TransactionKind {
     }
 }
 
+/// Signed transaction without its Hash. Used type for inserting into the DB.
+#[derive_arbitrary(compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
+pub struct TransactionSignedNoHash {
+    /// The transaction signature values
+    pub signature: Signature,
+    /// Raw transaction info
+    #[deref]
+    #[as_ref]
+    pub transaction: Transaction,
+}
+
+impl TransactionSignedNoHash {
+    /// Calculates the transaction hash. If used more than once, it's better to convert it to
+    /// [`TransactionSigned`] first.
+    pub fn hash(&self) -> H256 {
+        let mut buf = Vec::new();
+        self.transaction.encode_with_signature(&self.signature, &mut buf, false);
+        keccak256(&buf)
+    }
+
+    /// Converts into a transaction type with its hash: [`TransactionSigned`].
+    pub fn with_hash(self) -> TransactionSigned {
+        self.into()
+    }
+}
+
+impl Compact for TransactionSignedNoHash {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let start = buf.as_mut().len();
+
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        buf.put_u8(0);
+
+        let sig_bit = self.signature.to_compact(buf) as u8;
+        let zstd_bit = self.transaction.input().len() >= 32;
+
+        let tx_bits = if zstd_bit {
+            TRANSACTION_COMPRESSOR.with(|compressor| {
+                let mut compressor = compressor.borrow_mut();
+                let mut tmp = bytes::BytesMut::with_capacity(200);
+                let tx_bits = self.transaction.to_compact(&mut tmp);
+
+                buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                tx_bits as u8
+            })
+        } else {
+            self.transaction.to_compact(buf) as u8
+        };
+
+        // Replace bitflags with the actual values
+        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+
+        buf.as_mut().len() - start
+    }
+
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+        let bitflags = buf.get_u8() as usize;
+
+        let sig_bit = bitflags & 1;
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+
+        let zstd_bit = bitflags >> 3;
+        let (transaction, buf) = if zstd_bit != 0 {
+            TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                let mut decompressor = decompressor.borrow_mut();
+                let mut tmp: Vec<u8> = Vec::with_capacity(200);
+
+                // `decompress_to_buffer` will return an error if the output buffer doesn't have
+                // enough capacity. However we don't actually have information on the required
+                // length. So we hope for the best, and keep trying again with a fairly bigger size
+                // if it fails.
+                while let Err(err) = decompressor.decompress_to_buffer(buf, &mut tmp) {
+                    let err = err.to_string();
+                    if !err.contains("Destination buffer is too small") {
+                        panic!("Failed to decompress: {}", err);
+                    }
+                    tmp.reserve(tmp.capacity() + 24_000);
+                }
+
+                // TODO: enforce that zstd is only present at a "top" level type
+
+                let transaction_type = (bitflags & 0b110) >> 1;
+                let (transaction, _) = Transaction::from_compact(tmp.as_slice(), transaction_type);
+
+                (transaction, buf)
+            })
+        } else {
+            let transaction_type = bitflags >> 1;
+            Transaction::from_compact(buf, transaction_type)
+        };
+
+        (TransactionSignedNoHash { signature, transaction }, buf)
+    }
+}
+
+impl From<TransactionSignedNoHash> for TransactionSigned {
+    fn from(tx: TransactionSignedNoHash) -> Self {
+        TransactionSigned::from_transaction_and_signature(tx.transaction, tx.signature)
+    }
+}
+
+impl From<TransactionSigned> for TransactionSignedNoHash {
+    fn from(tx: TransactionSigned) -> Self {
+        TransactionSignedNoHash { signature: tx.signature, transaction: tx.transaction }
+    }
+}
+
 /// Signed transaction.
-#[main_codec(no_arbitrary)]
-#[add_arbitrary_tests(rlp, compact)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
+#[add_arbitrary_tests(rlp)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
@@ -585,6 +924,11 @@ impl TransactionSigned {
     /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
         self.hash
+    }
+
+    /// Reference to transaction hash. Used to identify transaction.
+    pub fn hash_ref(&self) -> &TxHash {
+        &self.hash
     }
 
     /// Recover signer from signature and hash.
@@ -631,32 +975,7 @@ impl TransactionSigned {
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2718 does not require rlp header
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
-        match self.transaction {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                // do nothing w/ with_header
-                let payload_length = self.transaction.fields_len() +
-                    self.signature.payload_len_with_eip155_chain_id(chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                self.signature.encode_with_eip155_chain_id(out, chain_id);
-            }
-            _ => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.transaction.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                self.signature.encode(out);
-            }
-        }
+        self.transaction.encode_with_signature(&self.signature, out, with_header);
     }
 
     /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
@@ -883,7 +1202,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 }
 
 /// Signed transaction with recovered signer.
-#[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction
@@ -1315,5 +1633,21 @@ mod tests {
 
         let decoded = TransactionSignedEcRecovered::decode(&mut &encoded[..]).unwrap();
         assert_eq!(recovered, decoded)
+    }
+
+    #[test]
+    fn test_decode_tx() {
+        // some random transactions pulled from hive tests
+        let s = "b86f02f86c0705843b9aca008506fc23ac00830124f89400000000000000000000000000000000000003160180c001a00293c713e2f1eab91c366621ff2f867e05ad7e99d4aa5d069aafeb9e1e8c9b6aa05ec6c0605ff20b57c90a6484ec3b0509e5923733d06f9b69bee9a2dabe4f1352";
+        let tx = TransactionSigned::decode(&mut &hex::decode(s).unwrap()[..]).unwrap();
+        let mut b = Vec::new();
+        tx.encode(&mut b);
+        assert_eq!(s, hex::encode(&b));
+
+        let s = "f865048506fc23ac00830124f8940000000000000000000000000000000000000316018032a06b8fdfdcb84790816b7af85b19305f493665fe8b4e7c51ffdd7cc144cd776a60a028a09ab55def7b8d6602ba1c97a0ebbafe64ffc9c8e89520cec97a8edfb2ebe9";
+        let tx = TransactionSigned::decode(&mut &hex::decode(s).unwrap()[..]).unwrap();
+        let mut b = Vec::new();
+        tx.encode(&mut b);
+        assert_eq!(s, hex::encode(&b));
     }
 }

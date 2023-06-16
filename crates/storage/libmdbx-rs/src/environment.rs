@@ -15,7 +15,6 @@ use std::{
     marker::PhantomData,
     mem,
     ops::{Bound, RangeBounds},
-    os::unix::ffi::OsStrExt,
     path::Path,
     ptr, result,
     sync::mpsc::{sync_channel, SyncSender},
@@ -454,9 +453,23 @@ where
                     }
                 }
 
-                let path = match CString::new(path.as_os_str().as_bytes()) {
+                #[cfg(unix)]
+                fn path_to_bytes<P: AsRef<Path>>(path: P) -> Vec<u8> {
+                    use std::os::unix::ffi::OsStrExt;
+                    path.as_ref().as_os_str().as_bytes().to_vec()
+                }
+
+                #[cfg(windows)]
+                fn path_to_bytes<P: AsRef<Path>>(path: P) -> Vec<u8> {
+                    // On Windows, could use std::os::windows::ffi::OsStrExt to encode_wide(),
+                    // but we end up with a Vec<u16> instead of a Vec<u8>, so that doesn't
+                    // really help.
+                    path.as_ref().to_string_lossy().to_string().into_bytes()
+                }
+
+                let path = match CString::new(path_to_bytes(path)) {
                     Ok(path) => path,
-                    Err(..) => return Err(crate::Error::Invalid),
+                    Err(_) => return Err(Error::Invalid),
                 };
                 mdbx_result(ffi::mdbx_env_open(
                     env,

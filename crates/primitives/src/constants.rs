@@ -10,6 +10,9 @@ pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"
 /// The first four bytes of the call data for a function call specifies the function to be called.
 pub const SELECTOR_LEN: usize = 4;
 
+/// Maximum extra data size in a block after genesis
+pub const MAXIMUM_EXTRA_DATA_SIZE: usize = 32;
+
 /// The duration of a slot in seconds.
 ///
 /// This is the time period of 12 seconds in which a randomly chosen validator has time to propose a
@@ -18,6 +21,9 @@ pub const SLOT_DURATION: Duration = Duration::from_secs(12);
 
 /// An EPOCH is a series of 32 slots (~6.4min).
 pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * 32);
+
+/// The default block nonce in the beacon consensus
+pub const BEACON_NONCE: u64 = 0u64;
 
 /// The minimal value the basefee can decrease to.
 ///
@@ -46,6 +52,9 @@ pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
 
 /// Multiplier for converting ether to wei.
 pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
+
+/// Multiplier for converting mgas to gas.
+pub const MGAS_TO_GAS: u64 = 1_000_000u64;
 
 /// The Ethereum mainnet genesis hash.
 pub const MAINNET_GENESIS: H256 =
@@ -79,6 +88,16 @@ pub const EMPTY_TRANSACTIONS: H256 = EMPTY_SET_HASH;
 
 /// Withdrawals root of empty withdrawals set.
 pub const EMPTY_WITHDRAWALS: H256 = EMPTY_SET_HASH;
+
+/// The number of blocks to unwind during a reorg that already became a part of canonical chain.
+///
+/// In reality, the node can end up in this particular situation very rarely. It would happen only
+/// if the node process is abruptly terminated during ongoing reorg and doesn't boot back up for
+/// long period of time.
+///
+/// Unwind depth of `3` blocks significantly reduces the chance that the reorged block is kept in
+/// the database.
+pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
 
 #[cfg(test)]
 mod tests {

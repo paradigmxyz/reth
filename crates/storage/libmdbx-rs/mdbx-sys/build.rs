@@ -1,4 +1,7 @@
-use bindgen::callbacks::{IntKind, ParseCallbacks};
+use bindgen::{
+    callbacks::{IntKind, ParseCallbacks},
+    Formatter,
+};
 use std::{env, path::PathBuf};
 
 #[derive(Debug)]
@@ -66,7 +69,7 @@ fn main() {
         .prepend_enum_name(false)
         .generate_comments(false)
         .disable_header_comment()
-        .rustfmt_bindings(true)
+        .formatter(Formatter::Rustfmt)
         .generate()
         .expect("Unable to generate bindings");
 
@@ -76,15 +79,23 @@ fn main() {
     mdbx.push("libmdbx");
 
     let mut cc_builder = cc::Build::new();
-    cc_builder
-        .flag_if_supported("-Wno-unused-parameter")
-        .flag_if_supported("-Wbad-function-cast")
-        .flag_if_supported("-Wuninitialized");
+    cc_builder.flag_if_supported("-Wno-unused-parameter").flag_if_supported("-Wuninitialized");
+
+    #[cfg(not(target_os = "linux"))]
+    cc_builder.flag_if_supported("-Wbad-function-cast");
 
     let flags = format!("{:?}", cc_builder.get_compiler().cflags_env());
-    cc_builder
-        .define("MDBX_BUILD_FLAGS", flags.as_str())
-        .define("MDBX_TXN_CHECKOWNER", "0")
-        .file(mdbx.join("mdbx.c"))
-        .compile("libmdbx.a");
+    cc_builder.define("MDBX_BUILD_FLAGS", flags.as_str()).define("MDBX_TXN_CHECKOWNER", "0");
+
+    // Enable debugging on debug builds
+    #[cfg(debug_assertions)]
+    cc_builder.define("MDBX_DEBUG", "1");
+
+    // Disables debug logging on optimized builds
+    #[cfg(not(debug_assertions))]
+    {
+        cc_builder.define("NDEBUG", None).define("MDBX_DEBUG", "0");
+    }
+
+    cc_builder.file(mdbx.join("mdbx.c")).compile("libmdbx.a");
 }

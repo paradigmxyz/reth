@@ -1,13 +1,17 @@
 use crate::{
-    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    TransactionsProvider,
+    traits::{BlockSource, ReceiptProvider},
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
+    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
+    WithdrawalsProvider,
 };
+use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytecode, Bytes, ChainInfo, Header,
-    Receipt, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256,
-    KECCAK_EMPTY, U256,
+    stage::{StageCheckpoint, StageId},
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
+    ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey, StorageValue,
+    TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
@@ -28,9 +32,17 @@ impl BlockHashProvider for NoopProvider {
     }
 }
 
-impl BlockIdProvider for NoopProvider {
+impl BlockNumProvider for NoopProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
         Ok(ChainInfo::default())
+    }
+
+    fn best_block_number(&self) -> Result<BlockNumber> {
+        Ok(0)
+    }
+
+    fn last_block_number(&self) -> Result<BlockNumber> {
+        Ok(0)
     }
 
     fn block_number(&self, _hash: H256) -> Result<Option<BlockNumber>> {
@@ -39,11 +51,62 @@ impl BlockIdProvider for NoopProvider {
 }
 
 impl BlockProvider for NoopProvider {
-    fn block(&self, _id: BlockId) -> Result<Option<Block>> {
+    fn find_block_by_hash(&self, hash: H256, _source: BlockSource) -> Result<Option<Block>> {
+        self.block(hash.into())
+    }
+
+    fn block(&self, _id: BlockHashOrNumber) -> Result<Option<Block>> {
         Ok(None)
     }
 
-    fn ommers(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
+    fn pending_block(&self) -> Result<Option<SealedBlock>> {
+        Ok(None)
+    }
+
+    fn ommers(&self, _id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
+
+    fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
+        Ok(None)
+    }
+
+    fn block_with_senders(
+        &self,
+        _number: BlockNumber,
+    ) -> Result<Option<reth_primitives::BlockWithSenders>> {
+        Ok(None)
+    }
+}
+
+impl BlockProviderIdExt for NoopProvider {
+    fn block_by_id(&self, _id: BlockId) -> Result<Option<Block>> {
+        Ok(None)
+    }
+
+    fn sealed_header_by_id(&self, _id: BlockId) -> Result<Option<SealedHeader>> {
+        Ok(None)
+    }
+
+    fn header_by_id(&self, _id: BlockId) -> Result<Option<Header>> {
+        Ok(None)
+    }
+
+    fn ommers_by_id(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
+}
+
+impl BlockIdProvider for NoopProvider {
+    fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(None)
+    }
+
+    fn safe_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
+        Ok(None)
+    }
+
+    fn finalized_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
 }
@@ -72,7 +135,10 @@ impl TransactionsProvider for NoopProvider {
         todo!()
     }
 
-    fn transactions_by_block(&self, _block_id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+    fn transactions_by_block(
+        &self,
+        _block_id: BlockHashOrNumber,
+    ) -> Result<Option<Vec<TransactionSigned>>> {
         Ok(None)
     }
 
@@ -80,6 +146,17 @@ impl TransactionsProvider for NoopProvider {
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
+        Ok(Vec::default())
+    }
+
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        Ok(Vec::default())
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
         Ok(Vec::default())
     }
 }
@@ -93,7 +170,7 @@ impl ReceiptProvider for NoopProvider {
         Ok(None)
     }
 
-    fn receipts_by_block(&self, _block: BlockId) -> Result<Option<Vec<Receipt>>> {
+    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> Result<Option<Vec<Receipt>>> {
         Ok(None)
     }
 }
@@ -118,11 +195,28 @@ impl HeaderProvider for NoopProvider {
     fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
         Ok(vec![])
     }
+
+    fn sealed_headers_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Vec<SealedHeader>> {
+        Ok(vec![])
+    }
+
+    fn sealed_header(&self, _number: BlockNumber) -> Result<Option<SealedHeader>> {
+        Ok(None)
+    }
 }
 
 impl AccountProvider for NoopProvider {
     fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
         Ok(None)
+    }
+}
+
+impl StateRootProvider for NoopProvider {
+    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+        todo!()
     }
 }
 
@@ -149,7 +243,7 @@ impl EvmEnvProvider for NoopProvider {
         &self,
         _cfg: &mut CfgEnv,
         _block_env: &mut BlockEnv,
-        _at: BlockId,
+        _at: BlockHashOrNumber,
     ) -> Result<()> {
         Ok(())
     }
@@ -163,7 +257,7 @@ impl EvmEnvProvider for NoopProvider {
         Ok(())
     }
 
-    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockId) -> Result<()> {
+    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockHashOrNumber) -> Result<()> {
         Ok(())
     }
 
@@ -175,7 +269,7 @@ impl EvmEnvProvider for NoopProvider {
         Ok(())
     }
 
-    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockId) -> Result<()> {
+    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockHashOrNumber) -> Result<()> {
         Ok(())
     }
 
@@ -197,10 +291,37 @@ impl StateProviderFactory for NoopProvider {
         Ok(Box::new(*self))
     }
 
-    fn pending<'a>(
+    fn state_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn pending(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(*self))
+    }
+
+    fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
         Ok(Box::new(*self))
+    }
+}
+
+impl StageCheckpointProvider for NoopProvider {
+    fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
+        Ok(None)
+    }
+}
+
+impl WithdrawalsProvider for NoopProvider {
+    fn latest_withdrawal(&self) -> Result<Option<reth_primitives::Withdrawal>> {
+        Ok(None)
+    }
+    fn withdrawals_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> Result<Option<Vec<reth_primitives::Withdrawal>>> {
+        Ok(None)
     }
 }

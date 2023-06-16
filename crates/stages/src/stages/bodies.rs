@@ -1,7 +1,4 @@
-use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -9,18 +6,16 @@ use reth_db::{
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
+    DatabaseError,
 };
 use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
-    provider::ProviderError,
 };
-use reth_provider::Transaction;
+use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
+use reth_provider::DatabaseProviderRW;
 use std::sync::Arc;
 use tracing::*;
-
-/// The [`StageId`] of the bodies downloader stage.
-pub const BODIES: StageId = StageId("Bodies");
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
@@ -28,7 +23,6 @@ pub const BODIES: StageId = StageId("Bodies");
 /// The body stage downloads block bodies for all block headers stored locally in the database.
 ///
 /// # Empty blocks
-
 ///
 /// Blocks with an ommers hash corresponding to no ommers *and* a transaction root corresponding to
 /// no transactions will not have a block body downloaded for them, since it would be meaningless to
@@ -66,36 +60,37 @@ pub struct BodyStage<D: BodyDownloader> {
 impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        BODIES
+        StageId::Bodies
     }
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
     /// header, limited by the stage's batch size.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let (start_block, end_block) = exec_or_return!(input, "sync::stages::bodies");
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
 
+        let range = input.next_block_range();
         // Update the header range on the downloader
-        self.downloader.set_download_range(start_block..end_block + 1)?;
-
-        // Cursor used to get total difficulty
-        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
+        self.downloader.set_download_range(range.clone())?;
+        let (from_block, to_block) = range.into_inner();
 
         // Cursors used to write bodies, ommers and transactions
-        let mut block_meta_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
+        let tx = provider.tx_ref();
+        let mut block_indices_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
-        // Get id for the first transaction and first transition in the block
-        let (mut next_tx_num, mut next_transition_id) = tx.get_next_block_ids(start_block)?;
+        // Get id for the next tx_num of zero if there are no transactions.
+        let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
-        let mut highest_block = input.stage_progress.unwrap_or_default();
-        debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = next_tx_num, next_transition_id, "Commencing sync");
+        debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
@@ -103,49 +98,43 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
 
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
+
+        let mut highest_block = from_block;
         for response in downloaded_bodies {
             // Write block
             let block_number = response.block_number();
-            let difficulty = response.difficulty();
 
-            let first_tx_num = next_tx_num;
-            let first_transition_id = next_transition_id;
-            let mut tx_count = 0;
-            let mut has_withdrawals = false;
+            let block_indices = StoredBlockBodyIndices {
+                first_tx_num: next_tx_num,
+                tx_count: match &response {
+                    BlockResponse::Full(block) => block.body.len() as u64,
+                    BlockResponse::Empty(_) => 0,
+                },
+            };
             match response {
                 BlockResponse::Full(block) => {
-                    tx_count = block.body.len() as u64;
                     // write transaction block index
                     if !block.body.is_empty() {
-                        tx_block_cursor.append(first_tx_num, block.number)?;
+                        tx_block_cursor.append(block_indices.last_tx_num(), block.number)?;
                     }
 
                     // Write transactions
                     for transaction in block.body {
                         // Append the transaction
-                        tx_cursor.append(next_tx_num, transaction)?;
+                        tx_cursor.append(next_tx_num, transaction.into())?;
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
                     }
 
                     // Write ommers if any
                     if !block.ommers.is_empty() {
-                        ommers_cursor.append(
-                            block_number,
-                            StoredBlockOmmers {
-                                ommers: block
-                                    .ommers
-                                    .into_iter()
-                                    .map(|header| header.unseal())
-                                    .collect(),
-                            },
-                        )?;
+                        ommers_cursor
+                            .append(block_number, StoredBlockOmmers { ommers: block.ommers })?;
                     }
 
                     // Write withdrawals if any
                     if let Some(withdrawals) = block.withdrawals {
                         if !withdrawals.is_empty() {
-                            has_withdrawals = true;
                             withdrawals_cursor
                                 .append(block_number, StoredBlockWithdrawals { withdrawals })?;
                         }
@@ -154,31 +143,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 BlockResponse::Empty(_) => {}
             };
 
-            // The block transition marks the final state at the end of the block.
-            // Increment the transition if the block contains an addition block reward.
-            // If the block does not have a reward, the transition will be the same as the
-            // transition at the last transaction of this block.
-            let td = td_cursor
-                .seek(block_number)?
-                .ok_or(ProviderError::TotalDifficulty { number: block_number })?
-                .1;
-            let has_reward = self.consensus.has_block_reward(td.into(), difficulty);
-            let has_block_change = has_reward || has_withdrawals;
-
-            // Increment transition id for each transaction,
-            // and by +1 if the block has its own state change (an block reward or withdrawals).
-            next_transition_id += tx_count + has_block_change as u64;
-
             // insert block meta
-            block_meta_cursor.append(
-                block_number,
-                StoredBlockBodyIndices {
-                    first_tx_num,
-                    first_transition_id,
-                    has_block_change,
-                    tx_count,
-                },
-            )?;
+            block_indices_cursor.append(block_number, block_indices)?;
 
             highest_block = block_number;
         }
@@ -186,18 +152,21 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
-        let done = highest_block == end_block;
-        info!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, done, "Sync iteration finished");
-        Ok(ExecOutput { stage_progress: highest_block, done })
+        let done = highest_block == to_block;
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(highest_block)
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+            done,
+        })
     }
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
+        let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
@@ -238,11 +207,26 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             }
 
             // Delete the current body value
-            tx.delete::<tables::BlockBodyIndices>(number, None)?;
+            rev_walker.delete_current()?;
         }
 
-        Ok(UnwindOutput { stage_progress: input.unwind_to })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to)
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+        })
     }
+}
+
+// TODO(alexey): ideally, we want to measure Bodies stage progress in bytes, but it's hard to know
+//  beforehand how many bytes we need to download. So the good solution would be to measure the
+//  progress in gas as a proxy to size. Execution stage uses a similar approach.
+fn stage_checkpoint<DB: Database>(
+    provider: &DatabaseProviderRW<'_, DB>,
+) -> Result<EntitiesCheckpoint, DatabaseError> {
+    Ok(EntitiesCheckpoint {
+        processed: provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64,
+        total: provider.tx_ref().entries::<tables::Headers>()? as u64,
+    })
 }
 
 #[cfg(test)]
@@ -250,9 +234,9 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
-        PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
+    use reth_primitives::stage::StageUnitCheckpoint;
     use test_utils::*;
 
     stage_test_suite_ext!(BodyTestRunner, body);
@@ -265,14 +249,15 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
         // Set the batch size (max we sync per stage execution) to less than the number of blocks
         // the previous stage synced (10 vs 20)
-        runner.set_batch_size(10);
+        let batch_size = 10;
+        runner.set_batch_size(batch_size);
 
         // Run the stage
         let rx = runner.execute(input);
@@ -282,7 +267,14 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, done: false }) if stage_progress < 200
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed, // 1 seeded block body + batch size
+                    total // seeded headers
+                }))
+            }, done: false }) if block_number < 200 &&
+                processed == 1 + batch_size && total == previous_stage
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -295,8 +287,8 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -309,7 +301,19 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
-        assert_matches!(output, Ok(ExecOutput { stage_progress: 20, done: true }));
+        assert_matches!(
+            output,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number: 20,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                },
+                done: true
+            }) if processed == total && total == previous_stage
+        );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
@@ -321,12 +325,13 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
-        runner.set_batch_size(10);
+        let batch_size = 10;
+        runner.set_batch_size(batch_size);
 
         // Run the stage
         let rx = runner.execute(input);
@@ -335,22 +340,34 @@ mod tests {
         let first_run = rx.await.unwrap();
         assert_matches!(
             first_run,
-            Ok(ExecOutput { stage_progress, done: false }) if stage_progress >= 10
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: false }) if block_number >= 10 &&
+                processed == 1 + batch_size && total == previous_stage
         );
-        let first_run_progress = first_run.unwrap().stage_progress;
+        let first_run_checkpoint = first_run.unwrap().checkpoint;
 
         // Execute again on top of the previous run
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(first_run_progress),
-        };
+        let input =
+            ExecInput { target: Some(previous_stage), checkpoint: Some(first_run_checkpoint) };
         let rx = runner.execute(input);
 
         // Check that we synced more blocks
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, done: true }) if stage_progress > first_run_progress
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: true }) if block_number > first_run_checkpoint.block_number &&
+                processed == total && total == previous_stage
         );
         assert_matches!(
             runner.validate_execution(input, output.ok()),
@@ -367,8 +384,8 @@ mod tests {
         // Set up test runner
         let mut runner = BodyTestRunner::default();
         let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
         runner.seed_execution(input).expect("failed to seed execution");
 
@@ -383,11 +400,18 @@ mod tests {
         let output = rx.await.unwrap();
         assert_matches!(
             output,
-            Ok(ExecOutput { stage_progress, done: true }) if stage_progress == previous_stage
+            Ok(ExecOutput { checkpoint: StageCheckpoint {
+                block_number,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed,
+                    total
+                }))
+            }, done: true }) if block_number == previous_stage &&
+                processed == total && total == previous_stage
         );
-        let stage_progress = output.unwrap().stage_progress;
+        let checkpoint = output.unwrap().checkpoint;
         runner
-            .validate_db_blocks(input.stage_progress.unwrap_or_default(), stage_progress)
+            .validate_db_blocks(input.checkpoint().block_number, checkpoint.block_number)
             .expect("Written block data invalid");
 
         // Delete a transaction
@@ -403,11 +427,17 @@ mod tests {
 
         // Unwind all of it
         let unwind_to = 1;
-        let input = UnwindInput { bad_block: None, stage_progress, unwind_to };
+        let input = UnwindInput { bad_block: None, checkpoint, unwind_to };
         let res = runner.unwind(input).await;
         assert_matches!(
             res,
-            Ok(UnwindOutput { stage_progress }) if stage_progress == 1
+            Ok(UnwindOutput { checkpoint: StageCheckpoint {
+                block_number: 1,
+                stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                    processed: 1,
+                    total
+                }))
+            }}) if total == previous_stage
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");
@@ -432,7 +462,6 @@ mod tests {
             transaction::{DbTx, DbTxMut},
         };
         use reth_interfaces::{
-            consensus::Consensus,
             p2p::{
                 bodies::{
                     client::{BodiesClient, BodiesFut},
@@ -451,7 +480,7 @@ mod tests {
         use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{
             collections::{HashMap, VecDeque},
-            ops::Range,
+            ops::RangeInclusive,
             pin::Pin,
             sync::Arc,
             task::{Context, Poll},
@@ -466,7 +495,7 @@ mod tests {
                 block.hash(),
                 BlockBody {
                     transactions: block.body.clone(),
-                    ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
+                    ommers: block.ommers.clone(),
                     withdrawals: block.withdrawals.clone(),
                 },
             )
@@ -525,22 +554,20 @@ mod tests {
             type Seed = Vec<SealedBlock>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let start = input.stage_progress.unwrap_or_default();
-                let end = input.previous_stage_progress() + 1;
-                let blocks = random_block_range(start..end, GENESIS_HASH, 0..2);
+                let start = input.checkpoint().block_number;
+                let end = input.target();
+                let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.tx.commit(|tx| {
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
-                            first_transition_id: 0,
                             tx_count: progress.body.len() as u64,
-                            has_block_change: true,
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx();
-                            tx.put::<tables::Transactions>(tx_num, transaction)
+                            tx.put::<tables::Transactions>(tx_num, transaction.into())
                         })?;
 
                         if body.tx_count != 0 {
@@ -555,13 +582,7 @@ mod tests {
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
-                                StoredBlockOmmers {
-                                    ommers: progress
-                                        .ommers
-                                        .iter()
-                                        .map(|o| o.clone().unseal())
-                                        .collect(),
-                                },
+                                StoredBlockOmmers { ommers: progress.ommers.clone() },
                             )?;
                         }
                         Ok(())
@@ -577,9 +598,10 @@ mod tests {
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
                 let highest_block = match output.as_ref() {
-                    Some(output) => output.stage_progress,
-                    None => input.stage_progress.unwrap_or_default(),
-                };
+                    Some(output) => output.checkpoint,
+                    None => input.checkpoint(),
+                }
+                .block_number;
                 self.validate_db_blocks(highest_block, highest_block)
             }
         }
@@ -628,7 +650,6 @@ mod tests {
                 self.tx.query(|tx| {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
-                    let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
@@ -640,7 +661,6 @@ mod tests {
                     };
 
                     let mut prev_number: Option<BlockNumber> = None;
-                    let mut expected_transition_id = 0;
 
                     for entry in bodies_cursor.walk(Some(first_body_key))? {
                         let (number, body) = entry?;
@@ -675,23 +695,11 @@ mod tests {
                             assert_eq!(tx_block_id, Some(number));
                         }
 
-                        assert_eq!(body.first_transition_id, expected_transition_id);
-
                         for tx_id in body.tx_num_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
                             assert!(tx_entry.is_some(), "Transaction is missing.");
-                            // Increment expected id for each transaction transition.
-                            expected_transition_id += 1;
                         }
 
-                        // Increment expected id for block reward.
-                        let td = td_cursor
-                            .seek(number)?
-                            .expect("Missing TD for header")
-                            .1;
-                        if self.consensus.has_block_reward(td.into(), header.difficulty) {
-                            expected_transition_id += 1;
-                        }
 
                         prev_number = Some(number);
                     }
@@ -747,13 +755,16 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
+            fn set_download_range(
+                &mut self,
+                range: RangeInclusive<BlockNumber>,
+            ) -> DownloadResult<()> {
                 self.headers =
                     VecDeque::from(self.db.view(|tx| -> DownloadResult<Vec<SealedHeader>> {
                         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
                         let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-                        let walker = canonical_cursor.walk_range(range.start..range.end)?;
+                        let walker = canonical_cursor.walk_range(range)?;
 
                         let mut headers = Vec::default();
                         for entry in walker {
@@ -787,7 +798,7 @@ mod tests {
                         response.push(BlockResponse::Full(SealedBlock {
                             header,
                             body: body.transactions,
-                            ommers: body.ommers.into_iter().map(|h| h.seal_slow()).collect(),
+                            ommers: body.ommers,
                             withdrawals: body.withdrawals,
                         }));
                     }

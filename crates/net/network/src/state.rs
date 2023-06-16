@@ -28,7 +28,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-use tracing::{debug, error};
+use tracing::debug;
 
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: usize = 512;
@@ -405,7 +405,7 @@ where
                         Poll::Ready(res) => {
                             // check if the error is due to a closed channel to the session
                             if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
-                                error!(
+                                debug!(
                                     target : "net",
                                     ?id,
                                     "Request canceled, response channel from session closed."
