@@ -5740,6 +5740,7 @@ dependencies = [
 name = "reth-staged-sync"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "async-trait",
  "confy",
  "enr 0.8.1",

@@ -62,3 +62,51 @@ pub(crate) fn create_db_version_file<P: AsRef<Path>>(db_path: P) -> io::Result<(
 fn db_version_file_path<P: AsRef<Path>>(db_path: P) -> PathBuf {
     db_path.as_ref().join(DB_VERSION_FILE_NAME)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::utils::versioning::db::{
+        check_db_version_file, db_version_file_path, DatabaseVersionError,
+    };
+    use assert_matches::assert_matches;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn missing_file() {
+        let dir = tempdir().unwrap();
+
+        let result = check_db_version_file(&dir);
+        assert!(result.is_err());
+        assert_matches!(
+            result.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+            Some(DatabaseVersionError::MissingFile)
+        );
+    }
+
+    #[test]
+    fn malformed_file() {
+        let dir = tempdir().unwrap();
+        fs::write(db_version_file_path(&dir), "invalid-version").unwrap();
+
+        let result = check_db_version_file(&dir);
+        assert!(result.is_err());
+        assert_matches!(
+            result.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+            Some(DatabaseVersionError::MalformedFile)
+        );
+    }
+
+    #[test]
+    fn version_mismatch() {
+        let dir = tempdir().unwrap();
+        fs::write(db_version_file_path(&dir), "0").unwrap();
+
+        let result = check_db_version_file(&dir);
+        assert!(result.is_err());
+        assert_matches!(
+            result.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+            Some(DatabaseVersionError::VersionMismatch { version: 0 })
+        );
+    }
+}
