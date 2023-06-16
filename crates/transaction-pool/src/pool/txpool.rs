@@ -13,7 +13,8 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, PRICE_BUMP,
+    U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{constants::MIN_PROTOCOL_BASE_FEE, TxHash, H256};
@@ -968,6 +969,22 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(transaction)
     }
 
+    /// Returns true if `transaction_a` is underpriced compared to `transaction_B`.
+    fn is_underpriced(
+        transaction_a: &ValidPoolTransaction<T>,
+        transaction_b: &ValidPoolTransaction<T>,
+        price_bump: u128,
+    ) -> bool {
+        let tx_a_max_fee_per_gas = transaction_a.max_fee_per_gas();
+        let tx_a_max_priority_fee_per_gas =
+            transaction_a.transaction.max_priority_fee_per_gas().unwrap_or(0);
+
+        tx_a_max_fee_per_gas < tx_a_max_fee_per_gas * (100 + price_bump) / 100 ||
+            tx_a_max_priority_fee_per_gas <
+                tx_a_max_priority_fee_per_gas * (100 + price_bump) / 100 ||
+            transaction_a.effective_gas_price() < transaction_b.effective_gas_price()
+    }
+
     /// Inserts a new transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
@@ -1035,7 +1052,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
             Entry::Occupied(mut entry) => {
                 // Transaction already exists
                 // Ensure the new transaction is not underpriced
-                if transaction.is_underpriced(entry.get().transaction.as_ref()) {
+                if Self::is_underpriced(
+                    transaction.as_ref(),
+                    entry.get().transaction.as_ref(),
+                    PRICE_BUMP,
+                ) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
