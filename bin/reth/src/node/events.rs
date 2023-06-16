@@ -30,7 +30,7 @@ struct NodeState {
     /// The stage currently being executed.
     current_stage: Option<StageId>,
     /// The ETA for the current stage.
-    eta: Eta,
+    eta: ETA,
     /// The current checkpoint of the executing stage.
     current_checkpoint: StageCheckpoint,
     /// The latest canonical block added in the consensus engine.
@@ -42,7 +42,7 @@ impl NodeState {
         Self {
             network,
             current_stage: None,
-            eta: Eta::default(),
+            eta: ETA::default(),
             current_checkpoint: StageCheckpoint::new(0),
             latest_canonical_engine_block: None,
         }
@@ -96,7 +96,7 @@ impl NodeState {
 
                 if done {
                     self.current_stage = None;
-                    self.eta = Eta::default();
+                    self.eta = ETA::default();
                 }
             }
             _ => (),
@@ -268,7 +268,7 @@ where
 ///
 /// One `Eta` is only valid for a single stage.
 #[derive(Default)]
-struct Eta {
+struct ETA {
     /// The last stage checkpoint
     last_checkpoint: EntitiesCheckpoint,
     /// The last time the stage reported its checkpoint
@@ -277,10 +277,10 @@ struct Eta {
     eta: Option<Duration>,
 }
 
-impl Eta {
-    /// Update the ETA given the checkpoint.
+impl ETA {
+    /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, checkpoint: StageCheckpoint) {
-        let current = checkpoint.entities();
+        let Some(current) = checkpoint.entities() else { return };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
             let processed_since_last = current.processed - self.last_checkpoint.processed;
@@ -297,7 +297,7 @@ impl Eta {
     }
 }
 
-impl std::fmt::Display for Eta {
+impl std::fmt::Display for ETA {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some((eta, last_checkpoint_time)) = self.eta.zip(self.last_checkpoint_time) {
             let remaining = eta.checked_sub(last_checkpoint_time.elapsed());
@@ -317,12 +317,12 @@ impl std::fmt::Display for Eta {
 
 #[cfg(test)]
 mod tests {
-    use crate::node::events::Eta;
+    use crate::node::events::ETA;
     use std::time::{Duration, Instant};
 
     #[test]
     fn eta_display_no_milliseconds() {
-        let eta = Eta {
+        let eta = ETA {
             last_checkpoint_time: Some(Instant::now()),
             eta: Some(Duration::from_millis(
                 13 * 60 * 1000 + // Minutes
