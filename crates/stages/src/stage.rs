@@ -196,8 +196,9 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Returns true if the stage execution is completed for the given input target.
     ///
     /// Default behavior is to call the [ExecOutput::target_reached].
+    #[allow(clippy::wrong_self_convention)]
     async fn is_execute_done(
-        &self,
+        &mut self,
         _provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
         output: ExecOutput,

@@ -114,7 +114,7 @@ macro_rules! stage_test_suite {
                 runner.after_execution(seed).await.expect("failed to run after execution hook");
 
                 // Assert the successful execution result
-                let stage = crate::test_utils::StageTestRunner::stage(&runner);
+                let mut stage = crate::test_utils::StageTestRunner::stage(&runner);
 
                 let result = rx.await.unwrap();
                 assert_matches::assert_matches!(result, Ok(_));

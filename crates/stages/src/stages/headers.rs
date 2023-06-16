@@ -87,6 +87,7 @@ where
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         checkpoint: u64,
+        mark_tip_seen: bool,
     ) -> Result<SyncGap, StageError> {
         // Create a cursor over canonical header hashes
         let mut cursor = provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
@@ -120,23 +121,28 @@ where
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let target = match next_header {
             Some(header) if checkpoint + 1 != header.number => SyncTarget::Gap(header),
-            None => self.next_sync_target(head_num).await,
+            None => self.next_sync_target(head_num, mark_tip_seen).await,
             _ => return Err(StageError::StageCheckpoint(checkpoint)),
         };
 
         Ok(SyncGap { local_head, target })
     }
 
-    async fn next_sync_target(&mut self, head: BlockNumber) -> SyncTarget {
+    async fn next_sync_target(&mut self, head: BlockNumber, mark_tip_seen: bool) -> SyncTarget {
         match self.mode {
             HeaderSyncMode::Tip(ref mut rx) => {
                 loop {
-                    trace!(target: "sync::stages::headers", %head, "Waiting for the tip to arrive");
-                    let _ = rx.changed().await; // TODO: remove this await?
-                    let tip = rx.borrow();
-                    trace!(target: "sync::stages::headers", tip = %*tip, %head, "Got the tip");
-                    if !tip.is_zero() {
-                        return SyncTarget::Tip(*tip)
+                    if mark_tip_seen {
+                        trace!(target: "sync::stages::headers", %head, "Waiting for the tip to arrive");
+                        let _ = rx.changed().await; // TODO: remove this await?
+                        let tip = rx.borrow();
+                        trace!(target: "sync::stages::headers", tip = %*tip, %head, "Got the tip");
+
+                        if !tip.is_zero() {
+                            return SyncTarget::Tip(*tip)
+                        }
+                    } else {
+                        return SyncTarget::Tip(*rx.borrow())
                     }
                 }
             }
@@ -205,7 +211,8 @@ where
         let current_checkpoint = input.checkpoint();
 
         // Lookup the head and tip of the sync range
-        let gap = self.get_sync_gap(provider.deref(), current_checkpoint.block_number).await?;
+        let gap =
+            self.get_sync_gap(provider.deref(), current_checkpoint.block_number, true).await?;
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
@@ -318,14 +325,20 @@ where
     }
 
     async fn is_execute_done(
-        &self,
+        &mut self,
         provider: &mut DatabaseProviderRW<'_, &DB>,
-        input: ExecInput,
-        _output: ExecOutput,
+        _input: ExecInput,
+        output: ExecOutput,
     ) -> Result<bool, StageError> {
-        // We pass `input.checkpoint` instead of `output.checkpoint`, because we check the
-        // congruency of previous checkpoint block number with the highest header in the database.
-        self.is_stage_done::<DB>(provider.tx_ref(), input.checkpoint().block_number)
+        let gap = self
+            .get_sync_gap(
+                provider.deref(),
+                output.checkpoint.block_number,
+                // We don't mark the tip receiver as seen, so the `execute` method could do it.
+                false,
+            )
+            .await?;
+        Ok(gap.is_closed())
     }
 
     /// Unwind the stage.
@@ -623,7 +636,7 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            stage.get_sync_gap(&provider, checkpoint).await,
+            stage.get_sync_gap(&provider, checkpoint, false).await,
             Err(StageError::DatabaseIntegrity(ProviderError::HeaderNotFound(block_number)))
                 if block_number.as_number().unwrap() == checkpoint
         );
@@ -634,7 +647,7 @@ mod tests {
         tx.put::<tables::Headers>(head.number, head.clone().unseal())
             .expect("failed to write header");
 
-        let gap = stage.get_sync_gap(&provider, checkpoint).await.unwrap();
+        let gap = stage.get_sync_gap(&provider, checkpoint, false).await.unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
 
@@ -644,7 +657,7 @@ mod tests {
         tx.put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
             .expect("failed to write header");
 
-        let gap = stage.get_sync_gap(&provider, checkpoint).await.unwrap();
+        let gap = stage.get_sync_gap(&provider, checkpoint, false).await.unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
 
@@ -655,7 +668,7 @@ mod tests {
             .expect("failed to write header");
 
         assert_matches!(
-            stage.get_sync_gap(&provider, checkpoint).await,
+            stage.get_sync_gap(&provider, checkpoint, false).await,
             Err(StageError::StageCheckpoint(_checkpoint)) if _checkpoint == checkpoint
         );
     }

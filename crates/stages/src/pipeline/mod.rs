@@ -348,7 +348,7 @@ where
                 warn!(
                     target: "sync::pipeline",
                     stage = %stage_id,
-                    target = target.unwrap(),
+                    target = ?target,
                     prev_block = prev_checkpoint.unwrap().block_number,
                     "Stage reached target block, skipping."
                 );
