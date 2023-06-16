@@ -1,6 +1,6 @@
-use crate::{H256, U256};
-use serde::{Deserialize, Serialize};
-use std::fmt::Write;
+use crate::{Bytes, H256, U256};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::{collections::HashMap, fmt::Write};
 
 /// A storage key type that can be serialized to and from a hex string up to 32 bytes. Used for
 /// `eth_getStorageAt` and `eth_getProof` RPCs.
@@ -51,5 +51,52 @@ impl From<JsonStorageKey> for String {
             write!(hex, "{:02x}", byte).unwrap();
         }
         hex
+    }
+}
+
+/// Converts a Bytes value into a H256, accepting inputs that are less than 32 bytes long. These
+/// inputs will be left padded with zeros.
+pub fn from_bytes_to_h256<'de, D>(bytes: Bytes) -> Result<H256, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    if bytes.0.len() > 32 {
+        return Err(serde::de::Error::custom("input too long to be a H256"))
+    }
+
+    // left pad with zeros to 32 bytes
+    let mut padded = [0u8; 32];
+    padded[32 - bytes.0.len()..].copy_from_slice(&bytes.0);
+
+    // then convert to H256 without a panic
+    Ok(H256::from_slice(&padded))
+}
+
+/// Deserializes the input into an Option<HashMap<H256, H256>>, using [from_bytes_to_h256] which
+/// allows cropped values:
+///
+/// ```json
+///  {
+///      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x22"
+///   }
+/// ```
+pub fn deserialize_storage_map<'de, D>(
+    deserializer: D,
+) -> Result<Option<HashMap<H256, H256>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let map = Option::<HashMap<Bytes, Bytes>>::deserialize(deserializer)?;
+    match map {
+        Some(mut map) => {
+            let mut res_map = HashMap::with_capacity(map.len());
+            for (k, v) in map.drain() {
+                let k_deserialized = from_bytes_to_h256::<'de, D>(k)?;
+                let v_deserialized = from_bytes_to_h256::<'de, D>(v)?;
+                res_map.insert(k_deserialized, v_deserialized);
+            }
+            Ok(Some(res_map))
+        }
+        None => Ok(None),
     }
 }

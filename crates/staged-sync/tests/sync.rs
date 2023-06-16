@@ -8,7 +8,7 @@ use reth_network::{
     NetworkConfig, NetworkManager,
 };
 use reth_network_api::Peers;
-use reth_primitives::{ChainSpec, PeerId, SealedHeader};
+use reth_primitives::{ChainSpec, Genesis, PeerId, SealedHeader};
 use reth_provider::test_utils::NoopProvider;
 use reth_staged_sync::test_utils::{CliqueGethInstance, CliqueMiddleware};
 use secp256k1::SecretKey;
@@ -98,12 +98,10 @@ async fn init_geth() -> (CliqueGethInstance, Arc<ChainSpec>) {
     // === check that we have the same genesis hash ===
 
     // get the chainspec from the genesis we configured for geth
-    let chainspec: ChainSpec = clique
-        .instance
-        .genesis()
-        .clone()
-        .expect("clique should be configured with a genesis")
-        .into();
+    let chainspec = ChainSpec::from(Genesis::from(
+        clique.instance.genesis().clone().expect("clique should be configured with a genesis"),
+    ));
+
     let remote_genesis = SealedHeader::from(&clique.provider.remote_genesis_block().await.unwrap());
 
     let local_genesis = chainspec.genesis_header().seal(chainspec.genesis_hash());
