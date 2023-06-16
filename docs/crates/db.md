@@ -104,7 +104,7 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
 }
 ```
 
-Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. As an example, lets revisit the `Transaction` struct from the `stages` crate. This struct contains a field named `db` which is a reference to a generic type `DB` that implements the `Database` trait. The `Transaction` struct can use the `db` field to store new headers, bodies and senders in the database. In the code snippet below, you can see the `Transaction::open()` method, which uses the `Database::tx_mut()` function to create a mutable transaction.
+Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. As an example, let's revisit the `Transaction` struct from the `stages` crate. This struct contains a field named `db` which is a reference to a generic type `DB` that implements the `Database` trait. The `Transaction` struct can use the `db` field to store new headers, bodies and senders in the database. In the code snippet below, you can see the `Transaction::open()` method, which uses the `Database::tx_mut()` function to create a mutable transaction.
 
 [File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/db.rs#L95-L98)
 
