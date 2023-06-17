@@ -60,6 +60,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let (tx_range, block_range, is_final_range) =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
+        let tx_range_size = tx_range.clone().count();
 
         debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
 
@@ -67,7 +68,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         let tx_walker = tx_cursor.walk_range(tx_range)?;
 
-        let chunk_size = 100_000 / rayon::current_num_threads();
+        let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
         let mut channels = Vec::with_capacity(chunk_size);
         let mut transaction_count = 0;
 
