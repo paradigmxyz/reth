@@ -12,6 +12,8 @@ pub(crate) enum TestRunnerError {
     Database(#[from] reth_interfaces::db::DatabaseError),
     #[error("Internal runner error occurred.")]
     Internal(#[from] Box<dyn std::error::Error>),
+    #[error("Internal interface error occurred.")]
+    Interface(#[from] reth_interfaces::Error),
 }
 
 /// A generic test runner for stages.

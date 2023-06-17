@@ -738,8 +738,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
             let parent_number = range.start().saturating_sub(1);
             let parent_state_root = self
-                .tx
-                .get::<tables::Headers>(parent_number)?
+                .header_by_number(parent_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
                 .state_root;
 
@@ -747,8 +746,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
                 let parent_hash = self
-                    .tx
-                    .get::<tables::CanonicalHeaders>(parent_number)?
+                    .block_hash(parent_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
                 return Err(TransactionError::UnwindStateRootMismatch {
                     got: new_state_root,
@@ -1072,23 +1070,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
         }
         Ok(())
-    }
-
-    /// Get lastest block number.
-    pub fn tip_number(&self) -> std::result::Result<u64, DatabaseError> {
-        Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
-    }
-
-    /// Query [tables::CanonicalHeaders] table for block hash by block number
-    pub fn get_block_hash(
-        &self,
-        block_number: BlockNumber,
-    ) -> std::result::Result<BlockHash, TransactionError> {
-        let hash = self
-            .tx
-            .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(hash)
     }
 
     /// Query the block body by number.
@@ -1723,6 +1704,10 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .walk_range(range)?
             .map(|entry| entry.map(|sender| sender.1))
             .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        Ok(self.tx.get::<tables::TxSenders>(id)?)
     }
 }
 

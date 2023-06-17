@@ -422,7 +422,9 @@ mod tests {
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
         ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
     };
-    use reth_provider::{insert_canonical_block, ProviderFactory};
+    use reth_provider::{
+        insert_canonical_block, AccountProvider, ProviderFactory, ReceiptProvider,
+    };
     use reth_revm::Factory;
     use reth_rlp::Decodable;
     use std::sync::Arc;
@@ -624,8 +626,9 @@ mod tests {
             },
             done: true
         } if processed == total && total == block.gas_used);
-        let mut provider = factory.provider_rw().unwrap();
-        let tx = provider.tx_mut();
+
+        let provider = factory.provider().unwrap();
+
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
         let account1_info =
@@ -645,24 +648,24 @@ mod tests {
 
         // assert accounts
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account1),
+            provider.basic_account(account1),
             Ok(Some(account1_info)),
             "Post changed of a account"
         );
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account2),
+            provider.basic_account(account2),
             Ok(Some(account2_info)),
             "Post changed of a account"
         );
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account3),
+            provider.basic_account(account3),
             Ok(Some(account3_info)),
             "Post changed of a account"
         );
         // assert storage
         // Get on dupsort would return only first value. This is good enough for this test.
         assert_eq!(
-            tx.get::<tables::PlainStorageState>(account1),
+            provider.tx_ref().get::<tables::PlainStorageState>(account1),
             Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) })),
             "Post changed of a account"
         );
@@ -739,26 +742,13 @@ mod tests {
         } if total == block.gas_used);
 
         // assert unwind stage
-        let db_tx = provider.tx_ref();
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(acc1),
-            Ok(Some(acc1_info)),
-            "Pre changed of a account"
-        );
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(acc2),
-            Ok(Some(acc2_info)),
-            "Post changed of a account"
-        );
+        assert_eq!(provider.basic_account(acc1), Ok(Some(acc1_info)), "Pre changed of a account");
+        assert_eq!(provider.basic_account(acc2), Ok(Some(acc2_info)), "Post changed of a account");
 
         let miner_acc = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(miner_acc),
-            Ok(None),
-            "Third account should be unwound"
-        );
+        assert_eq!(provider.basic_account(miner_acc), Ok(None), "Third account should be unwound");
 
-        assert_eq!(db_tx.get::<tables::Receipts>(0), Ok(None), "First receipt should be unwound");
+        assert_eq!(provider.receipt(0), Ok(None), "First receipt should be unwound");
     }
 
     #[tokio::test]
@@ -830,11 +820,7 @@ mod tests {
 
         // assert unwind stage
         let provider = factory.provider_rw().unwrap();
-        assert_eq!(
-            provider.tx_ref().get::<tables::PlainAccountState>(destroyed_address),
-            Ok(None),
-            "Account was destroyed"
-        );
+        assert_eq!(provider.basic_account(destroyed_address), Ok(None), "Account was destroyed");
 
         assert_eq!(
             provider.tx_ref().get::<tables::PlainStorageState>(destroyed_address),

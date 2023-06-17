@@ -403,6 +403,7 @@ mod tests {
             generators::random_header_range, TestConsensus, TestHeaderDownloader, TestHeadersClient,
         };
         use reth_primitives::U256;
+        use reth_provider::{BlockHashProvider, BlockNumProvider, HeaderProvider};
         use std::sync::Arc;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
@@ -478,26 +479,21 @@ mod tests {
                 let initial_checkpoint = input.checkpoint().block_number;
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
-                        self.tx.query(|tx| {
-                            for block_num in
-                                (initial_checkpoint..output.checkpoint.block_number).rev()
-                            {
-                                // look up the header hash
-                                let hash = tx
-                                    .get::<tables::CanonicalHeaders>(block_num)?
-                                    .expect("no header hash");
+                        let provider = self.tx.factory.provider()?;
+                        for block_num in (initial_checkpoint..output.checkpoint.block_number).rev()
+                        {
+                            // look up the header hash
+                            let hash = provider.block_hash(block_num)?.expect("no header hash");
 
-                                // validate the header number
-                                assert_eq!(tx.get::<tables::HeaderNumbers>(hash)?, Some(block_num));
+                            // validate the header number
+                            assert_eq!(provider.block_number(hash)?, Some(block_num));
 
-                                // validate the header
-                                let header = tx.get::<tables::Headers>(block_num)?;
-                                assert!(header.is_some());
-                                let header = header.unwrap().seal_slow();
-                                assert_eq!(header.hash(), hash);
-                            }
-                            Ok(())
-                        })?;
+                            // validate the header
+                            let header = provider.header_by_number(block_num)?;
+                            assert!(header.is_some());
+                            let header = header.unwrap().seal_slow();
+                            assert_eq!(header.hash(), hash);
+                        }
                     }
                     _ => self.check_no_header_entry_above(initial_checkpoint)?,
                 };

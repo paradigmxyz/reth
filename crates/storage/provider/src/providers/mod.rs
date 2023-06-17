@@ -302,6 +302,10 @@ where
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         self.database.provider()?.senders_by_tx_range(range)
     }
+
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        self.database.provider()?.transaction_sender(id)
+    }
 }
 
 impl<DB, Tree> ReceiptProvider for BlockchainProvider<DB, Tree>

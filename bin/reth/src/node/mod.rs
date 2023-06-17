@@ -23,8 +23,6 @@ use reth_config::Config;
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
-    tables,
-    transaction::DbTx,
 };
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
@@ -41,12 +39,10 @@ use reth_interfaces::{
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256,
-};
+use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Head, SealedHeader, H256};
 use reth_provider::{
-    providers::get_stage_checkpoint, BlockProvider, CanonStateSubscriptions, HeaderProvider,
-    ProviderFactory,
+    BlockHashProvider, BlockProvider, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
+    StageCheckpointProvider,
 };
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
@@ -509,30 +505,31 @@ impl Command {
         Ok(handle)
     }
 
-    fn lookup_head(
-        &self,
-        db: Arc<Env<WriteMap>>,
-    ) -> Result<Head, reth_interfaces::db::DatabaseError> {
-        db.view(|tx| {
-            let head = get_stage_checkpoint(tx, StageId::Finish)?.unwrap_or_default().block_number;
-            let header = tx
-                .get::<tables::Headers>(head)?
-                .expect("the header for the latest block is missing, database is corrupt");
-            let total_difficulty = tx.get::<tables::HeaderTD>(head)?.expect(
-                "the total difficulty for the latest block is missing, database is corrupt",
-            );
-            let hash = tx
-                .get::<tables::CanonicalHeaders>(head)?
-                .expect("the hash for the latest block is missing, database is corrupt");
-            Ok::<Head, reth_interfaces::db::DatabaseError>(Head {
-                number: head,
-                hash,
-                difficulty: header.difficulty,
-                total_difficulty: total_difficulty.into(),
-                timestamp: header.timestamp,
-            })
-        })?
-        .map_err(Into::into)
+    fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::Error> {
+        let factory = ProviderFactory::new(db, self.chain.clone());
+        let provider = factory.provider()?;
+
+        let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
+
+        let header = provider
+            .header_by_number(head)?
+            .expect("the header for the latest block is missing, database is corrupt");
+
+        let total_difficulty = provider
+            .header_td_by_number(head)?
+            .expect("the total difficulty for the latest block is missing, database is corrupt");
+
+        let hash = provider
+            .block_hash(head)?
+            .expect("the hash for the latest block is missing, database is corrupt");
+
+        Ok(Head {
+            number: head,
+            hash,
+            difficulty: header.difficulty,
+            total_difficulty,
+            timestamp: header.timestamp,
+        })
     }
 
     /// Attempt to look up the block number for the tip hash in the database.
@@ -565,13 +562,10 @@ impl Command {
         DB: Database,
         Client: HeadersClient,
     {
-        let header = db.view(|tx| -> Result<Option<Header>, reth_db::DatabaseError> {
-            let number = match tip {
-                BlockHashOrNumber::Hash(hash) => tx.get::<tables::HeaderNumbers>(hash)?,
-                BlockHashOrNumber::Number(number) => Some(number),
-            };
-            Ok(number.map(|number| tx.get::<tables::Headers>(number)).transpose()?.flatten())
-        })??;
+        let factory = ProviderFactory::new(db, self.chain.clone());
+        let provider = factory.provider()?;
+
+        let header = provider.header_by_hash_or_number(tip)?;
 
         // try to look up the header in the database
         if let Some(header) = header {

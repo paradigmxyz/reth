@@ -60,6 +60,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let (tx_range, block_range, is_final_range) =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
+        let tx_range_size = tx_range.clone().count();
 
         debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
 
@@ -67,7 +68,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         let tx_walker = tx_cursor.walk_range(tx_range)?;
 
-        let chunk_size = 100_000 / rayon::current_num_threads();
+        let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
         let mut channels = Vec::with_capacity(chunk_size);
         let mut transaction_count = 0;
 
@@ -199,6 +200,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
+    use reth_provider::TransactionsProvider;
 
     // Implement stage test suite.
     stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
@@ -331,7 +333,7 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxHashNumber] is not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().block_body_indices(number);
+            let body_result = self.tx.inner_rw().block_body_indices(number);
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
                     body.last_tx_num(),
@@ -376,7 +378,9 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             match output {
-                Some(output) => self.tx.query(|tx| {
+                Some(output) => {
+                    let provider = self.tx.inner();
+
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
 
@@ -384,23 +388,18 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+                    let mut body_cursor =
+                        provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
-                            let transaction = tx
-                                .get::<tables::Transactions>(tx_id)?
-                                .expect("no transaction entry");
-                            assert_eq!(
-                                Some(tx_id),
-                                tx.get::<tables::TxHashNumber>(transaction.hash())?,
-                            );
+                            let transaction =
+                                provider.transaction_by_id(tx_id)?.expect("no transaction entry");
+                            assert_eq!(Some(tx_id), provider.transaction_id(transaction.hash())?);
                         }
                     }
-
-                    Ok(())
-                })?,
+                }
                 None => self.ensure_no_hash_by_block(input.checkpoint().block_number)?,
             };
             Ok(())
