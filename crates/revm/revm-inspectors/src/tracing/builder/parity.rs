@@ -8,6 +8,8 @@ use revm::{
 use std::collections::HashSet;
 
 /// A type for creating parity style traces
+///
+/// Note: Parity style traces always ignore calls to precompiles.
 #[derive(Clone, Debug)]
 pub struct ParityTraceBuilder {
     /// Recorded trace nodes
@@ -27,7 +29,12 @@ impl ParityTraceBuilder {
         self.nodes.iter().map(|node| node.trace.caller).collect()
     }
 
-    /// Returns the trace addresses of all transactions in the set
+    /// Returns the trace addresses of all call nodes in the set
+    ///
+    /// Each entry in the returned vector represents the [Self::trace_address] of the corresponding
+    /// node in the nodes set.
+    ///
+    /// CAUTION: This also includes precompiles, which have an empty trace address.
     fn trace_addresses(&self) -> Vec<Vec<usize>> {
         let mut all_addresses = Vec::with_capacity(self.nodes.len());
         for idx in 0..self.nodes.len() {
@@ -44,6 +51,8 @@ impl ParityTraceBuilder {
     /// # Panics
     ///
     /// if the `idx` does not belong to a node
+    ///
+    /// Note: if the call node of `idx` is a precompile, the returned trace address will be empty.
     fn trace_address(&self, idx: usize) -> Vec<usize> {
         if idx == 0 {
             // root call has empty traceAddress
@@ -51,6 +60,9 @@ impl ParityTraceBuilder {
         }
         let mut graph = vec![];
         let mut node = &self.nodes[idx];
+        if node.is_precompile() {
+            return graph
+        }
         while let Some(parent) = node.parent {
             // the index of the child call in the arena
             let child_idx = node.idx;
@@ -60,7 +72,7 @@ impl ParityTraceBuilder {
                 .children
                 .iter()
                 .position(|child| *child == child_idx)
-                .expect("child exists in parent");
+                .expect("non precompile child call exists in parent");
             graph.push(call_idx);
         }
         graph.reverse();
