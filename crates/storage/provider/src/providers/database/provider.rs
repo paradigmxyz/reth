@@ -1,9 +1,9 @@
 use crate::{
     insert_canonical_block,
     post_state::StorageChangeset,
-    traits::{AccountExtProvider, BlockSource, ReceiptProvider},
+    traits::{AccountExtProvider, BlockSource, ReceiptProvider, StageCheckpointWriter},
     AccountProvider, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, PostState, ProviderError, StageCheckpointProvider, TransactionError,
+    HeaderProvider, PostState, ProviderError, StageCheckpointReader, TransactionError,
     TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -1072,32 +1072,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(())
     }
 
-    /// Save stage checkpoint.
-    pub fn save_stage_checkpoint(
-        &self,
-        id: StageId,
-        checkpoint: StageCheckpoint,
-    ) -> std::result::Result<(), DatabaseError> {
-        self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)
-    }
-
-    /// Get stage checkpoint progress.
-    pub fn get_stage_checkpoint_progress(
-        &self,
-        id: StageId,
-    ) -> std::result::Result<Option<Vec<u8>>, DatabaseError> {
-        self.tx.get::<tables::SyncStageProgress>(id.to_string())
-    }
-
-    /// Save stage checkpoint progress.
-    pub fn save_stage_checkpoint_progress(
-        &self,
-        id: StageId,
-        checkpoint: Vec<u8>,
-    ) -> std::result::Result<(), DatabaseError> {
-        self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)
-    }
-
     /// Query the block body by number.
     pub fn block_body_indices(
         &self,
@@ -1865,8 +1839,25 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> StageCheckpointProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> StageCheckpointReader for DatabaseProvider<'this, TX> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(self.tx.get::<tables::SyncStage>(id.to_string())?)
+    }
+
+    /// Get stage checkpoint progress.
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
+        Ok(self.tx.get::<tables::SyncStageProgress>(id.to_string())?)
+    }
+}
+
+impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this, TX> {
+    /// Save stage checkpoint progress.
+    fn save_stage_checkpoint_progress(&self, id: StageId, checkpoint: Vec<u8>) -> Result<()> {
+        Ok(self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)?)
+    }
+
+    /// Save stage checkpoint.
+    fn save_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) -> Result<()> {
+        Ok(self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)?)
     }
 }
