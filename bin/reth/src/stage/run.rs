@@ -12,7 +12,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
-use reth_provider::{providers::get_stage_checkpoint, ProviderFactory};
+use reth_provider::{ProviderFactory, StageCheckpointProvider};
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
@@ -215,8 +215,7 @@ impl Command {
             assert!(exec_stage.type_id() == unwind_stage.type_id());
         }
 
-        let checkpoint =
-            get_stage_checkpoint(provider_rw.tx_ref(), exec_stage.id())?.unwrap_or_default();
+        let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
 
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 

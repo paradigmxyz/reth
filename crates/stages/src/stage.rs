@@ -5,7 +5,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, TxNumber,
 };
-use reth_provider::{DatabaseProviderRW, ProviderError};
+use reth_provider::DatabaseProviderRW;
 use std::{
     cmp::{max, min},
     ops::RangeInclusive,
@@ -79,10 +79,7 @@ impl ExecInput {
         tx_threshold: u64,
     ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
         let start_block = self.next_block();
-        let start_block_body = provider
-            .tx_ref()
-            .get::<tables::BlockBodyIndices>(start_block)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(start_block))?;
+        let start_block_body = provider.block_body_indices(start_block)?;
 
         let target_block = self.target();
 

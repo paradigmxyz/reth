@@ -123,7 +123,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         tx.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates) = StateRoot::new(tx.inner().tx_ref()).root_with_updates().unwrap();
+        let (root, updates) = StateRoot::new(tx.inner_rw().tx_ref()).root_with_updates().unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -144,7 +144,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         // make last block have valid state root
         let root = {
-            let tx_mut = tx.inner();
+            let tx_mut = tx.inner_rw();
             let root = StateRoot::new(tx_mut.tx_ref()).root().unwrap();
             tx_mut.commit().unwrap();
             root

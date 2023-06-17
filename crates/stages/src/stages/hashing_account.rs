@@ -532,7 +532,7 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let mut provider = self.tx.inner();
+                let mut provider = self.tx.inner_rw();
                 let res = Ok(AccountHashingStage::seed(
                     &mut provider,
                     SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },
