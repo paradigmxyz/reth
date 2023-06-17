@@ -67,6 +67,13 @@ impl ParityTraceBuilder {
         graph
     }
 
+    /// Returns an iterator over all nodes to trace
+    ///
+    /// This excludes nodes that represent calls to precompiles.
+    fn iter_traceable_nodes(&self) -> impl Iterator<Item = &CallTraceNode> {
+        self.nodes.iter().filter(|node| !node.is_precompile())
+    }
+
     /// Returns an iterator over all recorded traces  for `trace_transaction`
     pub fn into_localized_transaction_traces_iter(
         self,
@@ -164,15 +171,11 @@ impl ParityTraceBuilder {
             None
         };
 
-        let trace_addresses = self.trace_addresses();
         let mut traces = Vec::with_capacity(if with_traces { self.nodes.len() } else { 0 });
         let mut diff = StateDiff::default();
 
-        for (node, trace_address) in self.nodes.iter().zip(trace_addresses) {
-            // skip precompiles
-            if node.is_precompile() {
-                continue
-            }
+        for node in self.iter_traceable_nodes() {
+            let trace_address = self.trace_address(node.idx);
 
             if with_traces {
                 let trace = node.parity_transaction_trace(trace_address);
