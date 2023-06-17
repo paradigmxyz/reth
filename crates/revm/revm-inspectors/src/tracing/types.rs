@@ -242,6 +242,7 @@ impl CallTraceNode {
     }
 
     /// Returns true if this is a call to a precompile
+    #[inline]
     pub(crate) fn is_precompile(&self) -> bool {
         self.trace.maybe_precompile.unwrap_or(false)
     }
