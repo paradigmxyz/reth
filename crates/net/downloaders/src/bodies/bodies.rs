@@ -200,8 +200,8 @@ where
         self.download_range = RangeInclusive::new(1, 0);
         self.latest_queued_block_number.take();
         self.in_progress_queue.clear();
-        self.queued_bodies.clear();
-        self.buffered_responses.clear();
+        self.queued_bodies = Vec::new();
+        self.buffered_responses = BinaryHeap::new();
         self.num_buffered_blocks = 0;
 
         // reset metrics
@@ -270,6 +270,7 @@ where
     fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse>> {
         if self.queued_bodies.len() >= self.stream_batch_size {
             let next_batch = self.queued_bodies.drain(..self.stream_batch_size).collect::<Vec<_>>();
+            self.queued_bodies.shrink_to_fit();
             self.metrics.total_flushed.increment(next_batch.len() as u64);
             self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
             return Some(next_batch)
@@ -410,6 +411,9 @@ where
                 this.queue_bodies(buf_response);
             }
 
+            // shrink the buffer so that it doesn't grow indefinitely
+            this.buffered_responses.shrink_to_fit();
+
             if !new_request_submitted {
                 break
             }
@@ -422,6 +426,7 @@ where
             }
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size).collect::<Vec<_>>();
+            this.queued_bodies.shrink_to_fit();
             this.metrics.total_flushed.increment(next_batch.len() as u64);
             this.metrics.queued_blocks.set(this.queued_bodies.len() as f64);
             return Poll::Ready(Some(Ok(next_batch)))

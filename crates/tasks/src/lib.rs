@@ -183,7 +183,7 @@ impl Future for TaskManager {
 
 /// Error with the name of the task that panicked.
 #[derive(Debug, thiserror::Error)]
-#[error("Critical task panicked {0}")]
+#[error("Critical task panicked: `{0}`")]
 pub struct PanickedTaskError(&'static str);
 
 /// A type that can spawn new tokio tasks
