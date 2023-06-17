@@ -1,7 +1,10 @@
 use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
-use reth_primitives::Address;
+use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
-use revm::primitives::ExecutionResult;
+use revm::{
+    db::DatabaseRef,
+    primitives::{AccountInfo, ExecutionResult, ResultAndState},
+};
 use std::collections::HashSet;
 
 /// A type for creating parity style traces
@@ -91,6 +94,12 @@ impl ParityTraceBuilder {
 
     /// Consumes the inspector and returns the trace results according to the configured trace
     /// types.
+    ///
+    /// Warning: If `trace_types` contains [TraceType::StateDiff] the returned [StateDiff] will only
+    /// contain accounts with changed state, not including their balance changes because this is not
+    /// tracked during inspection and requires the State map returned after inspection. Use
+    /// [ParityTraceBuilder::into_trace_results_with_state] to populate the balance and nonce
+    /// changes for the [StateDiff] using the [DatabaseRef].
     pub fn into_trace_results(
         self,
         res: ExecutionResult,
@@ -105,6 +114,36 @@ impl ParityTraceBuilder {
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 
         TraceResults { output: output.into(), trace, vm_trace, state_diff }
+    }
+
+    /// Consumes the inspector and returns the trace results according to the configured trace
+    /// types.
+    ///
+    /// This also takes the [DatabaseRef] to populate the balance and nonce changes for the
+    /// [StateDiff].
+    ///
+    /// Note: this is considered a convenience method that takes the state map of
+    /// [ResultAndState] after inspecting a transaction
+    /// with the [TracingInspector](crate::tracing::TracingInspector).
+    pub fn into_trace_results_with_state<DB>(
+        self,
+        res: ResultAndState,
+        trace_types: &HashSet<TraceType>,
+        db: DB,
+    ) -> Result<TraceResults, DB::Error>
+    where
+        DB: DatabaseRef,
+    {
+        let ResultAndState { result, state } = res;
+        let mut trace_res = self.into_trace_results(result, trace_types);
+        if let Some(ref mut state_diff) = trace_res.state_diff {
+            populate_account_balance_nonce_diffs(
+                state_diff,
+                &db,
+                state.into_iter().map(|(addr, acc)| (addr, acc.info)),
+            )?;
+        }
+        Ok(trace_res)
     }
 
     /// Returns the tracing types that are configured in the set
@@ -171,4 +210,40 @@ fn vm_trace(nodes: &[CallTraceNode]) -> VmTrace {
     // TODO: populate vm trace
 
     VmTrace { code: nodes[0].trace.data.clone().into(), ops: vec![] }
+}
+
+/// Loops over all state accounts in the accounts diff that contains all accounts that are included
+/// in the [ExecutionResult] state map and compares the balance and nonce against what's in the
+/// `db`, which should point to the beginning of the transaction.
+///
+/// It's expected that `DB` is a [CacheDB](revm::db::CacheDB) which at this point already contains
+/// all the accounts that are in the state map and never has to fetch them from disk.
+pub fn populate_account_balance_nonce_diffs<DB, I>(
+    state_diff: &mut StateDiff,
+    db: DB,
+    account_diffs: I,
+) -> Result<(), DB::Error>
+where
+    I: IntoIterator<Item = (Address, AccountInfo)>,
+    DB: DatabaseRef,
+{
+    for (addr, changed_acc) in account_diffs.into_iter() {
+        let entry = state_diff.entry(addr).or_default();
+        let db_acc = db.basic(addr)?.unwrap_or_default();
+        entry.balance = if db_acc.balance == changed_acc.balance {
+            Delta::Unchanged
+        } else {
+            Delta::Changed(ChangedType { from: db_acc.balance, to: changed_acc.balance })
+        };
+        entry.nonce = if db_acc.nonce == changed_acc.nonce {
+            Delta::Unchanged
+        } else {
+            Delta::Changed(ChangedType {
+                from: U64::from(db_acc.nonce),
+                to: U64::from(changed_acc.nonce),
+            })
+        };
+    }
+
+    Ok(())
 }
