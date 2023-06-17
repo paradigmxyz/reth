@@ -21,10 +21,8 @@ pub fn test_address() -> SocketAddr {
 }
 
 /// Launches a new server for the auth module
-pub async fn launch_auth(secret: JwtSecret, rpc_max_response_size: u32) -> AuthServerHandle {
-    let config = AuthServerConfig::builder(secret, rpc_max_response_size)
-        .socket_addr(test_address())
-        .build();
+pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
+    let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
     let beacon_engine_handle = BeaconConsensusEngineHandle::new(tx);
     let engine_api = EngineApi::new(
