@@ -53,6 +53,6 @@ pub enum BlockExecutionError {
     #[error("DB Error during transaction execution: {inner:?}")]
     DBError { inner: String },
     #[cfg(feature = "optimism")]
-    #[error("Insufficient funds to cover transaction cost: want {want}, have {have}")]
-    InsufficientFunds { want: u64, have: u64 },
+    #[error("Insufficient funds to cover transaction L1 cost: want {want}, have {have}")]
+    InsufficientFundsForL1Cost { want: u64, have: u64 },
 }
