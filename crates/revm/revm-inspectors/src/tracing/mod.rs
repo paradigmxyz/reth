@@ -373,7 +373,6 @@ where
             inputs.transfer.value
         };
 
-
         // if calls to precompiles should be excluded, check whether this is a call to a precompile
         let maybe_precompile =
             self.config.exclude_precompile_calls.then(|| is_precompile_call(data, &to, value));
