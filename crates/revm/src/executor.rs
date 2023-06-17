@@ -26,6 +26,9 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "optimism")]
+use crate::optimism::OptimismGasCostOracle;
+
 /// Main block executor
 pub struct Executor<DB>
 where
@@ -228,7 +231,7 @@ where
         self.init_env(&block.header, total_difficulty);
 
         #[cfg(feature = "optimism")]
-        let mut l1_cost_oracle = crate::optimism::OptimismGasCostOracle::default();
+        let mut l1_cost_oracle = OptimismGasCostOracle::default();
 
         let mut cumulative_gas_used = 0;
         let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
@@ -246,38 +249,33 @@ where
 
             #[cfg(feature = "optimism")]
             {
-                // Check if the sender balance can cover the total cost including L1 cost
-                // total cost: gas_limit * gas_price + l1_cost
+                // Check if the sender balance can cover the L1 cost
                 let db = self.db();
                 let l1_cost = l1_cost_oracle
-                    .calculate_l1_cost(db, block.header.number, transaction.clone())
+                    .calculate_l1_cost(db, block.header.number, transaction)
                     .map_err(|db_err| Error::DBError { inner: db_err.to_string() })?;
 
                 let sender_account = db.load_account(sender).map_err(|_| Error::ProviderError)?;
                 let old_sender_info = to_reth_acc(&sender_account.info);
                 if let Some(m) = transaction.mint() {
-                    // Add balance to the caller account equivalent to the minted amount
+                    // Add balance to the caller account equal to the minted amount.
+                    // Note: this is unconditional, and will not be reverted if the tx fails.
                     sender_account.info.balance += U256::from(m);
                 }
 
-                // TODO: check if max_fee_per_gas works for 1559 txs here,
-                // for legacy this is the same as gas_price and for deposit this is 0.
-                // If this doesn't work we can replicate revm's effective_gas_price logic here
-                let total_cost = U256::from(transaction.gas_limit())
-                    .saturating_mul(U256::from(transaction.max_fee_per_gas()))
-                    .saturating_add(U256::from(l1_cost));
+                if !transaction.is_deposit() {
+                    if sender_account.info.balance.cmp(&l1_cost) == std::cmp::Ordering::Less {
+                        return Err(Error::InsufficientFundsForL1Cost {
+                            have: sender_account.info.balance.to::<u64>(),
+                            want: l1_cost.to::<u64>(),
+                        })
+                    }
 
-                if sender_account.info.balance.cmp(&total_cost) == std::cmp::Ordering::Less {
-                    return Err(Error::InsufficientFunds {
-                        have: sender_account.info.balance.to::<u64>(),
-                        want: total_cost.to::<u64>(),
-                    })
+                    // Safely take l1_cost from sender (the rest will be deducted by the
+                    // internal EVM execution and included in result.gas_used())
+                    // TODO: need to handle calls with `disable_balance_check` flag set?
+                    sender_account.info.balance -= l1_cost;
                 }
-
-                // Safely take l1_cost from sender (the rest will be deducted by the
-                // EVM execution and included in result.gas_used())
-                // TODO: need to handle calls with `disable_balance_check` flag set?
-                sender_account.info.balance -= l1_cost;
 
                 let new_sender_info = to_reth_acc(&sender_account.info);
                 post_state.change_account(sender, old_sender_info, new_sender_info);
@@ -288,7 +286,7 @@ where
 
             #[cfg(feature = "optimism")]
             if transaction.is_deposit() && !matches!(result, ExecutionResult::Success { .. }) {
-                // If the deposit transaction failed, the deposit must still be included.
+                // If the Deposited transaction failed, the deposit must still be included.
                 // In this case, we need to increment the sender nonce and disregard the
                 // state changes. The tx is invalid so it is also recorded as using all gas.
                 let sender_account =
@@ -306,7 +304,6 @@ where
                     cumulative_gas_used,
                     bloom: Bloom::zero(),
                     logs: vec![],
-                    deposit_nonce: None, // TODO: add correct deposit nonce
                 });
                 post_state.finish_transition();
                 continue
@@ -332,8 +329,6 @@ where
                 cumulative_gas_used,
                 bloom: logs_bloom(logs.iter()),
                 logs,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: None, // TODO: add correct deposit nonce
             });
             post_state.finish_transition();
         }
