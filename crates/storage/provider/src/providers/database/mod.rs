@@ -5,7 +5,7 @@ use crate::{
     ProviderError, StageCheckpointProvider, StateProviderBox, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices, tables, transaction::DbTx};
+use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -246,6 +246,10 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         self.provider()?.senders_by_tx_range(range)
     }
+
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        self.provider()?.transaction_sender(id)
+    }
 }
 
 impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
@@ -316,18 +320,6 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
         self.provider()?.fill_cfg_env_with_header(cfg, header)
     }
-}
-
-/// Get checkpoint for the given stage.
-#[inline]
-pub fn get_stage_checkpoint<'a, TX>(
-    tx: &TX,
-    id: StageId,
-) -> std::result::Result<Option<StageCheckpoint>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    tx.get::<tables::SyncStage>(id.to_string())
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     ChainSpec,
 };
-use reth_provider::ProviderFactory;
+use reth_provider::{ProviderFactory, StageCheckpointProvider};
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{

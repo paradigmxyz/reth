@@ -4,7 +4,7 @@ use reth_db::{
     mdbx::{
         test_utils::{create_test_db, create_test_db_with_path},
         tx::Tx,
-        Env, EnvKind, WriteMap, RW,
+        Env, EnvKind, WriteMap, RO, RW,
     },
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
@@ -16,7 +16,7 @@ use reth_primitives::{
     keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
     MAINNET, U256,
 };
-use reth_provider::{DatabaseProviderRW, ProviderFactory};
+use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, ProviderFactory};
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
@@ -37,7 +37,7 @@ pub struct TestTransaction {
     /// WriteMap DB
     pub tx: Arc<Env<WriteMap>>,
     pub path: Option<PathBuf>,
-    factory: ProviderFactory<Arc<Env<WriteMap>>>,
+    pub factory: ProviderFactory<Arc<Env<WriteMap>>>,
 }
 
 impl Default for TestTransaction {
@@ -59,8 +59,13 @@ impl TestTransaction {
     }
 
     /// Return a database wrapped in [DatabaseProviderRW].
-    pub fn inner(&self) -> DatabaseProviderRW<'_, Arc<Env<WriteMap>>> {
+    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<Env<WriteMap>>> {
         self.factory.provider_rw().expect("failed to create db container")
+    }
+
+    /// Return a database wrapped in [DatabaseProviderRO].
+    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<Env<WriteMap>>> {
+        self.factory.provider().expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
@@ -73,7 +78,7 @@ impl TestTransaction {
     where
         F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
-        let mut tx = self.inner();
+        let mut tx = self.inner_rw();
         f(tx.tx_mut())?;
         tx.commit().expect("failed to commit");
         Ok(())
@@ -82,7 +87,7 @@ impl TestTransaction {
     /// Invoke a callback with a read transaction
     pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, DbError>,
+        F: FnOnce(&Tx<'_, RO, WriteMap>) -> Result<R, DbError>,
     {
         f(self.inner().tx_ref())
     }

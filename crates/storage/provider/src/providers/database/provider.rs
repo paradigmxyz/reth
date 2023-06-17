@@ -43,8 +43,6 @@ use std::{
     sync::Arc,
 };
 
-use super::get_stage_checkpoint;
-
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TX>;
 
@@ -740,8 +738,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
             let parent_number = range.start().saturating_sub(1);
             let parent_state_root = self
-                .tx
-                .get::<tables::Headers>(parent_number)?
+                .header_by_number(parent_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
                 .state_root;
 
@@ -749,8 +746,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
                 let parent_hash = self
-                    .tx
-                    .get::<tables::CanonicalHeaders>(parent_number)?
+                    .block_hash(parent_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
                 return Err(TransactionError::UnwindStateRootMismatch {
                     got: new_state_root,
@@ -1074,14 +1070,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
         }
         Ok(())
-    }
-
-    /// Get the stage checkpoint.
-    pub fn get_stage_checkpoint(
-        &self,
-        id: StageId,
-    ) -> std::result::Result<Option<StageCheckpoint>, DatabaseError> {
-        get_stage_checkpoint(&self.tx, id)
     }
 
     /// Save stage checkpoint.
@@ -1742,6 +1730,10 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .walk_range(range)?
             .map(|entry| entry.map(|sender| sender.1))
             .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        Ok(self.tx.get::<tables::TxSenders>(id)?)
     }
 }
 
