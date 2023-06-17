@@ -15,7 +15,8 @@ use reth_provider::{
 };
 use reth_rpc::{
     eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
+    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
+    JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -116,12 +117,14 @@ where
 }
 
 /// Server configuration for the auth server.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AuthServerConfig {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
     /// The secrete for the auth layer of the server.
     pub(crate) secret: JwtSecret,
+    /// Configs for JSON-RPC Http.
+    pub(crate) server_config: ServerBuilder,
 }
 
 // === impl AuthServerConfig ===
@@ -134,7 +137,7 @@ impl AuthServerConfig {
 
     /// Convenience function to start a server in one step.
     pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
-        let Self { socket_addr, secret } = self;
+        let Self { socket_addr, secret, server_config } = self;
 
         // Create auth middleware.
         let middleware = tower::ServiceBuilder::new()
@@ -142,9 +145,9 @@ impl AuthServerConfig {
 
         // By default, both http and ws are enabled.
         let server =
-            ServerBuilder::new().set_middleware(middleware).build(socket_addr).await.map_err(
-                |err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)),
-            )?;
+            server_config.set_middleware(middleware).build(socket_addr).await.map_err(|err| {
+                RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
+            })?;
 
         let local_addr = server.local_addr()?;
 
@@ -154,10 +157,11 @@ impl AuthServerConfig {
 }
 
 /// Builder type for configuring an `AuthServerConfig`.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
+    server_config: Option<ServerBuilder>,
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -165,7 +169,7 @@ pub struct AuthServerConfigBuilder {
 impl AuthServerConfigBuilder {
     /// Create a new `AuthServerConfigBuilder` with the given `secret`.
     pub fn new(secret: JwtSecret) -> Self {
-        Self { socket_addr: None, secret }
+        Self { socket_addr: None, secret, server_config: None }
     }
 
     /// Set the socket address for the server.
@@ -185,6 +189,16 @@ impl AuthServerConfigBuilder {
         self.secret = secret;
         self
     }
+
+    /// Configures the JSON-RPC server
+    ///
+    /// Note: this always configures an [EthSubscriptionIdProvider]
+    /// [IdProvider](jsonrpsee::server::IdProvider) for convenience.
+    pub fn with_server_config(mut self, config: ServerBuilder) -> Self {
+        self.server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+
     /// Build the `AuthServerConfig`.
     pub fn build(self) -> AuthServerConfig {
         AuthServerConfig {
@@ -192,6 +206,12 @@ impl AuthServerConfigBuilder {
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), constants::DEFAULT_AUTH_PORT)
             }),
             secret: self.secret,
+            server_config: self.server_config.unwrap_or_else(|| {
+                ServerBuilder::new()
+                    // allows for 300mb responses (for large eth_getLogs deposit logs)
+                    .max_response_body_size(300 * 1024 * 1024)
+                    .set_id_provider(EthSubscriptionIdProvider::default())
+            }),
         }
     }
 }
