@@ -268,8 +268,6 @@ impl CallTraceNode {
             }
         }
 
-        // TODO: track nonce and balance changes
-
         // iterate over all storage diffs
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
             let StorageChange { key, value, had_value } = change;

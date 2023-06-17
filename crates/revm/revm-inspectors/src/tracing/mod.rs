@@ -25,7 +25,10 @@ use crate::tracing::{
     arena::PushTraceKind,
     types::{CallTraceNode, StorageChange},
 };
-pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
+pub use builder::{
+    geth::{self, GethTraceBuilder},
+    parity::{self, ParityTraceBuilder},
+};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
