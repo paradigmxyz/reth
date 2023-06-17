@@ -3,7 +3,7 @@ use crate::{
     post_state::StorageChangeset,
     traits::{AccountExtProvider, BlockSource, ReceiptProvider, StageCheckpointWriter},
     AccountProvider, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, PostState, ProviderError, StageCheckpointProvider, TransactionError,
+    HeaderProvider, PostState, ProviderError, StageCheckpointReader, TransactionError,
     TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -1839,7 +1839,7 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> StageCheckpointProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> StageCheckpointReader for DatabaseProvider<'this, TX> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(self.tx.get::<tables::SyncStage>(id.to_string())?)
     }

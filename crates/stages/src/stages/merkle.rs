@@ -13,8 +13,7 @@ use reth_primitives::{
     BlockNumber, SealedHeader, H256,
 };
 use reth_provider::{
-    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointProvider,
-    StageCheckpointWriter,
+    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;

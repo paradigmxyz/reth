@@ -1,7 +1,7 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
-    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointProvider,
+    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointReader,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
     WithdrawalsProvider,
 };
@@ -311,7 +311,7 @@ impl StateProviderFactory for NoopProvider {
     }
 }
 
-impl StageCheckpointProvider for NoopProvider {
+impl StageCheckpointReader for NoopProvider {
     fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(None)
     }
