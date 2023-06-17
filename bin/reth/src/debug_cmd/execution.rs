@@ -26,7 +26,7 @@ use reth_interfaces::{
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
-use reth_provider::{ProviderFactory, StageCheckpointProvider};
+use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_staged_sync::utils::init::{init_db, init_genesis};
 use reth_stages::{
     sets::DefaultStages,

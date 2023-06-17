@@ -42,7 +42,7 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Head, SealedHeader, H256};
 use reth_provider::{
     BlockHashProvider, BlockProvider, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
-    StageCheckpointProvider,
+    StageCheckpointReader,
 };
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;

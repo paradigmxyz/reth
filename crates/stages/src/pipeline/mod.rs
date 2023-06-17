@@ -6,7 +6,7 @@ use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
     BlockNumber, ChainSpec, H256,
 };
-use reth_provider::{ProviderFactory, StageCheckpointProvider};
+use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;

@@ -46,4 +46,4 @@ pub use chain::{
 };
 
 mod stage_checkpoint;
-pub use stage_checkpoint::StageCheckpointProvider;
+pub use stage_checkpoint::{StageCheckpointReader, StageCheckpointWriter};

@@ -2,7 +2,7 @@ use crate::{
     BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
-    ReceiptProvider, StageCheckpointProvider, StateProviderBox, StateProviderFactory,
+    ReceiptProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
@@ -344,13 +344,17 @@ where
     }
 }
 
-impl<DB, Tree> StageCheckpointProvider for BlockchainProvider<DB, Tree>
+impl<DB, Tree> StageCheckpointReader for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: Send + Sync,
 {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         self.database.provider()?.get_stage_checkpoint(id)
+    }
+
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
+        self.database.provider()?.get_stage_checkpoint_progress(id)
     }
 }
 
