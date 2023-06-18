@@ -103,13 +103,13 @@ pub trait StateProviderFactory: BlockIdProvider + Send + Sync {
     /// Returns a [StateProvider] indexed by the given [BlockId].
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox<'_>> {
         match block_id {
-            BlockId::Number(block_number) => self.history_by_block_number_or_tag(block_number),
+            BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
             BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
         }
     }
 
     /// Returns a [StateProvider] indexed by the given block number or tag.
-    fn history_by_block_number_or_tag(
+    fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
     ) -> Result<StateProviderBox<'_>> {
@@ -160,6 +160,13 @@ pub trait StateProviderFactory: BlockIdProvider + Send + Sync {
     /// Represents the state at the block that extends the canonical chain by one.
     /// If there's no `pending` block, then this is equal to [StateProviderFactory::latest]
     fn pending(&self) -> Result<StateProviderBox<'_>>;
+
+    /// Storage provider for pending state for the given block hash.
+    ///
+    /// Represents the state at the block that extends the canonical chain.
+    ///
+    /// If the block couldn't be found, returns `None`.
+    fn pending_state_by_hash(&self, block_hash: H256) -> Result<Option<StateProviderBox<'_>>>;
 
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
