@@ -11,7 +11,7 @@ const DB_VERSION_FILE_NAME: &str = "database.version";
 const DB_VERSION: u64 = 1;
 
 #[derive(thiserror::Error, Debug)]
-enum DatabaseVersionError {
+pub(crate) enum DatabaseVersionError {
     #[error(
         "Reth (v{}) is unable to determine the version of the database, file is missing.",
         CLIENT_VERSION.to_string()
@@ -29,20 +29,24 @@ enum DatabaseVersionError {
         DB_VERSION.to_string()
     )]
     VersionMismatch { version: u64 },
+    #[error(transparent)]
+    IOError(#[from] io::Error),
 }
 
-pub(crate) fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> eyre::Result<()> {
+pub(crate) fn check_db_version_file<P: AsRef<Path>>(
+    db_path: P,
+) -> Result<(), DatabaseVersionError> {
     match fs::read_to_string(db_version_file_path(db_path)) {
         Ok(raw_version) => {
             let version =
                 raw_version.parse::<u64>().map_err(|_| DatabaseVersionError::MalformedFile)?;
             if version != DB_VERSION {
-                return Err(DatabaseVersionError::VersionMismatch { version }.into())
+                return Err(DatabaseVersionError::VersionMismatch { version })
             }
         }
         Err(error) => {
             return match error.kind() {
-                io::ErrorKind::NotFound => Err(DatabaseVersionError::MissingFile.into()),
+                io::ErrorKind::NotFound => Err(DatabaseVersionError::MissingFile),
                 _ => Err(error.into()),
             }
         }
@@ -77,11 +81,7 @@ mod tests {
         let dir = tempdir().unwrap();
 
         let result = check_db_version_file(&dir);
-        assert!(result.is_err());
-        assert_matches!(
-            result.unwrap_err().downcast_ref::<DatabaseVersionError>(),
-            Some(DatabaseVersionError::MissingFile)
-        );
+        assert_matches!(result, Err(DatabaseVersionError::MissingFile));
     }
 
     #[test]
@@ -90,11 +90,7 @@ mod tests {
         fs::write(db_version_file_path(&dir), "invalid-version").unwrap();
 
         let result = check_db_version_file(&dir);
-        assert!(result.is_err());
-        assert_matches!(
-            result.unwrap_err().downcast_ref::<DatabaseVersionError>(),
-            Some(DatabaseVersionError::MalformedFile)
-        );
+        assert_matches!(result, Err(DatabaseVersionError::MalformedFile));
     }
 
     #[test]
@@ -103,10 +99,6 @@ mod tests {
         fs::write(db_version_file_path(&dir), "0").unwrap();
 
         let result = check_db_version_file(&dir);
-        assert!(result.is_err());
-        assert_matches!(
-            result.unwrap_err().downcast_ref::<DatabaseVersionError>(),
-            Some(DatabaseVersionError::VersionMismatch { version: 0 })
-        );
+        assert_matches!(result, Err(DatabaseVersionError::VersionMismatch { version: 0 }));
     }
 }

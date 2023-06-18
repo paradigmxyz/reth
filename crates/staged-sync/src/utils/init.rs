@@ -1,6 +1,6 @@
 use crate::utils::versioning::{
     client::update_client_version_file,
-    db::{check_db_version_file, create_db_version_file},
+    db::{check_db_version_file, create_db_version_file, DatabaseVersionError},
 };
 use reth_db::{
     cursor::DbCursorRO,
@@ -20,7 +20,11 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
         fs::create_dir_all(&path)?;
         create_db_version_file(&path)?;
     } else {
-        check_db_version_file(&path)?;
+        match check_db_version_file(&path) {
+            Ok(_) => (),
+            Err(DatabaseVersionError::MissingFile) => create_db_version_file(&path)?,
+            Err(err) => return Err(err.into()),
+        }
     }
     update_client_version_file(&path)?;
 

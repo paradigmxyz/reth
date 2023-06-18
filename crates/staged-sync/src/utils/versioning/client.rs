@@ -32,8 +32,8 @@ enum ClientVersionError {
 /// Updates a client version file with [CLIENT_VERSION_FILE_NAME] name.
 ///
 /// If the version in the last line matches current client version [CLIENT_VERSION], don't do
-/// anything. Otherwise, append new line containing [CLIENT_VERSION] with the current unix timestamp
-/// in seconds.
+/// anything. If it doesn't match or the last line is unparseable, append new line containing
+/// [CLIENT_VERSION] with the current unix timestamp in seconds.
 ///
 /// This function will create a file if it does not exist.
 pub(crate) fn update_client_version_file<P: AsRef<Path>>(db_path: P) -> eyre::Result<()> {
