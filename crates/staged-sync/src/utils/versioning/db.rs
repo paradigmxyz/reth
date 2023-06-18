@@ -43,16 +43,12 @@ pub(crate) fn check_db_version_file<P: AsRef<Path>>(
             if version != DB_VERSION {
                 return Err(DatabaseVersionError::VersionMismatch { version })
             }
-        }
-        Err(error) => {
-            return match error.kind() {
-                io::ErrorKind::NotFound => Err(DatabaseVersionError::MissingFile),
-                _ => Err(error.into()),
-            }
-        }
-    }
 
-    Ok(())
+            Ok(())
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Err(DatabaseVersionError::MissingFile),
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Creates a database version file with [DB_VERSION_FILE_NAME] name containing [DB_VERSION] string.
