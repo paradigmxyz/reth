@@ -255,7 +255,7 @@ table!(
 );
 
 table!(
-    /// Storages pointers to block numbers at which the particular address emitted the log.
+    /// Stores pointers to block numbers at which the particular address emitted the log.
     ///
     /// Last shard key will contain `u64::MAX` `BlockNumber`,
     /// this allows small optimization on searching the last shard for a given address.
@@ -265,7 +265,7 @@ table!(
 );
 
 table!(
-    /// Storages pointers to block numbers at which logs with particular topics occurred.
+    /// Stores pointers to block numbers at which logs with particular topics occurred.
     ///
     /// Last shard key will contain `u64::MAX` `BlockNumber`,
     /// this allows small optimization on searching the last shard for a given topic.

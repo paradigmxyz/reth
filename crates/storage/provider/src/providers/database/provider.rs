@@ -108,7 +108,7 @@ impl<'this, TX: DbTxMut<'this>> DatabaseProvider<'this, TX> {
 /// T - Table to walk over.
 /// C - Cursor implementation.
 ///
-/// This function walks the entries from the given start keys and deletes all shards that belong to
+/// This function walks the entries from the given start key and deletes all shards that belong to
 /// the key and are below the given block number.
 ///
 /// The boundary shard (the shard is split by the block number) is removed from the database. Any
