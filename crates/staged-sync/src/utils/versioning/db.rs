@@ -23,7 +23,7 @@ enum DatabaseVersionError {
     )]
     MalformedFile,
     #[error(
-        "Reth (v{}) has detected a breaking database change.\
+        "Reth (v{}) has detected a breaking database change. \
             Your database version (v{version}) is incompatible with the latest database version (v{}).",
         CLIENT_VERSION.to_string(),
         DB_VERSION.to_string()
