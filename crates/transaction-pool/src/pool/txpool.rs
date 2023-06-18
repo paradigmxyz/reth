@@ -985,7 +985,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 tx_b_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
                 tx_a_max_priority_fee_per_gas != 0 &&
                 tx_b_max_priority_fee_per_gas != 0) ||
-            transaction_a.effective_gas_price() < transaction_b.effective_gas_price()
+            transaction_a.effective_gas_price() <= transaction_b.effective_gas_price()
     }
 
     /// Inserts a new transaction into the pool.
