@@ -20,7 +20,7 @@ use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Header, SealedBlock,
     SealedHeader, H256, U256,
 };
-use reth_provider::CanonStateNotificationSender;
+use reth_provider::{BlockProviderIdExt, CanonStateNotificationSender};
 use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -88,7 +88,10 @@ pub struct AutoSealBuilder<Client, Pool> {
 
 // === impl AutoSealBuilder ===
 
-impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool> {
+impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool>
+where
+    Client: BlockProviderIdExt,
+{
     /// Creates a new builder instance to configure all parts.
     pub fn new(
         chain_spec: Arc<ChainSpec>,
@@ -97,9 +100,15 @@ impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool> {
         to_engine: UnboundedSender<BeaconEngineMessage>,
         canon_state_notification: CanonStateNotificationSender,
     ) -> Self {
+        let latest_header = client
+            .latest_header()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| chain_spec.sealed_genesis_header());
         let mode = MiningMode::interval(std::time::Duration::from_secs(1));
+
         Self {
-            storage: Storage::new(&chain_spec),
+            storage: Storage::new(latest_header),
             client,
             consensus: AutoSealConsensus::new(chain_spec),
             pool,
@@ -116,6 +125,7 @@ impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool> {
     }
 
     /// Consumes the type and returns all components
+    #[track_caller]
     pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool>) {
         let Self { client, consensus, pool, mode, storage, to_engine, canon_state_notification } =
             self;
@@ -142,11 +152,14 @@ pub(crate) struct Storage {
 // == impl Storage ===
 
 impl Storage {
-    fn new(chain_spec: &ChainSpec) -> Self {
-        let header = chain_spec.genesis_header();
-        let best_hash = header.hash_slow();
-        let mut storage =
-            StorageInner { best_hash, total_difficulty: header.difficulty, ..Default::default() };
+    fn new(header: SealedHeader) -> Self {
+        let (header, best_hash) = header.split();
+        let mut storage = StorageInner {
+            best_hash,
+            total_difficulty: header.difficulty,
+            best_block: header.number,
+            ..Default::default()
+        };
         storage.headers.insert(0, header);
         storage.bodies.insert(best_hash, BlockBody::default());
         Self { inner: Arc::new(RwLock::new(storage)) }
