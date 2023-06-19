@@ -80,31 +80,29 @@
 //! [`Pool`](crate::Pool) type is just an `Arc` wrapper around `PoolInner`. This is the usable type
 //! that provides the `TransactionPool` interface.
 
-pub use crate::{
-    config::PoolConfig,
-    ordering::{CostOrdering, TransactionOrdering},
-    pool::TransactionEvents,
-    traits::{
-        AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        PoolTransaction, PooledTransaction, PropagateKind, PropagatedTransactions,
-        TransactionOrigin, TransactionPool,
-    },
-    validate::{
-        EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
-        ValidPoolTransaction,
-    },
-};
-use crate::{
-    error::PoolResult,
-    pool::PoolInner,
-    traits::{NewTransactionEvent, PoolSize},
-};
+use crate::pool::PoolInner;
 use aquamarine as _;
 use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
+
+pub use crate::{
+    config::PoolConfig,
+    error::PoolResult,
+    ordering::{CostOrdering, TransactionOrdering},
+    pool::TransactionEvents,
+    traits::{
+        AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
+        NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
+        PropagatedTransactions, TransactionOrigin, TransactionPool,
+    },
+    validate::{
+        EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
+        ValidPoolTransaction,
+    },
+};
 
 mod config;
 pub mod error;
