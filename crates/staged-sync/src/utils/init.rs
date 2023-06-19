@@ -1,3 +1,4 @@
+use eyre::WrapErr;
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
@@ -17,7 +18,9 @@ use tracing::debug;
 /// Opens up an existing database or creates a new one at the specified path.
 pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
     if is_database_empty(&path) {
-        fs::create_dir_all(&path)?;
+        fs::create_dir_all(&path).wrap_err_with(|| {
+            format!("Could not create database directory {}", path.as_ref().display())
+        })?;
         create_db_version_file(&path)?;
     } else {
         match check_db_version_file(&path) {

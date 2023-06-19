@@ -25,8 +25,8 @@ pub enum DatabaseVersionError {
         DB_VERSION.to_string()
     )]
     VersionMismatch { version: u64 },
-    #[error(transparent)]
-    IOError(#[from] io::Error),
+    #[error("IO error occurred while reading {path}: {err}")]
+    IORead { err: io::Error, path: PathBuf },
 }
 
 /// Checks the database version file with [DB_VERSION_FILE_NAME] name.
@@ -34,7 +34,8 @@ pub enum DatabaseVersionError {
 /// Returns [Ok] if file is found and has one line which equals to [DB_VERSION].
 /// Otherwise, returns different [DatabaseVersionError] error variants.
 pub fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), DatabaseVersionError> {
-    match fs::read_to_string(db_version_file_path(db_path)) {
+    let version_file_path = db_version_file_path(db_path);
+    match fs::read_to_string(&version_file_path) {
         Ok(raw_version) => {
             let version =
                 raw_version.parse::<u64>().map_err(|_| DatabaseVersionError::MalformedFile)?;
@@ -45,7 +46,7 @@ pub fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), DatabaseV
             Ok(())
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => Err(DatabaseVersionError::MissingFile),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(DatabaseVersionError::IORead { err, path: version_file_path }),
     }
 }
 
