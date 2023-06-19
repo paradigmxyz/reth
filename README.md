@@ -9,9 +9,10 @@
 
 ![](./assets/reth.jpg)
 
-**[User Book](https://paradigmxyz.github.io/reth)**
-| **[Developer Docs](./docs)**
-| **[Crate Docs](https://paradigmxyz.github.io/reth/docs)**
+**[Install](https://https://paradigmxyz.github.io/reth/installation/installation.html)**
+| [User Book](https://paradigmxyz.github.io/reth)
+| [Developer Docs](./docs)
+| [Crate Docs](https://paradigmxyz.github.io/reth/docs)
 
 *The project is still work in progress, see the [disclaimer below](#status).*
 
