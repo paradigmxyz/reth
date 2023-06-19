@@ -276,18 +276,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
 
         Ok(storage_changeset_lists)
     }
-
-    /// Get plainstate account from iterator
-    pub fn get_plainstate_accounts(
-        &self,
-        iter: impl IntoIterator<Item = Address>,
-    ) -> std::result::Result<Vec<(Address, Option<Account>)>, TransactionError> {
-        let mut plain_accounts = self.tx.cursor_read::<tables::PlainAccountState>()?;
-        Ok(iter
-            .into_iter()
-            .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
-    }
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
@@ -1296,7 +1284,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         // account hashing stage
         {
             let lists = self.changed_accounts_with_range(range.clone())?;
-            let accounts = self.get_plainstate_accounts(lists.into_iter())?;
+            let accounts = self.basic_accounts(lists.into_iter())?;
             self.insert_account_for_hashing(accounts.into_iter())?;
         }
 
