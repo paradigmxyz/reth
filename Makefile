@@ -167,5 +167,5 @@ db-tools:
 		mv mdbx_stat $(FULL_DB_TOOLS_DIR)
     # `IOARENA=1` silences benchmarking info message that is printed to stderr
 	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make IOARENA=1 clean > /dev/null
-	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_stat -h\" for the info about MDBX db file."
-	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk -h\" for the MDBX db file integrity check."
+	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_stat\" for the info about MDBX db file."
+	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
