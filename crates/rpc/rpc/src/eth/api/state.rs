@@ -9,7 +9,7 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    AccountProvider, BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory,
+    AccountReader, BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};

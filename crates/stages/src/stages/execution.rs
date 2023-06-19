@@ -422,9 +422,7 @@ mod tests {
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
         ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
     };
-    use reth_provider::{
-        insert_canonical_block, AccountProvider, ProviderFactory, ReceiptProvider,
-    };
+    use reth_provider::{insert_canonical_block, AccountReader, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
     use reth_rlp::Decodable;
     use std::sync::Arc;
