@@ -64,10 +64,28 @@ jobs:
         run: |
           mv target/doc target/book/docs
 
-      - name: Save pages artifact
-        uses: actions/upload-pages-artifact@v1
+      - name: Archive artifact
+        shell: sh
+        run: |
+          chmod -c -R +rX "target/book" |
+          while read line; do
+             echo "::warning title=Invalid file permissions automatically fixed::$line"
+          done
+          tar \
+            --dereference --hard-dereference \
+            --directory "target/book" \
+            -cvf "$RUNNER_TEMP/artifact.tar" \
+            --exclude=.git \
+            --exclude=.github \
+            .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
         with:
-          path: target/book
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     # Only deploy if a push to main
