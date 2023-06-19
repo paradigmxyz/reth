@@ -1,7 +1,9 @@
 # Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
 
-GIT_TAG := $(shell git describe --tags --abbrev=0)
+GIT_TAG ?= $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
+DB_TOOLS_DIR = "db-tools"
+FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
 BUILD_PATH = "target"
 
@@ -148,3 +150,14 @@ clean:
 	cargo clean
 	rm -rf $(BIN_DIR)
 	rm -rf $(EF_TESTS_DIR)
+
+# Compile MDBX debugging tools
+.PHONY: db-tools
+db-tools:
+	@echo "Building MDBX debugging tools"
+	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make tools
+	@mkdir -p $(DB_TOOLS_DIR)
+	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && cp mdbx_chk $(FULL_DB_TOOLS_DIR) && cp mdbx_copy $(FULL_DB_TOOLS_DIR) && cp mdbx_dump $(FULL_DB_TOOLS_DIR) && cp mdbx_drop $(FULL_DB_TOOLS_DIR) && cp mdbx_load $(FULL_DB_TOOLS_DIR) && cp mdbx_stat $(FULL_DB_TOOLS_DIR)
+	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make clean
+	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_stat -h\" for the info about MDBX db file."
+	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk -h\" for the MDBX db file integrity check."
