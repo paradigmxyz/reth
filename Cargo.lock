@@ -5097,6 +5097,7 @@ name = "reth-db"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "assert_matches",
  "async-trait",
  "bytes",
  "criterion",
@@ -5127,6 +5128,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "vergen",
 ]
 
 [[package]]
@@ -5772,7 +5774,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "vergen",
  "walkdir",
 ]
 

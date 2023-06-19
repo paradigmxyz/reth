@@ -71,6 +71,11 @@ serde_json = { workspace = true }
 
 paste = "1.0"
 
+assert_matches = "1.5.0"
+
+[build-dependencies]
+vergen = { version = "8.0.0", features = ["git", "gitcl"] }
+
 [features]
 default = ["mdbx"]
 test-utils = ["tempfile", "arbitrary"]

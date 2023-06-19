@@ -1,4 +1,5 @@
-use crate::utils::versioning::client::CLIENT_VERSION;
+//! Database version utils.
+
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -7,25 +8,20 @@ use std::{
 /// The name of the file that contains the version of the database.
 const DB_VERSION_FILE_NAME: &str = "database.version";
 /// The version of the database stored in the [DB_VERSION_FILE_NAME] file in the same directory as
-/// database. Example: `1`
+/// database. Example: `1`.
 const DB_VERSION: u64 = 1;
 
+/// Error when checking a database version using [check_db_version_file]
+#[allow(missing_docs)]
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum DatabaseVersionError {
-    #[error(
-        "Reth (v{}) is unable to determine the version of the database, file is missing.",
-        CLIENT_VERSION.to_string()
-    )]
+pub enum DatabaseVersionError {
+    #[error("Unable to determine the version of the database, file is missing.")]
     MissingFile,
-    #[error(
-        "Reth (v{}) is unable to determine the version of the database, file is malformed.",
-        CLIENT_VERSION.to_string()
-    )]
+    #[error("Unable to determine the version of the database, file is malformed.")]
     MalformedFile,
     #[error(
-        "Reth (v{}) has detected a breaking database change. \
+    "Breaking database change detected. \
             Your database version (v{version}) is incompatible with the latest database version (v{}).",
-        CLIENT_VERSION.to_string(),
         DB_VERSION.to_string()
     )]
     VersionMismatch { version: u64 },
@@ -33,9 +29,11 @@ pub(crate) enum DatabaseVersionError {
     IOError(#[from] io::Error),
 }
 
-pub(crate) fn check_db_version_file<P: AsRef<Path>>(
-    db_path: P,
-) -> Result<(), DatabaseVersionError> {
+/// Checks the database version file with [DB_VERSION_FILE_NAME] name.
+///
+/// Returns [Ok] if file is found and has one line which equals to [DB_VERSION].
+/// Otherwise, returns different [DatabaseVersionError] error variants.
+pub fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), DatabaseVersionError> {
     match fs::read_to_string(db_version_file_path(db_path)) {
         Ok(raw_version) => {
             let version =
@@ -55,19 +53,18 @@ pub(crate) fn check_db_version_file<P: AsRef<Path>>(
 ///
 /// This function will create a file if it does not exist,
 /// and will entirely replace its contents if it does.
-pub(crate) fn create_db_version_file<P: AsRef<Path>>(db_path: P) -> io::Result<()> {
+pub fn create_db_version_file<P: AsRef<Path>>(db_path: P) -> io::Result<()> {
     fs::write(db_version_file_path(db_path), DB_VERSION.to_string())
 }
 
-fn db_version_file_path<P: AsRef<Path>>(db_path: P) -> PathBuf {
+/// Returns a database version file path.
+pub fn db_version_file_path<P: AsRef<Path>>(db_path: P) -> PathBuf {
     db_path.as_ref().join(DB_VERSION_FILE_NAME)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::versioning::db::{
-        check_db_version_file, db_version_file_path, DatabaseVersionError,
-    };
+    use super::{check_db_version_file, db_version_file_path, DatabaseVersionError};
     use assert_matches::assert_matches;
     use std::fs;
     use tempfile::tempdir;
