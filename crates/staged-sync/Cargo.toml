@@ -81,6 +81,7 @@ secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recov
 confy = "0.5"
 
 tempfile = "3.4"
+assert_matches = "1.5.0"
 
 [features]
 test-utils = [
