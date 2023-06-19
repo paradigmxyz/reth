@@ -44,8 +44,8 @@ use tracing::*;
 pub enum MerkleStage {
     /// The execution portion of the merkle stage.
     Execution {
-        /// The threshold for switching from incremental trie building
-        /// of changes to whole rebuild. Num of transitions.
+        /// The threshold (in number of blocks) for switching from incremental trie building
+        /// of changes to whole rebuild.
         clean_threshold: u64,
     },
     /// The unwind portion of the merkle stage.
@@ -58,14 +58,19 @@ pub enum MerkleStage {
 }
 
 impl MerkleStage {
-    /// Stage default for the Execution variant.
+    /// Stage default for the [MerkleStage::Execution].
     pub fn default_execution() -> Self {
         Self::Execution { clean_threshold: 50_000 }
     }
 
-    /// Stage default for the Unwind variant.
+    /// Stage default for the [MerkleStage::Unwind].
     pub fn default_unwind() -> Self {
         Self::Unwind
+    }
+
+    /// Create new instance of [MerkleStage::Execution].
+    pub fn new_execution(clean_threshold: u64) -> Self {
+        Self::Execution { clean_threshold }
     }
 
     /// Check that the computed state root matches the root in the expected header.

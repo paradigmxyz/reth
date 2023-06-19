@@ -51,14 +51,26 @@ impl Config {
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
-    /// Total difficulty stage configuration
+    /// Total Difficulty stage configuration
     pub total_difficulty: TotalDifficultyConfig,
     /// Body stage configuration.
     pub bodies: BodiesConfig,
-    /// Sender recovery stage configuration.
+    /// Sender Recovery stage configuration.
     pub sender_recovery: SenderRecoveryConfig,
     /// Execution stage configuration.
     pub execution: ExecutionConfig,
+    /// Account Hashing stage configuration.
+    pub account_hashing: HashingConfig,
+    /// Storage Hashing stage configuration.
+    pub storage_hashing: HashingConfig,
+    /// Merkle stage configuration.
+    pub merkle: MerkleConfig,
+    /// Transaction Lookup stage configuration.
+    pub transaction_lookup: TransactionLookupConfig,
+    /// Index Account History stage configuration.
+    pub index_account_history: IndexHistoryConfig,
+    /// Index Storage History stage configuration.
+    pub index_storage_history: IndexHistoryConfig,
 }
 
 /// Header stage configuration.
@@ -201,6 +213,66 @@ pub struct ExecutionConfig {
 impl Default for ExecutionConfig {
     fn default() -> Self {
         Self { max_blocks: Some(500_000), max_changes: Some(5_000_000) }
+    }
+}
+
+/// Hashing stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct HashingConfig {
+    /// The threshold (in number of blocks) for switching between
+    /// incremental hashing and full hashing.
+    pub clean_threshold: u64,
+    /// The maximum number of entities to process before committing progress to the database.
+    pub commit_threshold: u64,
+}
+
+impl Default for HashingConfig {
+    fn default() -> Self {
+        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+    }
+}
+
+/// Merkle stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct MerkleConfig {
+    /// The threshold (in number of blocks) for switching from incremental trie building of changes
+    /// to whole rebuild.
+    pub clean_threshold: u64,
+}
+
+impl Default for MerkleConfig {
+    fn default() -> Self {
+        Self { clean_threshold: 50_000 }
+    }
+}
+
+/// Transaction Lookup stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct TransactionLookupConfig {
+    /// The maximum number of transactions to process before committing progress to the database.
+    pub commit_threshold: u64,
+}
+
+impl Default for TransactionLookupConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 5_000_000 }
+    }
+}
+
+/// History History stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct IndexHistoryConfig {
+    /// The maximum number of blocks to process before committing progress to the database.
+    pub commit_threshold: u64,
+}
+
+impl Default for IndexHistoryConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 100_000 }
     }
 }
 
