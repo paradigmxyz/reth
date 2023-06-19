@@ -244,44 +244,6 @@ impl ChainSpec {
         &self.hardforks
     }
 
-    /// Returns a list of activated forks in a container to pretty-print them.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use reth_primitives::MAINNET;
-    /// println!("{}", MAINNET.display_hardforks().to_string());
-    /// ```
-    ///
-    /// An example of the output:
-    ///
-    /// ```text
-    /// Pre-merge hard forks (block based):
-    // - Frontier                         @0
-    // - Homestead                        @1150000
-    // - Dao                              @1920000
-    // - Tangerine                        @2463000
-    // - SpuriousDragon                   @2675000
-    // - Byzantium                        @4370000
-    // - Constantinople                   @7280000
-    // - Petersburg                       @7280000
-    // - Istanbul                         @9069000
-    // - MuirGlacier                      @9200000
-    // - Berlin                           @12244000
-    // - London                           @12965000
-    // - ArrowGlacier                     @13773000
-    // - GrayGlacier                      @15050000
-    // Merge hard forks:
-    // - Paris                            @58750000000000000000000 (network is not known to be
-    //   merged)
-    //
-    // Post-merge hard forks (timestamp based):
-    // - Shanghai                         @1681338455
-    /// ```
-    pub fn display_hardforks(&self) -> HardforkList {
-        HardforkList::from(self.hardforks.clone().into_iter())
-    }
-
     /// Get the fork condition for the given fork.
     pub fn fork(&self, fork: Hardfork) -> ForkCondition {
         self.hardforks.get(&fork).copied().unwrap_or(ForkCondition::Never)
@@ -803,9 +765,40 @@ impl Display for DisplayFork {
 
 /// A container for pretty-printing a list of hardforks.
 ///
-/// See [`ChainSpec::display_hardforks`] for more information.
+/// # Example
+///
+/// ```
+/// # use reth_primitives::MAINNET;
+/// # use reth_primitives::DisplayHardforks;
+/// println!("{}", DisplayHardforks::from(MAINNET.hardforks().clone()));
+/// ```
+///
+/// An example of the output:
+///
+/// ```text
+/// Pre-merge hard forks (block based):
+// - Frontier                         @0
+// - Homestead                        @1150000
+// - Dao                              @1920000
+// - Tangerine                        @2463000
+// - SpuriousDragon                   @2675000
+// - Byzantium                        @4370000
+// - Constantinople                   @7280000
+// - Petersburg                       @7280000
+// - Istanbul                         @9069000
+// - MuirGlacier                      @9200000
+// - Berlin                           @12244000
+// - London                           @12965000
+// - ArrowGlacier                     @13773000
+// - GrayGlacier                      @15050000
+// Merge hard forks:
+// - Paris                            @58750000000000000000000 (network is not known to be merged)
+//
+// Post-merge hard forks (timestamp based):
+// - Shanghai                         @1681338455
+/// ```
 #[derive(Debug)]
-pub struct HardforkList {
+pub struct DisplayHardforks {
     /// A list of pre-merge (block based) hardforks
     pre_merge: Vec<DisplayFork>,
     /// A list of merge (TTD based) hardforks
@@ -814,7 +807,7 @@ pub struct HardforkList {
     post_merge: Vec<DisplayFork>,
 }
 
-impl Display for HardforkList {
+impl Display for DisplayHardforks {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Pre-merge hard forks (block based):")?;
         for fork in self.pre_merge.iter() {
@@ -839,7 +832,7 @@ impl Display for HardforkList {
     }
 }
 
-impl<I> From<I> for HardforkList
+impl<I> From<I> for DisplayHardforks
 where
     I: IntoIterator<Item = (Hardfork, ForkCondition)>,
 {
@@ -873,8 +866,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId,
-        Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA, U256,
+        AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
+        ForkHash, ForkId, Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA, U256,
     };
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
@@ -893,7 +886,7 @@ mod tests {
     #[test]
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
-            MAINNET.display_hardforks().to_string(),
+            DisplayHardforks::from(MAINNET.hardforks().clone()).to_string(),
             r##"Pre-merge hard forks (block based):
 - Frontier                         @0
 - Homestead                        @1150000
@@ -927,7 +920,7 @@ Post-merge hard forks (timestamp based):
             .with_fork(Hardfork::Shanghai, ForkCondition::Never)
             .build();
         assert_eq!(
-            spec.display_hardforks().to_string(),
+            DisplayHardforks::from(spec.hardforks().clone()).to_string(),
             r##"Pre-merge hard forks (block based):
 - Frontier                         @0
 "##

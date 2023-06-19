@@ -76,6 +76,7 @@ use crate::{
 };
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::DisplayHardforks;
 use reth_provider::providers::BlockchainProvider;
 use reth_stages::stages::{
     AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
@@ -171,7 +172,7 @@ impl Command {
 
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", self.chain.display_hardforks());
+        info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
