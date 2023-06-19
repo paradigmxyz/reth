@@ -599,7 +599,7 @@ mod tests {
     /// Unwinds a simple pipeline.
     #[tokio::test]
     async fn unwind_pipeline() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let tx = TestTransaction::default();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -618,7 +618,7 @@ mod tests {
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .build(tx.inner_raw(), MAINNET.clone());
         let events = pipeline.events();
 
         // Run pipeline
