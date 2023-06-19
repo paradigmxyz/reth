@@ -1,6 +1,6 @@
 [package]
 name = "reth-primitives"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ description = "Commonly used types in reth."
 # reth
 reth-rlp = { workspace = true, features = ["std", "derive", "ethereum-types"] }
 reth-rlp-derive = { path = "../rlp/rlp-derive" }
-reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
+reth-codecs = { path = "../storage/codecs" }
 
 revm-primitives = { workspace = true, features = ["serde"] }
 

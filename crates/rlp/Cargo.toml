@@ -1,6 +1,6 @@
 [package]
 name = "reth-rlp"
-version = "0.1.2"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0"
@@ -16,7 +16,7 @@ ethnum = { version = "1", default-features = false, optional = true }
 smol_str = { version = "0.1", default-features = false, optional = true }
 ethereum-types = { version = "0.14", features = ["codec"], optional = true }
 revm-primitives = { workspace = true, features = ["serde"] }
-reth-rlp-derive = { version = "0.1", path = "./rlp-derive", optional = true }
+reth-rlp-derive = {  path = "./rlp-derive", optional = true }
 
 [dev-dependencies]
 reth-rlp = { workspace = true, features = [
