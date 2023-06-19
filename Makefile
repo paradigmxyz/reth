@@ -2,6 +2,8 @@
 
 GIT_TAG ?= $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
+
+MDBX_PATH = "crates/storage/libmdbx-rs/mdbx-sys/libmdbx"
 DB_TOOLS_DIR = "db-tools"
 FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
@@ -156,9 +158,9 @@ clean:
 db-tools:
 	@echo "Building MDBX debugging tools..."
     # `IOARENA=1` silences benchmarking info message that is printed to stderr
-	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make IOARENA=1 tools > /dev/null
+	@$(MAKE) -C $(MDBX_PATH) IOARENA=1 tools > /dev/null
 	@mkdir -p $(DB_TOOLS_DIR)
-	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && \
+	@cd $(MDBX_PATH) && \
 		mv mdbx_chk $(FULL_DB_TOOLS_DIR) && \
 		mv mdbx_copy $(FULL_DB_TOOLS_DIR) && \
 		mv mdbx_dump $(FULL_DB_TOOLS_DIR) && \
@@ -166,6 +168,6 @@ db-tools:
 		mv mdbx_load $(FULL_DB_TOOLS_DIR) && \
 		mv mdbx_stat $(FULL_DB_TOOLS_DIR)
     # `IOARENA=1` silences benchmarking info message that is printed to stderr
-	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make IOARENA=1 clean > /dev/null
+	@$(MAKE) -C $(MDBX_PATH) IOARENA=1 clean > /dev/null
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_stat\" for the info about MDBX db file."
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
