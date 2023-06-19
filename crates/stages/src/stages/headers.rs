@@ -82,7 +82,8 @@ where
 
     /// Get the head and tip of the range we need to sync
     ///
-    /// See also [SyncTarget]
+    /// See also [SyncTarget] for enum variant descriptions and [HeaderStage::next_sync_target] for
+    /// `MARK_TIP_SEEN` description.
     async fn get_sync_gap<DB: Database, const MARK_TIP_SEEN: bool>(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
@@ -127,6 +128,17 @@ where
         Ok(SyncGap { local_head, target })
     }
 
+    /// If `MARK_TIP_SEEN` is `true`, we first wait for the tip to arrive, then mark it as seen and
+    /// return it as a sync target. Next call with `MARK_TIP_SEEN = true` will wait for another tip
+    /// to arrive.
+    ///
+    /// If `MARK_TIP_SEEN` is `false`, we grab any tip that's in the channel (even if it's empty)
+    /// and don't mark it as seen. Next call with `MARK_TIP_SEEN = true` will wait for the tip
+    /// to arrive just as it was never seen before.
+    ///
+    /// Main usage scenario for `MARK_TIP_SEEN = false` is to check the stage completion according
+    /// to the tip in [HeaderStage::is_execute_done] while not disrupting the further execution of
+    /// the stage.
     async fn next_sync_target<const MARK_TIP_SEEN: bool>(
         &mut self,
         head: BlockNumber,
