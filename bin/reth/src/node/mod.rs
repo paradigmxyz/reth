@@ -171,6 +171,8 @@ impl Command {
 
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
+        info!(target: "reth::cli", "{}", self.chain.display_hardforks());
+
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
             Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
