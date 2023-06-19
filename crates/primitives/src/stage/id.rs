@@ -5,17 +5,17 @@
 #[allow(missing_docs)]
 pub enum StageId {
     Headers,
+    TotalDifficulty,
     Bodies,
     SenderRecovery,
-    TotalDifficulty,
+    Execution,
+    MerkleUnwind,
     AccountHashing,
     StorageHashing,
-    IndexAccountHistory,
-    IndexStorageHistory,
     MerkleExecute,
-    MerkleUnwind,
-    Execution,
     TransactionLookup,
+    IndexStorageHistory,
+    IndexAccountHistory,
     Finish,
     Other(&'static str),
 }
@@ -24,17 +24,17 @@ impl StageId {
     /// All supported Stages
     pub const ALL: [StageId; 13] = [
         StageId::Headers,
+        StageId::TotalDifficulty,
         StageId::Bodies,
         StageId::SenderRecovery,
-        StageId::TotalDifficulty,
+        StageId::Execution,
+        StageId::MerkleUnwind,
         StageId::AccountHashing,
         StageId::StorageHashing,
-        StageId::IndexAccountHistory,
-        StageId::IndexStorageHistory,
         StageId::MerkleExecute,
-        StageId::MerkleUnwind,
-        StageId::Execution,
         StageId::TransactionLookup,
+        StageId::IndexStorageHistory,
+        StageId::IndexAccountHistory,
         StageId::Finish,
     ];
 
@@ -42,17 +42,17 @@ impl StageId {
     pub fn as_str(&self) -> &str {
         match self {
             StageId::Headers => "Headers",
+            StageId::TotalDifficulty => "TotalDifficulty",
             StageId::Bodies => "Bodies",
             StageId::SenderRecovery => "SenderRecovery",
-            StageId::TotalDifficulty => "TotalDifficulty",
+            StageId::Execution => "Execution",
+            StageId::MerkleUnwind => "MerkleUnwind",
             StageId::AccountHashing => "AccountHashing",
             StageId::StorageHashing => "StorageHashing",
+            StageId::MerkleExecute => "MerkleExecute",
+            StageId::TransactionLookup => "TransactionLookup",
             StageId::IndexAccountHistory => "IndexAccountHistory",
             StageId::IndexStorageHistory => "IndexStorageHistory",
-            StageId::MerkleExecute => "MerkleExecute",
-            StageId::MerkleUnwind => "MerkleUnwind",
-            StageId::Execution => "Execution",
-            StageId::TransactionLookup => "TransactionLookup",
             StageId::Finish => "Finish",
             StageId::Other(s) => s,
         }
