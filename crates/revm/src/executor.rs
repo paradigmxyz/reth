@@ -17,7 +17,7 @@ use revm::{
     db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
         hash_map::{self, Entry},
-        Account as RevmAccount, AccountInfo, ExecutionResult, ResultAndState,
+        Account as RevmAccount, AccountInfo, ResultAndState,
     },
     EVM,
 };
@@ -285,7 +285,7 @@ where
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
             #[cfg(feature = "optimism")]
-            if transaction.is_deposit() && !matches!(result, ExecutionResult::Success { .. }) {
+            if transaction.is_deposit() && !result.is_success() {
                 // If the Deposited transaction failed, the deposit must still be included.
                 // In this case, we need to increment the sender nonce and disregard the
                 // state changes. The tx is invalid so it is also recorded as using all gas.
@@ -320,9 +320,9 @@ where
             );
 
             #[cfg(feature = "optimism")]
-            if transaction.is_deposit() {
-                cumulative_gas_used += transaction.gas_limit()
-            } else {
+            if !transaction.is_system_transaction() {
+                // After Regolith, deposits are reported as using the actual gas used instead of
+                // all the gas. System transactions are not reported as using any gas.
                 cumulative_gas_used += result.gas_used()
             }
 
