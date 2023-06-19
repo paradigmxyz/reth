@@ -222,27 +222,24 @@ pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithS
 
 impl<'a> fmt::Display for DisplayBlocksChain<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let block_len = self.0.len();
-
-        if block_len == 0 {
-            return Ok(())
-        }
-
-        write!(f, "[{:?}", self.0.iter().next().unwrap().1.num_hash())?;
-        if block_len > 1 {
-            write!(f, ", ")?;
-            for block in self.0.iter().skip(1).take(block_len - 1) {
-                let block_num_hash = block.1.num_hash();
-                write!(
-                    f,
-                    "({:?}, {:?}...), ",
-                    block_num_hash.number,
-                    block_num_hash.hash.to_string().truncate(10)
-                )?;
+        if self.0.len() <= 3 {
+            write!(f, "[")?;
+            let mut iter = self.0.values().map(|block| block.num_hash());
+            if let Some(block_num_hash) = iter.next() {
+                write!(f, "{:?}", block_num_hash)?;
+                for block_num_hash_iter in iter {
+                    write!(f, ", {:?}", block_num_hash_iter)?;
+                }
             }
-            write!(f, "{:?}", self.0.iter().last().unwrap().1.num_hash())?;
+            write!(f, "]")?;
+        } else {
+            write!(
+                f,
+                "[{:?}, ..., {:?}]",
+                self.0.values().next().unwrap().num_hash(),
+                self.0.values().last().unwrap().num_hash()
+            )?;
         }
-        write!(f, "]")?;
 
         Ok(())
     }
