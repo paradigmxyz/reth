@@ -61,13 +61,14 @@ pub(crate) mod sync;
 use crate::engine::forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
 pub use event::BeaconConsensusEngineEvent;
 use reth_interfaces::blockchain_tree::InsertPayloadOk;
+use reth_primitives::constants::EPOCH_SLOTS;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
 /// for more information.
-pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = 128;
+pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = 2 * EPOCH_SLOTS;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
