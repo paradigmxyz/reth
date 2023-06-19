@@ -14,6 +14,13 @@ pub struct IndexStorageHistoryStage {
     pub commit_threshold: u64,
 }
 
+impl IndexStorageHistoryStage {
+    /// Create new instance of [IndexStorageHistoryStage].
+    pub fn new(commit_threshold: u64) -> Self {
+        Self { commit_threshold }
+    }
+}
+
 impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
         Self { commit_threshold: 100_000 }
