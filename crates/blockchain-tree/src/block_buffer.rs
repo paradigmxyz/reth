@@ -4,6 +4,8 @@ use std::{
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
     num::NonZeroUsize,
 };
+
+use crate::metrics::BlockBufferMetrics;
 /// Type that contains blocks by number and hash.
 pub type BufferedBlocks = BTreeMap<BlockNumber, HashMap<BlockHash, SealedBlockWithSenders>>;
 
@@ -35,6 +37,8 @@ pub struct BlockBuffer {
     ///
     /// Used as counter of amount of blocks inside buffer.
     pub(crate) lru: LruCache<BlockNumHash, ()>,
+    /// Various metrics for the block buffer.
+    pub(crate) metrics: BlockBufferMetrics,
 }
 
 impl BlockBuffer {
@@ -45,6 +49,7 @@ impl BlockBuffer {
             parent_to_child: Default::default(),
             hash_to_num: Default::default(),
             lru: LruCache::new(NonZeroUsize::new(limit).unwrap()),
+            metrics: Default::default(),
         }
     }
 
