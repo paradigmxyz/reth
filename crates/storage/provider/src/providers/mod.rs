@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
-    blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
+    blockchain_tree::{BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::ForkchoiceState,
     Error, Result,
 };
@@ -37,7 +37,9 @@ mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use database::*;
 pub use post_state_provider::PostStateProvider;
-use reth_interfaces::blockchain_tree::{error::InsertBlockError, CanonicalOutcome};
+use reth_interfaces::blockchain_tree::{
+    error::InsertBlockError, CanonicalOutcome, InsertPayloadOk,
+};
 
 /// The main type for interacting with the blockchain.
 ///
@@ -537,7 +539,7 @@ where
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
-    ) -> std::result::Result<BlockStatus, InsertBlockError> {
+    ) -> std::result::Result<InsertPayloadOk, InsertBlockError> {
         self.tree.insert_block(block)
     }
 
