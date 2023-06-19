@@ -34,16 +34,23 @@ pub enum DatabaseVersionError {
 /// Returns [Ok] if file is found and has one line which equals to [DB_VERSION].
 /// Otherwise, returns different [DatabaseVersionError] error variants.
 pub fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), DatabaseVersionError> {
+    let version = get_db_version(db_path)?;
+    if version != DB_VERSION {
+        return Err(DatabaseVersionError::VersionMismatch { version })
+    }
+
+    Ok(())
+}
+
+/// Returns the database version from file with [DB_VERSION_FILE_NAME] name.
+///
+/// Returns [Ok] if file is found and contains a valid version.
+/// Otherwise, returns different [DatabaseVersionError] error variants.
+pub fn get_db_version<P: AsRef<Path>>(db_path: P) -> Result<u64, DatabaseVersionError> {
     let version_file_path = db_version_file_path(db_path);
     match fs::read_to_string(&version_file_path) {
         Ok(raw_version) => {
-            let version =
-                raw_version.parse::<u64>().map_err(|_| DatabaseVersionError::MalformedFile)?;
-            if version != DB_VERSION {
-                return Err(DatabaseVersionError::VersionMismatch { version })
-            }
-
-            Ok(())
+            Ok(raw_version.parse::<u64>().map_err(|_| DatabaseVersionError::MalformedFile)?)
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => Err(DatabaseVersionError::MissingFile),
         Err(err) => Err(DatabaseVersionError::IORead { err, path: version_file_path }),
