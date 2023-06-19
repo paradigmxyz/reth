@@ -4,8 +4,8 @@ use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::InsertBlockError, BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer,
-        CanonicalOutcome,
+        error::InsertBlockError, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+        InsertPayloadOk,
     },
     consensus::Consensus,
     Error,
@@ -44,7 +44,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         self.tree.write().buffer_block(block)
     }
 
-    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError> {
+    fn insert_block(
+        &self,
+        block: SealedBlockWithSenders,
+    ) -> Result<InsertPayloadOk, InsertBlockError> {
         trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
         self.tree.write().insert_block(block)
     }

@@ -21,7 +21,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn insert_block_without_senders(
         &self,
         block: SealedBlock,
-    ) -> Result<BlockStatus, InsertBlockError> {
+    ) -> Result<InsertPayloadOk, InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.insert_block(block),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
@@ -43,7 +43,10 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError>;
 
     /// Insert block with senders
-    fn insert_block(&self, block: SealedBlockWithSenders) -> Result<BlockStatus, InsertBlockError>;
+    fn insert_block(
+        &self,
+        block: SealedBlockWithSenders,
+    ) -> Result<InsertPayloadOk, InsertBlockError>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     fn finalize_block(&self, finalized_block: BlockNumber);
@@ -133,6 +136,18 @@ pub enum BlockStatus {
         /// The lowest parent block that is not connected to the canonical chain.
         missing_parent: BlockNumHash,
     },
+}
+
+/// How a payload was inserted if it was valid.
+///
+/// If the payload was valid, but has already been seen, [`InsertPayloadOk::AlreadySeen(_)`] is
+/// returned, otherwise [`InsertPayloadOk::Inserted(_)`] is returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InsertPayloadOk {
+    /// The payload was valid, but we have already seen it.
+    AlreadySeen(BlockStatus),
+    /// The payload was valid and inserted into the tree.
+    Inserted(BlockStatus),
 }
 
 /// Allows read only functionality on the blockchain tree.
