@@ -5045,6 +5045,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "reth-db",
  "reth-interfaces",
+ "reth-metrics",
  "reth-primitives",
  "reth-provider",
  "tokio",

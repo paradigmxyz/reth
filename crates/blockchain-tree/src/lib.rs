@@ -34,4 +34,6 @@ pub use post_state_data::{PostStateData, PostStateDataRef};
 pub mod block_buffer;
 mod canonical_chain;
 
+pub mod metrics;
+
 pub use block_buffer::BlockBuffer;
