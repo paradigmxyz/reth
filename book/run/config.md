@@ -11,11 +11,17 @@ The default data directory is platform dependent:
 The configuration file contains the following sections:
 
 - [`[stages]`](#the-stages-section) -- Configuration of the individual sync stages
-    - [`headers`](#headers)
-    - [`total_difficulty`](#total_difficulty)
-    - [`bodies`](#bodies)
-    - [`sender_recovery`](#sender_recovery)
-    - [`execution`](#execution)
+  - [`headers`](#headers)
+  - [`total_difficulty`](#total_difficulty)
+  - [`bodies`](#bodies)
+  - [`sender_recovery`](#sender_recovery)
+  - [`execution`](#execution)
+  - [`account_hashing`](#account_hashing)
+  - [`storage_hashing`](#storage_hashing)
+  - [`merkle`](#merkle)
+  - [`transaction_lookup`](#transaction_lookup)
+  - [`index_account_history`](#index_account_history)
+  - [`index_storage_history`](#index_storage_history)
 - [`[peers]`](#the-peers-section)
 - [`[sessions]`](#the-sessions-section)
 
@@ -137,6 +143,93 @@ Either one of `max_blocks` or `max_changes` must be specified, and both can also
 - If both are specified, then the first threshold to be hit will determine when the results are written to disk.
 
 Lower values correspond to more frequent disk writes, but also lower memory consumption. A lower value also negatively impacts sync speed, since reth keeps a cache around for the entire duration of blocks executed in the same range.
+
+### `account_hashing`
+
+The account hashing stage builds a secondary table of accounts, where the key is the hash of the address instead of the raw address.
+
+This is used to later compute the state root.
+
+```toml
+[stages.account_hashing]
+# The threshold in number of blocks before the stage starts from scratch
+# and re-hashes all accounts as opposed to just the accounts that changed.
+clean_threshold = 500000
+# The amount of accounts to process before writing the results to disk.
+#
+# Lower thresholds correspond to more frequent disk I/O (writes),
+# but lowers memory usage
+commit_threshold = 100000
+```
+
+### `storage_hashing`
+
+The account hashing stage builds a secondary table of account storages, where the key is the hash of the address and the slot, instead of the raw address and slot.
+
+This is used to later compute the state root.
+
+```toml
+[stages.storage_hashing]
+# The threshold in number of blocks before the stage starts from scratch
+# and re-hashes all storages as opposed to just the storages that changed.
+clean_threshold = 500000
+# The amount of storage slots to process before writing the results to disk.
+#
+# Lower thresholds correspond to more frequent disk I/O (writes),
+# but lowers memory usage
+commit_threshold = 100000
+```
+
+### `merkle`
+
+The merkle stage uses the indexes built in the hashing stages (storage and account hashing) to compute the state root of the latest block.
+
+```toml
+[stages.merkle]
+# The threshold in number of blocks before the stage starts from scratch
+# and re-computes the state root, discarding the trie that has already been built,
+# as opposed to incrementally updating the trie.
+clean_threshold = 50000
+```
+
+### `transaction_lookup`
+
+The transaction lookup stage builds an index of transaction hashes to their sequential transaction ID.
+
+```toml
+[stages.transaction_lookup]
+# The maximum number of transactions to process before writing the results to disk.
+#
+# Lower thresholds correspond to more frequent disk I/O (writes),
+# but lowers memory usage
+commit_threshold = 5000000
+```
+
+### `index_account_history`
+
+The account history indexing stage builds an index of what blocks a particular account changed.
+
+```toml
+[stages.index_account_history]
+# The maximum amount of blocks to process before writing the results to disk.
+#
+# Lower thresholds correspond to more frequent disk I/O (writes),
+# but lowers memory usage
+commit_threshold = 100000
+```
+
+### `index_storage_history`
+
+The storage history indexing stage builds an index of what blocks a particular storage slot changed.
+
+```toml
+[stages.index_storage_history]
+# The maximum amount of blocks to process before writing the results to disk.
+#
+# Lower thresholds correspond to more frequent disk I/O (writes),
+# but lowers memory usage
+commit_threshold = 100000
+```
 
 ## The `[peers]` section
 
