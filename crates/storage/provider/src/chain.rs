@@ -6,7 +6,7 @@ use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TxHash,
 };
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, fmt};
 
 /// A chain of blocks and their final state.
 ///
@@ -214,6 +214,37 @@ impl Chain {
             canonical: Chain { state: canonical_state, blocks: self.blocks },
             pending: Chain { state: self.state, blocks: higher_number_blocks },
         }
+    }
+}
+
+/// Wrapper type for `blocks` display in `Chain`
+pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders>);
+
+impl<'a> fmt::Display for DisplayBlocksChain<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let block_len = self.0.len();
+
+        if block_len == 0 {
+            return Ok(())
+        }
+
+        write!(f, "[{:?}", self.0.iter().next().unwrap().1.num_hash())?;
+        if block_len > 1 {
+            write!(f, ", ")?;
+            for block in self.0.iter().skip(1).take(block_len - 1) {
+                let block_num_hash = block.1.num_hash();
+                write!(
+                    f,
+                    "({:?}, {:?}...), ",
+                    block_num_hash.number,
+                    block_num_hash.hash.to_string().truncate(10)
+                )?;
+            }
+            write!(f, "{:?}", self.0.iter().last().unwrap().1.num_hash())?;
+        }
+        write!(f, "]")?;
+
+        Ok(())
     }
 }
 
