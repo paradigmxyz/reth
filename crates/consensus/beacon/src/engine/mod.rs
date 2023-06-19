@@ -915,7 +915,10 @@ where
                 // not known to be invalid, but we don't know anything else
                 PayloadStatusEnum::Syncing
             }
-            InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => PayloadStatusEnum::Valid,
+            InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
+                latest_valid_hash = Some(block_hash);
+                PayloadStatusEnum::Valid
+            }
             InsertPayloadOk::AlreadySeen(BlockStatus::Accepted) => PayloadStatusEnum::Accepted,
         };
         Ok(PayloadStatus::new(status, latest_valid_hash))
