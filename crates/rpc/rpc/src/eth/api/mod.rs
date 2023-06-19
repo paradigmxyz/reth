@@ -177,21 +177,14 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
 {
-    fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
-        self.provider().convert_block_number(num)
-    }
-
     /// Returns the state at the given [BlockId] enum.
     pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
-        match at {
-            BlockId::Hash(hash) => Ok(self.state_at_hash(hash.into())?),
-            BlockId::Number(num) => {
-                self.state_at_block_number(num)?.ok_or(EthApiError::UnknownBlockNumber)
-            }
-        }
+        Ok(self.provider().state_by_block_id(at)?)
     }
 
     /// Returns the state at the given [BlockId] enum or the latest.
+    ///
+    /// Convenience function to interprets `None` as `BlockId::Number(BlockNumberOrTag::Latest)`
     pub fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
@@ -203,31 +196,9 @@ where
         }
     }
 
-    /// Returns the state at the given [BlockNumberOrTag] enum
-    ///
-    /// Returns `None` if no state available.
-    pub fn state_at_block_number(
-        &self,
-        num: BlockNumberOrTag,
-    ) -> Result<Option<StateProviderBox<'_>>> {
-        if let Some(number) = self.convert_block_number(num)? {
-            self.state_at_number(number).map(Some)
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Returns the state at the given block number
     pub fn state_at_hash(&self, block_hash: H256) -> Result<StateProviderBox<'_>> {
         self.provider().history_by_block_hash(block_hash)
-    }
-
-    /// Returns the state at the given block number
-    pub fn state_at_number(&self, block_number: u64) -> Result<StateProviderBox<'_>> {
-        match self.convert_block_number(BlockNumberOrTag::Latest)? {
-            Some(num) if num == block_number => self.latest_state(),
-            _ => self.provider().history_by_block_number(block_number),
-        }
     }
 
     /// Returns the _latest_ state

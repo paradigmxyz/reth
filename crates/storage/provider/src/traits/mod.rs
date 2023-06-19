@@ -1,7 +1,7 @@
 //! Collection of common provider traits.
 
 mod account;
-pub use account::{AccountExtProvider, AccountProvider};
+pub use account::{AccountExtReader, AccountReader, AccountWriter};
 
 mod block;
 pub use block::{BlockProvider, BlockProviderIdExt, BlockSource};
@@ -46,4 +46,4 @@ pub use chain::{
 };
 
 mod stage_checkpoint;
-pub use stage_checkpoint::StageCheckpointProvider;
+pub use stage_checkpoint::{StageCheckpointReader, StageCheckpointWriter};

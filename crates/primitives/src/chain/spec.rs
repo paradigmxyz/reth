@@ -221,11 +221,11 @@ impl ChainSpec {
         }
     }
 
-    /// Returns the final difficulty if the given block number is after the Paris hardfork.
+    /// Returns the final total difficulty if the given block number is after the Paris hardfork.
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this
     /// edge case is omitted here.
-    pub fn final_paris_difficulty(&self, block_number: u64) -> Option<U256> {
+    pub fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
         self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
             if block_number >= activated_at {
                 Some(final_difficulty)

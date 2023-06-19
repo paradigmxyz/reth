@@ -1,6 +1,6 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
+    AccountReader, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
     WithdrawalsProvider,
@@ -219,6 +219,10 @@ impl TransactionsProvider for MockEthProvider {
     ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
         unimplemented!()
     }
+
+    fn transaction_sender(&self, _id: TxNumber) -> Result<Option<Address>> {
+        unimplemented!()
+    }
 }
 
 impl ReceiptProvider for MockEthProvider {
@@ -358,7 +362,7 @@ impl BlockProviderIdExt for MockEthProvider {
     }
 }
 
-impl AccountProvider for MockEthProvider {
+impl AccountReader for MockEthProvider {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         Ok(self.accounts.lock().get(&address).cloned().map(|a| a.account))
     }
@@ -458,6 +462,10 @@ impl StateProviderFactory for MockEthProvider {
         todo!()
     }
 
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
+        todo!()
+    }
+
     fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
@@ -484,6 +492,10 @@ impl StateProviderFactory for Arc<MockEthProvider> {
     }
 
     fn pending(&self) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
         todo!()
     }
 

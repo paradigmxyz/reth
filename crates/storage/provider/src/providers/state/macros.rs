@@ -23,7 +23,7 @@ pub(crate) use delegate_impls_to_as_ref;
 
 /// Delegates the provider trait implementations to the `as_ref` function of the type:
 ///
-/// [AccountProvider](crate::AccountProvider)
+/// [AccountReader](crate::AccountReader)
 /// [BlockHashProvider](crate::BlockHashProvider)
 /// [StateProvider](crate::StateProvider)
 macro_rules! delegate_provider_impls {
@@ -33,7 +33,7 @@ macro_rules! delegate_provider_impls {
             StateRootProvider $(where [$($generics)*])? {
                 fn state_root(&self, state: crate::PostState) -> reth_interfaces::Result<reth_primitives::H256>;
             }
-            AccountProvider $(where [$($generics)*])? {
+            AccountReader $(where [$($generics)*])? {
                 fn basic_account(&self, address: reth_primitives::Address) -> reth_interfaces::Result<Option<reth_primitives::Account>>;
             }
             BlockHashProvider $(where [$($generics)*])? {

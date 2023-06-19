@@ -4,7 +4,7 @@ use reth_primitives::{
     constants, BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock,
     SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
 };
-use reth_provider::{AccountProvider, HeaderProvider, WithdrawalsProvider};
+use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
 use std::{
     collections::{hash_map::Entry, HashMap},
     time::SystemTime,
@@ -120,7 +120,7 @@ pub fn validate_transaction_regarding_header(
 /// There is no gas check done as [REVM](https://github.com/bluealloy/revm/blob/fd0108381799662098b7ab2c429ea719d6dfbf28/crates/revm/src/evm_impl.rs#L113-L131) already checks that.
 pub fn validate_all_transaction_regarding_block_and_nonces<
     'a,
-    Provider: HeaderProvider + AccountProvider,
+    Provider: HeaderProvider + AccountReader,
 >(
     transactions: impl Iterator<Item = &'a TransactionSignedEcRecovered>,
     header: &Header,
@@ -363,7 +363,7 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider
 }
 
 /// Full validation of block before execution.
-pub fn full_validation<Provider: HeaderProvider + AccountProvider + WithdrawalsProvider>(
+pub fn full_validation<Provider: HeaderProvider + AccountReader + WithdrawalsProvider>(
     block: &SealedBlock,
     provider: Provider,
     chain_spec: &ChainSpec,
@@ -444,7 +444,7 @@ mod tests {
         }
     }
 
-    impl AccountProvider for Provider {
+    impl AccountReader for Provider {
         fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
             Ok(self.account)
         }

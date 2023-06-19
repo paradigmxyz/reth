@@ -21,7 +21,7 @@ use reth_primitives::{
     SealedHeader, H256, U256,
 };
 use reth_provider::{
-    BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointProvider,
+    BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
@@ -210,7 +210,7 @@ pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
-    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointProvider,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointReader,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -238,11 +238,7 @@ where
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine
-        + BlockProvider
-        + CanonChainTracker
-        + StageCheckpointProvider
-        + 'static,
+    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointReader + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -1235,7 +1231,7 @@ where
     BT: BlockchainTreeEngine
         + BlockProvider
         + CanonChainTracker
-        + StageCheckpointProvider
+        + StageCheckpointReader
         + Unpin
         + 'static,
 {

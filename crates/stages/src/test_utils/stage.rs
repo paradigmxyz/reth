@@ -4,7 +4,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     MAINNET,
 };
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, StageCheckpointWriter};
 use std::collections::VecDeque;
 
 #[derive(Debug)]
@@ -33,11 +33,11 @@ impl TestStage {
         if let Some(checkpoint) = checkpoint {
             provider
                 .save_stage_checkpoint(self.id, checkpoint)
-                .unwrap_or_else(|_| panic!("save stage {} checkpoint", self.id))
+                .unwrap_or_else(|_| panic!("save stage {} checkpoint", self.id));
         } else {
             provider
                 .delete_stage_checkpoint(self.id)
-                .unwrap_or_else(|_| panic!("delete stage {} checkpoint", self.id))
+                .unwrap_or_else(|_| panic!("delete stage {} checkpoint", self.id));
         }
 
         provider.commit().expect("provider commit");
