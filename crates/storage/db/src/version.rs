@@ -6,10 +6,10 @@ use std::{
 };
 
 /// The name of the file that contains the version of the database.
-const DB_VERSION_FILE_NAME: &str = "database.version";
+pub const DB_VERSION_FILE_NAME: &str = "database.version";
 /// The version of the database stored in the [DB_VERSION_FILE_NAME] file in the same directory as
 /// database. Example: `1`.
-const DB_VERSION: u64 = 1;
+pub const DB_VERSION: u64 = 1;
 
 /// Error when checking a database version using [check_db_version_file]
 #[allow(missing_docs)]
