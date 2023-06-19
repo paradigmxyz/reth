@@ -2,7 +2,11 @@
 
 Reth places a configuration file named `reth.toml` in the data directory specified when starting the node. It is written in the [TOML] format.
 
-The default data directory is platform dependent and can be found by running `reth node --help`.
+The default data directory is platform dependent:
+
+- Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+- Windows: `{FOLDERID_RoamingAppData}/reth/`
+- macOS: `$HOME/Library/Application Support/reth/`
 
 The configuration file contains the following sections:
 
