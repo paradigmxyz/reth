@@ -303,6 +303,10 @@ impl StateProviderFactory for NoopProvider {
         Ok(Box::new(*self))
     }
 
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
+        Ok(Some(Box::new(*self)))
+    }
+
     fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
