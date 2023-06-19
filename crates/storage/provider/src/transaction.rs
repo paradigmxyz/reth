@@ -39,6 +39,9 @@ pub enum TransactionError {
         /// Block hash
         block_hash: BlockHash,
     },
+    /// Internal interfaces error
+    #[error("Internal error")]
+    InternalError(#[from] reth_interfaces::Error),
 }
 
 #[cfg(test)]

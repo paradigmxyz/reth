@@ -35,6 +35,7 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkId, PeerId, H256,
 };
+use reth_rlp::{RlpDecodable, RlpEncodable};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -1967,13 +1968,73 @@ pub enum DiscoveryUpdate {
     Batch(Vec<DiscoveryUpdate>),
 }
 
+/// Represents a forward-compatible ENR entry for including the forkid in a node record via
+/// EIP-868. Forward compatibility is achieved by allowing trailing fields.
+///
+/// See:
+/// <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L27-L38>
+///
+/// for how geth implements ForkId values and forward compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
+pub struct EnrForkIdEntry {
+    /// The inner forkid
+    pub fork_id: ForkId,
+}
+
+impl From<ForkId> for EnrForkIdEntry {
+    fn from(fork_id: ForkId) -> Self {
+        Self { fork_id }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use rand::{thread_rng, Rng};
     use reth_primitives::{hex_literal::hex, mainnet_nodes, ForkHash};
+    use reth_rlp::{Decodable, Encodable};
     use std::{future::poll_fn, net::Ipv4Addr};
+
+    #[tokio::test]
+    async fn test_configured_enr_forkid_entry() {
+        let fork: ForkId = ForkId { hash: ForkHash([220, 233, 108, 45]), next: 0u64 };
+        let mut disc_conf = Discv4Config::default();
+        disc_conf.add_eip868_pair("eth", EnrForkIdEntry::from(fork));
+        let (_discv4, service) = create_discv4_with_config(disc_conf).await;
+        let eth = service.local_eip_868_enr.get_raw_rlp(b"eth").unwrap();
+        let fork_entry_id = EnrForkIdEntry::decode(&mut &eth[..]).unwrap();
+
+        let raw: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        let decoded = EnrForkIdEntry::decode(&mut &raw[..]).unwrap();
+        let expected = EnrForkIdEntry {
+            fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+        };
+        assert_eq!(expected, fork_entry_id);
+        assert_eq!(expected, decoded);
+    }
+
+    #[test]
+    fn test_enr_forkid_entry_decode() {
+        let raw: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        let decoded = EnrForkIdEntry::decode(&mut &raw[..]).unwrap();
+        let expected = EnrForkIdEntry {
+            fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+        };
+        assert_eq!(expected, decoded);
+    }
+
+    #[test]
+    fn test_enr_forkid_entry_encode() {
+        let original = EnrForkIdEntry {
+            fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+        };
+        let mut encoded = Vec::new();
+        original.encode(&mut encoded);
+        let expected: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        assert_eq!(&expected[..], encoded.as_slice());
+    }
 
     #[test]
     fn test_local_rotator() {

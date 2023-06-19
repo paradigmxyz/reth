@@ -16,11 +16,11 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    Block, BlockNumber, BlockWithSenders, Header, TransactionSigned, U256,
+    BlockNumber, Header, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, BlockProvider, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, ProviderError, WithdrawalsProvider,
+    HeaderProvider, LatestStateProviderRef, ProviderError,
 };
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
@@ -84,59 +84,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         Self::new(executor_factory, ExecutionStageThresholds::default())
     }
 
-    // TODO(joshie): This should be in the block provider trait once we consolidate
-    fn read_block_with_senders<DB: Database>(
-        provider: &DatabaseProviderRW<'_, &DB>,
-        block_number: BlockNumber,
-    ) -> Result<(BlockWithSenders, U256), StageError> {
-        let header = provider
-            .header_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        let td = provider
-            .header_td_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        let ommers = provider.ommers(block_number.into())?.unwrap_or_default();
-        let withdrawals = provider.withdrawals_by_block(block_number.into(), header.timestamp)?;
-
-        // Get the block body
-        let body = provider.block_body_indices(block_number)?;
-        let tx_range = body.tx_num_range();
-
-        // Get the transactions in the body
-        let tx = provider.tx_ref();
-        let (transactions, senders) = if tx_range.is_empty() {
-            (Vec::new(), Vec::new())
-        } else {
-            let transactions = tx
-                .cursor_read::<tables::Transactions>()?
-                .walk_range(tx_range.clone())?
-                .map(|entry| entry.map(|tx| tx.1))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let senders = tx
-                .cursor_read::<tables::TxSenders>()?
-                .walk_range(tx_range)?
-                .map(|entry| entry.map(|sender| sender.1))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            (transactions, senders)
-        };
-
-        let body = transactions
-            .into_iter()
-            .map(|tx| {
-                TransactionSigned {
-                    // TODO: This is the fastest way right now to make everything just work with
-                    // a dummy transaction hash.
-                    hash: Default::default(),
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                }
-            })
-            .collect();
-        Ok((Block { header, body, ommers, withdrawals }.with_senders(senders), td))
-    }
-
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &self,
@@ -162,7 +109,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Execute block range
         let mut state = PostState::default();
         for block_number in start_block..=max_block {
-            let (block, td) = Self::read_block_with_senders(provider, block_number)?;
+            let td = provider
+                .header_td_by_number(block_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            let block = provider
+                .block_with_senders(block_number)?
+                .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
@@ -470,7 +422,7 @@ mod tests {
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
         ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
     };
-    use reth_provider::{insert_canonical_block, ProviderFactory};
+    use reth_provider::{insert_canonical_block, AccountReader, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
     use reth_rlp::Decodable;
     use std::sync::Arc;
@@ -672,8 +624,9 @@ mod tests {
             },
             done: true
         } if processed == total && total == block.gas_used);
-        let mut provider = factory.provider_rw().unwrap();
-        let tx = provider.tx_mut();
+
+        let provider = factory.provider().unwrap();
+
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
         let account1_info =
@@ -693,24 +646,24 @@ mod tests {
 
         // assert accounts
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account1),
+            provider.basic_account(account1),
             Ok(Some(account1_info)),
             "Post changed of a account"
         );
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account2),
+            provider.basic_account(account2),
             Ok(Some(account2_info)),
             "Post changed of a account"
         );
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account3),
+            provider.basic_account(account3),
             Ok(Some(account3_info)),
             "Post changed of a account"
         );
         // assert storage
         // Get on dupsort would return only first value. This is good enough for this test.
         assert_eq!(
-            tx.get::<tables::PlainStorageState>(account1),
+            provider.tx_ref().get::<tables::PlainStorageState>(account1),
             Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) })),
             "Post changed of a account"
         );
@@ -787,26 +740,13 @@ mod tests {
         } if total == block.gas_used);
 
         // assert unwind stage
-        let db_tx = provider.tx_ref();
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(acc1),
-            Ok(Some(acc1_info)),
-            "Pre changed of a account"
-        );
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(acc2),
-            Ok(Some(acc2_info)),
-            "Post changed of a account"
-        );
+        assert_eq!(provider.basic_account(acc1), Ok(Some(acc1_info)), "Pre changed of a account");
+        assert_eq!(provider.basic_account(acc2), Ok(Some(acc2_info)), "Post changed of a account");
 
         let miner_acc = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(miner_acc),
-            Ok(None),
-            "Third account should be unwound"
-        );
+        assert_eq!(provider.basic_account(miner_acc), Ok(None), "Third account should be unwound");
 
-        assert_eq!(db_tx.get::<tables::Receipts>(0), Ok(None), "First receipt should be unwound");
+        assert_eq!(provider.receipt(0), Ok(None), "First receipt should be unwound");
     }
 
     #[tokio::test]
@@ -878,11 +818,7 @@ mod tests {
 
         // assert unwind stage
         let provider = factory.provider_rw().unwrap();
-        assert_eq!(
-            provider.tx_ref().get::<tables::PlainAccountState>(destroyed_address),
-            Ok(None),
-            "Account was destroyed"
-        );
+        assert_eq!(provider.basic_account(destroyed_address), Ok(None), "Account was destroyed");
 
         assert_eq!(
             provider.tx_ref().get::<tables::PlainStorageState>(destroyed_address),

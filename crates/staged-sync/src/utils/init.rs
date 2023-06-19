@@ -8,7 +8,9 @@ use reth_db::{
     version::{check_db_version_file, create_db_version_file, DatabaseVersionError},
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, H256, U256};
-use reth_provider::{DatabaseProviderRW, PostState, ProviderFactory, TransactionError};
+use reth_provider::{
+    AccountWriter, DatabaseProviderRW, PostState, ProviderFactory, TransactionError,
+};
 use std::{fs, path::Path, sync::Arc};
 use tracing::debug;
 

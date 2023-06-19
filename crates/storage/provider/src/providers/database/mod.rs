@@ -2,16 +2,16 @@ use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
     BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StageCheckpointProvider, StateProviderBox, TransactionsProvider,
+    ProviderError, StageCheckpointReader, StateProviderBox, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices, tables, transaction::DbTx};
+use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, ChainSpec, Header, Receipt,
-    SealedBlock, SealedHeader, TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal,
-    H256, U256,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
+    ChainSpec, Header, Receipt, SealedBlock, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{ops::RangeBounds, sync::Arc};
@@ -189,8 +189,12 @@ impl<DB: Database> BlockProvider for ProviderFactory<DB> {
         self.provider()?.ommers(id)
     }
 
-    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
-        self.provider()?.block_body_indices(num)
+    fn block_body_indices(&self, number: BlockNumber) -> Result<Option<StoredBlockBodyIndices>> {
+        self.provider()?.block_body_indices(number)
+    }
+
+    fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>> {
+        self.provider()?.block_with_senders(number)
     }
 }
 
@@ -231,6 +235,21 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         self.provider()?.transactions_by_block_range(range)
     }
+
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<TransactionSignedNoHash>> {
+        self.provider()?.transactions_by_tx_range(range)
+    }
+
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        self.provider()?.senders_by_tx_range(range)
+    }
+
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        self.provider()?.transaction_sender(id)
+    }
 }
 
 impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
@@ -261,9 +280,13 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> StageCheckpointProvider for ProviderFactory<DB> {
+impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
+    }
+
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
+        self.provider()?.get_stage_checkpoint_progress(id)
     }
 }
 
@@ -301,18 +324,6 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
         self.provider()?.fill_cfg_env_with_header(cfg, header)
     }
-}
-
-/// Get checkpoint for the given stage.
-#[inline]
-pub fn get_stage_checkpoint<'a, TX>(
-    tx: &TX,
-    id: StageId,
-) -> std::result::Result<Option<StageCheckpoint>, reth_interfaces::db::DatabaseError>
-where
-    TX: DbTx<'a> + Send + Sync,
-{
-    tx.get::<tables::SyncStage>(id.to_string())
 }
 
 #[cfg(test)]

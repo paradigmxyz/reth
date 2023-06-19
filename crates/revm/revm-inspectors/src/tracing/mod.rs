@@ -25,7 +25,10 @@ use crate::tracing::{
     arena::PushTraceKind,
     types::{CallTraceNode, StorageChange},
 };
-pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
+pub use builder::{
+    geth::{self, GethTraceBuilder},
+    parity::{self, ParityTraceBuilder},
+};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
@@ -127,6 +130,7 @@ impl TracingInspector {
         value: U256,
         kind: CallKind,
         caller: Address,
+        gas_limit: u64,
         maybe_precompile: Option<bool>,
     ) {
         // This will only be true if the inspector is configured to exclude precompiles and the call
@@ -151,6 +155,7 @@ impl TracingInspector {
                 caller,
                 last_call_return_value: self.last_call_return_data.clone(),
                 maybe_precompile,
+                gas_limit,
                 ..Default::default()
             },
         ));
@@ -175,7 +180,6 @@ impl TracingInspector {
         let trace = &mut self.traces.arena[trace_idx].trace;
 
         trace.gas_used = gas.spend();
-        trace.gas_limit = gas.limit();
         trace.status = status;
         trace.success = matches!(status, return_ok!());
         trace.output = output.clone();
@@ -380,6 +384,7 @@ where
             value,
             inputs.context.scheme.into(),
             from,
+            inputs.gas_limit,
             maybe_precompile,
         );
 
@@ -418,6 +423,7 @@ where
             inputs.value,
             inputs.scheme.into(),
             inputs.caller,
+            inputs.gas_limit,
             Some(false),
         );
 

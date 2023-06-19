@@ -1,16 +1,17 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
+    AccountReader, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey,
-    StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
+    BlockWithSenders, Bytecode, Bytes, ChainInfo, Header, Receipt, SealedBlock, SealedHeader,
+    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -207,6 +208,21 @@ impl TransactionsProvider for MockEthProvider {
 
         Ok(map.into_values().collect())
     }
+
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        unimplemented!()
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
+        unimplemented!()
+    }
+
+    fn transaction_sender(&self, _id: TxNumber) -> Result<Option<Address>> {
+        unimplemented!()
+    }
 }
 
 impl ReceiptProvider for MockEthProvider {
@@ -313,6 +329,10 @@ impl BlockProvider for MockEthProvider {
     fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
+
+    fn block_with_senders(&self, _number: BlockNumber) -> Result<Option<BlockWithSenders>> {
+        Ok(None)
+    }
 }
 
 impl BlockProviderIdExt for MockEthProvider {
@@ -342,7 +362,7 @@ impl BlockProviderIdExt for MockEthProvider {
     }
 }
 
-impl AccountProvider for MockEthProvider {
+impl AccountReader for MockEthProvider {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         Ok(self.accounts.lock().get(&address).cloned().map(|a| a.account))
     }
@@ -442,6 +462,10 @@ impl StateProviderFactory for MockEthProvider {
         todo!()
     }
 
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
+        todo!()
+    }
+
     fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
@@ -471,10 +495,27 @@ impl StateProviderFactory for Arc<MockEthProvider> {
         todo!()
     }
 
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
+        todo!()
+    }
+
     fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
     ) -> Result<StateProviderBox<'a>> {
         todo!()
+    }
+}
+
+impl WithdrawalsProvider for MockEthProvider {
+    fn latest_withdrawal(&self) -> Result<Option<reth_primitives::Withdrawal>> {
+        unimplemented!()
+    }
+    fn withdrawals_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> Result<Option<Vec<reth_primitives::Withdrawal>>> {
+        unimplemented!()
     }
 }

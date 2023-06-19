@@ -5457,7 +5457,6 @@ name = "reth-payload-builder"
 version = "0.1.0"
 dependencies = [
  "futures-util",
- "hashbrown 0.13.2",
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
@@ -5667,6 +5666,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-types",
+ "serde_json",
  "tokio",
 ]
 

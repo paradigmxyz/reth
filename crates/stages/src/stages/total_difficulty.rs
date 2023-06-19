@@ -130,6 +130,7 @@ mod tests {
         TestConsensus,
     };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedHeader};
+    use reth_provider::HeaderProvider;
 
     use super::*;
     use crate::test_utils::{
@@ -262,27 +263,25 @@ mod tests {
             let initial_stage_progress = input.checkpoint().block_number;
             match output {
                 Some(output) if output.checkpoint.block_number > initial_stage_progress => {
-                    self.tx.query(|tx| {
-                        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
-                        let (_, mut current_header) = header_cursor
-                            .seek_exact(initial_stage_progress)?
-                            .expect("no initial header");
-                        let mut td: U256 = tx
-                            .get::<tables::HeaderTD>(initial_stage_progress)?
-                            .expect("no initial td")
-                            .into();
+                    let provider = self.tx.inner();
 
-                        while let Some((next_key, next_header)) = header_cursor.next()? {
-                            assert_eq!(current_header.number + 1, next_header.number);
-                            td += next_header.difficulty;
-                            assert_eq!(
-                                tx.get::<tables::HeaderTD>(next_key)?.map(Into::into),
-                                Some(td)
-                            );
-                            current_header = next_header;
-                        }
-                        Ok(())
-                    })?;
+                    let mut header_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
+                    let (_, mut current_header) = header_cursor
+                        .seek_exact(initial_stage_progress)?
+                        .expect("no initial header");
+                    let mut td: U256 = provider
+                        .header_td_by_number(initial_stage_progress)?
+                        .expect("no initial td");
+
+                    while let Some((next_key, next_header)) = header_cursor.next()? {
+                        assert_eq!(current_header.number + 1, next_header.number);
+                        td += next_header.difficulty;
+                        assert_eq!(
+                            provider.header_td_by_number(next_key)?.map(Into::into),
+                            Some(td)
+                        );
+                        current_header = next_header;
+                    }
                 }
                 _ => self.check_no_td_above(initial_stage_progress)?,
             };

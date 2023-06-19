@@ -235,6 +235,7 @@ mod tests {
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, H256,
     };
+    use reth_provider::TransactionsProvider;
 
     use super::*;
     use crate::test_utils::{
@@ -373,7 +374,7 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().block_body_indices(block);
+            let body_result = self.tx.inner_rw().block_body_indices(block);
             match body_result {
                 Ok(body) => self
                     .tx
@@ -417,7 +418,8 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             match output {
-                Some(output) => self.tx.query(|tx| {
+                Some(output) => {
+                    let provider = self.tx.inner();
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
 
@@ -425,23 +427,20 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+                    let mut body_cursor =
+                        provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
-                            let transaction: TransactionSigned = tx
-                                .get::<tables::Transactions>(tx_id)?
-                                .expect("no transaction entry")
-                                .into();
+                            let transaction: TransactionSigned =
+                                provider.transaction_by_id(tx_id)?.expect("no transaction entry");
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");
-                            assert_eq!(Some(signer), tx.get::<tables::TxSenders>(tx_id)?);
+                            assert_eq!(Some(signer), provider.transaction_sender(tx_id)?)
                         }
                     }
-
-                    Ok(())
-                })?,
+                }
                 None => self.ensure_no_senders_by_block(input.checkpoint().block_number)?,
             };
 

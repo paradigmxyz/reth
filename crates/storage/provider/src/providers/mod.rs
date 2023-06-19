@@ -2,7 +2,7 @@ use crate::{
     BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
-    ReceiptProvider, StageCheckpointProvider, StateProviderBox, StateProviderFactory,
+    ReceiptProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
@@ -13,9 +13,10 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
-    ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
+    BlockNumberOrTag, BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 pub use state::{
@@ -234,8 +235,18 @@ where
         self.database.provider()?.ommers(id)
     }
 
-    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
-        self.database.provider()?.block_body_indices(num)
+    fn block_body_indices(&self, number: BlockNumber) -> Result<Option<StoredBlockBodyIndices>> {
+        self.database.provider()?.block_body_indices(number)
+    }
+
+    /// Returns the block with senders with matching number from database.
+    ///
+    /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
+    /// spot, and we want fast querying.**
+    ///
+    /// Returns `None` if block is not found.
+    fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>> {
+        self.database.provider()?.block_with_senders(number)
     }
 }
 
@@ -280,6 +291,21 @@ where
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         self.database.provider()?.transactions_by_block_range(range)
     }
+
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<TransactionSignedNoHash>> {
+        self.database.provider()?.transactions_by_tx_range(range)
+    }
+
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        self.database.provider()?.senders_by_tx_range(range)
+    }
+
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
+        self.database.provider()?.transaction_sender(id)
+    }
 }
 
 impl<DB, Tree> ReceiptProvider for BlockchainProvider<DB, Tree>
@@ -318,13 +344,17 @@ where
     }
 }
 
-impl<DB, Tree> StageCheckpointProvider for BlockchainProvider<DB, Tree>
+impl<DB, Tree> StageCheckpointReader for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: Send + Sync,
 {
     fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         self.database.provider()?.get_stage_checkpoint(id)
+    }
+
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
+        self.database.provider()?.get_stage_checkpoint_progress(id)
     }
 }
 
@@ -379,6 +409,65 @@ where
         self.database.latest()
     }
 
+    /// Returns a [StateProviderBox] indexed by the given [BlockId].
+    fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox<'_>> {
+        match block_id {
+            BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
+            BlockId::Hash(rpc_block_hash) => {
+                let block_hash = rpc_block_hash.into();
+                let mut state = self.history_by_block_hash(block_hash);
+
+                // we failed to get the state by hash, from disk, hash block be the pending block
+                if state.is_err() && !rpc_block_hash.require_canonical.unwrap_or(false) {
+                    if let Ok(Some(pending)) = self.pending_state_by_hash(block_hash) {
+                        // we found pending block by hash
+                        state = Ok(pending)
+                    }
+                }
+
+                state
+            }
+        }
+    }
+
+    /// Returns a [StateProviderBox] indexed by the given block number or tag.
+    fn state_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> Result<StateProviderBox<'_>> {
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
+                let hash = match self.finalized_block_hash()? {
+                    Some(hash) => hash,
+                    None => return Err(ProviderError::FinalizedBlockNotFound.into()),
+                };
+
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
+                let hash = match self.safe_block_hash()? {
+                    Some(hash) => hash,
+                    None => return Err(ProviderError::SafeBlockNotFound.into()),
+                };
+
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => {
+                let mut state = self.history_by_block_number(num);
+                if state.is_err() && num == self.chain_info.get_canonical_block_number() + 1 {
+                    // we don't have the block on disk yet but the number is the pending block
+                    state = self.pending();
+                }
+                state
+            }
+        }
+    }
+
     fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         self.ensure_canonical_block(block_number)?;
@@ -411,6 +500,13 @@ where
             return self.pending_with_provider(pending)
         }
         self.latest()
+    }
+
+    fn pending_state_by_hash(&self, block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
+        if let Some(state) = self.tree.find_pending_state_provider(block_hash) {
+            return Ok(Some(self.pending_with_provider(state)?))
+        }
+        Ok(None)
     }
 
     fn pending_with_provider(

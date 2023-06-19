@@ -242,6 +242,7 @@ impl CallTraceNode {
     }
 
     /// Returns true if this is a call to a precompile
+    #[inline]
     pub(crate) fn is_precompile(&self) -> bool {
         self.trace.maybe_precompile.unwrap_or(false)
     }
@@ -267,8 +268,6 @@ impl CallTraceNode {
                 acc.code = Delta::Added(code.into())
             }
         }
-
-        // TODO: track nonce and balance changes
 
         // iterate over all storage diffs
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
