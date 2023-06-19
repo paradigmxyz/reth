@@ -23,6 +23,9 @@ The configuration file contains the following sections:
   - [`index_account_history`](#index_account_history)
   - [`index_storage_history`](#index_storage_history)
 - [`[peers]`](#the-peers-section)
+  - [`connection_info`](#connection_info)
+  - [`reputation_weights`](#reputation_weights)
+  - [`backoff_durations`](#backoff_durations)
 - [`[sessions]`](#the-sessions-section)
 
 ## The `[stages]` section
@@ -233,6 +236,96 @@ commit_threshold = 100000
 
 ## The `[peers]` section
 
+The peers section is used to configure how the networking component of reth establishes and maintains connections to peers.
+
+In the top level of the section you can configure trusted nodes, and how often reth will try to connect to new peers.
+
+```toml
+[peers]
+# How often reth will attempt to make outgoing connections,
+# if there is room for more peers
+refill_slots_interval = '1s'
+# A list of ENRs for trusted peers, which are peers reth will always try to connect to.
+trusted_nodes = []
+# Whether reth will only attempt to connect to the peers specified above,
+# or if it will connect to other peers in the network
+connect_trusted_nodes_only = false
+# The duration for which a badly behaving peer is banned
+ban_duration = '12h'
+```
+
+### `connection_info`
+
+This section configures how many peers reth will connect to.
+
+```toml
+[peers.connection_info]
+# The maximum number of outbound peers (peers we connect to)
+max_outbound = 100
+# The maximum number of inbound peers (peers that connect to us)
+max_inbound = 30
+```
+
+### `reputation_weights`
+
+This section configures the penalty for various offences peers can commit.
+
+All peers start out with a reputation of 0, which increases over time as the peer stays connected to us.
+
+If the peer misbehaves, various penalties are exacted to their reputation, and if it falls below a certain threshold (currently `50 * -1024`), reth will disconnect and ban the peer temporarily (except for protocol violations which constitute a permanent ban).
+
+```toml
+[peers.reputation_weights]
+bad_message = -16384
+bad_block = -16384
+bad_transactions = -16384
+already_seen_transactions = 0
+timeout = -4096
+bad_protocol = -2147483648
+failed_to_connect = -25600
+dropped = -4096
+```
+
+### `backoff_durations`
+
+If reth fails to establish a connection to a peer, it will not re-attempt for some amount of time, depending on the reason the connection failed.
+
+```toml
+[peers.backoff_durations]
+low = '30s'
+medium = '3m'
+high = '15m'
+max = '1h'
+```
+
 ## The `[sessions]` section
+
+The sessions section configures the internal behavior of a single peer-to-peer connection.
+
+You can configure the session buffer sizes, which limits the amount of pending events (incoming messages) and commands (outgoing messages) each session can hold before it will start to ignore messages.
+
+> **Note**
+> 
+> These buffers are allocated *per peer*, which means that increasing the buffer sizes can have large impact on memory consumption.
+
+```toml
+[sessions]
+session_command_buffer = 32
+session_event_buffer = 260
+```
+
+You can also configure request timeouts:
+
+```toml
+[sessions.initial_internal_request_timeout]
+secs = 20
+nanos = 0
+
+# The amount of time before the peer will be penalized for
+# being in violation of the protocol. This exacts a permaban on the peer.
+[sessions.protocol_breach_request_timeout]
+secs = 120
+nanos = 0
+```
 
 [TOML]: https://toml.io/
