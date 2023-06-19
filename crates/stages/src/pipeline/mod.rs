@@ -546,7 +546,7 @@ mod tests {
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
-                    .with_checkpoint(Some(StageCheckpoint::new(10)), tx.inner()),
+                    .with_checkpoint(Some(StageCheckpoint::new(10)), tx.inner_rw()),
             )
             .add_stage(
                 TestStage::new(StageId::Other("C"))
