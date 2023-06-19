@@ -1,7 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{AccountExtReader, AccountWriter, DatabaseProviderRW};
 use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in
@@ -46,7 +46,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
-        let indices = provider.get_account_block_numbers_from_changesets(range.clone())?;
+        let indices = provider.changed_accounts_and_blocks_with_range(range.clone())?;
         // Insert changeset to history index
         provider.insert_account_history_index(indices)?;
 

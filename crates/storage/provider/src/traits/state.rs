@@ -1,4 +1,4 @@
-use super::AccountProvider;
+use super::AccountReader;
 use crate::{post_state::PostState, BlockHashProvider, BlockIdProvider};
 use auto_impl::auto_impl;
 use reth_interfaces::{provider::ProviderError, Result};
@@ -13,7 +13,7 @@ pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
-    BlockHashProvider + AccountProvider + StateRootProvider + Send + Sync
+    BlockHashProvider + AccountReader + StateRootProvider + Send + Sync
 {
     /// Get storage of given account.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;

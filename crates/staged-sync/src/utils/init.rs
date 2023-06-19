@@ -6,7 +6,9 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, H256, U256};
-use reth_provider::{DatabaseProviderRW, PostState, ProviderFactory, TransactionError};
+use reth_provider::{
+    AccountWriter, DatabaseProviderRW, PostState, ProviderFactory, TransactionError,
+};
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 

@@ -1,10 +1,10 @@
 use crate::{
     insert_canonical_block,
     post_state::StorageChangeset,
-    traits::{AccountExtProvider, BlockSource, ReceiptProvider, StageCheckpointWriter},
-    AccountProvider, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, PostState, ProviderError, StageCheckpointReader, TransactionError,
-    TransactionsProvider, WithdrawalsProvider,
+    traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
+    AccountReader, AccountWriter, BlockHashProvider, BlockNumProvider, BlockProvider,
+    EvmEnvProvider, HeaderProvider, PostState, ProviderError, StageCheckpointReader,
+    TransactionError, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -109,7 +109,7 @@ fn unwind_account_history_shards<'a, TX: reth_db::transaction::DbTxMutGAT<'a>>(
     cursor: &mut <TX as DbTxMutGAT<'a>>::CursorMut<tables::AccountHistory>,
     address: Address,
     block_number: BlockNumber,
-) -> std::result::Result<Vec<usize>, TransactionError> {
+) -> Result<Vec<usize>> {
     let mut item = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
 
     while let Some((sharded_key, list)) = item {
@@ -276,56 +276,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
 
         Ok(storage_changeset_lists)
     }
-
-    /// Get all block numbers where account got changed.
-    ///
-    /// NOTE: Get inclusive range of blocks.
-    pub fn get_account_block_numbers_from_changesets(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
-        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
-
-        let account_transtions = changeset_cursor.walk_range(range)?.try_fold(
-            BTreeMap::new(),
-            |mut accounts: BTreeMap<Address, Vec<u64>>,
-             entry|
-             -> std::result::Result<_, TransactionError> {
-                let (index, account) = entry?;
-                accounts.entry(account.address).or_default().push(index);
-                Ok(accounts)
-            },
-        )?;
-
-        Ok(account_transtions)
-    }
-
-    /// Iterate over account changesets and return all account address that were changed.
-    pub fn get_addresses_of_changed_accounts(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<BTreeSet<Address>, TransactionError> {
-        self.tx.cursor_read::<tables::AccountChangeSet>()?.walk_range(range)?.try_fold(
-            BTreeSet::new(),
-            |mut accounts: BTreeSet<Address>, entry| {
-                let (_, account_before) = entry?;
-                accounts.insert(account_before.address);
-                Ok(accounts)
-            },
-        )
-    }
-
-    /// Get plainstate account from iterator
-    pub fn get_plainstate_accounts(
-        &self,
-        iter: impl IntoIterator<Item = Address>,
-    ) -> std::result::Result<Vec<(Address, Option<Account>)>, TransactionError> {
-        let mut plain_accounts = self.tx.cursor_read::<tables::PlainAccountState>()?;
-        Ok(iter
-            .into_iter()
-            .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
-    }
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
@@ -352,49 +302,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> std::result::Result<Vec<(SealedBlockWithSenders, PostState)>, TransactionError> {
         self.get_take_block_and_execution_range::<true>(chain_spec, range)
-    }
-
-    /// Unwind and clear account hashing
-    pub fn unwind_account_hashing(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<(), TransactionError> {
-        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
-
-        // Aggregate all block changesets and make a list of accounts that have been changed.
-        self.tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            .rev()
-            // fold all account to get the old balance/nonces and account that needs to be removed
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
-                    accounts.insert(account_before.address, account_before.info);
-                    accounts
-                },
-            )
-            .into_iter()
-            // hash addresses and collect it inside sorted BTreeMap.
-            // We are doing keccak only once per address.
-            .map(|(address, account)| (keccak256(address), account))
-            .collect::<BTreeMap<_, _>>()
-            .into_iter()
-            // Apply values to HashedState (if Account is None remove it);
-            .try_for_each(
-                |(hashed_address, account)| -> std::result::Result<(), TransactionError> {
-                    if let Some(account) = account {
-                        hashed_accounts.upsert(hashed_address, account)?;
-                    } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
-                        hashed_accounts.delete_current()?;
-                    }
-                    Ok(())
-                },
-            )?;
-
-        Ok(())
     }
 
     /// Unwind and clear storage hashing
@@ -445,49 +352,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             )?;
 
         Ok(())
-    }
-
-    /// Unwind and clear account history indices.
-    ///
-    /// Returns number of changesets walked.
-    pub fn unwind_account_history_indices(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<usize, TransactionError> {
-        let account_changeset = self
-            .tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let changesets = account_changeset.len();
-
-        let last_indices = account_changeset
-            .into_iter()
-            // reverse so we can get lowest block number where we need to unwind account.
-            .rev()
-            // fold all account and get last block number
-            .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
-                // we just need address and lowest block number.
-                accounts.insert(account.address, index);
-                accounts
-            });
-        // try to unwind the index
-        let mut cursor = self.tx.cursor_write::<tables::AccountHistory>()?;
-        for (address, rem_index) in last_indices {
-            let shard_part = unwind_account_history_shards::<TX>(&mut cursor, address, rem_index)?;
-
-            // check last shard_part, if present, items needs to be reinserted.
-            if !shard_part.is_empty() {
-                // there are items in list
-                self.tx.put::<tables::AccountHistory>(
-                    ShardedKey::new(address, u64::MAX),
-                    BlockNumberList::new(shard_part)
-                        .expect("There is at least one element in list and it is sorted."),
-                )?;
-            }
-        }
-
-        Ok(changesets)
     }
 
     /// Unwind and clear storage history indices.
@@ -1034,44 +898,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(())
     }
 
-    /// Insert account change index to database. Used inside AccountHistoryIndex stage
-    pub fn insert_account_history_index(
-        &self,
-        account_transitions: BTreeMap<Address, Vec<u64>>,
-    ) -> std::result::Result<(), TransactionError> {
-        // insert indexes to AccountHistory.
-        for (address, mut indices) in account_transitions {
-            let mut last_shard = self.take_last_account_shard(address)?;
-            last_shard.append(&mut indices);
-            // chunk indices and insert them in shards of N size.
-            let mut chunks = last_shard
-                .iter()
-                .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
-                .into_iter()
-                .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
-                .collect::<Vec<_>>();
-            let last_chunk = chunks.pop();
-
-            chunks.into_iter().try_for_each(|list| {
-                self.tx.put::<tables::AccountHistory>(
-                    ShardedKey::new(
-                        address,
-                        *list.last().expect("Chuck does not return empty list") as BlockNumber,
-                    ),
-                    BlockNumberList::new(list).expect("Indices are presorted and not empty"),
-                )
-            })?;
-            // Insert last list with u64::MAX
-            if let Some(last_list) = last_chunk {
-                self.tx.put::<tables::AccountHistory>(
-                    ShardedKey::new(address, u64::MAX),
-                    BlockNumberList::new(last_list).expect("Indices are presorted and not empty"),
-                )?
-            }
-        }
-        Ok(())
-    }
-
     /// Query the block body by number.
     pub fn block_body_indices(
         &self,
@@ -1143,23 +969,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
     /// Load last shard and check if it is full and remove if it is not. If list is empty, last
     /// shard was full or there is no shards at all.
-    fn take_last_account_shard(
-        &self,
-        address: Address,
-    ) -> std::result::Result<Vec<u64>, TransactionError> {
-        let mut cursor = self.tx.cursor_read::<tables::AccountHistory>()?;
-        let last = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
-        if let Some((shard_key, list)) = last {
-            // delete old shard so new one can be inserted.
-            self.tx.delete::<tables::AccountHistory>(shard_key, None)?;
-            let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-            return Ok(list)
-        }
-        Ok(Vec::new())
-    }
-
-    /// Load last shard and check if it is full and remove if it is not. If list is empty, last
-    /// shard was full or there is no shards at all.
     pub fn take_last_storage_shard(
         &self,
         address: Address,
@@ -1211,34 +1020,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 },
             )
         })?;
-        Ok(())
-    }
-
-    /// iterate over accounts and insert them to hashing table
-    pub fn insert_account_for_hashing(
-        &self,
-        accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
-    ) -> std::result::Result<(), TransactionError> {
-        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
-
-        let hashes_accounts = accounts.into_iter().fold(
-            BTreeMap::new(),
-            |mut map: BTreeMap<H256, Option<Account>>, (address, account)| {
-                map.insert(keccak256(address), account);
-                map
-            },
-        );
-
-        hashes_accounts.into_iter().try_for_each(
-            |(hashed_address, account)| -> std::result::Result<(), TransactionError> {
-                if let Some(account) = account {
-                    hashed_accounts.upsert(hashed_address, account)?
-                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
-                    hashed_accounts.delete_current()?;
-                }
-                Ok(())
-            },
-        )?;
         Ok(())
     }
 
@@ -1299,7 +1080,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ) -> std::result::Result<(), TransactionError> {
         // account history stage
         {
-            let indices = self.get_account_block_numbers_from_changesets(range.clone())?;
+            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
@@ -1333,8 +1114,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         // account hashing stage
         {
-            let lists = self.get_addresses_of_changed_accounts(range.clone())?;
-            let accounts = self.get_plainstate_accounts(lists.into_iter())?;
+            let lists = self.changed_accounts_with_range(range.clone())?;
+            let accounts = self.basic_accounts(lists.into_iter())?;
             self.insert_account_for_hashing(accounts.into_iter())?;
         }
 
@@ -1356,13 +1137,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> AccountProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> AccountReader for DatabaseProvider<'this, TX> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         Ok(self.tx.get::<tables::PlainAccountState>(address)?)
     }
 }
 
-impl<'this, TX: DbTx<'this>> AccountExtProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
     fn changed_accounts_with_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -1385,6 +1166,177 @@ impl<'this, TX: DbTx<'this>> AccountExtProvider for DatabaseProvider<'this, TX> 
             .into_iter()
             .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
             .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    fn changed_accounts_and_blocks_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<BTreeMap<Address, Vec<u64>>> {
+        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
+
+        let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
+            BTreeMap::new(),
+            |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> Result<_> {
+                let (index, account) = entry?;
+                accounts.entry(account.address).or_default().push(index);
+                Ok(accounts)
+            },
+        )?;
+
+        Ok(account_transitions)
+    }
+}
+
+impl<'this, TX: DbTxMut<'this> + DbTx<'this>> AccountWriter for DatabaseProvider<'this, TX> {
+    fn unwind_account_hashing(&self, range: RangeInclusive<BlockNumber>) -> Result<()> {
+        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
+
+        // Aggregate all block changesets and make a list of accounts that have been changed.
+        self.tx
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(range)?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .rev()
+            // fold all account to get the old balance/nonces and account that needs to be removed
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
+                    accounts.insert(account_before.address, account_before.info);
+                    accounts
+                },
+            )
+            .into_iter()
+            // hash addresses and collect it inside sorted BTreeMap.
+            // We are doing keccak only once per address.
+            .map(|(address, account)| (keccak256(address), account))
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            // Apply values to HashedState (if Account is None remove it);
+            .try_for_each(|(hashed_address, account)| -> Result<()> {
+                if let Some(account) = account {
+                    hashed_accounts.upsert(hashed_address, account)?;
+                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                    hashed_accounts.delete_current()?;
+                }
+                Ok(())
+            })?;
+
+        Ok(())
+    }
+
+    fn unwind_account_history_indices(&self, range: RangeInclusive<BlockNumber>) -> Result<usize> {
+        let account_changeset = self
+            .tx
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(range)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let changesets = account_changeset.len();
+
+        let last_indices = account_changeset
+            .into_iter()
+            // reverse so we can get lowest block number where we need to unwind account.
+            .rev()
+            // fold all account and get last block number
+            .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
+                // we just need address and lowest block number.
+                accounts.insert(account.address, index);
+                accounts
+            });
+        // try to unwind the index
+        let mut cursor = self.tx.cursor_write::<tables::AccountHistory>()?;
+        for (address, rem_index) in last_indices {
+            let shard_part = unwind_account_history_shards::<TX>(&mut cursor, address, rem_index)?;
+
+            // check last shard_part, if present, items needs to be reinserted.
+            if !shard_part.is_empty() {
+                // there are items in list
+                self.tx.put::<tables::AccountHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    BlockNumberList::new(shard_part)
+                        .expect("There is at least one element in list and it is sorted."),
+                )?;
+            }
+        }
+
+        Ok(changesets)
+    }
+
+    fn insert_account_history_index(
+        &self,
+        account_transitions: BTreeMap<Address, Vec<u64>>,
+    ) -> Result<()> {
+        // insert indexes to AccountHistory.
+        for (address, mut indices) in account_transitions {
+            // Load last shard and check if it is full and remove if it is not. If list is empty,
+            // last shard was full or there is no shards at all.
+            let mut last_shard = {
+                let mut cursor = self.tx.cursor_read::<tables::AccountHistory>()?;
+                let last = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
+                if let Some((shard_key, list)) = last {
+                    // delete old shard so new one can be inserted.
+                    self.tx.delete::<tables::AccountHistory>(shard_key, None)?;
+                    let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
+                    list
+                } else {
+                    Vec::new()
+                }
+            };
+
+            last_shard.append(&mut indices);
+            // chunk indices and insert them in shards of N size.
+            let mut chunks = last_shard
+                .iter()
+                .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
+                .into_iter()
+                .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
+                .collect::<Vec<_>>();
+            let last_chunk = chunks.pop();
+
+            chunks.into_iter().try_for_each(|list| {
+                self.tx.put::<tables::AccountHistory>(
+                    ShardedKey::new(
+                        address,
+                        *list.last().expect("Chuck does not return empty list") as BlockNumber,
+                    ),
+                    BlockNumberList::new(list).expect("Indices are presorted and not empty"),
+                )
+            })?;
+
+            // Insert last list with u64::MAX
+            if let Some(last_list) = last_chunk {
+                self.tx.put::<tables::AccountHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    BlockNumberList::new(last_list).expect("Indices are presorted and not empty"),
+                )?
+            }
+        }
+        Ok(())
+    }
+
+    fn insert_account_for_hashing(
+        &self,
+        accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
+    ) -> Result<()> {
+        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
+
+        let hashes_accounts = accounts.into_iter().fold(
+            BTreeMap::new(),
+            |mut map: BTreeMap<H256, Option<Account>>, (address, account)| {
+                map.insert(keccak256(address), account);
+                map
+            },
+        );
+
+        hashes_accounts.into_iter().try_for_each(|(hashed_address, account)| -> Result<()> {
+            if let Some(account) = account {
+                hashed_accounts.upsert(hashed_address, account)?
+            } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts.delete_current()?;
+            }
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 
