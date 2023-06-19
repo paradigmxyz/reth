@@ -13,7 +13,8 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, U256,
+    PoolConfig, PoolResult, PoolTransaction, TransactionOrdering, ValidPoolTransaction, PRICE_BUMP,
+    U256,
 };
 use fnv::FnvHashMap;
 use reth_primitives::{
@@ -971,6 +972,25 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(transaction)
     }
 
+    /// Returns true if `transaction_a` is underpriced compared to `transaction_B`.
+    fn is_underpriced(
+        transaction_a: &ValidPoolTransaction<T>,
+        transaction_b: &ValidPoolTransaction<T>,
+        price_bump: u128,
+    ) -> bool {
+        let tx_a_max_priority_fee_per_gas =
+            transaction_a.transaction.max_priority_fee_per_gas().unwrap_or(0);
+        let tx_b_max_priority_fee_per_gas =
+            transaction_b.transaction.max_priority_fee_per_gas().unwrap_or(0);
+
+        transaction_a.max_fee_per_gas() <=
+            transaction_b.max_fee_per_gas() * (100 + price_bump) / 100 ||
+            (tx_a_max_priority_fee_per_gas <=
+                tx_b_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
+                tx_a_max_priority_fee_per_gas != 0 &&
+                tx_b_max_priority_fee_per_gas != 0)
+    }
+
     /// Inserts a new transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
@@ -1038,7 +1058,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
             Entry::Occupied(mut entry) => {
                 // Transaction already exists
                 // Ensure the new transaction is not underpriced
-                if transaction.is_underpriced(entry.get().transaction.as_ref()) {
+
+                if Self::is_underpriced(
+                    transaction.as_ref(),
+                    entry.get().transaction.as_ref(),
+                    PRICE_BUMP,
+                ) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
@@ -1408,6 +1433,22 @@ mod tests {
         assert!(!pool.contains(first.hash()));
         assert!(pool.contains(replacement.hash()));
         assert_eq!(pool.len(), 1);
+    }
+
+    #[test]
+    fn insert_replace_underpriced() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let first = f.validated(tx.clone());
+        let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+        let mut replacement = f.validated(tx.rng_hash());
+        replacement.transaction = replacement.transaction.decr_price();
+        let err =
+            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
     }
 
     // insert nonce then nonce - 1

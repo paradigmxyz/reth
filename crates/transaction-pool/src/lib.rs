@@ -136,6 +136,9 @@ pub(crate) const MAX_CODE_SIZE: usize = 24576;
 // Maximum initcode to permit in a creation transaction and create instructions
 pub(crate) const MAX_INIT_CODE_SIZE: usize = 2 * MAX_CODE_SIZE;
 
+// Price bump (in %) for the transaction pool underpriced check
+pub(crate) const PRICE_BUMP: u128 = 10;
+
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
 pub struct Pool<V: TransactionValidator, T: TransactionOrdering> {
