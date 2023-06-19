@@ -837,27 +837,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(blocks)
     }
 
-    /// Update all pipeline sync stage progress.
-    pub fn update_pipeline_stages(
-        &self,
-        block_number: BlockNumber,
-        drop_stage_checkpoint: bool,
-    ) -> std::result::Result<(), TransactionError> {
-        // iterate over all existing stages in the table and update its progress.
-        let mut cursor = self.tx.cursor_write::<tables::SyncStage>()?;
-        while let Some((stage_name, checkpoint)) = cursor.next()? {
-            cursor.upsert(
-                stage_name,
-                StageCheckpoint {
-                    block_number,
-                    ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
-                },
-            )?
-        }
-
-        Ok(())
-    }
-
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage
     pub fn insert_storage_history_index(
         &self,
@@ -1815,5 +1794,25 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
     /// Save stage checkpoint.
     fn save_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) -> Result<()> {
         Ok(self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)?)
+    }
+
+    fn update_pipeline_stages(
+        &self,
+        block_number: BlockNumber,
+        drop_stage_checkpoint: bool,
+    ) -> Result<()> {
+        // iterate over all existing stages in the table and update its progress.
+        let mut cursor = self.tx.cursor_write::<tables::SyncStage>()?;
+        while let Some((stage_name, checkpoint)) = cursor.next()? {
+            cursor.upsert(
+                stage_name,
+                StageCheckpoint {
+                    block_number,
+                    ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
+                },
+            )?
+        }
+
+        Ok(())
     }
 }
