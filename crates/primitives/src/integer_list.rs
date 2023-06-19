@@ -37,7 +37,7 @@ impl IntegerList {
         Ok(Self(EliasFano::from_ints(list.as_ref()).map_err(|_| EliasFanoError::InvalidInput)?))
     }
 
-    // Creates an IntegerList from a list of integers. `usize` is safe to use since
+    // Creates an IntegerList from a pre-sorted list of integers. `usize` is safe to use since
     /// [`sucds::EliasFano`] restricts its compilation to 64bits.
     ///
     /// # Panics
