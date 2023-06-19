@@ -1997,6 +1997,24 @@ mod tests {
     use reth_rlp::{Decodable, Encodable};
     use std::{future::poll_fn, net::Ipv4Addr};
 
+    #[tokio::test]
+    async fn test_configured_enr_forkid_entry() {
+        let fork: ForkId = ForkId { hash: ForkHash([220, 233, 108, 45]), next: 0u64 };
+        let mut disc_conf = Discv4Config::default();
+        disc_conf.add_eip868_pair("eth", EnrForkIdEntry::from(fork));
+        let (_discv4, service) = create_discv4_with_config(disc_conf).await;
+        let eth = service.local_eip_868_enr.get_raw_rlp(b"eth").unwrap();
+        let fork_entry_id = EnrForkIdEntry::decode(&mut &eth[..]).unwrap();
+
+        let raw: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        let decoded = EnrForkIdEntry::decode(&mut &raw[..]).unwrap();
+        let expected = EnrForkIdEntry {
+            fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+        };
+        assert_eq!(expected, fork_entry_id);
+        assert_eq!(expected, decoded);
+    }
+
     #[test]
     fn test_enr_forkid_entry_decode() {
         let raw: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
