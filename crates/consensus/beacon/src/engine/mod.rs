@@ -60,6 +60,7 @@ pub(crate) mod sync;
 
 use crate::engine::forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
 pub use event::BeaconConsensusEngineEvent;
+use reth_interfaces::blockchain_tree::InsertPayloadOk;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
@@ -893,16 +894,17 @@ where
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
         let status = match status {
-            BlockStatus::Valid => {
+            InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                 latest_valid_hash = Some(block_hash);
                 self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(block));
                 PayloadStatusEnum::Valid
             }
-            BlockStatus::Accepted => {
+            InsertPayloadOk::Inserted(BlockStatus::Accepted) => {
                 self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
                 PayloadStatusEnum::Accepted
             }
-            BlockStatus::Disconnected { .. } => {
+            InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+            InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                 // check if the block's parent is already marked as invalid
                 if let Some(status) =
                     self.check_invalid_ancestor_with_head(block.parent_hash, block.hash)
@@ -913,6 +915,11 @@ where
                 // not known to be invalid, but we don't know anything else
                 PayloadStatusEnum::Syncing
             }
+            InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
+                latest_valid_hash = Some(block_hash);
+                PayloadStatusEnum::Valid
+            }
+            InsertPayloadOk::AlreadySeen(BlockStatus::Accepted) => PayloadStatusEnum::Accepted,
         };
         Ok(PayloadStatus::new(status, latest_valid_hash))
     }
@@ -1014,18 +1021,19 @@ where
         match self.blockchain.insert_block_without_senders(block) {
             Ok(status) => {
                 match status {
-                    BlockStatus::Valid => {
+                    InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                         // block is connected to the current canonical head and is valid.
                         self.try_make_sync_target_canonical(num_hash);
                     }
-                    BlockStatus::Accepted => {
+                    InsertPayloadOk::Inserted(BlockStatus::Accepted) => {
                         // block is connected to the canonical chain, but not the current head
                         self.try_make_sync_target_canonical(num_hash);
                     }
-                    BlockStatus::Disconnected { missing_parent } => {
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
                         // continue downloading the missing parent
                         self.sync.download_full_block(missing_parent.hash);
                     }
+                    _ => (),
                 }
             }
             Err(err) => {

@@ -8,7 +8,7 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, CanonicalOutcome,
+        BlockStatus, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
@@ -595,7 +595,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn insert_block_without_senders(
         &mut self,
         block: SealedBlock,
-    ) -> Result<BlockStatus, InsertBlockError> {
+    ) -> Result<InsertPayloadOk, InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.insert_block(block),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
@@ -683,10 +683,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn insert_block(
         &mut self,
         block: SealedBlockWithSenders,
-    ) -> Result<BlockStatus, InsertBlockError> {
+    ) -> Result<InsertPayloadOk, InsertBlockError> {
         // check if we already have this block
         match self.is_block_known(block.num_hash()) {
-            Ok(Some(status)) => return Ok(status),
+            Ok(Some(status)) => return Ok(InsertPayloadOk::AlreadySeen(status)),
             Err(err) => return Err(InsertBlockError::new(block.block, err)),
             _ => {}
         }
@@ -696,7 +696,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             return Err(InsertBlockError::consensus_error(err, block.block))
         }
 
-        self.try_insert_validated_block(block)
+        Ok(InsertPayloadOk::Inserted(self.try_insert_validated_block(block)?))
     }
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
@@ -1220,7 +1220,9 @@ mod tests {
         // block 2 parent is not known, block2 is buffered.
         assert_eq!(
             tree.insert_block(block2.clone()).unwrap(),
-            BlockStatus::Disconnected { missing_parent: block2.parent_num_hash() }
+            InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                missing_parent: block2.parent_num_hash()
+            })
         );
 
         // Buffered block: [block2]
@@ -1248,7 +1250,10 @@ mod tests {
         assert_eq!(tree.is_block_known(old_block).unwrap_err().as_tree_error(), Some(err));
 
         // insert block1 and buffered block2 is inserted
-        assert_eq!(tree.insert_block(block1.clone()).unwrap(), BlockStatus::Valid);
+        assert_eq!(
+            tree.insert_block(block1.clone()).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid)
+        );
 
         // Buffered blocks: []
         // Trie state:
@@ -1267,11 +1272,17 @@ mod tests {
             .with_pending_blocks((block1.number, HashSet::from([block1.hash])))
             .assert(&tree);
 
-        // already inserted block will return true.
-        assert_eq!(tree.insert_block(block1.clone()).unwrap(), BlockStatus::Valid);
+        // already inserted block will `InsertPayloadOk::AlreadySeen(_)`
+        assert_eq!(
+            tree.insert_block(block1.clone()).unwrap(),
+            InsertPayloadOk::AlreadySeen(BlockStatus::Valid)
+        );
 
         // block two is already inserted.
-        assert_eq!(tree.insert_block(block2.clone()).unwrap(), BlockStatus::Valid);
+        assert_eq!(
+            tree.insert_block(block2.clone()).unwrap(),
+            InsertPayloadOk::AlreadySeen(BlockStatus::Valid)
+        );
 
         // make block1 canonical
         assert!(tree.make_canonical(&block1.hash()).is_ok());
@@ -1308,7 +1319,10 @@ mod tests {
         block2a.hash = block2a_hash;
 
         // reinsert two blocks that point to canonical chain
-        assert_eq!(tree.insert_block(block1a.clone()).unwrap(), BlockStatus::Accepted);
+        assert_eq!(
+            tree.insert_block(block1a.clone()).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Accepted)
+        );
 
         TreeTester::default()
             .with_chain_num(1)
@@ -1320,7 +1334,10 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::from([])))
             .assert(&tree);
 
-        assert_eq!(tree.insert_block(block2a.clone()).unwrap(), BlockStatus::Accepted);
+        assert_eq!(
+            tree.insert_block(block2a.clone()).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Accepted)
+        );
         // Trie state:
         // b2   b2a (side chain)
         // |   /
@@ -1504,7 +1521,9 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(block2b.clone()).unwrap(),
-            BlockStatus::Disconnected { missing_parent: block2b.parent_num_hash() }
+            InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                missing_parent: block2b.parent_num_hash()
+            })
         );
 
         TreeTester::default()
