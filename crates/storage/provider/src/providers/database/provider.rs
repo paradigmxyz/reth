@@ -1505,8 +1505,7 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
                 let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
-                let ommers = if withdrawals.is_none() { self.ommers(number.into())? } else { None }
-                    .unwrap_or_default();
+                let ommers = self.ommers(number.into())?.unwrap_or_default();
                 let transactions = self
                     .transactions_by_block(number.into())?
                     .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
