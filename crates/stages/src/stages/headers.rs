@@ -400,7 +400,6 @@ impl SyncGap {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
@@ -410,6 +409,8 @@ mod tests {
     use reth_primitives::{stage::StageUnitCheckpoint, H256, MAINNET};
     use reth_provider::ProviderFactory;
     use test_runner::HeadersTestRunner;
+
+    stage_test_suite!(HeadersTestRunner, headers);
 
     mod test_runner {
         use super::*;
@@ -575,8 +576,6 @@ mod tests {
             }
         }
     }
-
-    stage_test_suite!(HeadersTestRunner, headers);
 
     /// Execute the stage with linear downloader
     #[tokio::test]

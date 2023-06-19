@@ -232,9 +232,11 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-        UnwindStageTestRunner,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
     };
+
+    stage_test_suite!(SenderRecoveryTestRunner, sender_recovery);
 
     /// Execute a block range with a single transaction
     #[tokio::test]

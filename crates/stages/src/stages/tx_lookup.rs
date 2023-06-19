@@ -189,12 +189,14 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-        UnwindStageTestRunner,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
+
+    stage_test_suite!(TransactionLookupTestRunner, transaction_lookup);
 
     #[tokio::test]
     async fn execute_single_transaction_lookup() {

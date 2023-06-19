@@ -901,17 +901,17 @@ mod tests {
     #[tokio::test]
     async fn pipeline_error_handling() {
         // Non-fatal
-        // let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
-        // let mut pipeline = Pipeline::builder()
-        //     .add_stage(
-        //         TestStage::new(StageId::Other("NonFatal"))
-        //             .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
-        //             .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10) })),
-        //     )
-        //     .with_max_block(10)
-        //     .build(db, MAINNET.clone());
-        // let result = pipeline.run().await;
-        // assert_matches!(result, Ok(()));
+        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let mut pipeline = Pipeline::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("NonFatal"))
+                    .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10) })),
+            )
+            .with_max_block(10)
+            .build(db, MAINNET.clone());
+        let result = pipeline.run().await;
+        assert_matches!(result, Ok(()));
 
         // Fatal
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);

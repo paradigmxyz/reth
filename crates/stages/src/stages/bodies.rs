@@ -226,10 +226,14 @@ fn stage_checkpoint<DB: Database>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner};
+    use crate::test_utils::{
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+    };
     use assert_matches::assert_matches;
     use reth_primitives::stage::StageUnitCheckpoint;
     use test_utils::*;
+
+    stage_test_suite!(BodyTestRunner, body);
 
     /// Checks that the stage downloads at most `batch_size` blocks.
     #[tokio::test]

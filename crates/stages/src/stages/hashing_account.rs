@@ -141,7 +141,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
-        if to_block - from_block > self.clean_threshold || from_block == 1 {
+        if to_block.saturating_sub(from_block) > self.clean_threshold || from_block == 1 {
             let tx = provider.tx_ref();
             let stage_checkpoint = input
                 .checkpoint
@@ -293,10 +293,14 @@ fn stage_checkpoint_progress<DB: Database>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner};
+    use crate::test_utils::{
+        stage_test_suite, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
+    };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
     use test_utils::*;
+
+    stage_test_suite!(AccountHashingTestRunner, account_hashing);
 
     #[tokio::test]
     async fn execute_clean_account_hashing() {

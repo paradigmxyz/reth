@@ -8,7 +8,10 @@ macro_rules! stage_test_suite {
                 let runner = $runner::default();
 
                 // Execute the stage with empty database
-                let input = crate::stage::ExecInput::default();
+                let input = crate::stage::ExecInput {
+                    target: Some(0),
+                    checkpoint: None
+                };
 
                 // Run stage execution
                 let result = runner.execute(input).await;

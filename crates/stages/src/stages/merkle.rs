@@ -328,8 +328,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-        UnwindStageTestRunner,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -345,6 +345,8 @@ mod tests {
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
+
+    stage_test_suite!(MerkleTestRunner, merkle);
 
     /// Execute from genesis so as to merkelize whole state
     #[tokio::test]

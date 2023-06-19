@@ -37,11 +37,13 @@ impl<DB: Database> Stage<DB> for FinishStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-        UnwindStageTestRunner,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
     };
     use reth_interfaces::test_utils::generators::{random_header, random_header_range};
     use reth_primitives::SealedHeader;
+
+    stage_test_suite!(FinishTestRunner, finish);
 
     #[derive(Default)]
     struct FinishTestRunner {

@@ -65,7 +65,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset, along with their storages.
-        if to_block - from_block > self.clean_threshold || from_block == 1 {
+        if to_block.saturating_sub(from_block) > self.clean_threshold || from_block == 1 {
             let stage_checkpoint = input
                 .checkpoint
                 .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint());
@@ -224,8 +224,8 @@ fn stage_checkpoint_progress<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-        UnwindStageTestRunner,
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -239,6 +239,8 @@ mod tests {
     use reth_primitives::{
         stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
     };
+
+    stage_test_suite!(StorageHashingTestRunner, account_storage);
 
     /// Execute with low clean threshold so as to hash whole storage
     #[tokio::test]
