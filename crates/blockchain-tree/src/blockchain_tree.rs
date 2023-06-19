@@ -22,7 +22,8 @@ use reth_provider::{
     chain::{ChainSplit, SplitAt},
     post_state::PostState,
     BlockNumProvider, CanonStateNotification, CanonStateNotificationSender,
-    CanonStateNotifications, Chain, DatabaseProvider, ExecutorFactory, HeaderProvider,
+    CanonStateNotifications, Chain, DatabaseProvider, DisplayBlocksChain, ExecutorFactory,
+    HeaderProvider,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -923,8 +924,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let chain_notification;
         info!(
             target: "blockchain_tree",
-            "Committing new canonical chain: {:?}",
-            new_canon_chain.blocks().iter().map(|(_, b)| b.num_hash()).collect::<Vec<_>>()
+            "Committing new canonical chain: {}", DisplayBlocksChain(new_canon_chain.blocks())
         );
         // if joins to the tip;
         if new_canon_chain.fork_block_hash() == old_tip.hash {
