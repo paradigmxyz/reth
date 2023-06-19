@@ -367,11 +367,6 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.gas_limit()
     }
 
-    /// Returns true if this transaction is underpriced compared to the other.
-    pub(crate) fn is_underpriced(&self, other: &Self) -> bool {
-        self.transaction.effective_gas_price() <= other.transaction.effective_gas_price()
-    }
-
     /// Whether the transaction originated locally.
     pub fn is_local(&self) -> bool {
         self.origin.is_local()
