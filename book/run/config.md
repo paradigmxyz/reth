@@ -69,7 +69,7 @@ commit_threshold = 100000
 The bodies section controls both the behavior of the bodies stage, which download historical block bodies, as well as the primary downloader that fetches block bodies over P2P.
 
 ```toml
-[stages.headers]
+[stages.bodies]
 # The maximum number of bodies to request from a peer at a time.
 downloader_request_limit = 200
 # The maximum amount of bodies to download before writing them to disk.
