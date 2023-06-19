@@ -154,10 +154,18 @@ clean:
 # Compile MDBX debugging tools
 .PHONY: db-tools
 db-tools:
-	@echo "Building MDBX debugging tools"
-	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make tools
+	@echo "Building MDBX debugging tools..."
+    # `IOARENA=1` silences benchmarking info message that is printed to stderr
+	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make IOARENA=1 tools > /dev/null
 	@mkdir -p $(DB_TOOLS_DIR)
-	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && cp mdbx_chk $(FULL_DB_TOOLS_DIR) && cp mdbx_copy $(FULL_DB_TOOLS_DIR) && cp mdbx_dump $(FULL_DB_TOOLS_DIR) && cp mdbx_drop $(FULL_DB_TOOLS_DIR) && cp mdbx_load $(FULL_DB_TOOLS_DIR) && cp mdbx_stat $(FULL_DB_TOOLS_DIR)
-	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make clean
+	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && \
+		mv mdbx_chk $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_copy $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_dump $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_drop $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_load $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_stat $(FULL_DB_TOOLS_DIR)
+    # `IOARENA=1` silences benchmarking info message that is printed to stderr
+	@cd crates/storage/libmdbx-rs/mdbx-sys/libmdbx && make IOARENA=1 clean > /dev/null
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_stat -h\" for the info about MDBX db file."
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk -h\" for the MDBX db file integrity check."
