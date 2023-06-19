@@ -321,16 +321,17 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             };
 
             // now we unwind
-            // TODO: remove unwrap
-            let old_canon_chain = self.revert_canonical(canonical_fork.number).unwrap();
+            let old_canon_chain = self
+                .revert_canonical(canonical_fork.number)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
             // found parent in side tree, try to insert there
-            let res = self.try_insert_block_into_side_chain(block, chain_id);
+            let res = self.try_insert_block_into_side_chain(block.clone(), chain_id);
 
             // re insert canonical if possible
             if let Some(old_chain) = old_canon_chain {
-                // TODO: remove unwrap
-                self.commit_canonical(old_chain).unwrap();
+                self.commit_canonical(old_chain)
+                    .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
             }
 
             trace!(target: "blockchain_tree", ?res, "Inserted block into side chain");
@@ -344,16 +345,17 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
         {
             // now we unwind
-            // TODO: remove unwrap
-            let old_canon_chain = self.revert_canonical(parent.number).unwrap();
+            let old_canon_chain = self
+                .revert_canonical(parent.number)
+                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
             // found parent in side tree, try to insert there
-            let res = self.try_append_canonical_chain(block);
+            let res = self.try_append_canonical_chain(block.clone());
 
             // re insert canonical if possible
             if let Some(old_chain) = old_canon_chain {
-                // TODO: remove unwrap
-                self.commit_canonical(old_chain).unwrap();
+                self.commit_canonical(old_chain)
+                    .map_err(|err| InsertBlockError::new(block.block, err.into()))?;
             }
 
             trace!(target: "blockchain_tree", ?res, "Tried to append to canonical chain");
