@@ -1059,8 +1059,16 @@ where
                             missing_parent.number - canonical_tip_num >
                                 self.pipeline_run_threshold
                         {
-                            if let Some(target) = self.forkchoice_state_tracker.sync_target() {
-                                self.sync.set_pipeline_sync_target(target)
+                            if let Some(state) = self.forkchoice_state_tracker.sync_target_state() {
+                                // if we have already canonicalized the finalized block, we should
+                                // skip the pipeline run
+                                if Ok(None) ==
+                                    self.blockchain.header_by_hash_or_number(
+                                        state.finalized_block_hash.into(),
+                                    )
+                                {
+                                    self.sync.set_pipeline_sync_target(state.finalized_block_hash)
+                                }
                             }
                         } else {
                             // continue downloading the missing parent
