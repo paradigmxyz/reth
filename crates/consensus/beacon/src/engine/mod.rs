@@ -1680,9 +1680,10 @@ mod tests {
         );
 
         let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
-            .with_pipeline_exec_outputs(VecDeque::from([
-                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true }),
-            ]))
+            .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                checkpoint: StageCheckpoint::new(1),
+                done: true,
+            })]))
             .disable_blockchain_tree_sync()
             .with_max_block(2)
             .build();
@@ -1715,7 +1716,8 @@ mod tests {
 
         let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
             .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(max_block), done: true
+                checkpoint: StageCheckpoint::new(max_block),
+                done: true,
             })]))
             .with_max_block(max_block)
             .disable_blockchain_tree_sync()
@@ -1761,7 +1763,8 @@ mod tests {
 
             let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
                 .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new(0), done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
                 })]))
                 .build();
 
@@ -1790,7 +1793,8 @@ mod tests {
 
             let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
                 .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new(0), done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
                 })]))
                 .build();
 
@@ -1885,7 +1889,8 @@ mod tests {
 
             let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
                 .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new(0), done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
                 })]))
                 .disable_blockchain_tree_sync()
                 .build();
@@ -2019,7 +2024,8 @@ mod tests {
 
             let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
                 .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new(0), done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
                 })]))
                 .build();
 
@@ -2050,7 +2056,8 @@ mod tests {
 
             let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
                 .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new(0), done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
                 })]))
                 .build();
 
@@ -2098,7 +2105,8 @@ mod tests {
 
             let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
                 .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new(0), done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
                 })]))
                 .build();
 
@@ -2153,7 +2161,8 @@ mod tests {
 
             let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
                 .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new(0), done: true,
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
                 })]))
                 .with_executor_results(Vec::from([exec_result2]))
                 .build();
