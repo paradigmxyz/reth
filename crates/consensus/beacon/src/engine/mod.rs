@@ -1563,7 +1563,7 @@ mod tests {
             let shareable_db = ProviderFactory::new(db.clone(), self.chain_spec.clone());
             let latest = self.chain_spec.genesis_header().seal_slow();
             let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
-            let (engine, handle) = BeaconConsensusEngine::new(
+            let (mut engine, handle) = BeaconConsensusEngine::new(
                 NoopFullBlockClient::default(),
                 pipeline,
                 blockchain_provider,
@@ -1576,6 +1576,10 @@ mod tests {
                 self.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
             )
             .expect("failed to create consensus engine");
+
+            if let Some(max_block) = self.max_block {
+                engine.sync.set_max_block(max_block)
+            }
 
             (engine, TestEnv::new(db, tip_rx, handle))
         }
@@ -1677,10 +1681,10 @@ mod tests {
         );
 
         let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
-            .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(1),
-                done: true,
-            })]))
+            .with_pipeline_exec_outputs(VecDeque::from([
+                Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true }),
+                Err(StageError::ChannelClosed),
+            ]))
             .disable_blockchain_tree_sync()
             .with_max_block(2)
             .build();
