@@ -25,6 +25,9 @@ pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * 32);
 /// The default block nonce in the beacon consensus
 pub const BEACON_NONCE: u64 = 0u64;
 
+/// The default Ethereum block gas limit.
+pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
+
 /// The minimal value the basefee can decrease to.
 ///
 /// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%.
