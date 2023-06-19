@@ -1,7 +1,11 @@
 # Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
 
-GIT_TAG := $(shell git describe --tags --abbrev=0)
+GIT_TAG ?= $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
+
+MDBX_PATH = "crates/storage/libmdbx-rs/mdbx-sys/libmdbx"
+DB_TOOLS_DIR = "db-tools"
+FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
 BUILD_PATH = "target"
 
@@ -148,3 +152,22 @@ clean:
 	cargo clean
 	rm -rf $(BIN_DIR)
 	rm -rf $(EF_TESTS_DIR)
+
+# Compile MDBX debugging tools
+.PHONY: db-tools
+db-tools:
+	@echo "Building MDBX debugging tools..."
+    # `IOARENA=1` silences benchmarking info message that is printed to stderr
+	@$(MAKE) -C $(MDBX_PATH) IOARENA=1 tools > /dev/null
+	@mkdir -p $(DB_TOOLS_DIR)
+	@cd $(MDBX_PATH) && \
+		mv mdbx_chk $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_copy $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_dump $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_drop $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_load $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_stat $(FULL_DB_TOOLS_DIR)
+    # `IOARENA=1` silences benchmarking info message that is printed to stderr
+	@$(MAKE) -C $(MDBX_PATH) IOARENA=1 clean > /dev/null
+	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_stat\" for the info about MDBX db file."
+	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
