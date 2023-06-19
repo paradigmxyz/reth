@@ -1410,7 +1410,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
-        if let Some(td) = self.chain_spec.final_paris_difficulty(number) {
+        if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
             return Ok(Some(td))
@@ -1524,7 +1524,12 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
 
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
-            // TODO: this can be optimized to return empty Vec post-merge
+            // If the Paris (Merge) hardfork block is known and block is after it, return empty
+            // ommers.
+            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
+                return Ok(Some(Vec::new()))
+            }
+
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
             return Ok(ommers)
         }
