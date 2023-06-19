@@ -160,6 +160,7 @@ mod tests {
             hardforks: BTreeMap::from([(Hardfork::Frontier, ForkCondition::Never)]),
             fork_timestamps: Default::default(),
             paris_block_and_final_difficulty: None,
+            block_gas_limit: ChainSpec::block_gas_limit_default(),
         };
 
         assert_eq!(Hardfork::Frontier.fork_id(&spec), None);
@@ -174,6 +175,7 @@ mod tests {
             hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Never)]),
             fork_timestamps: Default::default(),
             paris_block_and_final_difficulty: None,
+            block_gas_limit: ChainSpec::block_gas_limit_default(),
         };
 
         assert_eq!(Hardfork::Shanghai.fork_filter(&spec), None);

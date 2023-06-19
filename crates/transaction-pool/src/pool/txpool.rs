@@ -17,10 +17,7 @@ use crate::{
     U256,
 };
 use fnv::FnvHashMap;
-use reth_primitives::{
-    constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
-    TxHash, H256,
-};
+use reth_primitives::{constants::MIN_PROTOCOL_BASE_FEE, ChainSpec, TxHash, H256};
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
@@ -1191,7 +1188,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
         Self {
             max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            block_gas_limit: ChainSpec::block_gas_limit_default(),
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),

@@ -15,6 +15,8 @@ use std::{
     sync::Arc,
 };
 
+const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
+
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
@@ -54,6 +56,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
         ]),
+        block_gas_limit: ChainSpec::block_gas_limit_default(),
     }
     .into()
 });
@@ -88,6 +91,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
         ]),
+        block_gas_limit: ChainSpec::block_gas_limit_default(),
     }
     .into()
 });
@@ -126,6 +130,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
         ]),
+        block_gas_limit: ChainSpec::block_gas_limit_default(),
     }
     .into()
 });
@@ -164,9 +169,17 @@ pub struct ChainSpec {
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
+
+    /// The Ethereum block gas limit.
+    pub block_gas_limit: u64,
 }
 
 impl ChainSpec {
+    /// The default Ethereum block gas limit.
+    pub fn block_gas_limit_default() -> u64 {
+        ETHEREUM_BLOCK_GAS_LIMIT
+    }
+
     /// Get information about the chain itself
     pub fn chain(&self) -> Chain {
         self.chain
@@ -367,6 +380,7 @@ impl From<Genesis> for ChainSpec {
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
             paris_block_and_final_difficulty: None,
+            block_gas_limit: ChainSpec::block_gas_limit_default(),
         }
     }
 }
@@ -571,6 +585,7 @@ impl ChainSpecBuilder {
             fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
             paris_block_and_final_difficulty: None,
+            block_gas_limit: ChainSpec::block_gas_limit_default(),
         }
     }
 }

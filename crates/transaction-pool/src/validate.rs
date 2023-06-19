@@ -7,9 +7,9 @@ use crate::{
     MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
 };
 use reth_primitives::{
-    constants::ETHEREUM_BLOCK_GAS_LIMIT, Address, ChainSpec, IntoRecoveredTransaction,
-    InvalidTransactionError, TransactionKind, TransactionSignedEcRecovered, TxHash,
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    Address, ChainSpec, IntoRecoveredTransaction, InvalidTransactionError, TransactionKind,
+    TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID, U256,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
 use std::{fmt, marker::PhantomData, sync::Arc, time::Instant};
@@ -138,7 +138,7 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
             shanghai: true,
             eip2718: true,
             eip1559: true,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            block_gas_limit: ChainSpec::block_gas_limit_default(),
             minimum_priority_fee: None,
             _marker: Default::default(),
         }

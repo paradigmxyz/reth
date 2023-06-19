@@ -17,8 +17,8 @@ use reth_payload_builder::{
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     constants::{
-        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
-        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
+        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION,
+        SLOT_DURATION,
     },
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
@@ -173,7 +173,7 @@ impl PayloadTaskGuard {
 pub struct BasicPayloadJobGeneratorConfig {
     /// Data to include in the block's extra data field.
     extradata: Bytes,
-    /// Target gas ceiling for built blocks, defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
+    /// Target gas ceiling for built blocks.
     max_gas_limit: u64,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
@@ -218,8 +218,6 @@ impl BasicPayloadJobGeneratorConfig {
     }
 
     /// Sets the target gas ceiling for mined blocks.
-    ///
-    /// Defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
     pub fn max_gas_limit(mut self, max_gas_limit: u64) -> Self {
         self.max_gas_limit = max_gas_limit;
         self
@@ -232,7 +230,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
         RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
             extradata: extradata.freeze(),
-            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            max_gas_limit: ChainSpec::block_gas_limit_default(),
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,
