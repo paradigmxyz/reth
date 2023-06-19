@@ -462,6 +462,10 @@ impl StateProviderFactory for MockEthProvider {
         todo!()
     }
 
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
+        todo!()
+    }
+
     fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
@@ -488,6 +492,10 @@ impl StateProviderFactory for Arc<MockEthProvider> {
     }
 
     fn pending(&self) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
         todo!()
     }
 
