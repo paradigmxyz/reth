@@ -277,21 +277,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(storage_changeset_lists)
     }
 
-    /// Iterate over account changesets and return all account address that were changed.
-    pub fn get_addresses_of_changed_accounts(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<BTreeSet<Address>, TransactionError> {
-        self.tx.cursor_read::<tables::AccountChangeSet>()?.walk_range(range)?.try_fold(
-            BTreeSet::new(),
-            |mut accounts: BTreeSet<Address>, entry| {
-                let (_, account_before) = entry?;
-                accounts.insert(account_before.address);
-                Ok(accounts)
-            },
-        )
-    }
-
     /// Get plainstate account from iterator
     pub fn get_plainstate_accounts(
         &self,
@@ -1310,7 +1295,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         // account hashing stage
         {
-            let lists = self.get_addresses_of_changed_accounts(range.clone())?;
+            let lists = self.changed_accounts_with_range(range.clone())?;
             let accounts = self.get_plainstate_accounts(lists.into_iter())?;
             self.insert_account_for_hashing(accounts.into_iter())?;
         }
