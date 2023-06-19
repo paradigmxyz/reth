@@ -1422,7 +1422,7 @@ mod tests {
         let mut pool = AllTransactions::default();
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let first = f.validated(tx.clone());
-        let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
+        let _res = pool.insert_tx(first, on_chain_balance, on_chain_nonce);
         let replacement = f.validated(tx.rng_hash().inc_price());
         let InsertOk { updates, replaced_tx, .. } =
             pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap();
@@ -1446,8 +1446,7 @@ mod tests {
         let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce);
         let mut replacement = f.validated(tx.rng_hash());
         replacement.transaction = replacement.transaction.decr_price();
-        let err =
-            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));
     }
 
