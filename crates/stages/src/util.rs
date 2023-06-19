@@ -32,3 +32,13 @@ pub(crate) mod opt {
         }
     }
 }
+
+macro_rules! return_if_target_reached {
+    ($input:expr) => {
+        if (crate::ExecOutput { checkpoint: $input.checkpoint() }).target_reached($input) {
+            return Ok(crate::ExecOutput { checkpoint: $input.checkpoint() })
+        }
+    };
+}
+
+pub(crate) use return_if_target_reached;

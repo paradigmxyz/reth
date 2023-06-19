@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -70,6 +73,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         let range = input.next_block_range();
         // Update the header range on the downloader
         self.downloader.set_download_range(range.clone())?;
@@ -227,13 +232,13 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_primitives::stage::StageUnitCheckpoint;
     use test_utils::*;
 
-    stage_test_suite!(BodyTestRunner, body);
+    stage_test_suite_ext!(BodyTestRunner, body);
 
     /// Checks that the stage downloads at most `batch_size` blocks.
     #[tokio::test]

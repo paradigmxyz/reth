@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use reth_codecs::Compact;
 use reth_db::{
     database::Database,
@@ -141,6 +144,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         let threshold = match self {
             MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
@@ -328,7 +333,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
@@ -346,7 +351,7 @@ mod tests {
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 
-    stage_test_suite!(MerkleTestRunner, merkle);
+    stage_test_suite_ext!(MerkleTestRunner, merkle);
 
     /// Execute from genesis so as to merkelize whole state
     #[tokio::test]

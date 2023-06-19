@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -259,6 +262,8 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         // For Ethereum transactions that reaches the max call depth (1024) revm can use more stack
         // space than what is allocated by default.
         //

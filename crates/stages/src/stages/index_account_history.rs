@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use reth_db::database::Database;
 use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::DatabaseProviderRW;
@@ -33,6 +36,8 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         let range = input.next_block_range_with_threshold(self.commit_threshold);
 
         let indices = provider.get_account_block_numbers_from_changesets(range.clone())?;

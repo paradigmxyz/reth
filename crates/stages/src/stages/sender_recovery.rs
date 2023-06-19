@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -59,6 +62,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         let (tx_range, block_range) =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
@@ -232,11 +237,11 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner,
     };
 
-    stage_test_suite!(SenderRecoveryTestRunner, sender_recovery);
+    stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
 
     /// Execute a block range with a single transaction
     #[tokio::test]

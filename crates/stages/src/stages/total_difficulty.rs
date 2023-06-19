@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -54,6 +57,8 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         let tx = provider.tx_ref();
 
         let range = input.next_block_range_with_threshold(self.commit_threshold);
@@ -126,11 +131,11 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner,
     };
 
-    stage_test_suite!(TotalDifficultyTestRunner, total_difficulty);
+    stage_test_suite_ext!(TotalDifficultyTestRunner, total_difficulty);
 
     #[tokio::test]
     async fn execute_with_intermediate_commit() {

@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use itertools::Itertools;
 use rayon::prelude::*;
 use reth_db::{
@@ -54,6 +57,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         let (tx_range, block_range) =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
@@ -189,14 +194,14 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
 
-    stage_test_suite!(TransactionLookupTestRunner, transaction_lookup);
+    stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
 
     #[tokio::test]
     async fn execute_single_transaction_lookup() {

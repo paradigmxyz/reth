@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
@@ -135,6 +138,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         let (from_block, to_block) = input.next_block_range().into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
@@ -294,13 +299,13 @@ fn stage_checkpoint_progress<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
     use test_utils::*;
 
-    stage_test_suite!(AccountHashingTestRunner, account_hashing);
+    stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
 
     #[tokio::test]
     async fn execute_clean_account_hashing() {

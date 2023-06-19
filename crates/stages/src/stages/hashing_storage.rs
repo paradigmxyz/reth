@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    util::return_if_target_reached, ExecInput, ExecOutput, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use num_traits::Zero;
 use reth_db::{
     cursor::DbDupCursorRO,
@@ -57,6 +60,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        return_if_target_reached!(input);
+
         let tx = provider.tx_ref();
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -224,7 +229,7 @@ fn stage_checkpoint_progress<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
@@ -240,7 +245,7 @@ mod tests {
         stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
     };
 
-    stage_test_suite!(StorageHashingTestRunner, account_storage);
+    stage_test_suite_ext!(StorageHashingTestRunner, account_storage);
 
     /// Execute with low clean threshold so as to hash whole storage
     #[tokio::test]
