@@ -98,13 +98,8 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        std::fs::create_dir_all(&db_path)?;
-
-        // TODO: Auto-impl for Database trait
-        let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            db_path.as_ref(),
-            reth_db::mdbx::EnvKind::RW,
-        )?;
+        let db = Arc::new(init_db(db_path)?);
+        info!(target: "reth::cli", "Database opened");
 
         let mut tool = DbTool::new(&db, self.chain.clone())?;
 
