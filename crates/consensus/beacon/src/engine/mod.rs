@@ -1059,7 +1059,12 @@ where
                             missing_parent.number - canonical_tip_num >
                                 self.pipeline_run_threshold
                         {
-                            self.sync.set_pipeline_sync_target(missing_parent.hash)
+                            if let Some(target) = self.forkchoice_state_tracker.sync_target() {
+                                self.sync.set_pipeline_sync_target(target)
+                            } else {
+                                // TODO: This should never happen because a download can only
+                                // happen in response to a fcu which we respond SYNCING to
+                            }
                         } else {
                             // continue downloading the missing parent
                             //
