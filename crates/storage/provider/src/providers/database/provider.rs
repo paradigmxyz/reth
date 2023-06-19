@@ -1,8 +1,8 @@
 use crate::{
     insert_canonical_block,
     post_state::StorageChangeset,
-    traits::{AccountExtProvider, BlockSource, ReceiptProvider, StageCheckpointWriter},
-    AccountProvider, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
+    traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
+    AccountReader, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
     HeaderProvider, PostState, ProviderError, StageCheckpointReader, TransactionError,
     TransactionsProvider, WithdrawalsProvider,
 };
@@ -1333,13 +1333,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> AccountProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> AccountReader for DatabaseProvider<'this, TX> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         Ok(self.tx.get::<tables::PlainAccountState>(address)?)
     }
 }
 
-impl<'this, TX: DbTx<'this>> AccountExtProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
     fn changed_accounts_with_range(
         &self,
         range: impl RangeBounds<BlockNumber>,

@@ -1,6 +1,6 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
+    AccountReader, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointReader,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
     WithdrawalsProvider,
@@ -212,7 +212,7 @@ impl HeaderProvider for NoopProvider {
     }
 }
 
-impl AccountProvider for NoopProvider {
+impl AccountReader for NoopProvider {
     fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
         Ok(None)
     }

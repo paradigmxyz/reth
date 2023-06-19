@@ -16,7 +16,7 @@ use reth_primitives::{
         StageId,
     },
 };
-use reth_provider::{AccountExtProvider, DatabaseProviderRW};
+use reth_provider::{AccountExtReader, DatabaseProviderRW};
 use std::{
     cmp::max,
     fmt::Debug,
