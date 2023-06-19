@@ -1,10 +1,10 @@
 use crate::{
     insert_canonical_block,
     post_state::StorageChangeset,
-    traits::{AccountExtProvider, BlockSource, ReceiptProvider, StageCheckpointWriter},
-    AccountProvider, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, PostState, ProviderError, StageCheckpointReader, TransactionError,
-    TransactionsProvider, WithdrawalsProvider,
+    traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
+    AccountReader, AccountWriter, BlockHashProvider, BlockNumProvider, BlockProvider,
+    EvmEnvProvider, HeaderProvider, PostState, ProviderError, StageCheckpointReader,
+    TransactionError, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -119,7 +119,7 @@ fn unwind_history_shards<'a, S, T, C>(
     start_key: T::Key,
     block_number: BlockNumber,
     mut shard_belongs_to_key: impl FnMut(&T::Key) -> bool,
-) -> std::result::Result<Vec<usize>, TransactionError>
+) -> Result<Vec<usize>>
 where
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<S>>,
@@ -254,29 +254,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(storage_changeset_lists)
     }
 
-    /// Get all block numbers where account got changed.
-    ///
-    /// NOTE: Get inclusive range of blocks.
-    pub fn get_account_block_numbers_from_changesets(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
-        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
-
-        let account_transtions = changeset_cursor.walk_range(range)?.try_fold(
-            BTreeMap::new(),
-            |mut accounts: BTreeMap<Address, Vec<u64>>,
-             entry|
-             -> std::result::Result<_, TransactionError> {
-                let (index, account) = entry?;
-                accounts.entry(account.address).or_default().push(index);
-                Ok(accounts)
-            },
-        )?;
-
-        Ok(account_transtions)
-    }
-
     /// Get the mappings of log address and log topic to block numbers where they occurred.
     /// This function walks over the receipts and constructs corresponding mappings for log fields.
     ///
@@ -321,33 +298,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
 
         Ok((log_addresses, log_topics, num_of_receipts))
     }
-
-    /// Iterate over account changesets and return all account address that were changed.
-    pub fn get_addresses_of_changed_accounts(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<BTreeSet<Address>, TransactionError> {
-        self.tx.cursor_read::<tables::AccountChangeSet>()?.walk_range(range)?.try_fold(
-            BTreeSet::new(),
-            |mut accounts: BTreeSet<Address>, entry| {
-                let (_, account_before) = entry?;
-                accounts.insert(account_before.address);
-                Ok(accounts)
-            },
-        )
-    }
-
-    /// Get plainstate account from iterator
-    pub fn get_plainstate_accounts(
-        &self,
-        iter: impl IntoIterator<Item = Address>,
-    ) -> std::result::Result<Vec<(Address, Option<Account>)>, TransactionError> {
-        let mut plain_accounts = self.tx.cursor_read::<tables::PlainAccountState>()?;
-        Ok(iter
-            .into_iter()
-            .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
-    }
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
@@ -374,49 +324,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> std::result::Result<Vec<(SealedBlockWithSenders, PostState)>, TransactionError> {
         self.get_take_block_and_execution_range::<true>(chain_spec, range)
-    }
-
-    /// Unwind and clear account hashing
-    pub fn unwind_account_hashing(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<(), TransactionError> {
-        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
-
-        // Aggregate all block changesets and make a list of accounts that have been changed.
-        self.tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            .rev()
-            // fold all account to get the old balance/nonces and account that needs to be removed
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
-                    accounts.insert(account_before.address, account_before.info);
-                    accounts
-                },
-            )
-            .into_iter()
-            // hash addresses and collect it inside sorted BTreeMap.
-            // We are doing keccak only once per address.
-            .map(|(address, account)| (keccak256(address), account))
-            .collect::<BTreeMap<_, _>>()
-            .into_iter()
-            // Apply values to HashedState (if Account is None remove it);
-            .try_for_each(
-                |(hashed_address, account)| -> std::result::Result<(), TransactionError> {
-                    if let Some(account) = account {
-                        hashed_accounts.upsert(hashed_address, account)?;
-                    } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
-                        hashed_accounts.delete_current()?;
-                    }
-                    Ok(())
-                },
-            )?;
-
-        Ok(())
     }
 
     /// Unwind and clear storage hashing
@@ -467,54 +374,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             )?;
 
         Ok(())
-    }
-
-    /// Unwind and clear account history indices.
-    ///
-    /// Returns number of changesets walked.
-    pub fn unwind_account_history_indices(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<usize, TransactionError> {
-        let account_changeset = self
-            .tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let changesets = account_changeset.len();
-
-        let last_indices = account_changeset
-            .into_iter()
-            // reverse so we can get lowest block number where we need to unwind account.
-            .rev()
-            // fold all account and get last block number
-            .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
-                // we just need address and lowest block number.
-                accounts.insert(account.address, index);
-                accounts
-            });
-
-        // Unwind the account history index.
-        let mut cursor = self.tx.cursor_write::<tables::AccountHistory>()?;
-        for (address, rem_index) in last_indices {
-            let partial_shard = unwind_history_shards::<_, tables::AccountHistory, _>(
-                &mut cursor,
-                ShardedKey::last(address),
-                rem_index,
-                |sharded_key| sharded_key.key == address,
-            )?;
-
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
-                    ShardedKey::last(address),
-                    BlockNumberList::new_pre_sorted(partial_shard),
-                )?;
-            }
-        }
-
-        Ok(changesets)
     }
 
     /// Unwind and clear storage history indices.
@@ -1082,32 +941,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(blocks)
     }
 
-    /// Update all pipeline sync stage progress.
-    pub fn update_pipeline_stages(
-        &self,
-        block_number: BlockNumber,
-        drop_stage_checkpoint: bool,
-    ) -> std::result::Result<(), TransactionError> {
-        // iterate over all existing stages in the table and update its progress.
-        let mut cursor = self.tx.cursor_write::<tables::SyncStage>()?;
-        while let Some((stage_name, checkpoint)) = cursor.next()? {
-            cursor.upsert(
-                stage_name,
-                StageCheckpoint {
-                    block_number,
-                    ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
-                },
-            )?
-        }
-
-        Ok(())
-    }
-
     /// Insert storage change index into the database. Used inside StorageHistoryIndex stage.
     pub fn insert_storage_history_index(
         &self,
         storage_transitions: BTreeMap<(Address, H256), Vec<u64>>,
-    ) -> std::result::Result<(), TransactionError> {
+    ) -> Result<()> {
         self.insert_history_index::<_, tables::StorageHistory>(
             storage_transitions,
             |(address, storage_key), highest_block_number| {
@@ -1116,19 +954,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         )
     }
 
-    /// Insert account change index into the database. Used inside AccountHistoryIndex stage.
-    pub fn insert_account_history_index(
-        &self,
-        account_transitions: BTreeMap<Address, Vec<u64>>,
-    ) -> std::result::Result<(), TransactionError> {
-        self.insert_history_index::<_, tables::AccountHistory>(account_transitions, ShardedKey::new)
-    }
-
     /// Insert log address index into the database. Used inside LogHistoryIndex stage.
     pub fn insert_log_address_history_index(
         &self,
         log_address_occurrences: BTreeMap<Address, Vec<u64>>,
-    ) -> std::result::Result<(), TransactionError> {
+    ) -> Result<()> {
         self.insert_history_index::<_, tables::LogAddressHistory>(
             log_address_occurrences,
             ShardedKey::new,
@@ -1139,7 +969,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     pub fn insert_log_topic_history_index(
         &self,
         log_topic_occurrences: BTreeMap<H256, Vec<u64>>,
-    ) -> std::result::Result<(), TransactionError> {
+    ) -> Result<()> {
         self.insert_history_index::<_, tables::LogTopicHistory>(
             log_topic_occurrences,
             ShardedKey::new,
@@ -1157,7 +987,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         &self,
         index_updates: BTreeMap<P, Vec<u64>>,
         mut sharded_key_factory: impl FnMut(P, BlockNumber) -> T::Key,
-    ) -> std::result::Result<(), TransactionError>
+    ) -> Result<()>
     where
         P: Copy,
         T: Table<Value = BlockNumberList>,
@@ -1261,7 +1091,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
     /// Load shard and check if it is full and remove if it is not. If list is empty, last
     /// shard was full or there is no shards at all.
-    fn take_shard<T>(&self, key: T::Key) -> std::result::Result<Vec<u64>, TransactionError>
+    fn take_shard<T>(&self, key: T::Key) -> Result<Vec<u64>>
     where
         T: Table<Value = BlockNumberList>,
     {
@@ -1312,34 +1142,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                 },
             )
         })?;
-        Ok(())
-    }
-
-    /// iterate over accounts and insert them to hashing table
-    pub fn insert_account_for_hashing(
-        &self,
-        accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
-    ) -> std::result::Result<(), TransactionError> {
-        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
-
-        let hashes_accounts = accounts.into_iter().fold(
-            BTreeMap::new(),
-            |mut map: BTreeMap<H256, Option<Account>>, (address, account)| {
-                map.insert(keccak256(address), account);
-                map
-            },
-        );
-
-        hashes_accounts.into_iter().try_for_each(
-            |(hashed_address, account)| -> std::result::Result<(), TransactionError> {
-                if let Some(account) = account {
-                    hashed_accounts.upsert(hashed_address, account)?
-                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
-                    hashed_accounts.delete_current()?;
-                }
-                Ok(())
-            },
-        )?;
         Ok(())
     }
 
@@ -1400,7 +1202,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ) -> std::result::Result<(), TransactionError> {
         // account history stage
         {
-            let indices = self.get_account_block_numbers_from_changesets(range.clone())?;
+            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
@@ -1442,8 +1244,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
         // account hashing stage
         {
-            let lists = self.get_addresses_of_changed_accounts(range.clone())?;
-            let accounts = self.get_plainstate_accounts(lists.into_iter())?;
+            let lists = self.changed_accounts_with_range(range.clone())?;
+            let accounts = self.basic_accounts(lists.into_iter())?;
             self.insert_account_for_hashing(accounts.into_iter())?;
         }
 
@@ -1465,13 +1267,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> AccountProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> AccountReader for DatabaseProvider<'this, TX> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         Ok(self.tx.get::<tables::PlainAccountState>(address)?)
     }
 }
 
-impl<'this, TX: DbTx<'this>> AccountExtProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
     fn changed_accounts_with_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -1494,6 +1296,137 @@ impl<'this, TX: DbTx<'this>> AccountExtProvider for DatabaseProvider<'this, TX> 
             .into_iter()
             .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
             .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    fn changed_accounts_and_blocks_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<BTreeMap<Address, Vec<u64>>> {
+        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
+
+        let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
+            BTreeMap::new(),
+            |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> Result<_> {
+                let (index, account) = entry?;
+                accounts.entry(account.address).or_default().push(index);
+                Ok(accounts)
+            },
+        )?;
+
+        Ok(account_transitions)
+    }
+}
+
+impl<'this, TX: DbTxMut<'this> + DbTx<'this>> AccountWriter for DatabaseProvider<'this, TX> {
+    fn unwind_account_hashing(&self, range: RangeInclusive<BlockNumber>) -> Result<()> {
+        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
+
+        // Aggregate all block changesets and make a list of accounts that have been changed.
+        self.tx
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(range)?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .rev()
+            // fold all account to get the old balance/nonces and account that needs to be removed
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
+                    accounts.insert(account_before.address, account_before.info);
+                    accounts
+                },
+            )
+            .into_iter()
+            // hash addresses and collect it inside sorted BTreeMap.
+            // We are doing keccak only once per address.
+            .map(|(address, account)| (keccak256(address), account))
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            // Apply values to HashedState (if Account is None remove it);
+            .try_for_each(|(hashed_address, account)| -> Result<()> {
+                if let Some(account) = account {
+                    hashed_accounts.upsert(hashed_address, account)?;
+                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                    hashed_accounts.delete_current()?;
+                }
+                Ok(())
+            })?;
+
+        Ok(())
+    }
+
+    fn unwind_account_history_indices(&self, range: RangeInclusive<BlockNumber>) -> Result<usize> {
+        let account_changeset = self
+            .tx
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(range)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let changesets = account_changeset.len();
+
+        let last_indices = account_changeset
+            .into_iter()
+            // reverse so we can get lowest block number where we need to unwind account.
+            .rev()
+            // fold all account and get last block number
+            .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
+                // we just need address and lowest block number.
+                accounts.insert(account.address, index);
+                accounts
+            });
+
+        // Unwind the account history index.
+        let mut cursor = self.tx.cursor_write::<tables::AccountHistory>()?;
+        for (address, rem_index) in last_indices {
+            let partial_shard = unwind_history_shards::<_, tables::AccountHistory, _>(
+                &mut cursor,
+                ShardedKey::last(address),
+                rem_index,
+                |sharded_key| sharded_key.key == address,
+            )?;
+
+            // Check the last returned partial shard.
+            // If it's not empty, the shard needs to be reinserted.
+            if !partial_shard.is_empty() {
+                cursor.insert(
+                    ShardedKey::last(address),
+                    BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+
+        Ok(changesets)
+    }
+
+    fn insert_account_history_index(
+        &self,
+        account_transitions: BTreeMap<Address, Vec<u64>>,
+    ) -> Result<()> {
+        self.insert_history_index::<_, tables::AccountHistory>(account_transitions, ShardedKey::new)
+    }
+
+    fn insert_account_for_hashing(
+        &self,
+        accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
+    ) -> Result<()> {
+        let mut hashed_accounts = self.tx.cursor_write::<tables::HashedAccount>()?;
+
+        let hashes_accounts = accounts.into_iter().fold(
+            BTreeMap::new(),
+            |mut map: BTreeMap<H256, Option<Account>>, (address, account)| {
+                map.insert(keccak256(address), account);
+                map
+            },
+        );
+
+        hashes_accounts.into_iter().try_for_each(|(hashed_address, account)| -> Result<()> {
+            if let Some(account) = account {
+                hashed_accounts.upsert(hashed_address, account)?
+            } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts.delete_current()?;
+            }
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 
@@ -1519,7 +1452,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
-        if let Some(td) = self.chain_spec.final_paris_difficulty(number) {
+        if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
             return Ok(Some(td))
@@ -1614,8 +1547,7 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             if let Some(header) = self.header_by_number(number)? {
                 let withdrawals = self.withdrawals_by_block(number.into(), header.timestamp)?;
-                let ommers = if withdrawals.is_none() { self.ommers(number.into())? } else { None }
-                    .unwrap_or_default();
+                let ommers = self.ommers(number.into())?.unwrap_or_default();
                 let transactions = self
                     .transactions_by_block(number.into())?
                     .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
@@ -1633,7 +1565,12 @@ impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
 
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
-            // TODO: this can be optimized to return empty Vec post-merge
+            // If the Paris (Merge) hardfork block is known and block is after it, return empty
+            // ommers.
+            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
+                return Ok(Some(Vec::new()))
+            }
+
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
             return Ok(ommers)
         }
@@ -1968,5 +1905,25 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
     /// Save stage checkpoint.
     fn save_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) -> Result<()> {
         Ok(self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)?)
+    }
+
+    fn update_pipeline_stages(
+        &self,
+        block_number: BlockNumber,
+        drop_stage_checkpoint: bool,
+    ) -> Result<()> {
+        // iterate over all existing stages in the table and update its progress.
+        let mut cursor = self.tx.cursor_write::<tables::SyncStage>()?;
+        while let Some((stage_name, checkpoint)) = cursor.next()? {
+            cursor.upsert(
+                stage_name,
+                StageCheckpoint {
+                    block_number,
+                    ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
+                },
+            )?
+        }
+
+        Ok(())
     }
 }

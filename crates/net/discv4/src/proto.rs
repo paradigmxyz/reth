@@ -305,7 +305,7 @@ impl EnrResponse {
     ///
     /// See also <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L36>
     pub fn eth_fork_id(&self) -> Option<ForkId> {
-        let mut maybe_fork_id = self.enr.0.get(b"eth")?;
+        let mut maybe_fork_id = self.enr.0.get_raw_rlp(b"eth")?;
         EnrForkIdEntry::decode(&mut maybe_fork_id).ok().map(|entry| entry.fork_id)
     }
 }
@@ -500,7 +500,7 @@ mod tests {
     };
     use enr::{EnrBuilder, EnrPublicKey};
     use rand::{thread_rng, Rng, RngCore};
-    use reth_primitives::hex_literal::hex;
+    use reth_primitives::{hex_literal::hex, ForkHash};
 
     #[test]
     fn test_endpoint_ipv_v4() {
@@ -712,6 +712,41 @@ mod tests {
         let packet = "05ae5bf922cf2a93f97632a4ab0943dc252a0dab0c42d86dd62e5d91e1a0966e9b628fbf4763fdfbb928540460b797e6be2e7058a82f6083f6d2e7391bb021741459976d4152aa16bbee0c3609dcfac6668db1ef78b7ee9f8b4ced10dd5ae2900101df04cb8403d12d4f82765f82765fc9843ed8cae6828aa6808463569916829670";
         let data = hex::decode(packet).unwrap();
         Message::decode(&data).unwrap();
+    }
+
+    #[test]
+    fn encode_decode_enr_msg() {
+        use self::EnrWrapper;
+        use enr::secp256k1::SecretKey;
+        use reth_rlp::Decodable;
+        use std::net::Ipv4Addr;
+
+        let key = SecretKey::new(&mut rand::rngs::OsRng);
+        let ip = Ipv4Addr::new(127, 0, 0, 1);
+        let tcp = 3000;
+
+        let fork_id: ForkId = ForkId { hash: ForkHash([220, 233, 108, 45]), next: 0u64 };
+
+        let enr = {
+            let mut builder = EnrBuilder::new("v4");
+            builder.ip(ip.into());
+            builder.tcp4(tcp);
+            let mut buf = Vec::new();
+            let forkentry = EnrForkIdEntry { fork_id };
+            forkentry.encode(&mut buf);
+            builder.add_value_rlp("eth", buf.into());
+            EnrWrapper::new(builder.build(&key).unwrap())
+        };
+
+        let enr_respone = EnrResponse { request_hash: H256::random(), enr };
+
+        let mut buf = Vec::new();
+        enr_respone.encode(&mut buf);
+
+        let decoded = EnrResponse::decode(&mut &buf[..]).unwrap();
+
+        let fork_id_decoded = decoded.eth_fork_id().unwrap();
+        assert_eq!(fork_id, fork_id_decoded);
     }
 
     // test vector from the enr library rlp encoding tests

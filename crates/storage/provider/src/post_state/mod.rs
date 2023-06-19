@@ -640,7 +640,7 @@ impl PostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccountProvider, ProviderFactory};
+    use crate::{AccountReader, ProviderFactory};
     use reth_db::{
         database::Database,
         mdbx::{test_utils, Env, EnvKind, WriteMap},

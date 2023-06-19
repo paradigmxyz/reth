@@ -1,5 +1,8 @@
 use reth_interfaces::Result;
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    BlockNumber,
+};
 
 /// The trait for fetching stage checkpoint related data.
 #[auto_impl::auto_impl(&, Arc)]
@@ -19,4 +22,11 @@ pub trait StageCheckpointWriter: Send + Sync {
 
     /// Save stage checkpoint progress.
     fn save_stage_checkpoint_progress(&self, id: StageId, checkpoint: Vec<u8>) -> Result<()>;
+
+    /// Update all pipeline sync stage progress.
+    fn update_pipeline_stages(
+        &self,
+        block_number: BlockNumber,
+        drop_stage_checkpoint: bool,
+    ) -> Result<()>;
 }

@@ -77,6 +77,10 @@ use crate::{
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
 use reth_provider::providers::BlockchainProvider;
+use reth_stages::stages::{
+    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
+    StorageHashingStage, TransactionLookupStage,
+};
 
 pub mod cl_events;
 pub mod events;
@@ -628,7 +632,7 @@ impl Command {
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
     {
-        let stage_conf = &config.stages;
+        let stage_config = &config.stages;
 
         let mut builder = Pipeline::builder();
 
@@ -670,17 +674,33 @@ impl Command {
                 )
                 .set(
                     TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
+                        .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
                 )
                 .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
+                    commit_threshold: stage_config.sender_recovery.commit_threshold,
                 })
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds {
-                        max_blocks: stage_conf.execution.max_blocks,
-                        max_changes: stage_conf.execution.max_changes,
+                        max_blocks: stage_config.execution.max_blocks,
+                        max_changes: stage_config.execution.max_changes,
                     },
+                ))
+                .set(AccountHashingStage::new(
+                    stage_config.account_hashing.clean_threshold,
+                    stage_config.account_hashing.commit_threshold,
+                ))
+                .set(StorageHashingStage::new(
+                    stage_config.storage_hashing.clean_threshold,
+                    stage_config.storage_hashing.commit_threshold,
+                ))
+                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
+                .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
+                .set(IndexAccountHistoryStage::new(
+                    stage_config.index_account_history.commit_threshold,
+                ))
+                .set(IndexStorageHistoryStage::new(
+                    stage_config.index_storage_history.commit_threshold,
                 )),
             )
             .build(db, self.chain.clone());

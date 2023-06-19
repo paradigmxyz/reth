@@ -16,7 +16,7 @@ use reth_primitives::{
         StageId,
     },
 };
-use reth_provider::{AccountExtProvider, DatabaseProviderRW};
+use reth_provider::{AccountExtReader, AccountWriter, DatabaseProviderRW};
 use std::{
     cmp::max,
     fmt::Debug,
@@ -29,7 +29,7 @@ use tracing::*;
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
 #[derive(Clone, Debug)]
 pub struct AccountHashingStage {
-    /// The threshold (in number of state transitions) for switching between incremental
+    /// The threshold (in number of blocks) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
     /// The maximum number of accounts to process before committing.

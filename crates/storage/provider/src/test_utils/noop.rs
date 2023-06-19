@@ -1,6 +1,6 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
+    AccountReader, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointReader,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
     WithdrawalsProvider,
@@ -212,7 +212,7 @@ impl HeaderProvider for NoopProvider {
     }
 }
 
-impl AccountProvider for NoopProvider {
+impl AccountReader for NoopProvider {
     fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
         Ok(None)
     }
@@ -301,6 +301,10 @@ impl StateProviderFactory for NoopProvider {
 
     fn pending(&self) -> Result<StateProviderBox<'_>> {
         Ok(Box::new(*self))
+    }
+
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
+        Ok(Some(Box::new(*self)))
     }
 
     fn pending_with_provider<'a>(

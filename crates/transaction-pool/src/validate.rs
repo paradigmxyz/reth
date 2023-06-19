@@ -11,7 +11,7 @@ use reth_primitives::{
     TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID, U256,
 };
-use reth_provider::{AccountProvider, StateProviderFactory};
+use reth_provider::{AccountReader, StateProviderFactory};
 use std::{fmt, marker::PhantomData, sync::Arc, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
