@@ -167,7 +167,7 @@ commit_threshold = 100000
 
 ### `storage_hashing`
 
-The account hashing stage builds a secondary table of account storages, where the key is the hash of the address and the slot, instead of the raw address and slot.
+The storage hashing stage builds a secondary table of account storages, where the key is the hash of the address and the slot, instead of the raw address and slot.
 
 This is used to later compute the state root.
 
