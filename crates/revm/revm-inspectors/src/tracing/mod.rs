@@ -212,11 +212,20 @@ impl TracingInspector {
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
 
+        let op = OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+            .or_else(|| {
+                // if the opcode is invalid, we'll use the invalid opcode to represent it because
+                // this is invoked before the opcode is executed, the evm will eventually return a
+                // `Halt` with invalid/unknown opcode as result
+                let invalid_opcode = 0xfe;
+                OpCode::try_from_u8(invalid_opcode)
+            })
+            .expect("is valid opcode;");
+
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
             pc,
-            op: OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
-                .expect("is valid opcode;"),
+            op,
             contract: interp.contract.address,
             stack,
             memory,
