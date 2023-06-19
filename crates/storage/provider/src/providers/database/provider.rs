@@ -277,29 +277,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(storage_changeset_lists)
     }
 
-    /// Get all block numbers where account got changed.
-    ///
-    /// NOTE: Get inclusive range of blocks.
-    pub fn get_account_block_numbers_from_changesets(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> std::result::Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
-        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
-
-        let account_transtions = changeset_cursor.walk_range(range)?.try_fold(
-            BTreeMap::new(),
-            |mut accounts: BTreeMap<Address, Vec<u64>>,
-             entry|
-             -> std::result::Result<_, TransactionError> {
-                let (index, account) = entry?;
-                accounts.entry(account.address).or_default().push(index);
-                Ok(accounts)
-            },
-        )?;
-
-        Ok(account_transtions)
-    }
-
     /// Iterate over account changesets and return all account address that were changed.
     pub fn get_addresses_of_changed_accounts(
         &self,
@@ -1299,7 +1276,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     ) -> std::result::Result<(), TransactionError> {
         // account history stage
         {
-            let indices = self.get_account_block_numbers_from_changesets(range.clone())?;
+            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
@@ -1385,6 +1362,24 @@ impl<'this, TX: DbTx<'this>> AccountExtProvider for DatabaseProvider<'this, TX> 
             .into_iter()
             .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
             .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    fn changed_accounts_and_blocks_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<BTreeMap<Address, Vec<u64>>> {
+        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
+
+        let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
+            BTreeMap::new(),
+            |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> Result<_> {
+                let (index, account) = entry?;
+                accounts.entry(account.address).or_default().push(index);
+                Ok(accounts)
+            },
+        )?;
+
+        Ok(account_transitions)
     }
 }
 

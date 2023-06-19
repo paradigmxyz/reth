@@ -1,7 +1,10 @@
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{Account, Address, BlockNumber};
-use std::{collections::BTreeSet, ops::RangeBounds};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::{RangeBounds, RangeInclusive},
+};
 
 /// Account provider
 #[auto_impl(&, Arc, Box)]
@@ -29,4 +32,13 @@ pub trait AccountExtProvider: Send + Sync {
         &self,
         _iter: impl IntoIterator<Item = Address>,
     ) -> Result<Vec<(Address, Option<Account>)>>;
+
+    /// Iterate over account changesets and return all account addresses that were changed alongside
+    /// each specific set of blocks.
+    ///
+    /// NOTE: Get inclusive range of blocks.
+    fn changed_accounts_and_blocks_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<BTreeMap<Address, Vec<BlockNumber>>>;
 }
