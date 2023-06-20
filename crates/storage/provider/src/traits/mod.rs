@@ -3,6 +3,9 @@
 mod account;
 pub use account::{AccountExtReader, AccountReader, AccountWriter};
 
+mod storage;
+pub use storage::StorageReader;
+
 mod block;
 pub use block::{BlockProvider, BlockProviderIdExt, BlockSource};
 

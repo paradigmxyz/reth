@@ -3,7 +3,7 @@ use crate::{
     post_state::StorageChangeset,
     traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
     AccountReader, AccountWriter, BlockHashProvider, BlockNumProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, PostState, ProviderError, StageCheckpointReader,
+    EvmEnvProvider, HeaderProvider, PostState, ProviderError, StageCheckpointReader, StorageReader,
     TransactionError, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -223,31 +223,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
                 accounts.entry(address).or_default().insert(storage_entry.key);
                 Ok(accounts)
             })
-    }
-
-    /// Get plainstate storages
-    #[allow(clippy::type_complexity)]
-    pub fn get_plainstate_storages(
-        &self,
-        iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
-    ) -> std::result::Result<Vec<(Address, Vec<(H256, U256)>)>, TransactionError> {
-        let mut plain_storage = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
-
-        iter.into_iter()
-            .map(|(address, storage)| {
-                storage
-                    .into_iter()
-                    .map(|key| -> std::result::Result<_, TransactionError> {
-                        let ret = plain_storage
-                            .seek_by_key_subkey(address, key)?
-                            .filter(|v| v.key == key)
-                            .unwrap_or_default();
-                        Ok((key, ret.value))
-                    })
-                    .collect::<std::result::Result<Vec<(_, _)>, _>>()
-                    .map(|storage| (address, storage))
-            })
-            .collect::<std::result::Result<Vec<(_, _)>, _>>()
     }
 
     /// Get all block numbers where account got changed.
@@ -1087,7 +1062,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         // storage hashing stage
         {
             let lists = self.get_addresses_and_keys_of_changed_storages(range.clone())?;
-            let storages = self.get_plainstate_storages(lists.into_iter())?;
+            let storages = self.basic_storages(lists.into_iter())?;
             self.insert_storage_for_hashing(storages.into_iter())?;
         }
 
@@ -1814,5 +1789,30 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
         }
 
         Ok(())
+    }
+}
+
+impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
+    fn basic_storages(
+        &self,
+        iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
+    ) -> Result<Vec<(Address, Vec<(H256, U256)>)>> {
+        let mut plain_storage = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
+
+        iter.into_iter()
+            .map(|(address, storage)| {
+                storage
+                    .into_iter()
+                    .map(|key| -> Result<_> {
+                        let ret = plain_storage
+                            .seek_by_key_subkey(address, key)?
+                            .filter(|v| v.key == key)
+                            .unwrap_or_default();
+                        Ok((key, ret.value))
+                    })
+                    .collect::<Result<Vec<(_, _)>>>()
+                    .map(|storage| (address, storage))
+            })
+            .collect::<Result<Vec<(_, _)>>>()
     }
 }

@@ -16,7 +16,7 @@ use reth_primitives::{
     },
     StorageEntry,
 };
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, StorageReader};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
@@ -176,7 +176,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
-            let storages = provider.get_plainstate_storages(lists)?;
+            let storages = provider.basic_storages(lists)?;
             provider.insert_storage_for_hashing(storages.into_iter())?;
         }
 

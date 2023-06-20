@@ -17,7 +17,8 @@ pub use traits::{
     CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
     ExecutorFactory, HeaderProvider, PostStateDataProvider, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StageCheckpointWriter, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
+    StateProviderFactory, StateRootProvider, StorageReader, TransactionsProvider,
+    WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
