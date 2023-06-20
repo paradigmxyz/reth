@@ -23,7 +23,7 @@ The most important requirement is by far the disk, whereas CPU and RAM requireme
 
 ### Disk
 
-There are multiple types of disks to sync Reth, with varying size requirements, depending on the [syncing mode](../fundamentals/node.md):
+There are multiple types of disks to sync Reth, with varying size requirements, depending on the syncing mode:
 
 * Archive Node: At least 2TB is required to store 
 * Full Node: TBD
