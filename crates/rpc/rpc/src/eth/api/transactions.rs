@@ -238,7 +238,7 @@ where
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
-        let (cfg, block_env, block_id) = if at.is_pending() {
+        if at.is_pending() {
             let header = if let Some(pending) = self.provider().pending_header()? {
                 pending
             } else {
@@ -263,7 +263,7 @@ where
             let mut block_env = BlockEnv::default();
             self.provider().fill_block_env_with_header(&mut block_env, &header)?;
             self.provider().fill_cfg_env_with_header(&mut cfg, &header)?;
-            (cfg, block_env, header.hash.into())
+            return Ok((cfg, block_env, header.hash.into()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
@@ -271,10 +271,8 @@ where
                 .block_hash_for_id(at)?
                 .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
             let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
-            (cfg, env, block_hash.into())
-        };
-
-        Ok((cfg, block_env, block_id))
+            Ok((cfg, env, block_hash.into()))
+        }
     }
 
     async fn evm_env_for_raw_block(&self, header: &Header) -> EthResult<(CfgEnv, BlockEnv)> {
