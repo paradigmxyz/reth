@@ -47,8 +47,10 @@ pub enum BlockGasLimit {
     ///
     /// The reason for that option to exist is that both Erigon and Geth use pre-configured gas cap
     /// even if it's possible to derive the gas limit from the block:
-    /// https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
-    /// https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94
+    ///
+    /// <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956>
+    ///
+    /// <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94>
     Max,
     /// Gas limit derived from the block header.
     Header,
