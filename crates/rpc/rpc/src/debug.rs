@@ -1,7 +1,9 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult},
-        revm_utils::{inspect, prepare_call_env, replay_transactions_until, EvmOverrides},
+        revm_utils::{
+            clone_into_empty_db, inspect, prepare_call_env, replay_transactions_until, EvmOverrides,
+        },
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
@@ -9,10 +11,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256};
-use reth_provider::{
-    BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProvider, StateProviderBox,
-};
+use reth_primitives::{Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256};
+use reth_provider::{BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProviderBox};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -31,8 +31,14 @@ use reth_rpc_types::{
     BlockError, CallRequest, RichBlock,
 };
 use reth_tasks::TaskSpawner;
-use revm::primitives::Env;
-use revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv};
+use revm::{
+    db::{CacheDB, EmptyDB},
+    primitives::Env,
+};
+use revm_primitives::{
+    db::{DatabaseCommit, DatabaseRef},
+    BlockEnv, CfgEnv,
+};
 use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc, oneshot, AcquireError, OwnedSemaphorePermit};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -310,9 +316,17 @@ where
                     let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
                     let mut db = SubState::new(State::new(state));
+                    let has_state_overrides = overrides.has_state();
                     let env = prepare_call_env(cfg, block_env, call, &mut db, overrides)?;
 
-                    let to_db_service = self.spawn_js_trace_service(at)?;
+                    // If the caller provided state overrides we need to clone the DB so the js
+                    // service has access these modifications
+                    let mut maybe_override_db = None;
+                    if has_state_overrides {
+                        maybe_override_db = Some(clone_into_empty_db(&db));
+                    }
+
+                    let to_db_service = self.spawn_js_trace_service(at, maybe_override_db)?;
 
                     let mut inspector = JsInspector::new(code, config, to_db_service)?;
                     let (res, env) = inspect(db, env, &mut inspector)?;
@@ -384,10 +398,12 @@ where
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
+                    // We need to clone the database because the JS tracer will need to access the
+                    // current state via the spawned service
+                    let js_db = clone_into_empty_db(db);
                     // we spawn the database service that will be used by the JS tracer
-                    // TODO(mattsse) this is not quite accurate when tracing a block inside a
                     // transaction because the service needs access to the committed state changes
-                    let to_db_service = self.spawn_js_trace_service(at)?;
+                    let to_db_service = self.spawn_js_trace_service(at, Some(js_db))?;
 
                     let mut inspector = JsInspector::new(code, config, to_db_service)?;
                     let (res, env) = inspect(db, env, &mut inspector)?;
@@ -416,13 +432,17 @@ where
     /// to it.
     ///
     /// Note: This blocks until the service is ready to receive requests.
-    fn spawn_js_trace_service(&self, at: BlockId) -> EthResult<mpsc::Sender<JsDbRequest>> {
+    fn spawn_js_trace_service(
+        &self,
+        at: BlockId,
+        db: Option<CacheDB<EmptyDB>>,
+    ) -> EthResult<mpsc::Sender<JsDbRequest>> {
         let (to_db_service, rx) = mpsc::channel(1);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let this = self.clone();
-        self.inner
-            .task_spawner
-            .spawn(Box::pin(async move { this.js_trace_db_service_task(at, rx, ready_tx).await }));
+        self.inner.task_spawner.spawn(Box::pin(async move {
+            this.js_trace_db_service_task(at, rx, ready_tx, db).await
+        }));
         // wait for initialization
         ready_rx.recv().map_err(|_| {
             EthApiError::InternalJsTracerError("js tracer initialization failed".to_string())
@@ -431,11 +451,16 @@ where
     }
 
     /// A services that handles database requests issued from inside the JavaScript tracing engine.
+    ///
+    /// If this traces with modified state, this takes a `db` parameter that contains the modified
+    /// in memory state. This is required because [StateProviderBox] can not be cloned or shared
+    /// across threads.
     async fn js_trace_db_service_task(
         self,
         at: BlockId,
         rx: mpsc::Receiver<JsDbRequest>,
         on_ready: std::sync::mpsc::Sender<EthResult<()>>,
+        db: Option<CacheDB<EmptyDB>>,
     ) {
         let state = match self.inner.eth_api.state_at(at) {
             Ok(state) => {
@@ -448,25 +473,38 @@ where
             }
         };
 
+        let db = if let Some(db) = db {
+            let CacheDB { accounts, contracts, logs, block_hashes, .. } = db;
+            CacheDB { accounts, contracts, logs, block_hashes, db: State::new(state) }
+        } else {
+            CacheDB::new(State::new(state))
+        };
+
         let mut stream = ReceiverStream::new(rx);
         while let Some(req) = stream.next().await {
             match req {
                 JsDbRequest::Basic { address, resp } => {
-                    let acc = state.basic_account(address).map_err(|err| err.to_string());
+                    let acc = db
+                        .basic(address)
+                        .map(|maybe_acc| {
+                            maybe_acc.map(|acc| Account {
+                                nonce: acc.nonce,
+                                balance: acc.balance,
+                                bytecode_hash: Some(acc.code_hash),
+                            })
+                        })
+                        .map_err(|err| err.to_string());
                     let _ = resp.send(acc);
                 }
                 JsDbRequest::Code { code_hash, resp } => {
-                    let code = state
-                        .bytecode_by_hash(code_hash)
-                        .map(|code| code.map(|c| c.bytecode.clone()).unwrap_or_default())
+                    let code = db
+                        .code_by_hash(code_hash)
+                        .map(|code| code.bytecode)
                         .map_err(|err| err.to_string());
                     let _ = resp.send(code);
                 }
                 JsDbRequest::StorageAt { address, index, resp } => {
-                    let value = state
-                        .storage(address, index)
-                        .map(|val| val.unwrap_or_default())
-                        .map_err(|err| err.to_string());
+                    let value = db.storage(address, index).map_err(|err| err.to_string());
                     let _ = resp.send(value);
                 }
             }

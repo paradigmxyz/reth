@@ -506,7 +506,7 @@ pub enum JsDbRequest {
         /// The address of the account
         address: Address,
         /// Index of the storage slot
-        index: H256,
+        index: U256,
         /// The response channel
         resp: std::sync::mpsc::Sender<Result<U256, String>>,
     },
