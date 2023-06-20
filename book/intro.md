@@ -82,8 +82,8 @@ Here are some useful sections to jump to:
 - Install Reth by following the [guide](./installation/installation.md).
 - Sync your node on any [official network](./run/run-a-node.md).
 - View [statistics and metrics](./run/observability.md) about your node.
-- Query the [JSON-RPC](./api/api.md) using Foundry's `cast` or `curl`.
-- Set up your [development environment and contribute](./contribute.md)!
+- Query the [JSON-RPC](./jsonrpc/intro.md) using Foundry's `cast` or `curl`.
+- Set up your [development environment and contribute](./developers/contribute.md)!
 
 > 📖 **About this book**
 >
