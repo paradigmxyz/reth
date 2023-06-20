@@ -6,8 +6,8 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{basefee::calculate_next_block_base_fee, BlockId, BlockNumberOrTag, U256};
-use reth_provider::{BlockProviderIdExt, BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
+use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
+use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
@@ -36,8 +36,8 @@ where
     /// provided.
     pub(crate) async fn fee_history(
         &self,
-        mut block_count: u64,
-        newest_block: BlockId,
+        block_count: u64,
+        newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
         if block_count == 0 {
@@ -46,21 +46,14 @@ where
 
         // The spec states that you can request a maximum of 1024 blocks.
         if block_count > 1024 {
-            println!("block count too large");
             return Err(EthApiError::InvalidBlockRange)
         }
 
-        // Treat a request for 1 block as a request for `newest_block..=newest_block`,
-        // and a request for 2 blocks as `newest_block - 1..=newest_block`
-        block_count -= 1;
-
-        let Some(end_block) = self.inner.provider.block_number_for_id(newest_block)? else {
-            println!("could not find block {newest_block:?}");
+        let Some(end_block) = self.inner.provider.block_number_for_id(newest_block.into())? else {
             return Err(EthApiError::UnknownBlockNumber) };
 
         // Check that we would not be querying outside of genesis
         if end_block < block_count {
-            println!("{end_block} < {block_count}");
             return Err(EthApiError::InvalidBlockRange)
         }
 
@@ -75,10 +68,12 @@ where
         }
 
         // Fetch the headers and ensure we got all of them
-        let start_block = end_block - block_count;
+        //
+        // Treat a request for 1 block as a request for `newest_block..=newest_block`,
+        // otherwise `newest_block - 2
+        let start_block = end_block - block_count + 1;
         let headers = self.inner.provider.headers_range(start_block..=end_block)?;
         if headers.len() != block_count as usize {
-            println!("headers {} != block count {}", headers.len(), block_count);
             return Err(EthApiError::InvalidBlockRange)
         }
 
@@ -96,7 +91,6 @@ where
                 let Some(receipts) =
                     self.inner.provider.receipts_by_block(header.number.into())? else {
                     // If there are no receipts, then we do not have all info on the block
-                    println!("no receipts");
                     return Err(EthApiError::InvalidBlockRange)
                 };
                 let Some(mut transactions): Option<Vec<_>> = self
@@ -111,13 +105,14 @@ where
                         reward: tx.effective_gas_tip(header.base_fee_per_gas).unwrap_or_default(),
                     })
                     .collect()) else {
-                    println!("no transactions");
                         // If there are no transactions, then we do not have all info on the block
                         return Err(EthApiError::InvalidBlockRange)
                     };
 
                 // Sort the transactions by their rewards in ascending order
                 transactions.sort_by_key(|tx| tx.reward);
+
+                println!("txs: {}", transactions.len());
 
                 // Find the transaction that corresponds to the given percentile
                 //
@@ -135,10 +130,19 @@ where
                     }
 
                     let threshold = (header.gas_used as f64 * percentile / 100.) as u64;
+                    println!(
+                        "percentile: {}, cumulative gas: {}, threshold: {}",
+                        percentile, cumulative_gas_used, threshold
+                    );
                     while cumulative_gas_used < threshold && tx_index < transactions.len() - 1 {
                         tx_index += 1;
-                        cumulative_gas_used += transactions[tx_index].gas_used
+                        cumulative_gas_used += transactions[tx_index].gas_used;
+                        println!(
+                            "percentile: {}, cumulative gas: {}, threshold: {}, tx_index: {}",
+                            percentile, cumulative_gas_used, threshold, tx_index
+                        );
                     }
+                    println!("found tx: {}", tx_index);
                     rewards_in_block.push(U256::from(transactions[tx_index].reward));
                 }
                 rewards.push(rewards_in_block);
