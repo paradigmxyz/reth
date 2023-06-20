@@ -40,29 +40,6 @@ use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 
-/// Source of the block gas limit for EVM to execute the transaction with.
-#[derive(Clone, Copy, Debug)]
-pub enum BlockGasLimit {
-    /// Maximum gas limit (see [ETHEREUM_BLOCK_GAS_LIMIT]).
-    ///
-    /// The reason for that option to exist is that both Erigon and Geth use pre-configured gas cap
-    /// even if it's possible to derive the gas limit from the block:
-    ///
-    /// <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956>
-    ///
-    /// <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94>
-    Max,
-    /// Gas limit derived from the block header.
-    Header,
-}
-
-impl BlockGasLimit {
-    /// Returns true if should use the maximum gas limit
-    fn is_max(&self) -> bool {
-        matches!(self, Self::Max)
-    }
-}
-
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
@@ -78,11 +55,7 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
     /// for.
-    async fn evm_env_at(
-        &self,
-        at: BlockId,
-        block_gas_limit: BlockGasLimit,
-    ) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
 
     /// Returns the revm evm env for the raw block header
     ///
@@ -265,11 +238,7 @@ where
         f(state)
     }
 
-    async fn evm_env_at(
-        &self,
-        at: BlockId,
-        block_gas_limit: BlockGasLimit,
-    ) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         let (cfg, mut block_env, block_id) = if at.is_pending() {
             let header = if let Some(pending) = self.provider().pending_header()? {
                 pending
@@ -315,8 +284,7 @@ where
 
     async fn evm_env_for_raw_block(&self, header: &Header) -> EthResult<(CfgEnv, BlockEnv)> {
         // get the parent config first
-        let (cfg, mut block_env, _) =
-            self.evm_env_at(header.parent_hash.into(), BlockGasLimit::Header).await?;
+        let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
 
         let after_merge = cfg.spec_id >= SpecId::MERGE;
         fill_block_env_with_coinbase(&mut block_env, header, after_merge, header.beneficiary);
@@ -537,7 +505,7 @@ where
     where
         F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send,
     {
-        let (cfg, block_env, at) = self.evm_env_at(at, BlockGasLimit::Max).await?;
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
@@ -577,7 +545,7 @@ where
     where
         I: Inspector<StateCacheDB<'a>> + Send,
     {
-        let (cfg, block_env, at) = self.evm_env_at(at, BlockGasLimit::Max).await?;
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
         let mut db = SubState::new(State::new(state));
 
@@ -663,7 +631,7 @@ where
         };
         let (tx, tx_info) = transaction.split();
 
-        let (cfg, block_env, _) = self.evm_env_at(block.hash.into(), BlockGasLimit::Header).await?;
+        let (cfg, block_env, _) = self.evm_env_at(block.hash.into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in

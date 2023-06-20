@@ -4,7 +4,7 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{inspect, prepare_call_env, EvmOverrides},
         utils::recover_raw_transaction,
-        BlockGasLimit, EthTransactions,
+        EthTransactions, TransactionDefaultGasLimit,
     },
     result::internal_rpc_err,
     TracingCallGuard,
@@ -156,10 +156,7 @@ where
         let (cfg, block, at) = self
             .inner
             .eth_api
-            .evm_env_at(
-                block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                BlockGasLimit::Header,
-            )
+            .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
         let tx = tx_env_with_recovered(&tx);
         let env = Env { cfg, block, tx };
@@ -188,7 +185,7 @@ where
         block_id: Option<BlockId>,
     ) -> EthResult<Vec<TraceResults>> {
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
-        let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at, BlockGasLimit::Max).await?;
+        let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
 
         self.on_blocking_task(|this| async move {
             // execute all transactions on top of each other and record the traces
@@ -314,7 +311,7 @@ where
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) = futures::try_join!(
-            self.inner.eth_api.evm_env_at(block_id, BlockGasLimit::Header),
+            self.inner.eth_api.evm_env_at(block_id),
             self.inner.eth_api.block_by_id(block_id),
         )?;
 

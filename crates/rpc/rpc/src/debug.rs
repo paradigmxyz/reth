@@ -4,7 +4,7 @@ use crate::{
         revm_utils::{
             clone_into_empty_db, inspect, prepare_call_env, replay_transactions_until, EvmOverrides,
         },
-        BlockGasLimit, EthTransactions, TransactionSource,
+        EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
     EthApiSpec, TracingCallGuard,
@@ -189,7 +189,7 @@ where
             .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
         let ((cfg, block_env, _), block) = futures::try_join!(
-            self.inner.eth_api.evm_env_at(block_hash.into(), BlockGasLimit::Header),
+            self.inner.eth_api.evm_env_at(block_hash.into()),
             self.inner.eth_api.block_by_id(block_id),
         )?;
 
@@ -213,8 +213,7 @@ where
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
-        let (cfg, block_env, _) =
-            self.inner.eth_api.evm_env_at(block.hash.into(), BlockGasLimit::Header).await?;
+        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash.into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -314,8 +313,7 @@ where
 
                     // for JS tracing we need to setup all async work before we can start tracing
                     // because JSTracer and all JS types are not Send
-                    let (cfg, block_env, at) =
-                        self.inner.eth_api.evm_env_at(at, BlockGasLimit::Max).await?;
+                    let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
                     let mut db = SubState::new(State::new(state));
                     let has_state_overrides = overrides.has_state();

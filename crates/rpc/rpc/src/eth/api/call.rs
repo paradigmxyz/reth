@@ -7,7 +7,7 @@ use crate::{
             build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
             transact, EvmOverrides,
         },
-        BlockGasLimit, EthTransactions,
+        EthTransactions, TransactionDefaultGasLimit,
     },
     EthApi,
 };
@@ -43,7 +43,7 @@ where
         request: CallRequest,
         at: BlockId,
     ) -> EthResult<U256> {
-        let (cfg, block_env, at) = self.evm_env_at(at, BlockGasLimit::Header).await?;
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
         self.estimate_gas_with(cfg, block_env, request, state)
     }
@@ -255,7 +255,7 @@ where
         at: Option<BlockId>,
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let (cfg, block, at) = self.evm_env_at(block_id, BlockGasLimit::Header).await?;
+        let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
 
         let mut env = build_call_evm_env(cfg, block, request.clone())?;
