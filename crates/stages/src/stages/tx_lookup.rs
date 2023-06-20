@@ -198,7 +198,10 @@ mod tests {
         TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{random_block, random_block_range};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block, random_block_range},
+    };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
     use reth_provider::TransactionsProvider;
 
@@ -208,6 +211,7 @@ mod tests {
     #[tokio::test]
     async fn execute_single_transaction_lookup() {
         let (previous_stage, stage_progress) = (500, 100);
+        let mut rng = generators::rng();
 
         // Set up the runner
         let runner = TransactionLookupTestRunner::default();
@@ -220,7 +224,13 @@ mod tests {
         let non_empty_block_number = stage_progress + 10;
         let blocks = (stage_progress..=input.target())
             .map(|number| {
-                random_block(number, None, Some((number == non_empty_block_number) as u8), None)
+                random_block(
+                    &mut rng,
+                    number,
+                    None,
+                    Some((number == non_empty_block_number) as u8),
+                    None,
+                )
             })
             .collect::<Vec<_>>();
         runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
@@ -256,9 +266,11 @@ mod tests {
             target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
+        let mut rng = generators::rng();
 
         // Seed only once with full input range
-        let seed = random_block_range(stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+        let seed =
+            random_block_range(&mut rng, stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
         let total_txs = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
@@ -366,8 +378,9 @@ mod tests {
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
+            let mut rng = generators::rng();
 
-            let blocks = random_block_range(stage_progress + 1..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(&mut rng, stage_progress + 1..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }

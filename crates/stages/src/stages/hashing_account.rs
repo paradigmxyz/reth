@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_interfaces::db::DatabaseError;
+use reth_interfaces::{db::DatabaseError, test_utils::generators};
 use reth_primitives::{
     keccak256,
     stage::{
@@ -89,12 +89,14 @@ impl AccountHashingStage {
         use reth_primitives::{Account, H256, U256};
         use reth_provider::insert_canonical_block;
 
-        let blocks = random_block_range(opts.blocks.clone(), H256::zero(), opts.txs);
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(&mut rng, opts.blocks.clone(), H256::zero(), opts.txs);
 
         for block in blocks {
             insert_canonical_block(provider.tx_ref(), block, None).unwrap();
         }
-        let mut accounts = random_eoa_account_range(opts.accounts);
+        let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
         {
             // Account State generator
             let mut account_cursor =
