@@ -40,7 +40,7 @@ use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 
-/// Source of the block gas limit for EVM to execute the transaction on.
+/// Source of the block gas limit for EVM to execute the transaction with.
 #[derive(Clone, Copy, Debug)]
 pub enum BlockGasLimit {
     /// Maximum gas limit (see [ETHEREUM_BLOCK_GAS_LIMIT]).
