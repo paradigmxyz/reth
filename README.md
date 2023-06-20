@@ -98,6 +98,10 @@ cargo test --workspace --features geth-tests
 
 We recommend using [`cargo nextest`](https://nexte.st/) to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
 
+> **Note**
+> 
+> Some tests use random number generators to generate test data. If you want to use a deterministic seed, you can set the `SEED` environment variable.
+
 ## Getting Help
 
 If you have any questions, first see if the answer to your question can be found in the [book][book].
