@@ -6,6 +6,10 @@
 ))]
 
 //! Helpers for resolving the external IP.
+//!
+//! ## Feature Flags
+//!
+//! - `serde` (default): Enable serde support
 
 use igd::aio::search_gateway;
 use pin_project_lite::pin_project;
