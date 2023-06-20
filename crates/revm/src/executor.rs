@@ -327,12 +327,20 @@ where
                 }
 
                 // Route the l1 cost and base fee to the appropriate optimism vaults
-                let db = self.db();
-                optimism::route_l1_cost_to_vault(db, l1_cost)?;
-                optimism::route_base_fee_to_vault(
-                    db,
-                    block.base_fee_per_gas.unwrap_or_default(),
-                    result.gas_used(),
+                self.increment_account_balance(
+                    optimism::l1_cost_recipient(),
+                    l1_cost,
+                    &mut post_state,
+                )?;
+                self.increment_account_balance(
+                    optimism::base_fee_recipient(),
+                    U256::from(
+                        block
+                            .base_fee_per_gas
+                            .unwrap_or_default()
+                            .saturating_mul(result.gas_used()),
+                    ),
+                    &mut post_state,
                 )?;
 
                 // cast revm logs to reth logs

@@ -1,9 +1,6 @@
 use std::str::FromStr;
 
-use reth_interfaces::executor::Error;
 use reth_primitives::{Address, TransactionSigned, U256};
-use reth_provider::StateProvider;
-use reth_revm::database::SubState;
 use revm::db::DatabaseRef;
 
 const L1_FEE_RECIPIENT: &str = "0x420000000000000000000000000000000000001A";
@@ -70,26 +67,12 @@ impl L1GasCostOracle {
     }
 }
 
-/// Route the base fee to the appropriate recipient account
-pub fn route_base_fee_to_vault<DB: StateProvider>(
-    db: &mut SubState<DB>,
-    base_fee: u64,
-    gas_used: u64,
-) -> Result<(), Error> {
-    let recipient_address = Address::from_str(BASE_FEE_RECIPIENT).unwrap();
-    let mut recipient = db.load_account(recipient_address).map_err(|_| Error::ProviderError)?;
-    let amount_to_send = U256::from(base_fee.saturating_mul(gas_used));
-    recipient.info.balance = recipient.info.balance.saturating_add(amount_to_send);
-    Ok(())
+/// Get the base fee recipient address
+pub fn base_fee_recipient() -> Address {
+    Address::from_str(BASE_FEE_RECIPIENT).unwrap()
 }
 
-/// Route the L1 cost to the appropriate recipient account
-pub fn route_l1_cost_to_vault<DB: StateProvider>(
-    db: &mut SubState<DB>,
-    l1_cost: U256,
-) -> Result<(), Error> {
-    let recipient_address = Address::from_str(L1_FEE_RECIPIENT).unwrap();
-    let mut recipient = db.load_account(recipient_address).map_err(|_| Error::ProviderError)?;
-    recipient.info.balance = recipient.info.balance.saturating_add(l1_cost);
-    Ok(())
+/// Get the L1 cost recipient address
+pub fn l1_cost_recipient() -> Address {
+    Address::from_str(L1_FEE_RECIPIENT).unwrap()
 }
