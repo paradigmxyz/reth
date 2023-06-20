@@ -1,7 +1,7 @@
 use auto_impl::auto_impl;
 use reth_db::models::BlockNumberAddress;
 use reth_interfaces::Result;
-use reth_primitives::{Address, BlockNumber, H256, U256};
+use reth_primitives::{Address, BlockNumber, StorageEntry, H256};
 use std::ops::{Range, RangeInclusive};
 
 /// Hashing Writer
@@ -13,7 +13,7 @@ pub trait HashingWriter: Send + Sync {
     /// iterate over storages and insert them to hashing table
     fn insert_storage_for_hashing(
         &self,
-        storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = (H256, U256)>)>,
+        storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
     ) -> Result<()>;
 
     /// Calculate the hashes of all changed accounts and storages, and finally calculate the state

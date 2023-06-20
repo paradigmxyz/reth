@@ -1506,7 +1506,7 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     fn basic_storages(
         &self,
         iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
-    ) -> Result<Vec<(Address, Vec<(H256, U256)>)>> {
+    ) -> Result<Vec<(Address, Vec<StorageEntry>)>> {
         let mut plain_storage = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
 
         iter.into_iter()
@@ -1514,13 +1514,12 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
                 storage
                     .into_iter()
                     .map(|key| -> Result<_> {
-                        let ret = plain_storage
+                        Ok(plain_storage
                             .seek_by_key_subkey(address, key)?
                             .filter(|v| v.key == key)
-                            .unwrap_or_default();
-                        Ok((key, ret.value))
+                            .unwrap_or_else(|| StorageEntry { key, value: Default::default() }))
                     })
-                    .collect::<Result<Vec<(_, _)>>>()
+                    .collect::<Result<Vec<_>>>()
                     .map(|storage| (address, storage))
             })
             .collect::<Result<Vec<(_, _)>>>()
@@ -1650,12 +1649,12 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     }
     fn insert_storage_for_hashing(
         &self,
-        storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = (H256, U256)>)>,
+        storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
     ) -> Result<()> {
         // hash values
         let hashed = storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
-            let storage = storage.into_iter().fold(BTreeMap::new(), |mut map, (key, value)| {
-                map.insert(keccak256(key), value);
+            let storage = storage.into_iter().fold(BTreeMap::new(), |mut map, entry| {
+                map.insert(keccak256(entry.key), entry.value);
                 map
             });
             map.insert(keccak256(address), storage);

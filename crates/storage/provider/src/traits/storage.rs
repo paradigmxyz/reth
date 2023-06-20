@@ -5,7 +5,7 @@ use std::{
 
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
-use reth_primitives::{Address, BlockNumber, H256, U256};
+use reth_primitives::{Address, BlockNumber, StorageEntry, H256};
 
 /// Storage reader
 #[auto_impl(&, Arc, Box)]
@@ -14,7 +14,7 @@ pub trait StorageReader: Send + Sync {
     fn basic_storages(
         &self,
         iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
-    ) -> Result<Vec<(Address, Vec<(H256, U256)>)>>;
+    ) -> Result<Vec<(Address, Vec<StorageEntry>)>>;
 
     /// Iterate over storage changesets and return all storage slots that were changed.
     fn changed_storages(
