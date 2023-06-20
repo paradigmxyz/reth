@@ -4,7 +4,7 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{inspect, prepare_call_env, EvmOverrides},
         utils::recover_raw_transaction,
-        EthTransactions, TransactionDefaultGasLimit,
+        EthTransactions,
     },
     result::internal_rpc_err,
     TracingCallGuard,

@@ -7,7 +7,7 @@ use crate::{
             build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
             transact, EvmOverrides,
         },
-        EthTransactions, TransactionDefaultGasLimit,
+        EthTransactions,
     },
     EthApi,
 };

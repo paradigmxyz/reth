@@ -13,7 +13,6 @@ use crate::{
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    constants::ETHEREUM_BLOCK_GAS_LIMIT,
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
@@ -239,7 +238,7 @@ where
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
-        let (cfg, mut block_env, block_id) = if at.is_pending() {
+        let (cfg, block_env, block_id) = if at.is_pending() {
             let header = if let Some(pending) = self.provider().pending_header()? {
                 pending
             } else {
@@ -274,10 +273,6 @@ where
             let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
             (cfg, env, block_hash.into())
         };
-
-        if block_gas_limit.is_max() {
-            block_env.gas_limit = U256::from(ETHEREUM_BLOCK_GAS_LIMIT)
-        }
 
         Ok((cfg, block_env, block_id))
     }
