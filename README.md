@@ -9,7 +9,7 @@
 
 ![](./assets/reth.jpg)
 
-**[Install](https://https://paradigmxyz.github.io/reth/installation/installation.html)**
+**[Install](https://paradigmxyz.github.io/reth/installation/installation.html)**
 | [User Book](https://paradigmxyz.github.io/reth)
 | [Developer Docs](./docs)
 | [Crate Docs](https://paradigmxyz.github.io/reth/docs)
