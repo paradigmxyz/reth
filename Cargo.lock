@@ -5531,7 +5531,6 @@ dependencies = [
  "reth-revm-primitives",
  "reth-rlp",
  "reth-trie",
- "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
