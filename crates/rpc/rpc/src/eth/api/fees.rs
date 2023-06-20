@@ -138,14 +138,14 @@ where
 
                 let mut rewards = Vec::with_capacity(reward_percentiles.len());
                 let mut sum_gas_used = sorter.first().map(|tx| tx.gas_used).unwrap_or_default();
-                let mut tx_index = 0;
+                let mut tx_index = 1;
 
                 for percentile in reward_percentiles.iter() {
                     let threshold_gas_used = (header.gas_used as f64) * percentile / 100_f64;
                     while sum_gas_used < threshold_gas_used as u128 && tx_index < transactions.len()
                     {
-                        tx_index += 1;
                         sum_gas_used += sorter[tx_index].gas_used;
+                        tx_index += 1;
                     }
 
                     rewards.push(U256::from(sorter[tx_index].reward));
