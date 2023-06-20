@@ -75,6 +75,11 @@ impl TracingInspector {
         }
     }
 
+    /// Activate or deactivate log recording for `config`
+    pub fn set_record_logs(&mut self, enable: bool) {
+        self.config.record_logs = enable;
+    }
+
     /// Consumes the Inspector and returns a [ParityTraceBuilder].
     pub fn into_parity_builder(self) -> ParityTraceBuilder {
         ParityTraceBuilder::new(self.traces.arena, self.config)
@@ -336,8 +341,11 @@ where
 
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx];
-        trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
-        trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+
+        if self.config.record_logs {
+            trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
+            trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+        }
     }
 
     fn step_end(

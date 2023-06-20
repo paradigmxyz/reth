@@ -292,6 +292,9 @@ where
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_geth_config(&config),
                         );
+                        if let Some(true) = call_config.with_log {
+                            inspector.set_record_logs(true);
+                        }
 
                         let _ = self
                             .inner
