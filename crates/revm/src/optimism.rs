@@ -70,25 +70,26 @@ impl L1GasCostOracle {
     }
 }
 
-/// Get the L1 fee recipient address
-pub fn get_l1_fee_recipient() -> Address {
-    Address::from_str(L1_FEE_RECIPIENT).unwrap()
-}
-
-/// Get the base fee recipient address
-pub fn get_base_fee_recipient() -> Address {
-    Address::from_str(BASE_FEE_RECIPIENT).unwrap()
-}
-
-/// Route any fee to a recipient account
-pub fn route_fee_to_vault<DB: StateProvider>(
+/// Route the base fee to the appropriate recipient account
+pub fn route_base_fee_to_vault<DB: StateProvider>(
     db: &mut SubState<DB>,
-    fee: u64,
+    base_fee: u64,
     gas_used: u64,
-    recipient: Address,
 ) -> Result<(), Error> {
-    let mut account = db.load_account(recipient).map_err(|_| Error::ProviderError)?;
-    let amount_to_send = U256::from(fee.saturating_add(gas_used));
-    account.info.balance = account.info.balance.saturating_add(amount_to_send);
+    let recipient_address = Address::from_str(BASE_FEE_RECIPIENT).unwrap();
+    let mut recipient = db.load_account(recipient_address).map_err(|_| Error::ProviderError)?;
+    let amount_to_send = U256::from(base_fee.saturating_mul(gas_used));
+    recipient.info.balance = recipient.info.balance.saturating_add(amount_to_send);
+    Ok(())
+}
+
+/// Route the L1 cost to the appropriate recipient account
+pub fn route_l1_cost_to_vault<DB: StateProvider>(
+    db: &mut SubState<DB>,
+    l1_cost: U256,
+) -> Result<(), Error> {
+    let recipient_address = Address::from_str(L1_FEE_RECIPIENT).unwrap();
+    let mut recipient = db.load_account(recipient_address).map_err(|_| Error::ProviderError)?;
+    recipient.info.balance = recipient.info.balance.saturating_add(l1_cost);
     Ok(())
 }
