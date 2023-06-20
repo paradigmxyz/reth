@@ -36,7 +36,7 @@ where
     /// provided.
     pub(crate) async fn fee_history(
         &self,
-        block_count: u64,
+        mut block_count: u64,
         newest_block: BlockId,
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
@@ -46,13 +46,21 @@ where
 
         // The spec states that you can request a maximum of 1024 blocks.
         if block_count > 1024 {
+            println!("block count too large");
             return Err(EthApiError::InvalidBlockRange)
         }
 
-        let Some(end_block) = self.inner.provider.block_number_for_id(newest_block)? else { return Err(EthApiError::UnknownBlockNumber) };
+        // Treat a request for 1 block as a request for `newest_block..=newest_block`,
+        // and a request for 2 blocks as `newest_block - 1..=newest_block`
+        block_count -= 1;
+
+        let Some(end_block) = self.inner.provider.block_number_for_id(newest_block)? else {
+            println!("could not find block {newest_block:?}");
+            return Err(EthApiError::UnknownBlockNumber) };
 
         // Check that we would not be querying outside of genesis
         if end_block < block_count {
+            println!("{end_block} < {block_count}");
             return Err(EthApiError::InvalidBlockRange)
         }
 
@@ -70,6 +78,7 @@ where
         let start_block = end_block - block_count;
         let headers = self.inner.provider.headers_range(start_block..=end_block)?;
         if headers.len() != block_count as usize {
+            println!("headers {} != block count {}", headers.len(), block_count);
             return Err(EthApiError::InvalidBlockRange)
         }
 
@@ -79,7 +88,6 @@ where
         let mut rewards: Vec<Vec<U256>> = Vec::new();
         for header in &headers {
             let header_base_fee_per_gas = header.base_fee_per_gas.unwrap_or_default();
-            // todo: calc next base reward since we need it
             base_fee_per_gas.push(U256::try_from(header_base_fee_per_gas).unwrap());
             gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
 
@@ -88,6 +96,7 @@ where
                 let Some(receipts) =
                     self.inner.provider.receipts_by_block(header.number.into())? else {
                     // If there are no receipts, then we do not have all info on the block
+                    println!("no receipts");
                     return Err(EthApiError::InvalidBlockRange)
                 };
                 let Some(mut transactions): Option<Vec<_>> = self
@@ -102,6 +111,7 @@ where
                         reward: tx.effective_gas_tip(header.base_fee_per_gas).unwrap_or_default(),
                     })
                     .collect()) else {
+                    println!("no transactions");
                         // If there are no transactions, then we do not have all info on the block
                         return Err(EthApiError::InvalidBlockRange)
                     };
