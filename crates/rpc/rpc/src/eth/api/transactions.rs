@@ -41,6 +41,7 @@ use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 pub(crate) type StateCacheDB<'r> = CacheDB<State<StateProviderBox<'r>>>;
 
 /// Source of the block gas limit for EVM to execute the transaction on.
+#[derive(Clone, Copy, Debug)]
 pub enum BlockGasLimit {
     /// Maximum gas limit (see [ETHEREUM_BLOCK_GAS_LIMIT]).
     ///
@@ -296,10 +297,9 @@ where
             (cfg, env, block_hash.into())
         };
 
-        match block_gas_limit {
-            BlockGasLimit::Max => block_env.gas_limit = ETHEREUM_BLOCK_GAS_LIMIT.into(),
-            BlockGasLimit::Header => (),
-        };
+        if matches!(block_gas_limit, BlockGasLimit::Max) {
+            block_env.gas_limit = U256::from(ETHEREUM_BLOCK_GAS_LIMIT)
+        }
 
         Ok((cfg, block_env, block_id))
     }
