@@ -11,6 +11,7 @@ There are 7 label categories in the repository:
 - **Platform labels**: These describe the platform an issue is present on. They start with [`O-`][platform].
 - **Priority labels**: These are reserved for issues that require more immediate attention (high priority and critical priority) and they start with [`P-`][priority].
 - **Status labels**: These labels convey meaning to contributors about an issue or PR's status, e.g. whether they are blocked or need triage. They start with [`S-`][status].
+- **EIP/network upgrade labels**: These labels are attached to PRs and issues related to specific EIPs or network upgrades. They start with [`E-`][eip]
 
 ### Status labels
 
@@ -41,3 +42,4 @@ For easier at-a-glance communication of the status of issues and PRs the followi
 [platform]: https://github.com/paradigmxyz/reth/labels?q=o-
 [priority]: https://github.com/paradigmxyz/reth/labels?q=p-
 [status]: https://github.com/paradigmxyz/reth/labels?q=s-
+[eip]: https://github.com/paradigmxyz/reth/labels?q=e-
