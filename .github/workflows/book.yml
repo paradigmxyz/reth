@@ -41,7 +41,7 @@ jobs:
           mkdir mdbook-linkcheck
           curl -sSL -o mdbook-linkcheck.zip https://github.com/Michael-F-Bryan/mdbook-linkcheck/releases/latest/download/mdbook-linkcheck.x86_64-unknown-linux-gnu.zip
           unzip mdbook-linkcheck.zip -d ./mdbook-linkcheck
-          chmod a+x `pwd`/mdbook-linkcheck
+          chmod +x `pwd`/mdbook-linkcheck/mdbook-linkcheck
           echo `pwd`/mdbook-linkcheck >> $GITHUB_PATH
 
       - name: Run linkcheck
