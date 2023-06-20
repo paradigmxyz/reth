@@ -56,6 +56,13 @@ pub enum BlockGasLimit {
     Header,
 }
 
+impl BlockGasLimit {
+    /// Returns true if should use the maximum gas limit
+    fn is_max(&self) -> bool {
+        matches!(self, Self::Max)
+    }
+}
+
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
@@ -299,7 +306,7 @@ where
             (cfg, env, block_hash.into())
         };
 
-        if matches!(block_gas_limit, BlockGasLimit::Max) {
+        if block_gas_limit.is_max() {
             block_env.gas_limit = U256::from(ETHEREUM_BLOCK_GAS_LIMIT)
         }
 
