@@ -326,19 +326,13 @@ where
                     cumulative_gas_used += result.gas_used()
                 }
 
-                // Route base fee and l1 cost to the appropriate optimism vaults
+                // Route the l1 cost and base fee to the appropriate optimism vaults
                 let db = self.db();
-                optimism::route_fee_to_vault(
+                optimism::route_l1_cost_to_vault(db, l1_cost)?;
+                optimism::route_base_fee_to_vault(
                     db,
                     block.base_fee_per_gas.unwrap_or_default(),
                     result.gas_used(),
-                    optimism::get_base_fee_recipient(),
-                )?;
-                optimism::route_fee_to_vault(
-                    db,
-                    l1_cost.to::<u64>(),
-                    result.gas_used(),
-                    optimism::get_l1_fee_recipient(),
                 )?;
 
                 // cast revm logs to reth logs
