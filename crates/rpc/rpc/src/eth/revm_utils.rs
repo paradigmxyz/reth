@@ -10,7 +10,7 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest,
 };
 use revm::{
-    db::CacheDB,
+    db::{CacheDB, EmptyDB},
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
@@ -43,6 +43,11 @@ impl EvmOverrides {
     /// Creates a new instance with the given state overrides.
     pub fn state(state: Option<StateOverride>) -> Self {
         Self { state, block: None }
+    }
+
+    /// Returns `true` if the overrides contain state overrides.
+    pub fn has_state(&self) -> bool {
+        self.state.is_some()
     }
 }
 
@@ -477,4 +482,20 @@ where
     };
 
     Ok(())
+}
+
+/// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
+/// [CacheDB] with [EmptyDB] as the database type
+#[inline]
+pub(crate) fn clone_into_empty_db<DB>(db: &CacheDB<DB>) -> CacheDB<EmptyDB>
+where
+    DB: DatabaseRef,
+{
+    CacheDB {
+        accounts: db.accounts.clone(),
+        contracts: db.contracts.clone(),
+        logs: db.logs.clone(),
+        block_hashes: db.block_hashes.clone(),
+        db: Default::default(),
+    }
 }
