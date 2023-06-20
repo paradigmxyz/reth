@@ -50,10 +50,6 @@ pub enum InitDatabaseError {
         database_hash: H256,
     },
 
-    /// Higher level error encountered when using a Transaction.
-    #[error(transparent)]
-    TransactionError(#[from] TransactionError),
-
     /// Low-level database error.
     #[error(transparent)]
     DBError(#[from] reth_db::DatabaseError),
