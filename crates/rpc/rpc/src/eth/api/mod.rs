@@ -28,7 +28,7 @@ mod sign;
 mod state;
 mod transactions;
 
-pub use transactions::{EthTransactions, TransactionSource};
+pub use transactions::{BlockGasLimit, EthTransactions, TransactionSource};
 
 /// Cache limit of block-level fee history for `eth_feeHistory` RPC method.
 const FEE_HISTORY_CACHE_LIMIT: usize = 2048;
