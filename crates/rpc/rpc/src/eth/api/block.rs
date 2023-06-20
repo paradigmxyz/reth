@@ -102,8 +102,10 @@ where
             None => return Ok(None),
         };
         let block_hash = block.hash;
-        let total_difficulty =
-            self.provider().header_td(&block_hash)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let total_difficulty = self
+            .provider()
+            .header_td_by_number(block.number)?
+            .ok_or(EthApiError::UnknownBlockNumber)?;
         let block =
             Block::from_block(block.into(), total_difficulty, full.into(), Some(block_hash))?;
         Ok(Some(block.into()))
