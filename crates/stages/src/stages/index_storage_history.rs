@@ -1,7 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, models::BlockNumberAddress};
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, HistoryWriter};
 use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in

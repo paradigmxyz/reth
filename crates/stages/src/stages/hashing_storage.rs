@@ -16,7 +16,7 @@ use reth_primitives::{
     },
     StorageEntry,
 };
-use reth_provider::{DatabaseProviderRW, StorageReader};
+use reth_provider::{DatabaseProviderRW, HashingWriter, StorageReader};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
