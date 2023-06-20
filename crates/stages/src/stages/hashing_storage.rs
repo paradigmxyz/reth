@@ -171,8 +171,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         } else {
             // Aggregate all changesets and and make list of storages that have been
             // changed.
-            let lists =
-                provider.get_addresses_and_keys_of_changed_storages(from_block..=to_block)?;
+            let lists = provider.changed_storages(from_block..=to_block)?;
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.

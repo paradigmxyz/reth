@@ -205,50 +205,6 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
             .walk(Some(T::Key::default()))?
             .collect::<std::result::Result<Vec<_>, DatabaseError>>()
     }
-
-    // TODO(joshie) TEMPORARY should be moved to trait providers
-
-    /// Iterate over account changesets and return all account address that were changed.
-    pub fn get_addresses_and_keys_of_changed_storages(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<Address, BTreeSet<H256>>> {
-        self.tx
-            .cursor_read::<tables::StorageChangeSet>()?
-            .walk_range(BlockNumberAddress::range(range))?
-            // fold all storages and save its old state so we can remove it from HashedStorage
-            // it is needed as it is dup table.
-            .try_fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, BTreeSet<H256>>, entry| {
-                let (BlockNumberAddress((_, address)), storage_entry) = entry?;
-                accounts.entry(address).or_default().insert(storage_entry.key);
-                Ok(accounts)
-            })
-    }
-
-    /// Get all block numbers where account got changed.
-    ///
-    /// NOTE: Get inclusive range of blocks.
-    pub fn get_storage_block_numbers_from_changesets(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<(Address, H256), Vec<u64>>> {
-        let mut changeset_cursor = self.tx.cursor_read::<tables::StorageChangeSet>()?;
-
-        let storage_changeset_lists =
-            changeset_cursor.walk_range(BlockNumberAddress::range(range))?.try_fold(
-                BTreeMap::new(),
-                |mut storages: BTreeMap<(Address, H256), Vec<u64>>, entry| -> Result<_> {
-                    let (index, storage) = entry?;
-                    storages
-                        .entry((index.address(), storage.key))
-                        .or_default()
-                        .push(index.block_number());
-                    Ok(storages)
-                },
-            )?;
-
-        Ok(storage_changeset_lists)
-    }
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
@@ -1569,6 +1525,44 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
             })
             .collect::<Result<Vec<(_, _)>>>()
     }
+
+    fn changed_storages(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<BTreeMap<Address, BTreeSet<H256>>> {
+        self.tx
+            .cursor_read::<tables::StorageChangeSet>()?
+            .walk_range(BlockNumberAddress::range(range))?
+            // fold all storages and save its old state so we can remove it from HashedStorage
+            // it is needed as it is dup table.
+            .try_fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, BTreeSet<H256>>, entry| {
+                let (BlockNumberAddress((_, address)), storage_entry) = entry?;
+                accounts.entry(address).or_default().insert(storage_entry.key);
+                Ok(accounts)
+            })
+    }
+
+    fn changed_storage_and_blocks_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<BTreeMap<(Address, H256), Vec<u64>>> {
+        let mut changeset_cursor = self.tx.cursor_read::<tables::StorageChangeSet>()?;
+
+        let storage_changeset_lists =
+            changeset_cursor.walk_range(BlockNumberAddress::range(range))?.try_fold(
+                BTreeMap::new(),
+                |mut storages: BTreeMap<(Address, H256), Vec<u64>>, entry| -> Result<_> {
+                    let (index, storage) = entry?;
+                    storages
+                        .entry((index.address(), storage.key))
+                        .or_default()
+                        .push(index.block_number());
+                    Ok(storages)
+                },
+            )?;
+
+        Ok(storage_changeset_lists)
+    }
 }
 
 impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider<'this, TX> {
@@ -1580,7 +1574,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     ) -> Result<()> {
         // storage hashing stage
         {
-            let lists = self.get_addresses_and_keys_of_changed_storages(range.clone())?;
+            let lists = self.changed_storages(range.clone())?;
             let storages = self.basic_storages(lists.into_iter())?;
             self.insert_storage_for_hashing(storages.into_iter())?;
         }
@@ -1701,7 +1695,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
 
         // storage history stage
         {
-            let indices = self.get_storage_block_numbers_from_changesets(range)?;
+            let indices = self.changed_storage_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
 
