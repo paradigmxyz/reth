@@ -10,6 +10,7 @@
    1. [Mainnet or official testnets](./run/mainnet.md)
    1. [Metrics](./run/observability.md)
    1. [Configuring Reth](./run/config.md)
+   1. [Troubleshooting](./run/troubleshooting.md)
 1. [Interacting with Reth over JSON-RPC](./jsonrpc/intro.md)
    1. [eth](./jsonrpc/eth.md)
    1. [web3](./jsonrpc/web3.md)
