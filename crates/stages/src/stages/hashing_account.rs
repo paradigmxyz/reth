@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_interfaces::{db::DatabaseError, test_utils::generators};
+use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
     keccak256,
     stage::{
@@ -83,8 +83,9 @@ impl AccountHashingStage {
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db::models::AccountBeforeTx;
-        use reth_interfaces::test_utils::generators::{
-            random_block_range, random_eoa_account_range,
+        use reth_interfaces::test_utils::{
+            generators,
+            generators::{random_block_range, random_eoa_account_range},
         };
         use reth_primitives::{Account, H256, U256};
         use reth_provider::insert_canonical_block;
