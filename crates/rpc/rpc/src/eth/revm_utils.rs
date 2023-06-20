@@ -244,8 +244,8 @@ where
             trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap with caller allowance");
             cap_tx_gas_limit_with_caller_allowance(db, &mut env.tx)?;
         } else {
-            // If no gas price is specified, use maximum allowed gas limit. The reason for this to
-            // exist is that both Erigon and Geth use pre-configured gas cap even if it's possible
+            // If no gas price is specified, use maximum allowed gas limit. The reason for this is
+            // that both Erigon and Geth use pre-configured gas cap even if it's possible
             // to derive the gas limit from the block:
             // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
             // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94
