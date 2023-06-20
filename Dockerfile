@@ -1,6 +1,9 @@
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR app
 
+LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
+LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
+
 # Builds a cargo-chef plan
 FROM chef AS planner
 COPY . .
@@ -31,4 +34,4 @@ WORKDIR app
 COPY --from=builder /app/target/release/reth /usr/local/bin
 
 EXPOSE 30303 30303/udp 9000 8545 8546
-ENTRYPOINT ["/usr/local/bin/reth", "node"]
+ENTRYPOINT ["/usr/local/bin/reth"]
