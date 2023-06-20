@@ -16,6 +16,10 @@ Commands:
           Gets the content of a table for the given key
   drop
           Deletes all database entries
+  version
+          Lists current and local database versions
+  path
+          Returns the full database path
   help
           Print this message or the help of the given subcommand(s)
 
@@ -67,6 +71,7 @@ Usage: reth db stats [OPTIONS]
 
 Options:
   -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `reth db list`
@@ -131,6 +136,32 @@ $ reth db drop --help
 Deletes all database entries
 
 Usage: reth db drop [OPTIONS]
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `reth db version`
+
+```bash
+$ reth db version --help
+Lists current and local database versions
+
+Usage: reth db version [OPTIONS]
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `reth db path`
+
+```bash
+$ reth db path --help
+Returns the full database path
+
+Usage: reth db path [OPTIONS]
 
 Options:
   -h, --help
