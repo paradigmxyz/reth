@@ -508,10 +508,10 @@ mod tests {
     fn progress_ctrl_flow() {
         let mut progress = PipelineProgress::default();
 
-        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress { stage_progress: None });
+        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress { block_number: None });
 
         progress.update(1);
-        assert_eq!(progress.next_ctrl(), ControlFlow::Continue { progress: 1 });
+        assert_eq!(progress.next_ctrl(), ControlFlow::Continue { block_number: 1 });
     }
 
     /// Runs a simple pipeline.
