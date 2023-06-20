@@ -7,7 +7,7 @@
 
 **Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol**
 
-![](./assets/reth.jpg)
+![reth](./assets/reth.jpg)
 
 **[Install](https://paradigmxyz.github.io/reth/installation/installation.html)**
 | [User Book](https://paradigmxyz.github.io/reth)
