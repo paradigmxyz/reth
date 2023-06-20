@@ -61,7 +61,7 @@ In this runbook, we took you through starting the node, exposing different log l
 
 This will all be very useful to you, whether you're simply running a home node and want to keep an eye on its performance, or if you're a contributor and want to see the effect that your (or others') changes have on Reth's operations.
 
-[installation]: ./installation.md
+[installation]: ../installation/installation.md
 [release-profile]: https://doc.rust-lang.org/cargo/reference/profiles.html#release
 [docs]: https://github.com/paradigmxyz/reth/tree/main/docs
 [metrics]: https://github.com/paradigmxyz/reth/blob/main/docs/design/metrics.md#current-metrics
