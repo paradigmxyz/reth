@@ -72,6 +72,8 @@ pub enum Subcommands {
     Drop,
     /// Lists current and local database versions
     Version,
+    /// Returns the full database path
+    Path,
 }
 
 #[derive(Parser, Debug)]
@@ -242,6 +244,9 @@ impl Command {
                 } else {
                     println!("Local database is uninitialized");
                 }
+            }
+            Subcommands::Path => {
+                println!("{}", db_path.display());
             }
         }
 
