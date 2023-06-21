@@ -8,6 +8,10 @@
 //! Reth RPC interface definitions
 //!
 //! Provides all RPC interfaces.
+//!
+//! ## Feature Flags
+//!
+//! - `client`: Enables JSON-RPC client support.
 
 mod admin;
 mod debug;

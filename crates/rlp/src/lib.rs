@@ -6,6 +6,15 @@
 ))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+//! A fast RLP implementation.
+//!
+//! ## Feature Flags
+//!
+//! This crate works on `#[no_std]` targets if `std` is not enabled.
+//!
+//! - `derive`: Enables derive macros.
+//! - `std`: Uses the Rust standard library.
+
 #[cfg(feature = "alloc")]
 extern crate alloc;
 

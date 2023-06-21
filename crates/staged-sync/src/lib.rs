@@ -7,7 +7,7 @@
 
 //! Puts together all the Reth stages in a unified abstraction.
 //!
-//! # Features
+//! ## Feature Flags
 //!
 //! - `test-utils`: Various utilities helpful for writing tests
 //! - `geth-tests`: Runs tests that require Geth to be installed locally.

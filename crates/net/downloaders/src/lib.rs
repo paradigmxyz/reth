@@ -7,6 +7,10 @@
 #![allow(clippy::result_large_err)]
 
 //! Implements the downloader algorithms.
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 
 /// The collection of algorithms for downloading block bodies.
 pub mod bodies;

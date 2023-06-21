@@ -5,7 +5,11 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Reth interface bindings
+//! A collection of shared traits and error types used in Reth.
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 
 /// Consensus traits.
 pub mod consensus;

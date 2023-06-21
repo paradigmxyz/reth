@@ -52,5 +52,4 @@ secp256k1 = { workspace = true, features = [
 ] }
 
 [features]
-bench = []
 test-utils = ["tokio-stream/sync", "secp256k1"]

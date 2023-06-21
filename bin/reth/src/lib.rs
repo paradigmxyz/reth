@@ -6,6 +6,14 @@
 ))]
 
 //! Rust Ethereum (reth) binary executable.
+//!
+//! ## Feature Flags
+//!
+//! - `jemalloc`: Uses [jemallocator](https://github.com/tikv/jemallocator) as the global allocator.
+//!   This is **not recommended on Windows**. See [here](https://rust-lang.github.io/rfcs/1974-global-allocators.html#jemalloc)
+//!   for more info.
+//! - `only-info-logs`: Disables all logs below `info` level. This can speed up the node, since
+//!   fewer calls to the logging component is made.
 
 pub mod args;
 pub mod chain;

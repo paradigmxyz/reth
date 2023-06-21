@@ -53,6 +53,10 @@
 //!     )
 //!     .build(db, MAINNET.clone());
 //! ```
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 mod error;
 mod pipeline;
 mod stage;
