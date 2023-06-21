@@ -70,6 +70,7 @@ impl BlockBuffer {
                 self.remove_from_parent(evicted_block.parent_hash, &evicted_num_hash);
             }
         }
+        self.metrics.blocks.set(self.len() as f64);
     }
 
     /// Removes the given block from the buffer and also all the children of the block.
@@ -86,6 +87,7 @@ impl BlockBuffer {
         }
 
         taken.extend(self.remove_children(vec![parent]).into_iter());
+        self.metrics.blocks.set(self.len() as f64);
         taken
     }
 
@@ -110,6 +112,7 @@ impl BlockBuffer {
         }
 
         self.remove_children(remove_parent_children);
+        self.metrics.blocks.set(self.len() as f64);
     }
 
     /// Return reference to buffered blocks
