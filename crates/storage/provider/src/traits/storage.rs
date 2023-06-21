@@ -17,7 +17,7 @@ pub trait StorageReader: Send + Sync {
     ) -> Result<Vec<(Address, Vec<StorageEntry>)>>;
 
     /// Iterate over storage changesets and return all storage slots that were changed.
-    fn changed_storages(
+    fn changed_storages_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<Address, BTreeSet<H256>>>;
@@ -26,7 +26,7 @@ pub trait StorageReader: Send + Sync {
     /// each specific set of blocks.
     ///
     /// NOTE: Get inclusive range of blocks.
-    fn changed_storage_and_blocks_with_range(
+    fn changed_storages_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<(Address, H256), Vec<u64>>>;

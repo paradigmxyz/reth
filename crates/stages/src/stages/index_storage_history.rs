@@ -46,7 +46,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
 
-        let indices = provider.changed_storage_and_blocks_with_range(range.clone())?;
+        let indices = provider.changed_storages_and_blocks_with_range(range.clone())?;
         provider.insert_storage_history_index(indices)?;
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })

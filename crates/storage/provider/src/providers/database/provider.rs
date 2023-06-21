@@ -1526,7 +1526,7 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
             .collect::<Result<Vec<(_, _)>>>()
     }
 
-    fn changed_storages(
+    fn changed_storages_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<Address, BTreeSet<H256>>> {
@@ -1542,7 +1542,7 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
             })
     }
 
-    fn changed_storage_and_blocks_with_range(
+    fn changed_storages_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<(Address, H256), Vec<u64>>> {
@@ -1574,7 +1574,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     ) -> Result<()> {
         // storage hashing stage
         {
-            let lists = self.changed_storages(range.clone())?;
+            let lists = self.changed_storages_with_range(range.clone())?;
             let storages = self.basic_storages(lists.into_iter())?;
             self.insert_storage_for_hashing(storages.into_iter())?;
         }
@@ -1695,7 +1695,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
 
         // storage history stage
         {
-            let indices = self.changed_storage_and_blocks_with_range(range)?;
+            let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
 
