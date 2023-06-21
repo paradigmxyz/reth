@@ -41,7 +41,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     for ShareableBlockchainTree<DB, C, EF>
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
-        self.tree.write().buffer_block(block)
+        let mut tree = self.tree.write();
+        let res = tree.buffer_block(block);
+        tree.update_tree_metrics();
+        res
     }
 
     fn insert_block(
@@ -49,27 +52,41 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         block: SealedBlockWithSenders,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
-        self.tree.write().insert_block(block)
+        let mut tree = self.tree.write();
+        let res = tree.insert_block(block);
+        tree.update_tree_metrics();
+        res
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
         trace!(target: "blockchain_tree", ?finalized_block, "Finalizing block");
-        self.tree.write().finalize_block(finalized_block)
+        let mut tree = self.tree.write();
+        tree.finalize_block(finalized_block);
+        tree.update_tree_metrics();
     }
 
     fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<(), Error> {
         trace!(target: "blockchain_tree", ?last_finalized_block, "Restoring canonical hashes for last finalized block");
-        self.tree.write().restore_canonical_hashes(last_finalized_block)
+        let mut tree = self.tree.write();
+        let res = tree.restore_canonical_hashes(last_finalized_block);
+        tree.update_tree_metrics();
+        res
     }
 
     fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error> {
         trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
-        self.tree.write().make_canonical(block_hash)
+        let mut tree = self.tree.write();
+        let res = tree.make_canonical(block_hash);
+        tree.update_tree_metrics();
+        res
     }
 
     fn unwind(&self, unwind_to: BlockNumber) -> Result<(), Error> {
         trace!(target: "blockchain_tree", ?unwind_to, "Unwinding to block number");
-        self.tree.write().unwind(unwind_to)
+        let mut tree = self.tree.write();
+        let res = tree.unwind(unwind_to);
+        tree.update_tree_metrics();
+        res
     }
 }
 
