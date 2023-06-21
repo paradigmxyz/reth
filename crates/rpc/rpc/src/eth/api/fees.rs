@@ -90,7 +90,7 @@ where
 
             // Percentiles were specified, so we need to collect reward percentile ino
             if let Some(percentiles) = &reward_percentiles {
-                rewards.push(self.calculate_reward_percentiles(&percentiles, header)?);
+                rewards.push(self.calculate_reward_percentiles(percentiles, header)?);
             }
         }
 
@@ -139,7 +139,7 @@ where
                     // noting that the order of the transactions will be different,
                     // so the sum will also be different for each receipt.
                     let gas_used = receipt.cumulative_gas_used - *previous_gas;
-                    *previous_gas += receipt.cumulative_gas_used;
+                    *previous_gas = receipt.cumulative_gas_used;
 
                     Some(TxGasAndReward {
                         gas_used,
@@ -174,10 +174,6 @@ where
                 tx_index += 1;
                 cumulative_gas_used += transactions[tx_index].gas_used;
             }
-            println!(
-                "reward: {}, base fee per gas: {:?}",
-                transactions[tx_index].reward, header.base_fee_per_gas
-            );
             rewards_in_block.push(U256::from(transactions[tx_index].reward));
         }
 
