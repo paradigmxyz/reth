@@ -1751,7 +1751,7 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use reth_db::{tables, transaction::DbTxMut};
-        use reth_interfaces::test_utils::generators::random_block;
+        use reth_interfaces::test_utils::{generators, generators::random_block};
         use reth_rpc_types::engine::ForkchoiceUpdateError;
 
         #[tokio::test]
@@ -1786,6 +1786,7 @@ mod tests {
 
         #[tokio::test]
         async fn valid_forkchoice() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1801,8 +1802,8 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
             env.db
                 .update(|tx| {
@@ -1833,6 +1834,8 @@ mod tests {
 
         #[tokio::test]
         async fn unknown_head_hash() {
+            let mut rng = generators::rng();
+
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1849,13 +1852,13 @@ mod tests {
                 .disable_blockchain_tree_sync()
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
-            let next_head = random_block(2, Some(block1.hash), None, Some(0));
+            let next_head = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
             let next_forkchoice_state = ForkchoiceState {
                 head_block_hash: next_head.hash,
                 finalized_block_hash: block1.hash,
@@ -1882,6 +1885,7 @@ mod tests {
 
         #[tokio::test]
         async fn unknown_finalized_hash() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1898,8 +1902,8 @@ mod tests {
                 .disable_blockchain_tree_sync()
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let engine = spawn_consensus_engine(consensus_engine);
@@ -1918,6 +1922,7 @@ mod tests {
 
         #[tokio::test]
         async fn forkchoice_updated_pre_merge() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1934,16 +1939,16 @@ mod tests {
                 ]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let mut block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let mut block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block1.header.difficulty = U256::from(1);
 
             // a second pre-merge block
-            let mut block2 = random_block(1, Some(genesis.hash), None, Some(0));
+            let mut block2 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block2.header.difficulty = U256::from(1);
 
             // a transition block
-            let mut block3 = random_block(1, Some(genesis.hash), None, Some(0));
+            let mut block3 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block3.header.difficulty = U256::from(1);
 
             insert_blocks(
@@ -1971,6 +1976,7 @@ mod tests {
 
         #[tokio::test]
         async fn forkchoice_updated_invalid_pow() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1986,8 +1992,8 @@ mod tests {
                 ]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
 
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
@@ -2011,12 +2017,13 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_interfaces::test_utils::generators::random_block;
+        use reth_interfaces::test_utils::{generators, generators::random_block};
         use reth_primitives::{Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -2035,12 +2042,14 @@ mod tests {
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
             // Send new payload
-            let res = env.send_new_payload(random_block(0, None, None, Some(0)).into()).await;
+            let res =
+                env.send_new_payload(random_block(&mut rng, 0, None, None, Some(0)).into()).await;
             // Invalid, because this is a genesis block
             assert_matches!(res, Ok(result) => assert_matches!(result.status, PayloadStatusEnum::Invalid { .. }));
 
             // Send new payload
-            let res = env.send_new_payload(random_block(1, None, None, Some(0)).into()).await;
+            let res =
+                env.send_new_payload(random_block(&mut rng, 1, None, None, Some(0)).into()).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2049,6 +2058,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_known() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -2064,9 +2074,9 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
-            let block2 = random_block(2, Some(block1.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block2 = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
             insert_blocks(
                 env.db.as_ref(),
                 chain_spec.clone(),
@@ -2098,6 +2108,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_parent_unknown() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -2113,7 +2124,7 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
 
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis].into_iter());
 
@@ -2132,7 +2143,7 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let block = random_block(2, Some(H256::random()), None, Some(0));
+            let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
             let res = env.send_new_payload(block.into()).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));

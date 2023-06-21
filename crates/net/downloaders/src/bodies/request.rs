@@ -239,7 +239,7 @@ mod tests {
     };
     use reth_interfaces::{
         p2p::bodies::response::BlockResponse,
-        test_utils::{generators::random_header_range, TestConsensus},
+        test_utils::{generators, generators::random_header_range, TestConsensus},
     };
     use reth_primitives::H256;
     use std::sync::Arc;
@@ -247,7 +247,8 @@ mod tests {
     /// Check if future returns empty bodies without dispathing any requests.
     #[tokio::test]
     async fn request_returns_empty_bodies() {
-        let headers = random_header_range(0..20, H256::zero());
+        let mut rng = generators::rng();
+        let headers = random_header_range(&mut rng, 0..20, H256::zero());
 
         let client = Arc::new(TestBodiesClient::default());
         let fut = BodiesRequestFuture::new(

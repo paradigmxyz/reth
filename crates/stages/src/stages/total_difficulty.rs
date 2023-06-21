@@ -126,6 +126,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::transaction::DbTx;
     use reth_interfaces::test_utils::{
+        generators,
         generators::{random_header, random_header_range},
         TestConsensus,
     };
@@ -228,8 +229,9 @@ mod tests {
         type Seed = Vec<SealedHeader>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let mut rng = generators::rng();
             let start = input.checkpoint().block_number;
-            let head = random_header(start, None);
+            let head = random_header(&mut rng, start, None);
             self.tx.insert_headers(std::iter::once(&head))?;
             self.tx.commit(|tx| {
                 let td: U256 = tx
@@ -248,7 +250,7 @@ mod tests {
                 return Ok(Vec::default())
             }
 
-            let mut headers = random_header_range(start + 1..end, head.hash());
+            let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
             self.tx.insert_headers(headers.iter())?;
             headers.insert(0, head);
             Ok(headers)

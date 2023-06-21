@@ -9,6 +9,7 @@ env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
   GETH_BUILD: 1.12.0-e501b3b0
+  SEED: rustethereumethereumrust
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}

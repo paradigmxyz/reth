@@ -595,7 +595,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_interfaces::test_utils::{generators::random_block_range, TestConsensus};
+    use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, H256};
     use std::{collections::HashMap, sync::Arc};
 
@@ -632,7 +632,8 @@ mod tests {
     async fn requests_correct_number_of_times() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let blocks = random_block_range(0..=199, H256::zero(), 1..2);
+        let mut rng = generators::rng();
+        let blocks = random_block_range(&mut rng, 0..=199, H256::zero(), 1..2);
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
         let bodies = blocks

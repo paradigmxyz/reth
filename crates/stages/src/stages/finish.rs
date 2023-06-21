@@ -40,7 +40,10 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner,
     };
-    use reth_interfaces::test_utils::generators::{random_header, random_header_range};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_header, random_header_range},
+    };
     use reth_primitives::SealedHeader;
 
     stage_test_suite_ext!(FinishTestRunner, finish);
@@ -67,7 +70,8 @@ mod tests {
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let start = input.checkpoint().block_number;
-            let head = random_header(start, None);
+            let mut rng = generators::rng();
+            let head = random_header(&mut rng, start, None);
             self.tx.insert_headers_with_td(std::iter::once(&head))?;
 
             // use previous progress as seed size
@@ -77,7 +81,7 @@ mod tests {
                 return Ok(Vec::default())
             }
 
-            let mut headers = random_header_range(start + 1..end, head.hash());
+            let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
             self.tx.insert_headers_with_td(headers.iter())?;
             headers.insert(0, head);
             Ok(headers)
