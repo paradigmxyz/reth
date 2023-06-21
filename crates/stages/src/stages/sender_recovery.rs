@@ -368,11 +368,10 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TxSenders] table above
-        ///    a given block number.
+        /// 1. If there are any entries in the [tables::TxSenders] table above a given block number.
         ///
-        /// 2. If the is no requested block entry in the bodies table,
-        ///    but [tables::TxSenders] is not empty.
+        /// 2. If the is no requested block entry in the bodies table, but [tables::TxSenders] is
+        ///    not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self.tx.inner_rw().block_body_indices(block);
             match body_result {
