@@ -1,6 +1,6 @@
 [package]
 name = "reth-codecs"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -17,7 +17,7 @@ arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:
 
 [dependencies]
 bytes = "1.4"
-codecs-derive = { version = "0.1.0", path = "./derive", default-features = false }
+codecs-derive = { path = "./derive", default-features = false }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # arbitrary utils

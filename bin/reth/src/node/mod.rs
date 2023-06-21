@@ -15,7 +15,7 @@ use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine};
+use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -76,6 +76,7 @@ use crate::{
 };
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::DisplayHardforks;
 use reth_provider::providers::BlockchainProvider;
 use reth_stages::stages::{
     AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
@@ -170,6 +171,8 @@ impl Command {
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
+
+        info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
@@ -338,6 +341,7 @@ impl Command {
             self.debug.continuous,
             payload_builder.clone(),
             initial_target,
+            MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
             consensus_engine_rx,
         )?;
@@ -388,7 +392,7 @@ impl Command {
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor.spawn_critical("consensus engine", async move {
+        ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
@@ -777,14 +781,14 @@ mod tests {
 
     #[test]
     fn parse_metrics_port() {
-        let cmd = Command::try_parse_from(["reth", "--metrics", "9000"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+        let cmd = Command::try_parse_from(["reth", "--metrics", "9001"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = Command::try_parse_from(["reth", "--metrics", ":9000"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+        let cmd = Command::try_parse_from(["reth", "--metrics", ":9001"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9000"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+        let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9001"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
     #[test]

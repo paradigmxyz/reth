@@ -27,9 +27,9 @@ The method accepts a single argument, the [`enode`][enode] URL of the remote pee
 
 Disconnects from a peer if the connection exists. Returns a `bool` indicating whether the peer was successfully removed or not.
 
-| Client | Method invocation                                     |
-|--------|-------------------------------------------------------|
-| RPC    | `{"method": "admin_removePeer", "params": [url]}` |
+| Client | Method invocation                                  |
+|--------|----------------------------------------------------|
+| RPC    | `{"method": "admin_removePeer", "params": [url]}`  |
 
 ### Example
 

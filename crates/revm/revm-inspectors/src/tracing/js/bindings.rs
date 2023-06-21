@@ -711,7 +711,11 @@ impl EvmDBInner {
         let slot = bytes_to_hash(buf);
 
         let (tx, rx) = channel();
-        if self.to_db.try_send(JsDbRequest::StorageAt { address, index: slot, resp: tx }).is_err() {
+        if self
+            .to_db
+            .try_send(JsDbRequest::StorageAt { address, index: slot.into(), resp: tx })
+            .is_err()
+        {
             return Err(JsError::from_native(JsNativeError::error().with_message(format!(
                 "Failed to read state for {address:?} at {slot:?} from database",
             ))))

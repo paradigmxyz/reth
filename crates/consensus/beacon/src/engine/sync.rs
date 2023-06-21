@@ -107,6 +107,7 @@ where
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
+    #[allow(unused)]
     pub(crate) fn is_pipeline_sync_pending(&self) -> bool {
         self.pending_pipeline_target.is_some() && self.pipeline_state.is_idle()
     }

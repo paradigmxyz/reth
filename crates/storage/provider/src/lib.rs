@@ -47,4 +47,4 @@ pub mod test_utils;
 pub use reth_interfaces::provider::ProviderError;
 
 pub mod chain;
-pub use chain::Chain;
+pub use chain::{Chain, DisplayBlocksChain};

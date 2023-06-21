@@ -9,7 +9,11 @@ use crate::{
 use hex_literal::hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fmt::{Display, Formatter},
+    sync::Arc,
+};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -706,11 +710,164 @@ impl ForkCondition {
     }
 }
 
+/// A container to pretty-print a hardfork.
+///
+/// The fork is formatted depending on its fork condition:
+///
+/// - Block and timestamp based forks are formatted in the same manner (`{name} <({eip})>
+///   @{condition}`)
+/// - TTD based forks are formatted separately as `{name} <({eip})> @{ttd} (network is <not> known
+///   to be merged)`
+///
+/// An optional EIP can be attached to the fork to display as well. This should generally be in the
+/// form of just `EIP-x`, e.g. `EIP-1559`.
+#[derive(Debug)]
+struct DisplayFork {
+    /// The name of the hardfork (e.g. Frontier)
+    name: String,
+    /// The fork condition
+    activated_at: ForkCondition,
+    /// An optional EIP (e.g. `EIP-1559`).
+    eip: Option<String>,
+}
+
+impl Display for DisplayFork {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let name_with_eip = if let Some(eip) = &self.eip {
+            format!("{} ({})", self.name, eip)
+        } else {
+            self.name.clone()
+        };
+
+        match self.activated_at {
+            ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
+                write!(f, "{:32} @{}", name_with_eip, at)?;
+            }
+            ForkCondition::TTD { fork_block, total_difficulty } => {
+                writeln!(
+                    f,
+                    "{:32} @{} ({})",
+                    name_with_eip,
+                    total_difficulty,
+                    if fork_block.is_some() {
+                        "network is known to be merged"
+                    } else {
+                        "network is not known to be merged"
+                    }
+                )?;
+            }
+            ForkCondition::Never => unreachable!(),
+        }
+
+        Ok(())
+    }
+}
+
+/// A container for pretty-printing a list of hardforks.
+///
+/// # Example
+///
+/// ```
+/// # use reth_primitives::MAINNET;
+/// # use reth_primitives::DisplayHardforks;
+/// println!("{}", DisplayHardforks::from(MAINNET.hardforks().clone()));
+/// ```
+///
+/// An example of the output:
+///
+/// ```text
+/// Pre-merge hard forks (block based):
+// - Frontier                         @0
+// - Homestead                        @1150000
+// - Dao                              @1920000
+// - Tangerine                        @2463000
+// - SpuriousDragon                   @2675000
+// - Byzantium                        @4370000
+// - Constantinople                   @7280000
+// - Petersburg                       @7280000
+// - Istanbul                         @9069000
+// - MuirGlacier                      @9200000
+// - Berlin                           @12244000
+// - London                           @12965000
+// - ArrowGlacier                     @13773000
+// - GrayGlacier                      @15050000
+// Merge hard forks:
+// - Paris                            @58750000000000000000000 (network is not known to be merged)
+//
+// Post-merge hard forks (timestamp based):
+// - Shanghai                         @1681338455
+/// ```
+#[derive(Debug)]
+pub struct DisplayHardforks {
+    /// A list of pre-merge (block based) hardforks
+    pre_merge: Vec<DisplayFork>,
+    /// A list of merge (TTD based) hardforks
+    with_merge: Vec<DisplayFork>,
+    /// A list of post-merge (timestamp based) hardforks
+    post_merge: Vec<DisplayFork>,
+}
+
+impl Display for DisplayHardforks {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Pre-merge hard forks (block based):")?;
+        for fork in self.pre_merge.iter() {
+            writeln!(f, "- {fork}")?;
+        }
+
+        if !self.with_merge.is_empty() {
+            writeln!(f, "Merge hard forks:")?;
+            for fork in self.with_merge.iter() {
+                writeln!(f, "- {fork}")?;
+            }
+        }
+
+        if !self.post_merge.is_empty() {
+            writeln!(f, "Post-merge hard forks (timestamp based):")?;
+            for fork in self.post_merge.iter() {
+                writeln!(f, "- {fork}")?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<I> From<I> for DisplayHardforks
+where
+    I: IntoIterator<Item = (Hardfork, ForkCondition)>,
+{
+    fn from(iter: I) -> Self {
+        let mut pre_merge = Vec::new();
+        let mut with_merge = Vec::new();
+        let mut post_merge = Vec::new();
+
+        for (fork, condition) in iter.into_iter() {
+            let display_fork =
+                DisplayFork { name: fork.to_string(), activated_at: condition, eip: None };
+
+            match condition {
+                ForkCondition::Block(_) => {
+                    pre_merge.push(display_fork);
+                }
+                ForkCondition::TTD { .. } => {
+                    with_merge.push(display_fork);
+                }
+                ForkCondition::Timestamp(_) => {
+                    post_merge.push(display_fork);
+                }
+                ForkCondition::Never => continue,
+            }
+        }
+
+        Self { pre_merge, with_merge, post_merge }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
-        AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId,
-        Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA, U256,
+        AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
+        ForkHash, ForkId, Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA, U256,
     };
     use bytes::BytesMut;
     use ethers_core::types as EtherType;
@@ -724,6 +881,50 @@ mod tests {
                 expected_id, computed_id, block.number
             );
         }
+    }
+
+    #[test]
+    fn test_hardfork_list_display_mainnet() {
+        assert_eq!(
+            DisplayHardforks::from(MAINNET.hardforks().clone()).to_string(),
+            r##"Pre-merge hard forks (block based):
+- Frontier                         @0
+- Homestead                        @1150000
+- Dao                              @1920000
+- Tangerine                        @2463000
+- SpuriousDragon                   @2675000
+- Byzantium                        @4370000
+- Constantinople                   @7280000
+- Petersburg                       @7280000
+- Istanbul                         @9069000
+- MuirGlacier                      @9200000
+- Berlin                           @12244000
+- London                           @12965000
+- ArrowGlacier                     @13773000
+- GrayGlacier                      @15050000
+Merge hard forks:
+- Paris                            @58750000000000000000000 (network is not known to be merged)
+
+Post-merge hard forks (timestamp based):
+- Shanghai                         @1681338455
+"##
+        );
+    }
+
+    #[test]
+    fn test_hardfork_list_ignores_disabled_forks() {
+        let spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(Hardfork::Shanghai, ForkCondition::Never)
+            .build();
+        assert_eq!(
+            DisplayHardforks::from(spec.hardforks().clone()).to_string(),
+            r##"Pre-merge hard forks (block based):
+- Frontier                         @0
+"##
+        );
     }
 
     // Tests that the ForkTimestamps are correctly set up.

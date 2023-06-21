@@ -1,6 +1,6 @@
 [package]
 name = "ef-tests"
-version = "0.1.0"
+version.workspace = true
 description = "EF testing support for reth."
 edition.workspace = true
 rust-version.workspace = true

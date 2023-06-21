@@ -120,6 +120,8 @@ impl Command {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
+        info!(target: "reth::cli", "Database opened");
+
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 

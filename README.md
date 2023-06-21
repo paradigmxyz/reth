@@ -7,11 +7,12 @@
 
 **Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol**
 
-![](./assets/reth.jpg)
+![](./assets/reth-alpha.png)
 
-**[User Book](https://paradigmxyz.github.io/reth)**
-| **[Developer Docs](./docs)**
-| **[Crate Docs](https://paradigmxyz.github.io/reth/docs)**
+**[Install](https://paradigmxyz.github.io/reth/installation/installation.html)**
+| [User Book](https://paradigmxyz.github.io/reth)
+| [Developer Docs](./docs)
+| [Crate Docs](https://paradigmxyz.github.io/reth/docs)
 
 *The project is still work in progress, see the [disclaimer below](#status).*
 

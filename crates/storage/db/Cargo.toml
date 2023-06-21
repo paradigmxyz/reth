@@ -1,6 +1,6 @@
 [package]
 name = "reth-db"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -70,6 +70,11 @@ proptest-derive = "0.3"
 serde_json = { workspace = true }
 
 paste = "1.0"
+
+assert_matches = "1.5.0"
+
+[build-dependencies]
+vergen = { version = "8.0.0", features = ["git", "gitcl"] }
 
 [features]
 default = ["mdbx"]

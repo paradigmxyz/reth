@@ -353,7 +353,7 @@ impl RpcServerArgs {
         Tasks: TaskSpawner + Clone + 'static,
     {
         let socket_address = SocketAddr::new(
-            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
 
@@ -424,7 +424,7 @@ impl RpcServerArgs {
 
         if self.http {
             let socket_address = SocketAddr::new(
-                self.http_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                self.http_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
                 self.http_port.unwrap_or(constants::DEFAULT_HTTP_RPC_PORT),
             );
             config = config
@@ -436,7 +436,7 @@ impl RpcServerArgs {
 
         if self.ws {
             let socket_address = SocketAddr::new(
-                self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
                 self.ws_port.unwrap_or(constants::DEFAULT_WS_RPC_PORT),
             );
             config = config.with_ws_address(socket_address).with_ws(self.http_ws_server_builder());
@@ -454,7 +454,7 @@ impl RpcServerArgs {
     /// Creates the [AuthServerConfig] from cli args.
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
         let address = SocketAddr::new(
-            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
 
@@ -556,7 +556,7 @@ mod tests {
         assert_eq!(
             config.http_address().unwrap(),
             SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
+                Ipv4Addr::LOCALHOST,
                 constants::DEFAULT_HTTP_RPC_PORT
             ))
         );

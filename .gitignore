@@ -31,5 +31,8 @@ proptest-regressions/
 # Release artifacts
 dist/
 
+# Database debugging tools
+db-tools/
+
 # VSCode
 .vscode

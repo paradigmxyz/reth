@@ -68,6 +68,7 @@ pub mod abstraction;
 mod implementation;
 pub mod tables;
 mod utils;
+pub mod version;
 
 #[cfg(feature = "mdbx")]
 /// Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
@@ -79,3 +80,4 @@ pub mod mdbx {
 pub use abstraction::*;
 pub use reth_interfaces::db::DatabaseError;
 pub use tables::*;
+pub use utils::is_database_empty;

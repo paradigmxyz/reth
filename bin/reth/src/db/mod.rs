@@ -8,8 +8,13 @@ use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
-use reth_db::{database::Database, tables};
+use reth_db::{
+    database::Database,
+    tables,
+    version::{get_db_version, DatabaseVersionError, DB_VERSION},
+};
 use reth_primitives::ChainSpec;
+use reth_staged_sync::utils::init::init_db;
 use std::sync::Arc;
 use tracing::error;
 
@@ -65,6 +70,10 @@ pub enum Subcommands {
     Get(get::Command),
     /// Deletes all database entries
     Drop,
+    /// Lists current and local database versions
+    Version,
+    /// Returns the full database path
+    Path,
 }
 
 #[derive(Parser, Debug)]
@@ -92,13 +101,8 @@ impl Command {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
-        std::fs::create_dir_all(&db_path)?;
 
-        // TODO: Auto-impl for Database trait
-        let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            db_path.as_ref(),
-            reth_db::mdbx::EnvKind::RW,
-        )?;
+        let db = init_db(&db_path)?;
 
         let mut tool = DbTool::new(&db, self.chain.clone())?;
 
@@ -225,6 +229,24 @@ impl Command {
             }
             Subcommands::Drop => {
                 tool.drop(db_path)?;
+            }
+            Subcommands::Version => {
+                let local_db_version = match get_db_version(&db_path) {
+                    Ok(version) => Some(version),
+                    Err(DatabaseVersionError::MissingFile) => None,
+                    Err(err) => return Err(err.into()),
+                };
+
+                println!("Current database version: {DB_VERSION}");
+
+                if let Some(version) = local_db_version {
+                    println!("Local database version: {version}");
+                } else {
+                    println!("Local database is uninitialized");
+                }
+            }
+            Subcommands::Path => {
+                println!("{}", db_path.display());
             }
         }
 

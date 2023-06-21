@@ -3,7 +3,7 @@ use futures_util::{future::BoxFuture, FutureExt, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
-    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
+    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs,
     stage::StageId,
     Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
@@ -142,7 +142,7 @@ where
                         logs_bloom: Default::default(),
                         difficulty: U256::from(2),
                         number: storage.best_block + 1,
-                        gas_limit: 30_000_000,
+                        gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
                         gas_used: 0,
                         timestamp: SystemTime::now()
                             .duration_since(UNIX_EPOCH)
