@@ -100,7 +100,8 @@ ethers-signers = { version = "2.0.7", default-features = false }
 ethers-middleware = { version = "2.0.7", default-features = false }
 
 ## misc
-tracing = "^0.1.0"
+bytes = "1.4"
+tracing = "0.1.0"
 thiserror = "1.0.37"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }

@@ -42,5 +42,4 @@ reth-trie = { path = "../../trie", features = ["test-utils"] }
 parking_lot = "0.12"
 
 [features]
-bench = []
 test-utils = ["reth-rlp"]

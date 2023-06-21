@@ -7,6 +7,10 @@
 
 //! This crate contains a collection of traits and trait implementations for common database
 //! operations.
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 
 /// Various provider traits.
 mod traits;

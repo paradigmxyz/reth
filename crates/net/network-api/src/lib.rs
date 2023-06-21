@@ -8,7 +8,10 @@
 //! Reth network interface definitions.
 //!
 //! Provides abstractions for the reth-network crate.
-
+//!
+//! ## Feature Flags
+//!
+//! - `serde` (default): Enable serde support
 use async_trait::async_trait;
 use reth_eth_wire::DisconnectReason;
 use reth_primitives::{NodeRecord, PeerId};
