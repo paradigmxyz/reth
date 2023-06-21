@@ -43,7 +43,7 @@ tokio = { workspace = true, default-features = false, features = ["sync"] }
 tokio-stream = { workspace = true }
 
 # misc
-bytes = "1.4"
+bytes.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = "2.1.0"

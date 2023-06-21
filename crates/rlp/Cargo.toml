@@ -11,7 +11,7 @@ repository.workspace = true
 [dependencies]
 arrayvec = { version = "0.7", default-features = false }
 auto_impl = "1"
-bytes = { version = "1", default-features = false }
+bytes.workspace = true
 ethnum = { version = "1", default-features = false, optional = true }
 smol_str = { version = "0.1", default-features = false, optional = true }
 ethereum-types = { version = "0.14", features = ["codec"], optional = true }

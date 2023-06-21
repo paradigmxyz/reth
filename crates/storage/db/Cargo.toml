@@ -32,7 +32,7 @@ secp256k1 = { workspace = true, default-features = false, features = [
 modular-bitfield = "0.11.2"
 
 # misc
-bytes = "1.4"
+bytes.workspace = true
 page_size = "0.4.2"
 thiserror = { workspace = true }
 tempfile = { version = "3.3.0", optional = true }
