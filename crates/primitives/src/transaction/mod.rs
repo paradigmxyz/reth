@@ -437,12 +437,12 @@ impl Transaction {
     pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
         if let Some(base_fee) = base_fee {
             let max_fee_per_gas = self.max_fee_per_gas();
-            dbg!(max_fee_per_gas);
-            if dbg!(max_fee_per_gas < base_fee as u128) {
+
+            if max_fee_per_gas < base_fee as u128 {
                 None
             } else {
                 let effective_max_fee = max_fee_per_gas - base_fee as u128;
-                Some(std::cmp::min(effective_max_fee, dbg!(self.priority_fee_or_price())))
+                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
             }
         } else {
             Some(self.priority_fee_or_price())
