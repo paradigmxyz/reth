@@ -73,7 +73,7 @@ strum = { version = "0.24", features = ["derive"] }
 [dev-dependencies]
 serde_json = { workspace = true }
 hex-literal = "0.3"
-test-fuzz = "3.0.4"
+test-fuzz = "4"
 rand = { workspace = true }
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { version = "1.1.7", features = ["derive"] }
