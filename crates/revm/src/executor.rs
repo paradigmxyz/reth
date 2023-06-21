@@ -386,7 +386,6 @@ where
                     cumulative_gas_used,
                     bloom: logs_bloom(logs.iter()),
                     logs,
-                    deposit_nonce: Some(transaction.nonce()),
                 });
                 post_state.finish_transition();
             }
