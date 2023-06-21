@@ -18,6 +18,7 @@ normal = [
 reth-primitives = { workspace = true }
 reth-interfaces = { workspace = true }
 reth-db = { path = "../storage/db" }
+reth-metrics = { workspace = true, features = ["common"] }
 reth-provider = { workspace = true }
 
 # common

@@ -4,6 +4,8 @@ use std::{
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
     num::NonZeroUsize,
 };
+
+use crate::metrics::BlockBufferMetrics;
 /// Type that contains blocks by number and hash.
 pub type BufferedBlocks = BTreeMap<BlockNumber, HashMap<BlockHash, SealedBlockWithSenders>>;
 
@@ -35,6 +37,8 @@ pub struct BlockBuffer {
     ///
     /// Used as counter of amount of blocks inside buffer.
     pub(crate) lru: LruCache<BlockNumHash, ()>,
+    /// Various metrics for the block buffer.
+    pub(crate) metrics: BlockBufferMetrics,
 }
 
 impl BlockBuffer {
@@ -45,6 +49,7 @@ impl BlockBuffer {
             parent_to_child: Default::default(),
             hash_to_num: Default::default(),
             lru: LruCache::new(NonZeroUsize::new(limit).unwrap()),
+            metrics: Default::default(),
         }
     }
 
@@ -65,6 +70,7 @@ impl BlockBuffer {
                 self.remove_from_parent(evicted_block.parent_hash, &evicted_num_hash);
             }
         }
+        self.metrics.blocks.set(self.len() as f64);
     }
 
     /// Removes the given block from the buffer and also all the children of the block.
@@ -81,6 +87,7 @@ impl BlockBuffer {
         }
 
         taken.extend(self.remove_children(vec![parent]).into_iter());
+        self.metrics.blocks.set(self.len() as f64);
         taken
     }
 
@@ -105,6 +112,7 @@ impl BlockBuffer {
         }
 
         self.remove_children(remove_parent_children);
+        self.metrics.blocks.set(self.len() as f64);
     }
 
     /// Return reference to buffered blocks
