@@ -102,4 +102,10 @@ impl TracingInspectorConfig {
         self.record_state_diff = record_state_diff;
         self
     }
+
+    /// Configure whether the tracer should record logs
+    pub fn set_record_logs(mut self, record_logs: bool) -> Self {
+        self.record_logs = record_logs;
+        self
+    }
 }

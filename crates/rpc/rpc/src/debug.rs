@@ -290,11 +290,9 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                .set_record_logs(call_config.with_log.unwrap_or_default()),
                         );
-                        if let Some(true) = call_config.with_log {
-                            inspector.set_record_logs(true);
-                        }
 
                         let _ = self
                             .inner

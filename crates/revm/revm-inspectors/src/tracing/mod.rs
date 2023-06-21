@@ -75,11 +75,6 @@ impl TracingInspector {
         }
     }
 
-    /// Activate or deactivate log recording for `config`
-    pub fn set_record_logs(&mut self, enable: bool) {
-        self.config.record_logs = enable;
-    }
-
     /// Consumes the Inspector and returns a [ParityTraceBuilder].
     pub fn into_parity_builder(self) -> ParityTraceBuilder {
         ParityTraceBuilder::new(self.traces.arena, self.config)
