@@ -32,6 +32,3 @@ thiserror = { workspace = true }
 [dev-dependencies]
 tracing-test = "0.2"
 tokio-stream = { workspace = true, features = ["sync"] }
-
-[features]
-client = ["jsonrpsee/client", "jsonrpsee/async-client"]
