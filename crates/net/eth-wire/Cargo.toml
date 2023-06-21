@@ -49,7 +49,7 @@ reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing = { path = "../../tracing" }
 ethers-core = { workspace = true, default-features = false }
 
-test-fuzz = "3.0.4"
+test-fuzz = "4"
 tokio-util = { workspace = true, features = ["io", "codec"] }
 hex-literal = "0.3"
 hex = "0.4"

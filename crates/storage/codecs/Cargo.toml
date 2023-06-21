@@ -30,7 +30,7 @@ revm-primitives = { workspace = true, features = ["serde", "arbitrary"] }
 
 serde = "1.0"
 modular-bitfield = "0.11.2"
-test-fuzz = "3.0.4"
+test-fuzz = "4"
 
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }

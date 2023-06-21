@@ -726,7 +726,7 @@ checksum = "eee4243f1f26fc7a42710e7439c149e2b10b05472f88090acce52632f231a73a"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.17",
+ "semver",
  "serde",
  "serde_json",
  "thiserror",
@@ -1352,6 +1352,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling"
+version = "0.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0558d22a7b463ed0241e993f76f09f30b126687447751a8638587b864e4b3944"
+dependencies = [
+ "darling_core 0.20.1",
+ "darling_macro 0.20.1",
+]
+
+[[package]]
 name = "darling_core"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1380,6 +1390,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling_core"
+version = "0.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab8bfa2e259f8ee1ce5e97824a3c55ec4404a0d772ca7fa96bf19f0752a046eb"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2 1.0.60",
+ "quote 1.0.28",
+ "strsim 0.10.0",
+ "syn 2.0.18",
+]
+
+[[package]]
 name = "darling_macro"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1399,6 +1423,17 @@ dependencies = [
  "darling_core 0.14.3",
  "quote 1.0.28",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29a358ff9f12ec09c3e61fef9b5a9902623a695a46a917b07f269bff1445611a"
+dependencies = [
+ "darling_core 0.20.1",
+ "quote 1.0.28",
+ "syn 2.0.18",
 ]
 
 [[package]]
@@ -2094,7 +2129,7 @@ checksum = "84ebb401ba97c6f5af278c2c9936c4546cad75dec464b439ae6df249906f4caa"
 dependencies = [
  "ethers-core",
  "reqwest",
- "semver 1.0.17",
+ "semver",
  "serde",
  "serde_json",
  "thiserror",
@@ -4218,16 +4253,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "478c572c3d73181ff3c2539045f6eb99e5491218eae919370993b890cdbdd98e"
 
 [[package]]
-name = "pest"
-version = "2.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cbd939b234e95d72bc393d51788aec68aeeb5d51e748ca08ff3aad58cb722f7"
-dependencies = [
- "thiserror",
- "ucd-trie",
-]
-
-[[package]]
 name = "pharos"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6061,7 +6086,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.17",
+ "semver",
 ]
 
 [[package]]
@@ -6334,29 +6359,11 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f301af10236f6df4160f7c3f04eec6dbc70ace82d23326abad5edee88801c6b6"
-dependencies = [
- "semver-parser",
-]
-
-[[package]]
-name = "semver"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bebd363326d05ec3e2f532ab7660680f3b02130d780c299bca73469d521bc0ed"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "semver-parser"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b0bef5b7f9e0df16536d3961cfb6e84331c065b4066afb39768d0e319411f7"
-dependencies = [
- "pest",
 ]
 
 [[package]]
@@ -6975,9 +6982,9 @@ checksum = "95059e91184749cb66be6dc994f67f182b6d897cb3df74a5bf66b5e709295fd8"
 
 [[package]]
 name = "test-fuzz"
-version = "3.0.5"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4a3a7f00909d5a1d1f83b86b65d91e4c94f80b0c2d0ae37e2ef44da7b7a0a0"
+checksum = "a7bb2f404d5d20140588fb209481f5841920a7e29c36124f3d1ac1041eb1842c"
 dependencies = [
  "serde",
  "test-fuzz-internal",
@@ -6987,9 +6994,9 @@ dependencies = [
 
 [[package]]
 name = "test-fuzz-internal"
-version = "3.0.5"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9186daca5c58cb307d09731e0ba06b13fd6c036c90672b9bfc31cecf76cf689"
+checksum = "385624eb0031d550fe1bf99c08af79b838605fc4fcec2c4d55e229a2c342fdd0"
 dependencies = [
  "cargo_metadata",
  "proc-macro2 1.0.60",
@@ -7000,27 +7007,27 @@ dependencies = [
 
 [[package]]
 name = "test-fuzz-macro"
-version = "3.0.5"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57d187b450bfb5b7939f82f9747dc1ebb15a7a9c4a93cd304a41aece7149608b"
+checksum = "69247423e2d89bd51160e42200f6f45f921a23e5b44a0e5b57b888a378334037"
 dependencies = [
- "darling 0.14.3",
+ "darling 0.20.1",
  "if_chain",
+ "itertools",
  "lazy_static",
  "proc-macro2 1.0.60",
  "quote 1.0.28",
  "subprocess",
- "syn 1.0.109",
+ "syn 2.0.18",
  "test-fuzz-internal",
  "toolchain_find",
- "unzip-n",
 ]
 
 [[package]]
 name = "test-fuzz-runtime"
-version = "3.0.5"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a0d69068569b9b7311095823fe0e49eedfd05ad4277eb64fc334cf1a5bc5116"
+checksum = "f5054a92d02b1a95a0120155d20aef49b5c5673ba8a65d6f4ce667c2a6f3146c"
 dependencies = [
  "bincode",
  "hex",
@@ -7283,14 +7290,14 @@ dependencies = [
 
 [[package]]
 name = "toolchain_find"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e85654a10e7a07a47c6f19d93818f3f343e22927f2fa280c84f7c8042743413"
+checksum = "ebc8c9a7f0a2966e1acdaf0461023d0b01471eeead645370cf4c3f5cff153f2a"
 dependencies = [
  "home",
- "lazy_static",
+ "once_cell",
  "regex",
- "semver 0.11.0",
+ "semver",
  "walkdir",
 ]
 
@@ -7637,12 +7644,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 
 [[package]]
-name = "ucd-trie"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e79c4d996edb816c91e4308506774452e55e95c3c9de07b6729e17e15a5ef81"
-
-[[package]]
 name = "uint"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7729,17 +7730,6 @@ name = "untrusted"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
-
-[[package]]
-name = "unzip-n"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2e7e85a0596447f0f2ac090e16bc4c516c6fe91771fb0c0ccf7fa3dae896b9c"
-dependencies = [
- "proc-macro2 1.0.60",
- "quote 1.0.28",
- "syn 1.0.109",
-]
 
 [[package]]
 name = "url"
