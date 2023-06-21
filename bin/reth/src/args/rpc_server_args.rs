@@ -556,7 +556,7 @@ mod tests {
         assert_eq!(
             config.http_address().unwrap(),
             SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
+                Ipv4Addr::LOCALHOST,
                 constants::DEFAULT_HTTP_RPC_PORT
             ))
         );
