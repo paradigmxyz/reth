@@ -327,15 +327,19 @@ where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
 {
-    let mut allowance = db.basic(env.caller)?.map(|acc| acc.balance).unwrap_or_default();
-
-    // subtract transferred value from available funds
-    allowance = allowance
+    Ok(db
+        // Get the caller account
+        .basic(env.caller)?
+        // Get the caller balance
+        .map(|acc| acc.balance)
+        .unwrap_or_default()
+        // Subtract transferred value from the caller balance
         .checked_sub(env.value)
-        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?;
-
-    // amount of gas the sender can afford with the `gas_price`
-    Ok(allowance.checked_div(env.gas_price).unwrap_or_default())
+        // Return error if the caller has insufficient funds
+        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?
+        // Calculate the amount of gas the caller can afford with the specified gas price
+        .checked_div(env.gas_price)
+        .unwrap_or_default())
 }
 
 /// Helper type for representing the fees of a [CallRequest]
