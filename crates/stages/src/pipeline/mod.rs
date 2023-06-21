@@ -117,9 +117,10 @@ where
         PipelineBuilder::default()
     }
 
-    /// Return the minimum pipeline progress
-    pub fn minimum_progress(&self) -> Option<u64> {
-        self.progress.minimum_progress
+    /// Return the minimum block number achieved by
+    /// any stage during the execution of the pipeline.
+    pub fn minimum_block_number(&self) -> Option<u64> {
+        self.progress.minimum_block_number
     }
 
     /// Set tip for reverse sync.
@@ -181,14 +182,14 @@ where
             // configured block.
             if next_action.should_continue() &&
                 self.progress
-                    .minimum_progress
+                    .minimum_block_number
                     .zip(self.max_block)
                     .map_or(false, |(progress, target)| progress >= target)
             {
                 trace!(
                     target: "sync::pipeline",
                     ?next_action,
-                    minimum_progress = ?self.progress.minimum_progress,
+                    minimum_block_number = ?self.progress.minimum_block_number,
                     max_block = ?self.max_block,
                     "Terminating pipeline."
                 );
@@ -218,12 +219,12 @@ where
             trace!(target: "sync::pipeline", stage = %stage_id, ?next, "Completed stage");
 
             match next {
-                ControlFlow::NoProgress { stage_progress } => {
-                    if let Some(progress) = stage_progress {
-                        self.progress.update(progress);
+                ControlFlow::NoProgress { block_number } => {
+                    if let Some(block_number) = block_number {
+                        self.progress.update(block_number);
                     }
                 }
-                ControlFlow::Continue { progress } => self.progress.update(progress),
+                ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
                     self.unwind(target, Some(bad_block.number)).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
@@ -345,7 +346,7 @@ where
 
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress {
-                    stage_progress: prev_checkpoint.map(|progress| progress.block_number),
+                    block_number: prev_checkpoint.map(|progress| progress.block_number),
                 })
             }
 
@@ -386,11 +387,11 @@ where
                     provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
                     if done {
-                        let stage_progress = checkpoint.block_number;
+                        let block_number = checkpoint.block_number;
                         return Ok(if made_progress {
-                            ControlFlow::Continue { progress: stage_progress }
+                            ControlFlow::Continue { block_number }
                         } else {
-                            ControlFlow::NoProgress { stage_progress: Some(stage_progress) }
+                            ControlFlow::NoProgress { block_number: Some(block_number) }
                         })
                     }
                 }
@@ -491,26 +492,26 @@ mod tests {
         let mut progress = PipelineProgress::default();
 
         progress.update(10);
-        assert_eq!(progress.minimum_progress, Some(10));
-        assert_eq!(progress.maximum_progress, Some(10));
+        assert_eq!(progress.minimum_block_number, Some(10));
+        assert_eq!(progress.maximum_block_number, Some(10));
 
         progress.update(20);
-        assert_eq!(progress.minimum_progress, Some(10));
-        assert_eq!(progress.maximum_progress, Some(20));
+        assert_eq!(progress.minimum_block_number, Some(10));
+        assert_eq!(progress.maximum_block_number, Some(20));
 
         progress.update(1);
-        assert_eq!(progress.minimum_progress, Some(1));
-        assert_eq!(progress.maximum_progress, Some(20));
+        assert_eq!(progress.minimum_block_number, Some(1));
+        assert_eq!(progress.maximum_block_number, Some(20));
     }
 
     #[test]
     fn progress_ctrl_flow() {
         let mut progress = PipelineProgress::default();
 
-        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress { stage_progress: None });
+        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress { block_number: None });
 
         progress.update(1);
-        assert_eq!(progress.next_ctrl(), ControlFlow::Continue { progress: 1 });
+        assert_eq!(progress.next_ctrl(), ControlFlow::Continue { block_number: 1 });
     }
 
     /// Runs a simple pipeline.
