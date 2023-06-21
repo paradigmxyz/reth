@@ -16,7 +16,7 @@ no_codec = ["codecs-derive/no_codec"]
 arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 
 [dependencies]
-bytes = "1.4"
+bytes.workspace = true
 codecs-derive = { path = "./derive", default-features = false }
 revm-primitives = { workspace = true, features = ["serde"] }
 

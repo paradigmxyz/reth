@@ -9,7 +9,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-bytes = "1.4"
+bytes.workspace = true
 thiserror = { workspace = true }
 serde = { workspace = true, optional = true }
 
