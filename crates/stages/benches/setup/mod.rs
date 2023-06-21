@@ -5,9 +5,12 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::test_utils::generators::{
-    random_block_range, random_contract_account_range, random_eoa_account_range,
-    random_transition_range,
+use reth_interfaces::test_utils::{
+    generators,
+    generators::{
+        random_block_range, random_contract_account_range, random_eoa_account_range,
+        random_transition_range,
+    },
 };
 use reth_primitives::{Account, Address, SealedBlock, H256, MAINNET};
 use reth_provider::ProviderFactory;
@@ -98,6 +101,9 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
     let n_eoa = 131;
     let n_contract = 31;
 
+    // rng
+    let mut rng = generators::rng();
+
     if !path.exists() {
         // create the dirs
         std::fs::create_dir_all(&path).unwrap();
@@ -105,15 +111,16 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         let tx = TestTransaction::new(&path);
 
         let accounts: BTreeMap<Address, Account> = concat([
-            random_eoa_account_range(0..n_eoa),
-            random_contract_account_range(&mut (0..n_contract)),
+            random_eoa_account_range(&mut rng, 0..n_eoa),
+            random_contract_account_range(&mut rng, &mut (0..n_contract)),
         ])
         .into_iter()
         .collect();
 
-        let mut blocks = random_block_range(0..=num_blocks, H256::zero(), txs_range);
+        let mut blocks = random_block_range(&mut rng, 0..=num_blocks, H256::zero(), txs_range);
 
         let (transitions, start_state) = random_transition_range(
+            &mut rng,
             blocks.iter().take(2),
             accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
             n_changes.clone(),
@@ -135,8 +142,13 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         tx.insert_transitions(transitions, None).unwrap();
         tx.commit(|tx| updates.flush(tx)).unwrap();
 
-        let (transitions, final_state) =
-            random_transition_range(blocks.iter().skip(2), start_state, n_changes, key_range);
+        let (transitions, final_state) = random_transition_range(
+            &mut rng,
+            blocks.iter().skip(2),
+            start_state,
+            n_changes,
+            key_range,
+        );
 
         tx.insert_transitions(transitions, Some(offset)).unwrap();
 

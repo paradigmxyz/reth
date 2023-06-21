@@ -482,7 +482,9 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
     use reth_interfaces::{
-        consensus, provider::ProviderError, test_utils::generators::random_header,
+        consensus,
+        provider::ProviderError,
+        test_utils::{generators, generators::random_header},
     };
     use reth_primitives::{stage::StageCheckpoint, MAINNET};
     use tokio_stream::StreamExt;
@@ -787,7 +789,7 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Validation {
-                        block: random_header(5, Default::default()),
+                        block: random_header(&mut generators::rng(), 5, Default::default()),
                         error: consensus::ConsensusError::BaseFeeMissing,
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
