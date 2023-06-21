@@ -442,7 +442,7 @@ impl Transaction {
                 None
             } else {
                 let effective_max_fee = max_fee_per_gas - base_fee as u128;
-                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
+                Some(std::cmp::min(effective_max_fee, dbg!(self.priority_fee_or_price())))
             }
         } else {
             Some(self.priority_fee_or_price())
