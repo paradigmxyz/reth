@@ -88,8 +88,8 @@ where
     /// This method is going to return the batch as soon as one of the conditions below
     /// is fulfilled:
     ///     1. The number of non-empty headers in the batch equals requested.
-    ///     2. The total number of headers in the batch (both empty and non-empty)
-    ///        is greater than or equal to the stream batch size.
+    ///     2. The total number of headers in the batch (both empty and non-empty) is greater than
+    ///        or equal to the stream batch size.
     ///     3. Downloader reached the end of the range
     ///
     /// NOTE: The batches returned have a variable length.
