@@ -1505,11 +1505,12 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
 impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     fn basic_storages(
         &self,
-        iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
+        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
     ) -> Result<Vec<(Address, Vec<StorageEntry>)>> {
         let mut plain_storage = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
 
-        iter.into_iter()
+        addresses_with_keys
+            .into_iter()
             .map(|(address, storage)| {
                 storage
                     .into_iter()

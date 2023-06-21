@@ -13,7 +13,7 @@ pub trait StorageReader: Send + Sync {
     /// Get plainstate storages from an Address.
     fn basic_storages(
         &self,
-        iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
+        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
     ) -> Result<Vec<(Address, Vec<StorageEntry>)>>;
 
     /// Iterate over storage changesets and return all storage slots that were changed.
