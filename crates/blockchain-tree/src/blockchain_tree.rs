@@ -1062,6 +1062,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             Ok(Some(Chain::new(blocks_and_execution)))
         }
     }
+
+    /// Update blockchain tree metrics
+    pub(crate) fn update_tree_metrics(&self) {
+        self.metrics.sidechains.set(self.chains.len() as f64);
+        self.metrics.canonical_chain_height.set(self.canonical_chain().tip().number as f64);
+    }
 }
 
 #[cfg(test)]

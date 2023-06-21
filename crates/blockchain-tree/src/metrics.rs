@@ -1,9 +1,17 @@
-use reth_metrics::{metrics::{self, Gauge}, Metrics};
+use reth_metrics::{
+    metrics::{self, Gauge},
+    Metrics,
+};
 
 /// Metrics for the entire blockchain tree
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree")]
-pub struct TreeMetrics {}
+pub struct TreeMetrics {
+    /// Total number of sidechains (not including the canonical chain)
+    pub sidechains: Gauge,
+    /// The highest block number in the canonical chain
+    pub canonical_chain_height: Gauge,
+}
 
 /// Metrics for the blockchain tree block buffer
 #[derive(Metrics)]
