@@ -322,23 +322,25 @@ where
 /// `allowance = (account.balance - tx.value) / tx.gas_price`
 ///
 /// Returns an error if the caller has insufficient funds.
+/// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
 pub(crate) fn caller_gas_allowance<DB>(mut db: DB, env: &TxEnv) -> EthResult<U256>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
 {
     Ok(db
-        // Get the caller account
+        // Get the caller account.
         .basic(env.caller)?
-        // Get the caller balance
+        // Get the caller balance.
         .map(|acc| acc.balance)
         .unwrap_or_default()
-        // Subtract transferred value from the caller balance
+        // Subtract transferred value from the caller balance.
         .checked_sub(env.value)
-        // Return error if the caller has insufficient funds
+        // Return error if the caller has insufficient funds.
         .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?
-        // Calculate the amount of gas the caller can afford with the specified gas price
+        // Calculate the amount of gas the caller can afford with the specified gas price.
         .checked_div(env.gas_price)
+        // This will be 0 if gas price is 0. It is fine, because we check it before.
         .unwrap_or_default())
 }
 
