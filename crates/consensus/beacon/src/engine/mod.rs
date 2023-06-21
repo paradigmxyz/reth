@@ -758,21 +758,19 @@ where
         head: Header,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
-        // 7. Client software MUST ensure that payloadAttributes.timestamp is
-        //    greater than timestamp of a block referenced by
-        //    forkchoiceState.headBlockHash. If this condition isn't held client
-        //    software MUST respond with -38003: `Invalid payload attributes` and
-        //    MUST NOT begin a payload build process. In such an event, the
-        //    forkchoiceState update MUST NOT be rolled back.
+        // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
+        //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
+        //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
+        //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
+        //    be rolled back.
         if attrs.timestamp <= head.timestamp.into() {
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 
         // 8. Client software MUST begin a payload build process building on top of
-        //    forkchoiceState.headBlockHash and identified via buildProcessId value
-        //    if payloadAttributes is not null and the forkchoice state has been
-        //    updated successfully. The build process is specified in the Payload
-        //    building section.
+        //    forkchoiceState.headBlockHash and identified via buildProcessId value if
+        //    payloadAttributes is not null and the forkchoice state has been updated successfully.
+        //    The build process is specified in the Payload building section.
         let attributes = PayloadBuilderAttributes::new(state.head_block_hash, attrs);
 
         // send the payload to the builder and return the receiver for the pending payload id,
