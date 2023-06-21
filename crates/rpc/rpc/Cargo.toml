@@ -47,7 +47,7 @@ tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = "0.7"
 pin-project = { workspace = true }
 
-bytes = "1.4"
+bytes.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

@@ -26,7 +26,7 @@ tower = "0.4"
 jsonrpsee = { version = "0.18", features = ["server", "client"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-bytes = "1.4"
+bytes = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
