@@ -203,7 +203,7 @@ impl AuthServerConfigBuilder {
     pub fn build(self) -> AuthServerConfig {
         AuthServerConfig {
             socket_addr: self.socket_addr.unwrap_or_else(|| {
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), constants::DEFAULT_AUTH_PORT)
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), constants::DEFAULT_AUTH_PORT)
             }),
             secret: self.secret,
             server_config: self.server_config.unwrap_or_else(|| {

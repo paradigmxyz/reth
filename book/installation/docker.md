@@ -27,7 +27,7 @@ docker pull ghcr.io/paradigmxyz/reth:v0.0.1
 You can test the image with:
 
 ```bash
-docker run --rm ghcr.io/paradigmxyz/reth reth --version
+docker run --rm ghcr.io/paradigmxyz/reth --version
 ```
 
 If you can see the latest [Reth release](https://github.com/paradigmxyz/reth/releases) version, then you've successfully installed Reth via Docker.
@@ -43,5 +43,5 @@ docker build . -t reth:local
 The build will likely take several minutes. Once it's built, test it with:
 
 ```bash
-docker run reth:local reth --version
+docker run reth:local --version
 ```
