@@ -6,7 +6,11 @@
 ))]
 
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
-
+//!
+//! ## Feature Flags
+//!
+//! - `serde` (default): Enable serde support
+//! - `test-utils`: Export utilities for testing
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
 use crate::{
     query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
