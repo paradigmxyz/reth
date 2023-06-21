@@ -137,7 +137,7 @@ where
                 sorter.sort();
 
                 let mut rewards = Vec::with_capacity(reward_percentiles.len());
-                let mut sum_gas_used = sorter[0].gas_used;
+                let mut sum_gas_used = sorter.first().map(|tx| tx.gas_used).unwrap_or_default();
                 let mut tx_index = 0;
 
                 for percentile in reward_percentiles.iter() {

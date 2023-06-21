@@ -1030,7 +1030,7 @@ impl RpcServerConfig {
 
     /// Configures the [SocketAddr] of the http server
     ///
-    /// Default is [Ipv4Addr::UNSPECIFIED] and [DEFAULT_HTTP_RPC_PORT]
+    /// Default is [Ipv4Addr::LOCALHOST] and [DEFAULT_HTTP_RPC_PORT]
     pub fn with_http_address(mut self, addr: SocketAddr) -> Self {
         self.http_addr = Some(addr);
         self
@@ -1038,7 +1038,7 @@ impl RpcServerConfig {
 
     /// Configures the [SocketAddr] of the ws server
     ///
-    /// Default is [Ipv4Addr::UNSPECIFIED] and [DEFAULT_WS_RPC_PORT]
+    /// Default is [Ipv4Addr::LOCALHOST] and [DEFAULT_WS_RPC_PORT]
     pub fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
         self
@@ -1118,14 +1118,13 @@ impl RpcServerConfig {
     /// If both are on the same port, they are combined into one server.
     async fn build_ws_http(&mut self) -> Result<WsHttpServer, RpcError> {
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
-            Ipv4Addr::UNSPECIFIED,
+            Ipv4Addr::LOCALHOST,
             DEFAULT_HTTP_RPC_PORT,
         )));
 
-        let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
-            Ipv4Addr::UNSPECIFIED,
-            DEFAULT_WS_RPC_PORT,
-        )));
+        let ws_socket_addr = self
+            .ws_addr
+            .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
 
         // If both are configured on the same port, we combine them into one server.
         if self.http_addr == self.ws_addr &&

@@ -6,6 +6,11 @@
 ))]
 
 //! Collection of metrics utilities.
+//!
+//! ## Feature Flags
+//!
+//! - `common`: Common metrics utilities, such as wrappers around tokio senders and receivers. Pulls
+//!   in `tokio`.
 
 /// Metrics derive macro.
 pub use reth_metrics_derive::Metrics;

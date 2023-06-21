@@ -8,6 +8,10 @@
 //! The implementation of Merkle Patricia Trie, a cryptographically
 //! authenticated radix trie that is used to store key-value bindings.
 //! <https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/>
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 
 /// The Ethereum account as represented in the trie.
 pub mod account;
