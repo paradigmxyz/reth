@@ -33,5 +33,5 @@ WORKDIR app
 # Copy reth over from the build stage
 COPY --from=builder /app/target/release/reth /usr/local/bin
 
-EXPOSE 30303 30303/udp 9000 8545 8546
+EXPOSE 30303 30303/udp 9001 8545 8546
 ENTRYPOINT ["/usr/local/bin/reth"]
