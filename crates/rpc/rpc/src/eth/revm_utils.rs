@@ -317,29 +317,43 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
 }
 
 /// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
-///
-/// Returns an error if the caller has insufficient funds
-pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
-    mut db: DB,
-    env: &mut TxEnv,
-) -> EthResult<()>
+pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(db: DB, env: &mut TxEnv) -> EthResult<()>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
 {
-    let mut allowance = db.basic(env.caller)?.map(|acc| acc.balance).unwrap_or_default();
-
-    // subtract transferred value
-    allowance = allowance
-        .checked_sub(env.value)
-        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?;
-
-    // cap the gas limit
-    if let Ok(gas_limit) = allowance.checked_div(env.gas_price).unwrap_or_default().try_into() {
+    if let Ok(gas_limit) = caller_gas_allowance(db, env)?.try_into() {
         env.gas_limit = gas_limit;
     }
 
     Ok(())
+}
+
+/// Calculates the caller gas allowance.
+///
+/// `allowance = (account.balance - tx.value) / tx.gas_price`
+///
+/// Returns an error if the caller has insufficient funds.
+/// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
+pub(crate) fn caller_gas_allowance<DB>(mut db: DB, env: &TxEnv) -> EthResult<U256>
+where
+    DB: Database,
+    EthApiError: From<<DB as Database>::Error>,
+{
+    Ok(db
+        // Get the caller account.
+        .basic(env.caller)?
+        // Get the caller balance.
+        .map(|acc| acc.balance)
+        .unwrap_or_default()
+        // Subtract transferred value from the caller balance.
+        .checked_sub(env.value)
+        // Return error if the caller has insufficient funds.
+        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?
+        // Calculate the amount of gas the caller can afford with the specified gas price.
+        .checked_div(env.gas_price)
+        // This will be 0 if gas price is 0. It is fine, because we check it before.
+        .unwrap_or_default())
 }
 
 /// Helper type for representing the fees of a [CallRequest]
