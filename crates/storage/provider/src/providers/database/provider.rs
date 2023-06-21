@@ -1503,7 +1503,7 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
 }
 
 impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
-    fn basic_storages(
+    fn plainstate_storages(
         &self,
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
     ) -> Result<Vec<(Address, Vec<StorageEntry>)>> {
@@ -1575,7 +1575,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
         // storage hashing stage
         {
             let lists = self.changed_storages_with_range(range.clone())?;
-            let storages = self.basic_storages(lists.into_iter())?;
+            let storages = self.plainstate_storages(lists.into_iter())?;
             self.insert_storage_for_hashing(storages.into_iter())?;
         }
 
