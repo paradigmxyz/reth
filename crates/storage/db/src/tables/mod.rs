@@ -53,12 +53,39 @@ pub enum TableType {
 /// Number of tables that should be present inside database.
 pub const NUM_TABLES: usize = 25;
 
-/// The table visitor
+/// The general purpose of this is to use with a combination of Tables enum,
+/// by implementing a `TableViewer` trait you can operate on db tables in an abstract way.
+///
+/// # Example
+///
+/// ```
+/// use reth_db::{ table::Table, TableViewer, Tables };
+/// use std::str::FromStr;
+///
+/// let headers = Tables::from_str("Headers").unwrap();
+/// let transactions = Tables::from_str("Transactions").unwrap();
+///
+/// struct MyTableViewer;
+///
+/// impl TableViewer<()> for MyTableViewer {
+///     type Error = &'static str;
+///
+///     fn view<T: Table>(&self) -> Result<(), Self::Error> {
+///         // operate on table in generic way
+///         Ok(())
+///     }
+/// }
+///
+/// let viewer = MyTableViewer {};
+///
+/// let _ = headers.view(&viewer);
+/// let _ = transactions.view(&viewer);
+/// ```
 pub trait TableViewer<R> {
-    /// Type of error to return
+    /// type of error to return
     type Error;
 
-    /// Allows to operate on specific table type
+    /// operate on table in generic way
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
 }
 

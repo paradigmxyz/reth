@@ -10,7 +10,6 @@ use eyre::WrapErr;
 use human_bytes::human_bytes;
 use reth_db::{
     database::Database,
-    tables,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
     Tables,
 };
