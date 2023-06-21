@@ -37,6 +37,8 @@ pub struct BlockchainTest {
     #[serde(default)]
     /// Engine spec.
     pub self_engine: SealEngine,
+    #[serde(skip)]
+    _info: serde_json::Value,
 }
 
 /// A block header in an Ethereum blockchain test.
