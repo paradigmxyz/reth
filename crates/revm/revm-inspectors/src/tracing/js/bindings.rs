@@ -208,12 +208,12 @@ impl MemoryObj {
 
 /// Represents the opcode object
 #[derive(Debug)]
-pub(crate) struct OpObj(pub(crate) OpCode);
+pub(crate) struct OpObj(pub(crate) u8);
 
 impl OpObj {
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
         let obj = JsObject::default();
-        let value = self.0.u8();
+        let value = self.0;
         let is_push = (PUSH0..=PUSH32).contains(&value);
 
         let to_number = FunctionObjectBuilder::new(
@@ -233,7 +233,17 @@ impl OpObj {
         let to_string = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure(move |_this, _args, _ctx| {
-                let s = OpCode::try_from_u8(value).expect("invalid opcode").to_string();
+                let op = OpCode::try_from_u8(value)
+                    .or_else(|| {
+                        // if the opcode is invalid, we'll use the invalid opcode to represent it
+                        // because this is invoked before the opcode is
+                        // executed, the evm will eventually return a `Halt`
+                        // with invalid/unknown opcode as result
+                        let invalid_opcode = 0xfe;
+                        OpCode::try_from_u8(invalid_opcode)
+                    })
+                    .expect("is valid opcode;");
+                let s = op.to_string();
                 Ok(JsValue::from(s))
             }),
         )
@@ -244,6 +254,12 @@ impl OpObj {
         obj.set("toString", to_string, false, context)?;
         obj.set("isPush", is_push, false, context)?;
         Ok(obj)
+    }
+}
+
+impl From<u8> for OpObj {
+    fn from(op: u8) -> Self {
+        Self(op)
     }
 }
 

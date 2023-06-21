@@ -5,10 +5,12 @@ use boa_engine::{
     property::Attribute,
     Context, JsArgs, JsError, JsNativeError, JsResult, JsString, JsValue, NativeFunction, Source,
 };
+use boa_gc::{empty_trace, Finalize, Trace};
 use reth_primitives::{
     contract::{create2_address_from_code, create_address},
     hex, keccak256, Address, H256, U256,
 };
+use std::collections::HashSet;
 
 /// bigIntegerJS is the minified version of <https://github.com/peterolson/BigInteger.js>.
 pub(crate) const BIG_INT_JS: &str = include_str!("bigint.js");
@@ -142,15 +144,8 @@ pub(crate) fn to_contract2(
     let from = args.get_or_undefined(0).clone();
     let salt = match args.get_or_undefined(1).to_string(ctx) {
         Ok(js_string) => {
-            let s = js_string.to_std_string().unwrap();
-            match hex::decode(s) {
-                Ok(bytes) => H256::from_slice(bytes.as_slice()),
-                Err(_) => {
-                    return Err(JsError::from_native(
-                        JsNativeError::typ().with_message("invalid salt hex string"),
-                    ))
-                }
-            }
+            let buf = hex_decode_js_string(js_string)?;
+            bytes_to_hash(buf)
         }
         Err(_) => {
             return Err(JsError::from_native(JsNativeError::typ().with_message("invalid salt type")))
@@ -237,6 +232,35 @@ fn hex_decode_js_string(js_string: JsString) -> JsResult<Vec<u8>> {
                 .with_message(format!("invalid utf8 string {js_string:?}: {err}",)),
         )),
     }
+}
+
+/// A container for all precompile addresses used for the `isPrecompiled` global callable.
+#[derive(Debug, Clone)]
+pub(crate) struct PrecompileList(pub(crate) HashSet<Address>);
+
+impl PrecompileList {
+    /// Registers the global callable `isPrecompiled`
+    pub(crate) fn register_callable(self, ctx: &mut Context<'_>) -> JsResult<()> {
+        let is_precompiled = NativeFunction::from_copy_closure_with_captures(
+            move |_this, args, precompiles, ctx| {
+                let val = args.get_or_undefined(0).clone();
+                let buf = from_buf(val, ctx)?;
+                let addr = bytes_to_address(buf);
+                Ok(precompiles.0.contains(&addr).into())
+            },
+            self,
+        );
+
+        ctx.register_global_callable("isPrecompiled", 1, is_precompiled)?;
+
+        Ok(())
+    }
+}
+
+impl Finalize for PrecompileList {}
+
+unsafe impl Trace for PrecompileList {
+    empty_trace!();
 }
 
 #[cfg(test)]

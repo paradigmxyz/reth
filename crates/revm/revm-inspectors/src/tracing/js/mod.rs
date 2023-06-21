@@ -3,20 +3,18 @@
 use crate::tracing::{
     js::{
         bindings::{
-            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, OpObj, StackObj,
-            StepLog,
+            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, StackObj, StepLog,
         },
-        builtins::{bytes_to_address, from_buf, register_builtins},
+        builtins::{register_builtins, PrecompileList},
     },
     types::CallKind,
     utils::get_create_address,
 };
-use boa_engine::{Context, JsArgs, JsError, JsObject, JsResult, JsValue, NativeFunction, Source};
+use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
 use reth_primitives::{bytes::Bytes, Account, Address, H256, U256};
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
-        OpCode,
     },
     primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo, B160, B256},
     Database, EVMData, Inspector,
@@ -278,25 +276,11 @@ where
         data: &mut EVMData<'_, DB>,
         _is_static: bool,
     ) -> InstructionResult {
-        let precompiles: hashbrown::HashMap<[u8; 20], revm::precompile::Precompile> =
-            data.precompiles.fun.clone();
-        let is_precompiled =
-            move |_: &JsValue, args: &[JsValue], ctx: &mut Context<'_>| -> JsResult<JsValue> {
-                let val = args.get_or_undefined(0).clone();
-                let buf = from_buf(val, ctx)?;
-                let addr = bytes_to_address(buf);
-                for p in precompiles.keys() {
-                    if *p == addr.0 {
-                        return Ok(JsValue::from(true))
-                    }
-                }
-                Ok(JsValue::from(false))
-            };
-        self.ctx
-            .register_global_callable("isPrecompiled", 3, unsafe {
-                NativeFunction::from_closure(is_precompiled)
-            })
-            .unwrap();
+        let precompiles =
+            PrecompileList(data.precompiles.addresses().into_iter().map(Into::into).collect());
+
+        let _ = precompiles.register_callable(&mut self.ctx);
+
         InstructionResult::Continue
     }
 
@@ -315,10 +299,7 @@ where
         let pc = interp.program_counter();
         let step = StepLog {
             stack: StackObj(interp.stack.clone()),
-            op: OpObj(
-                OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
-                    .expect("is valid opcode;"),
-            ),
+            op: interp.contract.bytecode.bytecode()[pc].into(),
             memory: MemoryObj(interp.memory.clone()),
             pc: pc as u64,
             gas_remaining: interp.gas.remaining(),
@@ -361,10 +342,7 @@ where
             let pc = interp.program_counter();
             let step = StepLog {
                 stack: StackObj(interp.stack.clone()),
-                op: OpObj(
-                    OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
-                        .expect("is valid opcode;"),
-                ),
+                op: interp.contract.bytecode.bytecode()[pc].into(),
                 memory: MemoryObj(interp.memory.clone()),
                 pc: pc as u64,
                 gas_remaining: interp.gas.remaining(),
