@@ -82,8 +82,8 @@ where
         let mut gas_used_ratio: Vec<f64> = Vec::new();
         let mut rewards: Vec<Vec<U256>> = Vec::new();
         for header in &headers {
-            let header_base_fee_per_gas = header.base_fee_per_gas.unwrap_or_default();
-            base_fee_per_gas.push(U256::try_from(header_base_fee_per_gas).unwrap());
+            base_fee_per_gas
+                .push(U256::try_from(header.base_fee_per_gas.unwrap_or_default()).unwrap());
             gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
 
             // Percentiles were specified, so we need to collect reward percentile ino
@@ -100,9 +100,20 @@ where
                     .map(|txs|txs
                     .into_iter()
                     .zip(receipts.into_iter())
-                    .map(|(tx, receipt)| TxGasAndReward {
-                        gas_used: header.gas_used - receipt.cumulative_gas_used,
-                        reward: tx.effective_gas_tip(header.base_fee_per_gas).unwrap_or_default(),
+                    .scan(0, |previous_gas, (tx, receipt)| {
+                        // Convert the cumulative gas used in the receipts
+                        // to the gas usage by the transaction
+                        //
+                        // While we will sum up the gas again later, it is worth
+                        // noting that the order of the transactions will be different,
+                        // so the sum will also be different for each receipt.
+                        let gas_used = receipt.cumulative_gas_used - *previous_gas;
+                        *previous_gas += receipt.cumulative_gas_used;
+
+                        Some(TxGasAndReward {
+                            gas_used,
+                            reward: tx.effective_gas_tip(header.base_fee_per_gas).unwrap_or_default(),
+                        })
                     })
                     .collect()) else {
                         // If there are no transactions, then we do not have all info on the block
@@ -111,8 +122,6 @@ where
 
                 // Sort the transactions by their rewards in ascending order
                 transactions.sort_by_key(|tx| tx.reward);
-
-                println!("txs: {}", transactions.len());
 
                 // Find the transaction that corresponds to the given percentile
                 //
@@ -130,19 +139,14 @@ where
                     }
 
                     let threshold = (header.gas_used as f64 * percentile / 100.) as u64;
-                    println!(
-                        "percentile: {}, cumulative gas: {}, threshold: {}",
-                        percentile, cumulative_gas_used, threshold
-                    );
                     while cumulative_gas_used < threshold && tx_index < transactions.len() - 1 {
                         tx_index += 1;
                         cumulative_gas_used += transactions[tx_index].gas_used;
-                        println!(
-                            "percentile: {}, cumulative gas: {}, threshold: {}, tx_index: {}",
-                            percentile, cumulative_gas_used, threshold, tx_index
-                        );
                     }
-                    println!("found tx: {}", tx_index);
+                    println!(
+                        "reward: {}, base fee per gas: {:?}",
+                        transactions[tx_index].reward, header.base_fee_per_gas
+                    );
                     rewards_in_block.push(U256::from(transactions[tx_index].reward));
                 }
                 rewards.push(rewards_in_block);

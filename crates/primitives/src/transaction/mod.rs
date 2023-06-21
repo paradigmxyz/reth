@@ -437,7 +437,8 @@ impl Transaction {
     pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
         if let Some(base_fee) = base_fee {
             let max_fee_per_gas = self.max_fee_per_gas();
-            if max_fee_per_gas < base_fee as u128 {
+            dbg!(max_fee_per_gas);
+            if dbg!(max_fee_per_gas < base_fee as u128) {
                 None
             } else {
                 let effective_max_fee = max_fee_per_gas - base_fee as u128;
