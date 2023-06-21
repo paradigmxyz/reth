@@ -305,29 +305,37 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
 }
 
 /// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
+pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(db: DB, env: &mut TxEnv) -> EthResult<()>
+where
+    DB: Database,
+    EthApiError: From<<DB as Database>::Error>,
+{
+    if let Ok(gas_limit) = caller_gas_allowance(db, env)?.try_into() {
+        env.gas_limit = gas_limit;
+    }
+
+    Ok(())
+}
+
+/// Calculates the caller gas allowance.
 ///
-/// Returns an error if the caller has insufficient funds
-pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
-    mut db: DB,
-    env: &mut TxEnv,
-) -> EthResult<()>
+/// `allowance = (account.balance - tx.value) / tx.gas_price`
+///
+/// Returns an error if the caller has insufficient funds.
+pub(crate) fn caller_gas_allowance<DB>(mut db: DB, env: &TxEnv) -> EthResult<U256>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
 {
     let mut allowance = db.basic(env.caller)?.map(|acc| acc.balance).unwrap_or_default();
 
-    // subtract transferred value
+    // subtract transferred value from available funds
     allowance = allowance
         .checked_sub(env.value)
         .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?;
 
-    // cap the gas limit
-    if let Ok(gas_limit) = allowance.checked_div(env.gas_price).unwrap_or_default().try_into() {
-        env.gas_limit = gas_limit;
-    }
-
-    Ok(())
+    // amount of gas the sender can afford with the `gas_price`
+    Ok(allowance.checked_div(env.gas_price).unwrap_or_default())
 }
 
 /// Helper type for representing the fees of a [CallRequest]
