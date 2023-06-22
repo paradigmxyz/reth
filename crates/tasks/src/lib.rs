@@ -183,7 +183,7 @@ impl Future for TaskManager {
     }
 }
 
-/// Error with the name of the task that panicked.
+/// Error with the name of the task that panicked and an error downcasted to string, if possible.
 #[derive(Debug, thiserror::Error)]
 pub struct PanickedTaskError {
     task_name: &'static str,
