@@ -1368,8 +1368,7 @@ impl InvalidHeaderCache {
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
     fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
-        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
-        header_hash, invalid_ancestor);
+        warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
         self.headers.insert(header_hash, invalid_ancestor);
     }
 
@@ -1377,8 +1376,7 @@ impl InvalidHeaderCache {
     fn insert(&mut self, invalid_ancestor: SealedHeader) {
         let hash = invalid_ancestor.hash;
         let header = invalid_ancestor.unseal();
-        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
-        hash, header);
+        warn!(target: "consensus::engine", ?hash, ?header, "Bad block with hash");
         self.headers.insert(hash, Arc::new(header));
     }
 }
