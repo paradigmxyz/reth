@@ -28,6 +28,8 @@ pub enum JwtError {
     JwtDecodingError(String),
     #[error("IO error occurred while reading {path}: {err}")]
     IORead { err: std::io::Error, path: PathBuf },
+    #[error("IO error occurred while writing {path}: {err}")]
+    IOWrite { err: std::io::Error, path: PathBuf },
     #[error("An I/O error occurred: {0}")]
     IOError(#[from] std::io::Error),
 }
@@ -96,7 +98,7 @@ impl JwtSecret {
         let bytes = &secret.0;
         let hex = hex::encode(bytes);
         std::fs::write(fpath, hex)
-            .map_err(|err| JwtError::IORead { err, path: fpath.to_path_buf() })?;
+            .map_err(|err| JwtError::IOWrite { err, path: fpath.to_path_buf() })?;
         Ok(secret)
     }
 }
