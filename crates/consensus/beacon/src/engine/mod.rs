@@ -18,7 +18,7 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    SealedHeader, H256, U256,
+    H256, U256,
 };
 use reth_provider::{
     BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
@@ -29,7 +29,6 @@ use reth_rpc_types::engine::{
 };
 use reth_stages::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
-use schnellru::{ByLength, LruMap};
 use std::{
     pin::Pin,
     sync::Arc,
@@ -52,6 +51,8 @@ pub use error::{
     BeaconOnNewPayloadError,
 };
 
+mod invalid_headers;
+use invalid_headers::InvalidHeaderCache;
 mod metrics;
 
 mod event;
@@ -1347,37 +1348,6 @@ where
                 }
             }
         }
-    }
-}
-
-/// Keeps track of invalid headers.
-struct InvalidHeaderCache {
-    /// This maps a header hash to a reference to its invalid ancestor.
-    headers: LruMap<H256, Arc<Header>>,
-}
-
-impl InvalidHeaderCache {
-    fn new(max_length: u32) -> Self {
-        Self { headers: LruMap::new(ByLength::new(max_length)) }
-    }
-
-    /// Returns the invalid ancestor's header if it exists in the cache.
-    fn get(&mut self, hash: &H256) -> Option<&mut Arc<Header>> {
-        self.headers.get(hash)
-    }
-
-    /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
-        warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
-        self.headers.insert(header_hash, invalid_ancestor);
-    }
-
-    /// Inserts an invalid ancestor into the map.
-    fn insert(&mut self, invalid_ancestor: SealedHeader) {
-        let hash = invalid_ancestor.hash;
-        let header = invalid_ancestor.unseal();
-        warn!(target: "consensus::engine", ?hash, ?header, "Bad block with hash");
-        self.headers.insert(hash, Arc::new(header));
     }
 }
 
