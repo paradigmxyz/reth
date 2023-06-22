@@ -329,10 +329,11 @@ where
 
         // Check if the provided range is the next expected range.
         let is_next_consecutive_range = *range.start() == *self.download_range.end() + 1;
+        let distance = *range.end() - *range.start();
         if is_next_consecutive_range {
             // New range received.
             tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
-            info!(target: "downloaders::bodies", "Downloading bodies {range:?}");
+            info!(target: "downloaders::bodies", distance, "Downloading bodies {range:?}");
             self.download_range = range;
             return Ok(())
         }
@@ -340,7 +341,7 @@ where
         // The block range is reset. This can happen either after unwind or after the bodies were
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
-        info!(target: "downloaders::bodies", "Downloading bodies {range:?}");
+        info!(target: "downloaders::bodies", distance, "Downloading bodies {range:?}");
         self.clear();
         self.download_range = range;
         Ok(())
