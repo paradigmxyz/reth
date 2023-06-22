@@ -840,7 +840,7 @@ where
                 Ok(status)
             }
             Err(error) => {
-                debug!(target: "consensus::engine", ?error, "Error while processing payload");
+                warn!(target: "consensus::engine", ?error, "Error while processing payload");
                 self.map_insert_error(error)
             }
         };
@@ -1087,7 +1087,7 @@ where
                 }
             }
             Err(err) => {
-                debug!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
+                warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
                 if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
                     // non-internal error kinds occur if the payload is invalid
                     self.invalid_headers.insert(err.into_block().header);
