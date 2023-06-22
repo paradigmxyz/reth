@@ -29,6 +29,21 @@
   "liveNow": false,
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 92,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Node ($instance)",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -69,7 +84,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 22,
       "options": {
@@ -133,7 +148,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 1
       },
       "id": 20,
       "options": {
@@ -231,7 +246,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 8
+        "y": 9
       },
       "id": 69,
       "options": {
@@ -323,7 +338,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 8
+        "y": 9
       },
       "id": 12,
       "options": {
@@ -360,11 +375,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 17
       },
       "id": 38,
       "panels": [],
-      "title": "Database",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Database ($instance)",
       "type": "row"
     },
     {
@@ -428,7 +445,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 18
       },
       "id": 40,
       "options": {
@@ -488,7 +505,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 18
       },
       "id": 42,
       "maxDataPoints": 25,
@@ -579,7 +596,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 26
       },
       "id": 48,
       "options": {
@@ -688,7 +705,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 25
+        "y": 26
       },
       "id": 52,
       "options": {
@@ -746,7 +763,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 34
       },
       "id": 50,
       "options": {
@@ -914,7 +931,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 34
       },
       "id": 58,
       "options": {
@@ -955,11 +972,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 42
       },
       "id": 46,
       "panels": [],
-      "title": "Stage: Execution",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Stage: Execution ($instance)",
       "type": "row"
     },
     {
@@ -1021,7 +1040,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 43
       },
       "id": 56,
       "options": {
@@ -1094,11 +1113,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 51
       },
       "id": 6,
       "panels": [],
-      "title": "Networking",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Networking ($instance)",
       "type": "row"
     },
     {
@@ -1163,7 +1184,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 52
       },
       "id": 18,
       "options": {
@@ -1256,7 +1277,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 51
+        "y": 52
       },
       "id": 16,
       "options": {
@@ -1374,7 +1395,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 51
+        "y": 52
       },
       "id": 8,
       "options": {
@@ -1453,7 +1474,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 59
+        "y": 60
       },
       "id": 54,
       "options": {
@@ -1617,11 +1638,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 68
       },
       "id": 24,
       "panels": [],
-      "title": "Downloader: Headers",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Downloader: Headers ($instance)",
       "type": "row"
     },
     {
@@ -1710,7 +1733,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 68
+        "y": 69
       },
       "id": 26,
       "options": {
@@ -1840,7 +1863,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 68
+        "y": 69
       },
       "id": 33,
       "options": {
@@ -1957,7 +1980,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 76
+        "y": 77
       },
       "id": 36,
       "options": {
@@ -2006,11 +2029,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 84
+        "y": 85
       },
       "id": 32,
       "panels": [],
-      "title": "Downloader: Bodies",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Downloader: Bodies ($instance)",
       "type": "row"
     },
     {
@@ -2100,7 +2125,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 85
+        "y": 86
       },
       "id": 30,
       "options": {
@@ -2262,7 +2287,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 85
+        "y": 86
       },
       "id": 28,
       "options": {
@@ -2379,7 +2404,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 93
+        "y": 94
       },
       "id": 35,
       "options": {
@@ -2497,7 +2522,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 93
+        "y": 94
       },
       "id": 73,
       "options": {
@@ -2547,11 +2572,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 101
+        "y": 102
       },
       "id": 68,
       "panels": [],
-      "title": "Payload Builder",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Payload Builder ($instance)",
       "type": "row"
     },
     {
@@ -2616,7 +2643,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 102
+        "y": 103
       },
       "id": 60,
       "options": {
@@ -2709,7 +2736,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 102
+        "y": 103
       },
       "id": 62,
       "options": {
@@ -2802,7 +2829,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 110
+        "y": 111
       },
       "id": 64,
       "options": {
@@ -2895,7 +2922,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 110
+        "y": 111
       },
       "id": 80,
       "options": {
@@ -2989,7 +3016,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 118
+        "y": 119
       },
       "id": 74,
       "options": {
@@ -3083,7 +3110,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 118
+        "y": 119
       },
       "id": 81,
       "options": {
@@ -3121,11 +3148,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 126
+        "y": 127
       },
       "id": 88,
       "panels": [],
-      "title": "Blockchain tree",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Blockchain Tree ($instance)",
       "type": "row"
     },
     {
@@ -3190,7 +3219,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 127
+        "y": 128
       },
       "id": 89,
       "options": {
@@ -3284,7 +3313,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 127
+        "y": 128
       },
       "id": 90,
       "options": {
@@ -3378,7 +3407,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 135
+        "y": 136
       },
       "id": 91,
       "options": {
@@ -3416,11 +3445,13 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 143
+        "y": 144
       },
       "id": 87,
       "panels": [],
-      "title": "Engine API",
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Engine API ($instance)",
       "type": "row"
     },
     {
@@ -3485,7 +3516,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 144
+        "y": 145
       },
       "id": 83,
       "options": {
@@ -3578,7 +3609,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 144
+        "y": 145
       },
       "id": 84,
       "options": {
@@ -3683,7 +3714,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 152
+        "y": 153
       },
       "id": 85,
       "options": {
@@ -3762,6 +3793,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 6,
+  "version": 7,
   "weekStart": ""
 }
