@@ -19,9 +19,10 @@ pub use traits::{
     BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt, BlockSource,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
-    ExecutorFactory, HeaderProvider, PostStateDataProvider, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StageCheckpointWriter, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
+    ExecutorFactory, HashingWriter, HeaderProvider, HistoryWriter, PostStateDataProvider,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StageCheckpointWriter,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageReader,
+    TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
@@ -34,10 +35,6 @@ pub use providers::{
 /// Execution result
 pub mod post_state;
 pub use post_state::PostState;
-
-/// Helper types for interacting with the database
-mod transaction;
-pub use transaction::TransactionError;
 
 /// Common database utilities.
 mod utils;

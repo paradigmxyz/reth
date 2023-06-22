@@ -8,10 +8,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     version::{check_db_version_file, create_db_version_file, DatabaseVersionError},
 };
-use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, H256, U256};
-use reth_provider::{
-    AccountWriter, DatabaseProviderRW, PostState, ProviderFactory, TransactionError,
-};
+use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
+use reth_provider::{AccountWriter, DatabaseProviderRW, HashingWriter, PostState, ProviderFactory};
 use std::{fs, path::Path, sync::Arc};
 use tracing::debug;
 
@@ -49,10 +47,6 @@ pub enum InitDatabaseError {
         /// Actual genesis hash.
         database_hash: H256,
     },
-
-    /// Higher level error encountered when using a Transaction.
-    #[error(transparent)]
-    TransactionError(#[from] TransactionError),
 
     /// Low-level database error.
     #[error(transparent)]
@@ -155,7 +149,12 @@ pub fn insert_genesis_hashes<DB: Database>(
 
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
         // only return Some if there is storage
-        account.storage.map(|storage| (addr, storage.into_iter().map(|(k, v)| (k, v.into()))))
+        account.storage.map(|storage| {
+            (
+                addr,
+                storage.into_iter().map(|(key, value)| StorageEntry { key, value: value.into() }),
+            )
+        })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
     provider.commit()?;
