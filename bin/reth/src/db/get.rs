@@ -1,8 +1,7 @@
 use crate::utils::DbTool;
 use clap::Parser;
-use eyre::WrapErr;
-use reth_db::{database::Database, table::Table, tables};
-use serde::Deserialize;
+
+use reth_db::{database::Database, table::Table, TableType, TableViewer, Tables};
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -12,72 +11,57 @@ pub struct Command {
     ///
     /// NOTE: The dupsort tables are not supported now.
     #[arg()]
-    pub table: String, // TODO: Convert to enum
+    pub table: Tables,
 
-    /// The key to get content for
+    /// The key to get content for   
     #[arg(value_parser = maybe_json_value_parser)]
     pub key: String,
 }
 
 impl Command {
     /// Execute `db get` command
-    pub fn execute<DB: Database>(self, mut tool: DbTool<'_, DB>) -> eyre::Result<()> {
-        macro_rules! table_get {
-            ([$($table:ident),*]) => {
-                match self.table.as_str() {
-                    $(stringify!($table) => {
-                        let table_key = self.table_key::<tables::$table>().wrap_err("Could not parse the given table key.")?;
+    pub fn execute<DB: Database>(self, tool: &DbTool<'_, DB>) -> eyre::Result<()> {
+        if self.table.table_type() == TableType::DupSort {
+            error!(target: "reth::cli", "Unsupported table.");
 
-                        match tool.get::<tables::$table>(table_key)? {
-                            Some(content) => {
-                                println!("{}", serde_json::to_string_pretty(&content)?);
-                            }
-                            None => {
-                                error!(target: "reth::cli", "No content for the given table key.");
-                            },
-                        };
-                        return Ok(());
-                    },)*
-                    _ => {
-                        error!(target: "reth::cli", "Unknown or unsupported table.");
-                        return Ok(());
-                    }
-                }
-            }
+            return Ok(())
         }
 
-        table_get!([
-            CanonicalHeaders,
-            HeaderTD,
-            HeaderNumbers,
-            Headers,
-            BlockBodyIndices,
-            BlockOmmers,
-            BlockWithdrawals,
-            TransactionBlock,
-            Transactions,
-            TxHashNumber,
-            Receipts,
-            PlainAccountState,
-            Bytecodes,
-            AccountHistory,
-            StorageHistory,
-            HashedAccount,
-            AccountsTrie,
-            TxSenders,
-            SyncStage,
-            SyncStageProgress
-        ]);
+        self.table.view(&GetValueViewer { tool, args: &self })?;
+
+        Ok(())
     }
 
     /// Get an instance of key for given table
-    fn table_key<T: Table>(&self) -> Result<T::Key, eyre::Error>
-    where
-        for<'a> T::Key: Deserialize<'a>,
-    {
-        assert_eq!(T::NAME, self.table);
+    pub fn table_key<T: Table>(&self) -> Result<T::Key, eyre::Error> {
+        assert_eq!(T::NAME, self.table.name());
 
         serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
+    }
+}
+
+struct GetValueViewer<'a, DB: Database> {
+    tool: &'a DbTool<'a, DB>,
+    args: &'a Command,
+}
+
+impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
+    type Error = eyre::Report;
+
+    fn view<T: Table>(&self) -> Result<(), Self::Error> {
+        // get a key for given table
+        let key = self.args.table_key::<T>()?;
+
+        match self.tool.get::<T>(key)? {
+            Some(content) => {
+                println!("{}", serde_json::to_string_pretty(&content)?);
+            }
+            None => {
+                error!(target: "reth::cli", "No content for the given table key.");
+            }
+        };
+
+        Ok(())
     }
 }
 
