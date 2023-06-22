@@ -5374,6 +5374,7 @@ dependencies = [
 name = "reth-metrics"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "futures",
  "metrics",
  "reth-metrics-derive",
  "tokio",

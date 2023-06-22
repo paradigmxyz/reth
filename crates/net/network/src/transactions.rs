@@ -4,7 +4,7 @@ use crate::{
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
-    metrics::TransactionsManagerMetrics,
+    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
@@ -13,6 +13,7 @@ use reth_eth_wire::{
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
+use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
@@ -109,7 +110,7 @@ pub struct TransactionsManager<Pool> {
     /// Incoming commands from [`TransactionsHandle`].
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
-    transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
+    transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -140,7 +141,10 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: ReceiverStream::new(pending),
-            transaction_events: UnboundedReceiverStream::new(from_network),
+            transaction_events: UnboundedMeteredReceiver::new(
+                from_network,
+                NETWORK_POOL_TRANSACTIONS_SCOPE,
+            ),
             metrics: Default::default(),
         }
     }
