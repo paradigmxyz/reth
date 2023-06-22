@@ -87,6 +87,7 @@ humantime = "2.1.0"
 
 [features]
 jemalloc = ["dep:jemallocator"]
+jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
 only-info-logs = ["tracing/release_max_level_info"]
 
 [build-dependencies]
