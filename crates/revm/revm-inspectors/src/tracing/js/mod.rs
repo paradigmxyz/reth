@@ -3,10 +3,9 @@
 use crate::tracing::{
     js::{
         bindings::{
-            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, OpObj, StackObj,
-            StepLog,
+            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, StackObj, StepLog,
         },
-        builtins::register_builtins,
+        builtins::{register_builtins, PrecompileList},
     },
     types::CallKind,
     utils::get_create_address,
@@ -16,7 +15,6 @@ use reth_primitives::{bytes::Bytes, Account, Address, H256, U256};
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
-        OpCode,
     },
     primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo, B160, B256},
     Database, EVMData, Inspector,
@@ -275,9 +273,14 @@ where
     fn initialize_interp(
         &mut self,
         _interp: &mut Interpreter,
-        _data: &mut EVMData<'_, DB>,
+        data: &mut EVMData<'_, DB>,
         _is_static: bool,
     ) -> InstructionResult {
+        let precompiles =
+            PrecompileList(data.precompiles.addresses().into_iter().map(Into::into).collect());
+
+        let _ = precompiles.register_callable(&mut self.ctx);
+
         InstructionResult::Continue
     }
 
@@ -296,10 +299,7 @@ where
         let pc = interp.program_counter();
         let step = StepLog {
             stack: StackObj(interp.stack.clone()),
-            op: OpObj(
-                OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
-                    .expect("is valid opcode;"),
-            ),
+            op: interp.contract.bytecode.bytecode()[pc].into(),
             memory: MemoryObj(interp.memory.clone()),
             pc: pc as u64,
             gas_remaining: interp.gas.remaining(),
@@ -342,10 +342,7 @@ where
             let pc = interp.program_counter();
             let step = StepLog {
                 stack: StackObj(interp.stack.clone()),
-                op: OpObj(
-                    OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
-                        .expect("is valid opcode;"),
-                ),
+                op: interp.contract.bytecode.bytecode()[pc].into(),
                 memory: MemoryObj(interp.memory.clone()),
                 pc: pc as u64,
                 gas_remaining: interp.gas.remaining(),
