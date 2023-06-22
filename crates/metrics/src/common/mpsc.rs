@@ -1,9 +1,13 @@
 //! Support for metering senders. Facilitates debugging by exposing metrics for number of messages
 //! sent, number of errors, etc.
 
+use futures::Stream;
 use metrics::Counter;
 use reth_metrics_derive::Metrics;
-use std::task::{ready, Context, Poll};
+use std::{
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
 use tokio::sync::mpsc::{
     self,
     error::{SendError, TryRecvError, TrySendError},
@@ -115,6 +119,14 @@ impl<T> UnboundedMeteredReceiver<T> {
     }
 }
 
+impl<T> Stream for UnboundedMeteredReceiver<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.receiver.poll_recv(cx)
+    }
+}
+
 /// A wrapper type around [Sender](mpsc::Sender) that updates metrics on send.
 #[derive(Debug)]
 pub struct MeteredSender<T> {
@@ -212,6 +224,14 @@ impl<T> MeteredReceiver<T> {
             self.metrics.messages_received.increment(1);
         }
         Poll::Ready(msg)
+    }
+}
+
+impl<T> Stream for MeteredReceiver<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.receiver.poll_recv(cx)
     }
 }
 
