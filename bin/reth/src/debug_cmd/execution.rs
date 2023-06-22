@@ -238,7 +238,7 @@ impl Command {
         let provider = factory.provider().map_err(PipelineError::Interface)?;
 
         let latest_block_number =
-            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+            provider.get_stage_sync_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
         if latest_block_number.unwrap_or_default() >= self.to {
             info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
             return Ok(())

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::{pipeline::BoxedStage, Pipeline, Stage, StageSet};
+use crate::{
+    pipeline::{BoxedPrunableStage, BoxedStage},
+    Pipeline, Stage, StageSet,
+};
 use reth_db::database::Database;
 use reth_primitives::{stage::StageId, BlockNumber, ChainSpec, H256};
 use tokio::sync::watch;
@@ -13,6 +16,8 @@ where
 {
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
+    /// All configured prunable stages in the order they will be pruned.
+    prunable_stages: Vec<BoxedPrunableStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     /// A receiver for the current chain tip to sync to.
@@ -64,11 +69,12 @@ where
     ///
     /// Note: it's expected that this is either an [Arc](std::sync::Arc) or an Arc wrapper type.
     pub fn build(self, db: DB, chain_spec: Arc<ChainSpec>) -> Pipeline<DB> {
-        let Self { stages, max_block, tip_tx } = self;
+        let Self { stages, prunable_stages, max_block, tip_tx } = self;
         Pipeline {
             db,
             chain_spec,
             stages,
+            prunable_stages,
             max_block,
             tip_tx,
             listeners: Default::default(),
@@ -80,7 +86,7 @@ where
 
 impl<DB: Database> Default for PipelineBuilder<DB> {
     fn default() -> Self {
-        Self { stages: Vec::new(), max_block: None, tip_tx: None }
+        Self { stages: Vec::new(), prunable_stages: Vec::new(), max_block: None, tip_tx: None }
     }
 }
 

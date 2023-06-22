@@ -23,6 +23,7 @@ reth-codecs = { path = "../storage/codecs" }
 reth-provider = { workspace = true }
 reth-metrics = { workspace = true }
 reth-trie = { path = "../trie" }
+reth-downloaders = { path = "../net/downloaders" }
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -33,6 +34,10 @@ pin-project = { workspace = true }
 
 # observability
 tracing = { workspace = true }
+
+# io
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # misc
 thiserror = { workspace = true }
@@ -46,7 +51,6 @@ num-traits = "0.2.15"
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
 reth-blockchain-tree = { path = "../blockchain-tree" }
 reth-rlp = { workspace = true }

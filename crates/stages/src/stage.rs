@@ -6,6 +6,7 @@ use reth_primitives::{
     BlockNumber, TxNumber,
 };
 use reth_provider::DatabaseProviderRW;
+use serde::{Deserialize, Serialize};
 use std::{
     cmp::{max, min},
     ops::RangeInclusive,
@@ -102,6 +103,22 @@ impl ExecInput {
     }
 }
 
+/// The output of a stage execution.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ExecOutput {
+    /// How far the stage got.
+    pub checkpoint: StageCheckpoint,
+    /// Whether or not the stage is done.
+    pub done: bool,
+}
+
+impl ExecOutput {
+    /// Mark the stage as done, checkpointing at the given place.
+    pub fn done(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: true }
+    }
+}
+
 /// Stage unwind input, see [Stage::unwind].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
@@ -134,22 +151,6 @@ impl UnwindInput {
 
         let is_final_range = unwind_to == self.unwind_to;
         (start..=end.block_number, unwind_to, is_final_range)
-    }
-}
-
-/// The output of a stage execution.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct ExecOutput {
-    /// How far the stage got.
-    pub checkpoint: StageCheckpoint,
-    /// Whether or not the stage is done.
-    pub done: bool,
-}
-
-impl ExecOutput {
-    /// Mark the stage as done, checkpointing at the given place.
-    pub fn done(checkpoint: StageCheckpoint) -> Self {
-        Self { checkpoint, done: true }
     }
 }
 
@@ -191,4 +192,59 @@ pub trait Stage<DB: Database>: Send + Sync {
         provider: &mut DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
+}
+
+/// Stage prune mode.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+pub enum PruneMode {
+    /// Prune last N blocks.
+    Distance(u64),
+    /// Prune all blocks before the specified block number.
+    Before(BlockNumber),
+}
+
+/// Stage prune input, see [PrunableStage::prune].
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct PruneInput {
+    /// The sync checkpoint of this stage.
+    pub sync_checkpoint: StageCheckpoint,
+    /// The highest block number this stage reached the last time it was pruned.
+    pub block_number: Option<BlockNumber>,
+}
+
+/// The output of a stage pruning.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct PruneOutput {
+    /// The highest block number to which the stage has pruned to.
+    pub block_number: BlockNumber,
+}
+
+/// A stage is a segmented part of the pruning process of the node.
+#[async_trait::async_trait]
+pub trait PrunableStage<DB: Database>: Send + Sync + Stage<DB> {
+    /// Prune the stage.
+    async fn prune(
+        &mut self,
+        provider: &mut DatabaseProviderRW<'_, &DB>,
+        input: PruneInput,
+    ) -> Result<PruneOutput, StageError>;
+
+    /// Returns prune mode of the stage, if any if set.
+    fn prune_mode(&self) -> Option<PruneMode>;
+
+    /// Returns `true` if stage finished pruning, according to its prune mode retrieved via
+    /// [PrunableStage::prune_mode].
+    ///
+    /// If no prune mode is set, returns `true`.
+    fn is_prune_done(&self, input: PruneInput, output: PruneOutput) -> bool {
+        let Some(prune_mode) = self.prune_mode() else { return true };
+
+        // TODO(alexey): safe subtractions
+        match prune_mode {
+            PruneMode::Distance(distance) => {
+                output.block_number == input.sync_checkpoint.block_number - distance
+            }
+            PruneMode::Before(before_block) => output.block_number == before_block - 1,
+        }
+    }
 }

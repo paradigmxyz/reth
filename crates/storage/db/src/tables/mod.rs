@@ -49,7 +49,7 @@ pub enum TableType {
 }
 
 /// Number of tables that should be present inside database.
-pub const NUM_TABLES: usize = 25;
+pub const NUM_TABLES: usize = 26;
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); NUM_TABLES] = [
@@ -78,6 +78,7 @@ pub const TABLES: [(TableType, &str); NUM_TABLES] = [
     (TableType::Table, TxSenders::const_name()),
     (TableType::Table, SyncStage::const_name()),
     (TableType::Table, SyncStageProgress::const_name()),
+    (TableType::Table, PruneStage::const_name()),
 ];
 
 #[macro_export]
@@ -307,6 +308,11 @@ table!(
 table!(
     /// Stores arbitrary data to keep track of a stage first-sync progress.
     ( SyncStageProgress ) StageId | Vec<u8>
+);
+
+table!(
+    /// Stores the highest pruned block number.
+    ( PruneStage ) StageId | BlockNumber
 );
 
 /// Alias Types

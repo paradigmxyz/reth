@@ -369,15 +369,18 @@ where
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
             .blockchain
-            .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
+            .get_stage_sync_checkpoint(*StageId::ALL.first().unwrap())?
             .unwrap_or_default()
             .block_number;
 
         // Skip the first stage as we've already retrieved it and comparing all other checkpoints
         // against it.
         for stage_id in StageId::ALL.iter().skip(1) {
-            let stage_checkpoint =
-                self.blockchain.get_stage_checkpoint(*stage_id)?.unwrap_or_default().block_number;
+            let stage_checkpoint = self
+                .blockchain
+                .get_stage_sync_checkpoint(*stage_id)?
+                .unwrap_or_default()
+                .block_number;
 
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.

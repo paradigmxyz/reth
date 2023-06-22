@@ -99,8 +99,9 @@ impl MerkleStage {
         &self,
         provider: &DatabaseProviderRW<'_, &DB>,
     ) -> Result<Option<MerkleCheckpoint>, StageError> {
-        let buf =
-            provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
+        let buf = provider
+            .get_stage_sync_checkpoint_progress(StageId::MerkleExecute)?
+            .unwrap_or_default();
 
         if buf.is_empty() {
             return Ok(None)
@@ -126,7 +127,7 @@ impl MerkleStage {
             );
             checkpoint.to_compact(&mut buf);
         }
-        Ok(provider.save_stage_checkpoint_progress(StageId::MerkleExecute, buf)?)
+        Ok(provider.save_stage_sync_checkpoint_progress(StageId::MerkleExecute, buf)?)
     }
 }
 
