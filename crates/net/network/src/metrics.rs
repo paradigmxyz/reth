@@ -54,6 +54,8 @@ pub struct TransactionsManagerMetrics {
     pub(crate) messages_with_already_seen_hashes: Counter,
     /// Total number of messages with already seen full transactions
     pub(crate) messages_with_already_seen_transactions: Counter,
+    /// Number of transactions about to be imported into the pool.
+    pub(crate) pending_pool_imports: Gauge,
 }
 
 /// Metrics for Disconnection types
