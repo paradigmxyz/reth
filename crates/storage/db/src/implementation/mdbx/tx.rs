@@ -3,14 +3,14 @@
 use super::cursor::Cursor;
 use crate::{
     table::{Compress, DupSort, Encode, Table, TableImporter},
-    tables::{utils::decode_one, NUM_TABLES, TABLES},
+    tables::{utils::decode_one, Tables, NUM_TABLES},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseError,
 };
 use parking_lot::RwLock;
 use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, DBI, RW};
 use reth_metrics::metrics::{self, histogram};
-use std::{marker::PhantomData, sync::Arc, time::Instant};
+use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -39,13 +39,9 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
         let mut handles = self.db_handles.write();
 
-        let table_index = TABLES
-            .iter()
-            .enumerate()
-            .find_map(|(idx, (_, table))| (table == &T::NAME).then_some(idx))
-            .expect("Requested table should be part of `TABLES`.");
+        let table = Tables::from_str(T::NAME).expect("Requested table should be part of `Tables`.");
 
-        let dbi_handle = handles.get_mut(table_index).expect("should exist");
+        let dbi_handle = handles.get_mut(table as usize).expect("should exist");
         if dbi_handle.is_none() {
             *dbi_handle = Some(
                 self.inner
