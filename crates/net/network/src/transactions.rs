@@ -158,6 +158,10 @@ where
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
 
+    fn update_import_metrics(&self) {
+        self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
+    }
+
     /// Request handler for an incoming request for transactions
     fn on_get_pooled_transactions(
         &mut self,
@@ -538,6 +542,8 @@ where
             }
         }
 
+        this.update_import_metrics();
+
         // Advance all imports
         while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
             match import_res {
@@ -557,6 +563,8 @@ where
                 }
             }
         }
+
+        this.update_import_metrics();
 
         // handle and propagate new transactions
         let mut new_txs = Vec::new();
