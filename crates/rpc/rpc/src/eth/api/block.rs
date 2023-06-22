@@ -4,9 +4,9 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::BlockId;
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{Block, Index, RichBlock};
+use reth_rpc_types::{Block, Index, RichBlock, TransactionReceipt};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -44,6 +44,26 @@ where
             .nth(index)
             .map(|header| Block::uncle_block_from_header(header).into());
         Ok(uncle)
+    }
+
+    /// Returns all receipts in the block.
+    ///
+    /// Returns `None` if the block wasn't found.
+    pub(crate) async fn block_receipts(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> EthResult<Option<Vec<TransactionReceipt>>> {
+        let mut block = None;
+        if number.is_pending() {
+            block = self.provider().pending_block()
+        } else {
+            if let Some(block_hash) = self.provider().block_hash_for_id(number.into())? {
+                let x = self.cache().get_block_and_receipts(block_hash).await?;
+            }
+        }
+        let Some(block) = block else {return Ok(None)};
+
+        todo!()
     }
 
     /// Returns the number transactions in the given block.
