@@ -1,6 +1,6 @@
 use crate::{
-    BlockIdProvider, BlockNumProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
-    WithdrawalsProvider,
+    BlockIdProvider, BlockNumProvider, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
@@ -113,7 +113,7 @@ pub trait BlockProvider:
 /// `BlockIdProvider` methods should be used to resolve `BlockId`s to block numbers or hashes, and
 /// retrieving the block should be done using the type's `BlockProvider` methods.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockProviderIdExt: BlockProvider + BlockIdProvider {
+pub trait BlockProviderIdExt: BlockProvider + BlockIdProvider + ReceiptProviderIdExt {
     /// Returns the block with matching tag from the database
     ///
     /// Returns `None` if block is not found.

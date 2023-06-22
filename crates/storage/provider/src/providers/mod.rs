@@ -2,8 +2,8 @@ use crate::{
     BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
-    ReceiptProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
+    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -327,6 +327,33 @@ where
         self.database.provider()?.receipts_by_block(block)
     }
 }
+impl<DB, Tree> ReceiptProviderIdExt for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+    Tree: BlockchainTreeViewer + Send + Sync,
+{
+    fn receipts_by_block_id(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
+        match block {
+            BlockId::Hash(rpc_block_hash) => {
+                let mut receipts = self.receipts_by_block(rpc_block_hash.block_hash.into())?;
+                if receipts.is_none() && !rpc_block_hash.require_canonical.unwrap_or(false) {
+                    receipts = self.tree.receipts_by_block_hash(rpc_block_hash.block_hash);
+                }
+                Ok(receipts)
+            }
+            BlockId::Number(num_tag) => match num_tag {
+                BlockNumberOrTag::Pending => Ok(self.tree.pending_receipts()),
+                _ => {
+                    if let Some(num) = self.convert_block_number(num_tag)? {
+                        self.receipts_by_block(num.into())
+                    } else {
+                        Ok(None)
+                    }
+                }
+            },
+        }
+    }
+}
 
 impl<DB, Tree> WithdrawalsProvider for BlockchainProvider<DB, Tree>
 where
@@ -600,6 +627,10 @@ where
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         self.tree.pending_block_num_hash()
     }
+
+    fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>> {
+        self.tree.receipts_by_block_hash(block_hash)
+    }
 }
 
 impl<DB, Tree> CanonChainTracker for BlockchainProvider<DB, Tree>
@@ -640,7 +671,7 @@ where
 
 impl<DB, Tree> BlockProviderIdExt for BlockchainProvider<DB, Tree>
 where
-    Self: BlockProvider + BlockIdProvider,
+    Self: BlockProvider + BlockIdProvider + ReceiptProviderIdExt,
     Tree: BlockchainTreeEngine,
 {
     fn block_by_id(&self, id: BlockId) -> Result<Option<Block>> {
