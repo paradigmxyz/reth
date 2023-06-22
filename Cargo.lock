@@ -5634,6 +5634,7 @@ dependencies = [
 name = "reth-rpc"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "assert_matches",
  "async-trait",
  "bytes",
  "ethers-core",
@@ -5663,6 +5664,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
