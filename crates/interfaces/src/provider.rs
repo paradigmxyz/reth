@@ -4,6 +4,8 @@ use reth_primitives::{Address, BlockHash, BlockHashOrNumber, BlockNumber, TxNumb
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum ProviderError {
+    #[error(transparent)]
+    Database(#[from] crate::db::DatabaseError),
     /// The header number was not found for the given block hash.
     #[error("Block hash {0:?} does not exist in Headers table")]
     BlockHashNotFound(BlockHash),
@@ -68,4 +70,28 @@ pub enum ProviderError {
     /// Unable to find the block number for a given transaction index
     #[error("Unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,
+    /// Root mismatch
+    #[error("Merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
+    StateRootMismatch {
+        /// Expected root
+        expected: H256,
+        /// Calculated root
+        got: H256,
+        /// Block number
+        block_number: BlockNumber,
+        /// Block hash
+        block_hash: BlockHash,
+    },
+    /// Root mismatch during unwind
+    #[error("Unwind merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
+    UnwindStateRootMismatch {
+        /// Expected root
+        expected: H256,
+        /// Calculated root
+        got: H256,
+        /// Target block number
+        block_number: BlockNumber,
+        /// Block hash
+        block_hash: BlockHash,
+    },
 }

@@ -2,6 +2,7 @@
 use crate::{
     canonical_chain::CanonicalChain,
     chain::{BlockChainId, BlockKind},
+    metrics::TreeMetrics,
     AppendableChain, BlockBuffer, BlockIndices, BlockchainTreeConfig, PostStateData, TreeExternals,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
@@ -87,6 +88,8 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
     canon_state_notification_sender: CanonStateNotificationSender,
+    /// Metrics for the blockchain tree.
+    metrics: TreeMetrics,
 }
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
@@ -137,6 +140,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             ),
             config,
             canon_state_notification_sender,
+            metrics: Default::default(),
         })
     }
 
@@ -1057,6 +1061,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         } else {
             Ok(Some(Chain::new(blocks_and_execution)))
         }
+    }
+
+    /// Update blockchain tree metrics
+    pub(crate) fn update_tree_metrics(&self) {
+        self.metrics.sidechains.set(self.chains.len() as f64);
+        self.metrics.canonical_chain_height.set(self.canonical_chain().tip().number as f64);
     }
 }
 

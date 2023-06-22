@@ -1,4 +1,7 @@
-use rand::{distributions::uniform::SampleRange, seq::SliceRandom, thread_rng, Rng};
+pub use rand::Rng;
+use rand::{
+    distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
+};
 use reth_primitives::{
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, SealedBlock, SealedHeader,
     Signature, StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256,
@@ -7,12 +10,26 @@ use reth_primitives::{
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
 use std::{
     cmp::{max, min},
-    collections::BTreeMap,
+    collections::{hash_map::DefaultHasher, BTreeMap},
+    hash::Hasher,
     ops::{Range, RangeInclusive, Sub},
 };
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
 // relevant crates?
+
+/// Returns a random number generator that can be seeded using the `SEED` environment variable.
+///
+/// If `SEED` is not set, a random seed is used.
+pub fn rng() -> StdRng {
+    if let Ok(seed) = std::env::var("SEED") {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(seed.as_bytes());
+        StdRng::seed_from_u64(hasher.finish())
+    } else {
+        StdRng::from_rng(thread_rng()).expect("could not build rng")
+    }
+}
 
 /// Generates a range of random [SealedHeader]s.
 ///
@@ -20,10 +37,15 @@ use std::{
 /// in the result will be equal to `head`.
 ///
 /// The headers are assumed to not be correct if validated.
-pub fn random_header_range(rng: std::ops::Range<u64>, head: H256) -> Vec<SealedHeader> {
-    let mut headers = Vec::with_capacity(rng.end.saturating_sub(rng.start) as usize);
-    for idx in rng {
+pub fn random_header_range<R: Rng>(
+    rng: &mut R,
+    range: std::ops::Range<u64>,
+    head: H256,
+) -> Vec<SealedHeader> {
+    let mut headers = Vec::with_capacity(range.end.saturating_sub(range.start) as usize);
+    for idx in range {
         headers.push(random_header(
+            rng,
             idx,
             Some(headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(head)),
         ));
@@ -34,11 +56,11 @@ pub fn random_header_range(rng: std::ops::Range<u64>, head: H256) -> Vec<SealedH
 /// Generate a random [SealedHeader].
 ///
 /// The header is assumed to not be correct if validated.
-pub fn random_header(number: u64, parent: Option<H256>) -> SealedHeader {
+pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<H256>) -> SealedHeader {
     let header = reth_primitives::Header {
         number,
-        nonce: rand::random(),
-        difficulty: U256::from(rand::random::<u32>()),
+        nonce: rng.gen(),
+        difficulty: U256::from(rng.gen::<u32>()),
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
@@ -51,14 +73,14 @@ pub fn random_header(number: u64, parent: Option<H256>) -> SealedHeader {
 ///
 /// - The chain ID, which is always 1
 /// - The input, which is always nothing
-pub fn random_tx() -> Transaction {
+pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
     Transaction::Legacy(TxLegacy {
         chain_id: Some(1),
-        nonce: rand::random::<u16>().into(),
-        gas_price: rand::random::<u16>().into(),
-        gas_limit: rand::random::<u16>().into(),
+        nonce: rng.gen::<u16>().into(),
+        gas_price: rng.gen::<u16>().into(),
+        gas_limit: rng.gen::<u16>().into(),
         to: TransactionKind::Call(Address::random()),
-        value: rand::random::<u16>().into(),
+        value: rng.gen::<u16>().into(),
         input: Bytes::default(),
     })
 }
@@ -68,10 +90,10 @@ pub fn random_tx() -> Transaction {
 /// On top of the considerations of [random_tx], these apply as well:
 ///
 /// - There is no guarantee that the nonce is not used twice for the same account
-pub fn random_signed_tx() -> TransactionSigned {
+pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
     let secp = Secp256k1::new();
-    let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
-    let tx = random_tx();
+    let key_pair = KeyPair::new(&secp, rng);
+    let tx = random_tx(rng);
     sign_tx_with_key_pair(key_pair, tx)
 }
 
@@ -96,23 +118,23 @@ pub fn sign_tx_with_key_pair(key_pair: KeyPair, tx: Transaction) -> TransactionS
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block(
+pub fn random_block<R: Rng>(
+    rng: &mut R,
     number: u64,
     parent: Option<H256>,
     tx_count: Option<u8>,
     ommers_count: Option<u8>,
 ) -> SealedBlock {
-    let mut rng = thread_rng();
-
     // Generate transactions
     let tx_count = tx_count.unwrap_or_else(|| rng.gen::<u8>());
-    let transactions: Vec<TransactionSigned> = (0..tx_count).map(|_| random_signed_tx()).collect();
+    let transactions: Vec<TransactionSigned> =
+        (0..tx_count).map(|_| random_signed_tx(rng)).collect();
     let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
 
     // Generate ommers
     let ommers_count = ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
     let ommers =
-        (0..ommers_count).map(|_| random_header(number, parent).unseal()).collect::<Vec<_>>();
+        (0..ommers_count).map(|_| random_header(rng, number, parent).unseal()).collect::<Vec<_>>();
 
     // Calculate roots
     let transactions_root = proofs::calculate_transaction_root(&transactions);
@@ -142,19 +164,21 @@ pub fn random_block(
 /// in the result will be equal to `head`.
 ///
 /// See [random_block] for considerations when validating the generated blocks.
-pub fn random_block_range(
+pub fn random_block_range<R: Rng>(
+    rng: &mut R,
     block_numbers: RangeInclusive<BlockNumber>,
     head: H256,
     tx_count: Range<u8>,
 ) -> Vec<SealedBlock> {
-    let mut rng = rand::thread_rng();
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
+        let tx_count = tx_count.clone().sample_single(rng);
         blocks.push(random_block(
+            rng,
             idx,
             Some(blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(head)),
-            Some(tx_count.clone().sample_single(&mut rng)),
+            Some(tx_count),
             None,
         ));
     }
@@ -169,7 +193,8 @@ type AccountState = (Account, Vec<StorageEntry>);
 ///
 /// Returns a Vec of account and storage changes for each transition,
 /// along with the final state of all accounts and storages.
-pub fn random_transition_range<'a, IBlk, IAcc>(
+pub fn random_transition_range<'a, R: Rng, IBlk, IAcc>(
+    rng: &mut R,
     blocks: IBlk,
     accounts: IAcc,
     n_changes: std::ops::Range<u64>,
@@ -179,7 +204,6 @@ where
     IBlk: IntoIterator<Item = &'a SealedBlock>,
     IAcc: IntoIterator<Item = (Address, (Account, Vec<StorageEntry>))>,
 {
-    let mut rng = rand::thread_rng();
     let mut state: BTreeMap<_, _> = accounts
         .into_iter()
         .map(|(addr, (acc, st))| (addr, (acc, st.into_iter().map(|e| (e.key, e.value)).collect())))
@@ -192,7 +216,7 @@ where
     blocks.into_iter().for_each(|block| {
         let mut transition = Vec::new();
         let (from, to, mut transfer, new_entries) =
-            random_account_change(&valid_addresses, n_changes.clone(), key_range.clone());
+            random_account_change(rng, &valid_addresses, n_changes.clone(), key_range.clone());
 
         // extract from sending account
         let (prev_from, _) = state.get_mut(&from).unwrap();
@@ -239,61 +263,63 @@ where
 /// Generate a random account change.
 ///
 /// Returns two addresses, a balance_change, and a Vec of new storage entries.
-pub fn random_account_change(
+pub fn random_account_change<R: Rng>(
+    rng: &mut R,
     valid_addresses: &Vec<Address>,
     n_changes: std::ops::Range<u64>,
     key_range: std::ops::Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
-    let mut rng = rand::thread_rng();
-    let mut addresses = valid_addresses.choose_multiple(&mut rng, 2).cloned();
+    let mut addresses = valid_addresses.choose_multiple(rng, 2).cloned();
 
     let addr_from = addresses.next().unwrap_or_else(Address::random);
     let addr_to = addresses.next().unwrap_or_else(Address::random);
 
     let balance_change = U256::from(rng.gen::<u64>());
 
-    let storage_changes = (0..n_changes.sample_single(&mut rng))
-        .map(|_| random_storage_entry(key_range.clone()))
+    let storage_changes = (0..n_changes.sample_single(rng))
+        .map(|_| random_storage_entry(rng, key_range.clone()))
         .collect();
 
     (addr_from, addr_to, balance_change, storage_changes)
 }
 
 /// Generate a random storage change.
-pub fn random_storage_entry(key_range: std::ops::Range<u64>) -> StorageEntry {
-    let mut rng = rand::thread_rng();
-
-    let key = H256::from_low_u64_be(key_range.sample_single(&mut rng));
+pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: std::ops::Range<u64>) -> StorageEntry {
+    let key = H256::from_low_u64_be(key_range.sample_single(rng));
     let value = U256::from(rng.gen::<u64>());
 
     StorageEntry { key, value }
 }
 
 /// Generate random Externally Owned Account (EOA account without contract).
-pub fn random_eoa_account() -> (Address, Account) {
-    let nonce: u64 = rand::random();
-    let balance = U256::from(rand::random::<u32>());
-    let addr = H160::from(rand::random::<u64>());
+pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
+    let nonce: u64 = rng.gen();
+    let balance = U256::from(rng.gen::<u32>());
+    let addr = H160::from(rng.gen::<u64>());
 
     (addr, Account { nonce, balance, bytecode_hash: None })
 }
 
 /// Generate random Externally Owned Accounts
-pub fn random_eoa_account_range(acc_range: std::ops::Range<u64>) -> Vec<(Address, Account)> {
+pub fn random_eoa_account_range<R: Rng>(
+    rng: &mut R,
+    acc_range: std::ops::Range<u64>,
+) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
-        accounts.push(random_eoa_account())
+        accounts.push(random_eoa_account(rng))
     }
     accounts
 }
 
 /// Generate random Contract Accounts
-pub fn random_contract_account_range(
+pub fn random_contract_account_range<R: Rng>(
+    rng: &mut R,
     acc_range: &mut std::ops::Range<u64>,
 ) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
-        let (address, eoa_account) = random_eoa_account();
+        let (address, eoa_account) = random_eoa_account(rng);
         let account = Account { bytecode_hash: Some(H256::random()), ..eoa_account };
         accounts.push((address, account))
     }

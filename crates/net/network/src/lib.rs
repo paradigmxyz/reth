@@ -107,9 +107,9 @@
 //! }
 //! ```
 //!
-//! # Features
+//! # Feature Flags
 //!
-//! - `serde`: Enable serde support for configuration types (enabled by default).
+//! - `serde` (default): Enable serde support for configuration types.
 //! - `test-utils`: Various utilities helpful for writing tests
 //! - `geth-tests`: Runs tests that require Geth to be installed locally.
 

@@ -5071,6 +5071,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "reth-db",
  "reth-interfaces",
+ "reth-metrics",
  "reth-primitives",
  "reth-provider",
  "tokio",
@@ -5557,7 +5558,6 @@ dependencies = [
  "reth-revm-primitives",
  "reth-rlp",
  "reth-trie",
- "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -5634,6 +5634,7 @@ dependencies = [
 name = "reth-rpc"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "assert_matches",
  "async-trait",
  "bytes",
  "ethers-core",
@@ -5663,6 +5664,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

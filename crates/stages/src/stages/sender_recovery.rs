@@ -231,7 +231,10 @@ struct FailedSenderRecoveryError {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{random_block, random_block_range};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block, random_block_range},
+    };
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, H256,
     };
@@ -249,6 +252,7 @@ mod tests {
     #[tokio::test]
     async fn execute_single_transaction() {
         let (previous_stage, stage_progress) = (500, 100);
+        let mut rng = generators::rng();
 
         // Set up the runner
         let runner = SenderRecoveryTestRunner::default();
@@ -261,7 +265,13 @@ mod tests {
         let non_empty_block_number = stage_progress + 10;
         let blocks = (stage_progress..=input.target())
             .map(|number| {
-                random_block(number, None, Some((number == non_empty_block_number) as u8), None)
+                random_block(
+                    &mut rng,
+                    number,
+                    None,
+                    Some((number == non_empty_block_number) as u8),
+                    None,
+                )
             })
             .collect::<Vec<_>>();
         runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
@@ -288,13 +298,16 @@ mod tests {
     /// Execute the stage twice with input range that exceeds the commit threshold
     #[tokio::test]
     async fn execute_intermediate_commit() {
+        let mut rng = generators::rng();
+
         let threshold = 10;
         let mut runner = SenderRecoveryTestRunner::default();
         runner.set_threshold(threshold);
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
 
         // Manually seed once with full input range
-        let seed = random_block_range(stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+        let seed =
+            random_block_range(&mut rng, stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
         let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
@@ -403,10 +416,11 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let mut rng = generators::rng();
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
 
-            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(&mut rng, stage_progress..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }

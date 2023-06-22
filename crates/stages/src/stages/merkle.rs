@@ -346,8 +346,12 @@ mod tests {
         tables,
         transaction::{DbTx, DbTxMut},
     };
-    use reth_interfaces::test_utils::generators::{
-        random_block, random_block_range, random_contract_account_range, random_transition_range,
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{
+            random_block, random_block_range, random_contract_account_range,
+            random_transition_range,
+        },
     };
     use reth_primitives::{
         keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, H256, U256,
@@ -469,9 +473,10 @@ mod tests {
             let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
             let end = input.target();
+            let mut rng = generators::rng();
 
             let num_of_accounts = 31;
-            let accounts = random_contract_account_range(&mut (0..num_of_accounts))
+            let accounts = random_contract_account_range(&mut rng, &mut (0..num_of_accounts))
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
@@ -480,7 +485,7 @@ mod tests {
             )?;
 
             let SealedBlock { header, body, ommers, withdrawals } =
-                random_block(stage_progress, None, Some(0), None);
+                random_block(&mut rng, stage_progress, None, Some(0), None);
             let mut header = header.unseal();
 
             header.state_root = state_root(
@@ -493,10 +498,11 @@ mod tests {
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
-            blocks.extend(random_block_range(start..=end, head_hash, 0..3));
+            blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
             self.tx.insert_blocks(blocks.iter(), None)?;
 
             let (transitions, final_state) = random_transition_range(
+                &mut rng,
                 blocks.iter(),
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
                 0..3,

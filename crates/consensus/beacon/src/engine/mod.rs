@@ -18,7 +18,7 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    SealedHeader, H256, U256,
+    H256, U256,
 };
 use reth_provider::{
     BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
@@ -29,7 +29,6 @@ use reth_rpc_types::engine::{
 };
 use reth_stages::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
-use schnellru::{ByLength, LruMap};
 use std::{
     pin::Pin,
     sync::Arc,
@@ -52,6 +51,8 @@ pub use error::{
     BeaconOnNewPayloadError,
 };
 
+mod invalid_headers;
+use invalid_headers::InvalidHeaderCache;
 mod metrics;
 
 mod event;
@@ -840,7 +841,7 @@ where
                 Ok(status)
             }
             Err(error) => {
-                debug!(target: "consensus::engine", ?error, "Error while processing payload");
+                warn!(target: "consensus::engine", ?error, "Error while processing payload");
                 self.map_insert_error(error)
             }
         };
@@ -1087,7 +1088,7 @@ where
                 }
             }
             Err(err) => {
-                debug!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
+                warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
                 if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
                     // non-internal error kinds occur if the payload is invalid
                     self.invalid_headers.insert(err.into_block().header);
@@ -1347,39 +1348,6 @@ where
                 }
             }
         }
-    }
-}
-
-/// Keeps track of invalid headers.
-struct InvalidHeaderCache {
-    /// This maps a header hash to a reference to its invalid ancestor.
-    headers: LruMap<H256, Arc<Header>>,
-}
-
-impl InvalidHeaderCache {
-    fn new(max_length: u32) -> Self {
-        Self { headers: LruMap::new(ByLength::new(max_length)) }
-    }
-
-    /// Returns the invalid ancestor's header if it exists in the cache.
-    fn get(&mut self, hash: &H256) -> Option<&mut Arc<Header>> {
-        self.headers.get(hash)
-    }
-
-    /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
-        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
-        header_hash, invalid_ancestor);
-        self.headers.insert(header_hash, invalid_ancestor);
-    }
-
-    /// Inserts an invalid ancestor into the map.
-    fn insert(&mut self, invalid_ancestor: SealedHeader) {
-        let hash = invalid_ancestor.hash;
-        let header = invalid_ancestor.unseal();
-        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
-        hash, header);
-        self.headers.insert(hash, Arc::new(header));
     }
 }
 
@@ -1751,7 +1719,7 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use reth_db::{tables, transaction::DbTxMut};
-        use reth_interfaces::test_utils::generators::random_block;
+        use reth_interfaces::test_utils::{generators, generators::random_block};
         use reth_rpc_types::engine::ForkchoiceUpdateError;
 
         #[tokio::test]
@@ -1786,6 +1754,7 @@ mod tests {
 
         #[tokio::test]
         async fn valid_forkchoice() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1801,8 +1770,8 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
             env.db
                 .update(|tx| {
@@ -1833,6 +1802,8 @@ mod tests {
 
         #[tokio::test]
         async fn unknown_head_hash() {
+            let mut rng = generators::rng();
+
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1849,13 +1820,13 @@ mod tests {
                 .disable_blockchain_tree_sync()
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
-            let next_head = random_block(2, Some(block1.hash), None, Some(0));
+            let next_head = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
             let next_forkchoice_state = ForkchoiceState {
                 head_block_hash: next_head.hash,
                 finalized_block_hash: block1.hash,
@@ -1882,6 +1853,7 @@ mod tests {
 
         #[tokio::test]
         async fn unknown_finalized_hash() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1898,8 +1870,8 @@ mod tests {
                 .disable_blockchain_tree_sync()
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let engine = spawn_consensus_engine(consensus_engine);
@@ -1918,6 +1890,7 @@ mod tests {
 
         #[tokio::test]
         async fn forkchoice_updated_pre_merge() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1934,16 +1907,16 @@ mod tests {
                 ]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let mut block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let mut block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block1.header.difficulty = U256::from(1);
 
             // a second pre-merge block
-            let mut block2 = random_block(1, Some(genesis.hash), None, Some(0));
+            let mut block2 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block2.header.difficulty = U256::from(1);
 
             // a transition block
-            let mut block3 = random_block(1, Some(genesis.hash), None, Some(0));
+            let mut block3 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block3.header.difficulty = U256::from(1);
 
             insert_blocks(
@@ -1971,6 +1944,7 @@ mod tests {
 
         #[tokio::test]
         async fn forkchoice_updated_invalid_pow() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1986,8 +1960,8 @@ mod tests {
                 ]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
 
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
@@ -2011,12 +1985,13 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_interfaces::test_utils::generators::random_block;
+        use reth_interfaces::test_utils::{generators, generators::random_block};
         use reth_primitives::{Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -2035,12 +2010,14 @@ mod tests {
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
             // Send new payload
-            let res = env.send_new_payload(random_block(0, None, None, Some(0)).into()).await;
+            let res =
+                env.send_new_payload(random_block(&mut rng, 0, None, None, Some(0)).into()).await;
             // Invalid, because this is a genesis block
             assert_matches!(res, Ok(result) => assert_matches!(result.status, PayloadStatusEnum::Invalid { .. }));
 
             // Send new payload
-            let res = env.send_new_payload(random_block(1, None, None, Some(0)).into()).await;
+            let res =
+                env.send_new_payload(random_block(&mut rng, 1, None, None, Some(0)).into()).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2049,6 +2026,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_known() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -2064,9 +2042,9 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
-            let block2 = random_block(2, Some(block1.hash), None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block2 = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
             insert_blocks(
                 env.db.as_ref(),
                 chain_spec.clone(),
@@ -2098,6 +2076,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_parent_unknown() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -2113,7 +2092,7 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(0, None, None, Some(0));
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
 
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis].into_iter());
 
@@ -2132,7 +2111,7 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let block = random_block(2, Some(H256::random()), None, Some(0));
+            let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
             let res = env.send_new_payload(block.into()).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));

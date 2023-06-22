@@ -18,15 +18,17 @@ mod file_codec;
 pub use bodies_client::TestBodiesClient;
 pub use file_client::{FileClient, FileClientError};
 pub(crate) use file_codec::BlockFileCodec;
+use reth_interfaces::test_utils::generators;
 
 /// Metrics scope used for testing.
 pub(crate) const TEST_SCOPE: &str = "downloaders.test";
 
 /// Generate a set of bodies and their corresponding block hashes
 pub(crate) fn generate_bodies(
-    rng: RangeInclusive<u64>,
+    range: RangeInclusive<u64>,
 ) -> (Vec<SealedHeader>, HashMap<H256, BlockBody>) {
-    let blocks = random_block_range(rng, H256::zero(), 0..2);
+    let mut rng = generators::rng();
+    let blocks = random_block_range(&mut rng, range, H256::zero(), 0..2);
 
     let headers = blocks.iter().map(|block| block.header.clone()).collect();
     let bodies = blocks
