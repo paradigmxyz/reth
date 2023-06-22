@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
-    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointReader,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
-    WithdrawalsProvider,
+    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
@@ -178,6 +178,8 @@ impl ReceiptProvider for NoopProvider {
         Ok(None)
     }
 }
+
+impl ReceiptProviderIdExt for NoopProvider {}
 
 impl HeaderProvider for NoopProvider {
     fn header(&self, _block_hash: &BlockHash) -> Result<Option<Header>> {
