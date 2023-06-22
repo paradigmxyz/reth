@@ -94,9 +94,20 @@ cargo test --workspace
 
 # With Geth
 cargo test --workspace --features geth-tests
+
+# With Ethereum Foundation tests
+#
+# Note: Requires cloning https://github.com/ethereum/tests
+# 
+#   cd testing/ef-tests && git clone https://github.com/ethereum/tests ethereum-tests
+cargo test --workspace --features ef-tests
 ```
 
 We recommend using [`cargo nextest`](https://nexte.st/) to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
+
+> **Note**
+> 
+> Some tests use random number generators to generate test data. If you want to use a deterministic seed, you can set the `SEED` environment variable.
 
 ## Getting Help
 

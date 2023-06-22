@@ -4,8 +4,8 @@ use crate::{
     eth::{
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
-            build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
-            transact, EvmOverrides,
+            build_call_evm_env, caller_gas_allowance, cap_tx_gas_limit_with_caller_allowance,
+            get_precompiles, inspect, transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -122,19 +122,8 @@ where
         }
 
         // check funds of the sender
-        let gas_price = env.tx.gas_price;
-        if gas_price > U256::ZERO {
-            let mut available_funds =
-                db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
-            if env.tx.value > available_funds {
-                return Err(RpcInvalidTransactionError::InsufficientFunds.into())
-            }
-            // subtract transferred value from available funds
-            // SAFETY: value < available_funds, checked above
-            available_funds -= env.tx.value;
-            // amount of gas the sender can afford with the `gas_price`
-            // SAFETY: gas_price not zero
-            let allowance = available_funds.checked_div(gas_price).unwrap_or_default();
+        if env.tx.gas_price > U256::ZERO {
+            let allowance = caller_gas_allowance(&mut db, &env.tx)?;
 
             if highest_gas_limit > allowance {
                 // cap the highest gas limit by max gas caller can afford with given gas price

@@ -182,9 +182,9 @@ where
         };
         let ev = match res {
             Ok((pipeline, result)) => {
-                let minimum_progress = pipeline.minimum_progress();
+                let minimum_block_number = pipeline.minimum_block_number();
                 let reached_max_block =
-                    self.has_reached_max_block(minimum_progress.unwrap_or_default());
+                    self.has_reached_max_block(minimum_block_number.unwrap_or_default());
                 self.pipeline_state = PipelineState::Idle(Some(pipeline));
                 EngineSyncEvent::PipelineFinished { result, reached_max_block }
             }

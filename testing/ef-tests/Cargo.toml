@@ -24,3 +24,4 @@ walkdir = "2.3.3"
 serde = "1.0.163"
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+serde_bytes = "0.11.9"

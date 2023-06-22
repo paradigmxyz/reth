@@ -37,6 +37,20 @@ pub struct BlockchainTest {
     #[serde(default)]
     /// Engine spec.
     pub self_engine: SealEngine,
+    #[serde(rename = "_info")]
+    #[allow(unused)]
+    info: BlockchainTestInfo,
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+struct BlockchainTestInfo {
+    #[serde(rename = "filling-rpc-server")]
+    #[allow(unused)]
+    // One test has an invalid string in this field, which breaks our CI:
+    // https://github.com/ethereum/tests/blob/6c252923bdd1bd5a70f680df1214f866f76839db/GeneralStateTests/stTransactionTest/ValueOverflow.json#L5
+    // By using `serde_bytes::ByteBuf`, we ignore the validation of this field as a string.
+    // TODO(alexey): remove when `ethereum/tests` is fixed
+    filling_rpc_server: serde_bytes::ByteBuf,
 }
 
 /// A block header in an Ethereum blockchain test.

@@ -16,6 +16,10 @@
 //!   - [PayloadJobGenerator]: a type that knows how to create new jobs for creating payloads based
 //!     on [PayloadAttributes](reth_rpc_types::engine::PayloadAttributes).
 //!   - [PayloadJob]: a type that can yields (better) payloads over time.
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 
 pub mod database;
 pub mod error;

@@ -79,7 +79,11 @@
 //! The transaction pool will be used by separate consumers (RPC, P2P), to make sharing easier, the
 //! [`Pool`](crate::Pool) type is just an `Arc` wrapper around `PoolInner`. This is the usable type
 //! that provides the `TransactionPool` interface.
-
+//!
+//! ## Feature Flags
+//!
+//! - `serde` (default): Enable serde support
+//! - `test-utils`: Export utilities for testing
 use crate::pool::PoolInner;
 use aquamarine as _;
 use reth_primitives::{Address, TxHash, U256};

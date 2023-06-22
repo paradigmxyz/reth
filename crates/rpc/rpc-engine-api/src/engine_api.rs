@@ -476,7 +476,7 @@ mod tests {
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
     mod get_payload_bodies {
         use super::*;
-        use reth_interfaces::test_utils::generators::random_block_range;
+        use reth_interfaces::test_utils::{generators, generators::random_block_range};
 
         #[tokio::test]
         async fn invalid_params() {
@@ -507,10 +507,12 @@ mod tests {
 
         #[tokio::test]
         async fn returns_payload_bodies() {
+            let mut rng = generators::rng();
             let (handle, api) = setup_engine_api();
 
             let (start, count) = (1, 10);
-            let blocks = random_block_range(start..=start + count - 1, H256::default(), 0..2);
+            let blocks =
+                random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
             handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
             let expected =
@@ -522,10 +524,12 @@ mod tests {
 
         #[tokio::test]
         async fn returns_payload_bodies_with_gaps() {
+            let mut rng = generators::rng();
             let (handle, api) = setup_engine_api();
 
             let (start, count) = (1, 100);
-            let blocks = random_block_range(start..=start + count - 1, H256::default(), 0..2);
+            let blocks =
+                random_block_range(&mut rng, start..=start + count - 1, H256::default(), 0..2);
 
             // Insert only blocks in ranges 1-25 and 50-75
             let first_missing_range = 26..=50;
@@ -566,6 +570,7 @@ mod tests {
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
     mod exchange_transition_configuration {
         use super::*;
+        use reth_interfaces::test_utils::generators;
         use reth_primitives::U256;
 
         #[tokio::test]
@@ -589,11 +594,15 @@ mod tests {
 
         #[tokio::test]
         async fn terminal_block_hash_mismatch() {
+            let mut rng = generators::rng();
+
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let consensus_terminal_block = random_block(terminal_block_number, None, None, None);
-            let execution_terminal_block = random_block(terminal_block_number, None, None, None);
+            let consensus_terminal_block =
+                random_block(&mut rng, terminal_block_number, None, None, None);
+            let execution_terminal_block =
+                random_block(&mut rng, terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
@@ -630,7 +639,8 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let terminal_block = random_block(terminal_block_number, None, None, None);
+            let terminal_block =
+                random_block(&mut generators::rng(), terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),

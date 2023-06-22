@@ -5,7 +5,12 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! revm [Inspector](revm::Inspector) implementations
+//! revm [Inspector](revm::Inspector) implementations, such as call tracers
+//!
+//! ## Feature Flags
+//!
+//! - `js-tracer` (default): Enables a JavaScript tracer implementation. This pulls in extra
+//!   dependencies (such as `boa`, `tokio` and `serde_json`).
 
 /// An inspector implementation for an EIP2930 Accesslist
 pub mod access_list;
