@@ -160,17 +160,17 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let range = input.next_block_range();
         let (from_block, to_block) = range.clone().into_inner();
-        let current_block = input.target();
+        let current_block_number = input.checkpoint().block_number;
 
-        let block = provider
-            .header_by_number(current_block)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(current_block.into()))?;
-        let block_root = block.state_root;
+        let target_block = provider
+            .header_by_number(to_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(to_block.into()))?;
+        let target_block_root = target_block.state_root;
 
         let mut checkpoint = self.get_execution_checkpoint(provider)?;
 
         let (trie_root, entities_checkpoint) = if range.is_empty() {
-            (block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
+            (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
         } else if to_block - from_block > threshold || from_block == 1 {
             // if there are more blocks than threshold it is faster to rebuild the trie
             let mut entities_checkpoint = if let Some(checkpoint) =
@@ -178,7 +178,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             {
                 debug!(
                     target: "sync::stages::merkle::exec",
-                    current = ?current_block,
+                    current = ?current_block_number,
                     target = ?to_block,
                     last_account_key = ?checkpoint.last_account_key,
                     last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
@@ -189,7 +189,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             } else {
                 debug!(
                     target: "sync::stages::merkle::exec",
-                    current = ?current_block,
+                    current = ?current_block_number,
                     target = ?to_block,
                     previous_checkpoint = ?checkpoint,
                     "Rebuilding trie"
@@ -245,7 +245,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_block, target = ?to_block, "Updating trie");
+            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
             let (root, updates) =
                 StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
@@ -269,7 +269,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        self.validate_state_root(trie_root, block.seal_slow(), to_block)?;
+        self.validate_state_root(trie_root, target_block.seal_slow(), to_block)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
