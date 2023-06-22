@@ -142,7 +142,7 @@ max_changes = 5000000
 Either one of `max_blocks` or `max_changes` must be specified, and both can also be specified at the same time:
 
 - If only `max_blocks` is specified, reth will execute (up to) that amount of blocks before writing to disk.
-- If only `max_changes` is specified, reth will execute as many blocks as possible until the target amount of state transitions have occured before writing to disk.
+- If only `max_changes` is specified, reth will execute as many blocks as possible until the target amount of state transitions have occurred before writing to disk.
 - If both are specified, then the first threshold to be hit will determine when the results are written to disk.
 
 Lower values correspond to more frequent disk writes, but also lower memory consumption. A lower value also negatively impacts sync speed, since reth keeps a cache around for the entire duration of blocks executed in the same range.
