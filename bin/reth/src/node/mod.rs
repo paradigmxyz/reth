@@ -236,10 +236,12 @@ impl Command {
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         let default_peers_path = data_dir.known_peers_path();
+        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
             ctx.task_executor.clone(),
+            head,
             secret_key,
             default_peers_path.clone(),
         );
@@ -360,8 +362,10 @@ impl Command {
                 Either::Right(stream::empty())
             }
         );
-        ctx.task_executor
-            .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
+        ctx.task_executor.spawn_critical(
+            "events task",
+            events::handle_events(Some(network.clone()), Some(head.number), events),
+        );
 
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
@@ -600,11 +604,10 @@ impl Command {
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
+        head: Head,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
     ) -> NetworkConfig<ProviderFactory<Arc<Env<WriteMap>>>> {
-        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
-
         self.network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
