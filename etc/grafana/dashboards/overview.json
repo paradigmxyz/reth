@@ -154,7 +154,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_network_connected_peers",
+          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
           "instant": true,
           "legendFormat": "__auto",
           "range": false,
@@ -221,7 +221,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_sync_checkpoint",
+          "expr": "reth_sync_checkpoint{instance=~\"$instance\"}",
           "instant": true,
           "legendFormat": "{{stage}}",
           "range": false,
@@ -314,7 +314,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_sync_entities_processed / reth_sync_entities_total",
+          "expr": "reth_sync_entities_processed{instance=~\"$instance\"} / reth_sync_entities_total{instance=~\"$instance\"}",
           "legendFormat": "{{stage}}",
           "range": true,
           "refId": "A"
@@ -406,7 +406,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_sync_checkpoint",
+          "expr": "reth_sync_checkpoint{instance=~\"$instance\"}",
           "legendFormat": "{{stage}}",
           "range": true,
           "refId": "A"
@@ -513,7 +513,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(reth_tx_commit_sum[$__rate_interval]) / rate(reth_tx_commit_count[$__rate_interval])",
+          "expr": "rate(reth_tx_commit_sum{instance=~\"$instance\"}[$__rate_interval]) / rate(reth_tx_commit_count{instance=~\"$instance\"}[$__rate_interval])",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Commit time",
@@ -602,7 +602,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_tx_commit[$__interval])) by (quantile)",
+          "expr": "sum(increase(reth_tx_commit{instance=~\"$instance\"}[$__interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
@@ -676,7 +676,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_db_table_size",
+          "expr": "reth_db_table_size{instance=~\"$instance\"}",
           "interval": "",
           "legendFormat": "{{table}}",
           "range": true,
@@ -771,7 +771,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (job) ( reth_db_table_size )",
+          "expr": "sum by (job) ( reth_db_table_size{instance=~\"$instance\"} )",
           "legendFormat": "Size ({{job}})",
           "range": true,
           "refId": "A"
@@ -839,7 +839,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "sum by (type) ( reth_db_table_pages )",
+          "expr": "sum by (type) ( reth_db_table_pages{instance=~\"$instance\"} )",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -999,7 +999,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sort_desc(reth_db_table_pages{type=\"overflow\"} != 0)",
+          "expr": "sort_desc(reth_db_table_pages{instance=~\"$instance\", type=\"overflow\"} != 0)",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",
@@ -1104,7 +1104,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[30s])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[30s])",
           "legendFormat": "Gas/s (30s)",
           "range": true,
           "refId": "A"
@@ -1115,7 +1115,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[1m])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[1m])",
           "hide": false,
           "legendFormat": "Gas/s (1m)",
           "range": true,
@@ -1127,7 +1127,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[5m])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[5m])",
           "hide": false,
           "legendFormat": "Gas/s (5m)",
           "range": true,
@@ -1139,7 +1139,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total[10m])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[10m])",
           "hide": false,
           "legendFormat": "Gas/s (10m)",
           "range": true,
@@ -1246,7 +1246,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_tracked_peers",
+          "expr": "reth_network_tracked_peers{instance=~\"$instance\"}",
           "legendFormat": "Tracked peers",
           "range": true,
           "refId": "A"
@@ -1339,7 +1339,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_outgoing_connections",
+          "expr": "reth_network_outgoing_connections{instance=~\"$instance\"}",
           "legendFormat": "Outgoing connections",
           "range": true,
           "refId": "A"
@@ -1350,7 +1350,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_incoming_connections",
+          "expr": "reth_network_incoming_connections{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Incoming connections",
           "range": true,
@@ -1362,7 +1362,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_connected_peers",
+          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
@@ -1460,7 +1460,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_p2pstream_disconnected_errors",
+          "expr": "reth_p2pstream_disconnected_errors{instance=~\"$instance\"}",
           "legendFormat": "P2P stream disconnected",
           "range": true,
           "refId": "A"
@@ -1471,7 +1471,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_pending_session_failures",
+          "expr": "reth_network_pending_session_failures{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Failed pending sessions",
           "range": true,
@@ -1483,7 +1483,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_invalid_messages_received",
+          "expr": "reth_network_invalid_messages_received{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Invalid messages",
           "range": true,
@@ -1543,7 +1543,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_useless_peer",
+          "expr": "reth_network_useless_peer{instance=~\"$instance\"}",
           "legendFormat": "UselessPeer",
           "range": true,
           "refId": "A"
@@ -1554,7 +1554,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_subprotocol_specific",
+          "expr": "reth_network_subprotocol_specific{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "SubprotocolSpecific",
           "range": true,
@@ -1566,7 +1566,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_already_connected",
+          "expr": "reth_network_already_connected{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "AlreadyConnected",
           "range": true,
@@ -1578,7 +1578,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_client_quitting",
+          "expr": "reth_network_client_quitting{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "ClientQuitting",
           "range": true,
@@ -1590,7 +1590,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_unexpected_identity",
+          "expr": "reth_network_unexpected_identity{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "UnexpectedHandshakeIdentity",
           "range": true,
@@ -1602,7 +1602,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_disconnect_requested",
+          "expr": "reth_network_disconnect_requested{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "DisconnectRequested",
           "range": true,
@@ -1614,7 +1614,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_null_node_identity",
+          "expr": "reth_network_null_node_identity{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "NullNodeIdentity",
           "range": true,
@@ -1626,7 +1626,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_tcp_subsystem_error",
+          "expr": "reth_network_tcp_subsystem_error{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "TCPSubsystemError",
           "range": true,
@@ -1638,7 +1638,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_incompatible",
+          "expr": "reth_network_incompatible{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "IncompatibleP2PVersion",
           "range": true,
@@ -1650,7 +1650,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_protocol_breach",
+          "expr": "reth_network_protocol_breach{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "ProtocolBreach",
           "range": true,
@@ -1662,7 +1662,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_too_many_peers",
+          "expr": "reth_network_too_many_peers{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "TooManyPeers",
           "range": true,
@@ -1792,7 +1792,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_total_downloaded",
+          "expr": "reth_downloaders_headers_total_downloaded{instance=~\"$instance\"}",
           "legendFormat": "Downloaded",
           "range": true,
           "refId": "A"
@@ -1803,7 +1803,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_total_flushed",
+          "expr": "reth_downloaders_headers_total_flushed{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Flushed",
           "range": true,
@@ -1815,7 +1815,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_total_downloaded[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_total_downloaded{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "instant": false,
           "legendFormat": "Downloaded/s",
@@ -1828,7 +1828,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_total_flushed[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_total_flushed{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Flushed/s",
           "range": true,
@@ -1921,7 +1921,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_timeout_errors",
+          "expr": "reth_downloaders_headers_timeout_errors{instance=~\"$instance\"}",
           "legendFormat": "Request timed out",
           "range": true,
           "refId": "A"
@@ -1932,7 +1932,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_unexpected_errors",
+          "expr": "reth_downloaders_headers_unexpected_errors{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Unexpected error",
           "range": true,
@@ -1944,7 +1944,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_validation_errors",
+          "expr": "reth_downloaders_headers_validation_errors{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Invalid response",
           "range": true,
@@ -2037,7 +2037,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_in_flight_requests",
+          "expr": "reth_downloaders_headers_in_flight_requests{instance=~\"$instance\"}",
           "legendFormat": "In flight requests",
           "range": true,
           "refId": "A"
@@ -2048,7 +2048,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_connected_peers",
+          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
@@ -2179,7 +2179,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_total_downloaded",
+          "expr": "reth_downloaders_bodies_total_downloaded{instance=~\"$instance\"}",
           "legendFormat": "Downloaded",
           "range": true,
           "refId": "A"
@@ -2190,7 +2190,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_total_flushed",
+          "expr": "reth_downloaders_bodies_total_flushed{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Flushed",
           "range": true,
@@ -2202,7 +2202,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_total_flushed[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_total_flushed{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Flushed/s",
           "range": true,
@@ -2214,7 +2214,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_total_downloaded[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_total_downloaded{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Downloaded/s",
           "range": true,
@@ -2226,7 +2226,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_responses",
+          "expr": "reth_downloaders_bodies_buffered_responses{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered responses",
           "range": true,
@@ -2238,7 +2238,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_blocks",
+          "expr": "reth_downloaders_bodies_buffered_blocks{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks",
           "range": true,
@@ -2250,7 +2250,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_queued_blocks",
+          "expr": "reth_downloaders_bodies_queued_blocks{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Queued blocks",
           "range": true,
@@ -2340,7 +2340,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_timeout_errors",
+          "expr": "reth_downloaders_bodies_timeout_errors{instance=~\"$instance\"}",
           "legendFormat": "Request timed out",
           "range": true,
           "refId": "A"
@@ -2351,7 +2351,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_unexpected_errors",
+          "expr": "reth_downloaders_bodies_unexpected_errors{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Unexpected error",
           "range": true,
@@ -2363,7 +2363,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_validation_errors",
+          "expr": "reth_downloaders_bodies_validation_errors{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Invalid response",
           "range": true,
@@ -2456,7 +2456,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_in_flight_requests",
+          "expr": "reth_downloaders_bodies_in_flight_requests{instance=~\"$instance\"}",
           "legendFormat": "In flight requests",
           "range": true,
           "refId": "A"
@@ -2467,7 +2467,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_connected_peers",
+          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
@@ -2574,7 +2574,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_blocks_size_bytes",
+          "expr": "reth_downloaders_bodies_buffered_blocks_size_bytes{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks size (bytes)",
           "range": true,
@@ -2586,7 +2586,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_blocks",
+          "expr": "reth_downloaders_bodies_buffered_blocks{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks",
           "range": true,
@@ -2693,7 +2693,7 @@
             "uid": "Prometheus"
           },
           "editorMode": "builder",
-          "expr": "reth_blockchain_tree_canonical_chain_height",
+          "expr": "reth_blockchain_tree_canonical_chain_height{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Canonical chain height",
           "range": true,
@@ -2787,7 +2787,7 @@
             "uid": "Prometheus"
           },
           "editorMode": "builder",
-          "expr": "reth_blockchain_tree_block_buffer_blocks",
+          "expr": "reth_blockchain_tree_block_buffer_blocks{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks",
           "range": true,
@@ -2881,7 +2881,7 @@
             "uid": "Prometheus"
           },
           "editorMode": "builder",
-          "expr": "reth_blockchain_tree_sidechains",
+          "expr": "reth_blockchain_tree_sidechains{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Total number of sidechains",
           "range": true,
@@ -2988,7 +2988,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_consensus_engine_beacon_active_block_downloads",
+          "expr": "reth_consensus_engine_beacon_active_block_downloads{instance=~\"$instance\"}",
           "legendFormat": "Active block downloads",
           "range": true,
           "refId": "A"
@@ -3081,7 +3081,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_consensus_engine_beacon_forkchoice_updated_messages",
+          "expr": "reth_consensus_engine_beacon_forkchoice_updated_messages{instance=~\"$instance\"}",
           "legendFormat": "Forkchoice updated messages",
           "range": true,
           "refId": "A"
@@ -3092,7 +3092,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_consensus_engine_beacon_new_payload_messages",
+          "expr": "reth_consensus_engine_beacon_new_payload_messages{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "New payload messages",
           "range": true,
@@ -3186,7 +3186,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_consensus_engine_beacon_pipeline_runs",
+          "expr": "reth_consensus_engine_beacon_pipeline_runs{instance=~\"$instance\"}",
           "legendFormat": "Pipeline runs",
           "range": true,
           "refId": "A"
@@ -3288,7 +3288,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "reth_payloads_active_jobs",
+              "expr": "reth_payloads_active_jobs{instance=~\"$instance\"}",
               "legendFormat": "Active Jobs",
               "range": true,
               "refId": "A"
@@ -3380,7 +3380,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "reth_payloads_initiated_jobs",
+              "expr": "reth_payloads_initiated_jobs{instance=~\"$instance\"}",
               "legendFormat": "Initiated Jobs",
               "range": true,
               "refId": "A"
@@ -3472,7 +3472,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "reth_payloads_failed_jobs",
+              "expr": "reth_payloads_failed_jobs{instance=~\"$instance\"}",
               "legendFormat": "Failed Jobs",
               "range": true,
               "refId": "A"
@@ -3579,7 +3579,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "reth_blockchain_tree_canonical_chain_height",
+              "expr": "reth_blockchain_tree_canonical_chain_height{instance=~\"$instance\"}",
               "hide": false,
               "legendFormat": "Canonical chain height",
               "range": true,
@@ -3673,7 +3673,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "reth_blockchain_tree_block_buffer_blocks",
+              "expr": "reth_blockchain_tree_block_buffer_blocks{instance=~\"$instance\"}",
               "hide": false,
               "legendFormat": "Buffered blocks",
               "range": true,
@@ -3767,7 +3767,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "reth_blockchain_tree_sidechains",
+              "expr": "reth_blockchain_tree_sidechains{instance=~\"$instance\"}",
               "hide": false,
               "legendFormat": "Total number of sidechains",
               "range": true,
@@ -3788,7 +3788,38 @@
   "style": "dark",
   "tags": [],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "host.docker.internal:9001"
+          ],
+          "value": [
+            "host.docker.internal:9001"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "PBFA97CFB590B2093"
+        },
+        "definition": "query_result(up)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "query": "query_result(up)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "/.*instance=\"([^\"]*).*:*/",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-1h",
