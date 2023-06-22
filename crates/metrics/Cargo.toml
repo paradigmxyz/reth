@@ -17,6 +17,7 @@ metrics = "0.20.1"
 
 # async
 tokio = { workspace = true, features = ["full"], optional = true }
+futures = { workspace = true, optional = true }
 
 [features]
-common = ["tokio"]
+common = ["tokio", "futures"]
