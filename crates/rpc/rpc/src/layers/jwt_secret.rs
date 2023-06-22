@@ -77,17 +77,17 @@ impl JwtSecret {
     /// Tries to load a [`JwtSecret`] from the specified file path.
     /// I/O or secret validation errors might occur during read operations in the form of
     /// a [`JwtError`].
-    pub fn from_file(file_path: &Path) -> Result<Self, JwtError> {
-        let hex = std::fs::read_to_string(file_path)
-            .map_err(|err| JwtError::IORead { err, path: file_path.to_path_buf() })?;
+    pub fn from_file(fpath: &Path) -> Result<Self, JwtError> {
+        let hex = std::fs::read_to_string(fpath)
+            .map_err(|err| JwtError::IORead { err, path: fpath.to_path_buf() })?;
         let secret = JwtSecret::from_hex(hex)?;
         Ok(secret)
     }
 
     /// Creates a random [`JwtSecret`] and tries to store it at the specified path. I/O errors might
     /// occur during write operations in the form of a [`JwtError`]
-    pub fn try_create(file_path: &Path) -> Result<Self, JwtError> {
-        if let Some(dir) = file_path.parent() {
+    pub fn try_create(fpath: &Path) -> Result<Self, JwtError> {
+        if let Some(dir) = fpath.parent() {
             // Create parent directory
             std::fs::create_dir_all(dir)?
         }
@@ -95,8 +95,8 @@ impl JwtSecret {
         let secret = JwtSecret::random();
         let bytes = &secret.0;
         let hex = hex::encode(bytes);
-        std::fs::write(file_path, hex)
-            .map_err(|err| JwtError::IORead { err, path: file_path.to_path_buf() })?;
+        std::fs::write(fpath, hex)
+            .map_err(|err| JwtError::IORead { err, path: fpath.to_path_buf() })?;
         Ok(secret)
     }
 }
