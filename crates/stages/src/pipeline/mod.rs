@@ -1,6 +1,5 @@
 use crate::{
-    error::*, ExecInput, ExecOutput, PrunableStage, PruneInput, PruneOutput, Stage, StageError,
-    UnwindInput,
+    error::*, ExecInput, ExecOutput, PrunableStage, PruneInput, Stage, StageError, UnwindInput,
 };
 use futures_util::Future;
 use reth_db::database::Database;

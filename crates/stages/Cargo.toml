@@ -36,7 +36,6 @@ tracing = { workspace = true }
 
 # io
 serde = { workspace = true }
-serde_json = { workspace = true }
 
 # misc
 thiserror = { workspace = true }
@@ -50,6 +49,7 @@ num-traits = "0.2.15"
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
 reth-blockchain-tree = { path = "../blockchain-tree" }
 reth-rlp = { workspace = true }
@@ -65,6 +65,9 @@ paste = "1.0"
 # Stage benchmarks
 pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion = { version = "0.4.0", features = ["async_futures"] }
+
+# io
+serde_json = { workspace = true }
 
 [features]
 test-utils = []

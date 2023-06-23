@@ -5826,6 +5826,7 @@ dependencies = [
  "reth-blockchain-tree",
  "reth-codecs",
  "reth-db",
+ "reth-downloaders",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics",

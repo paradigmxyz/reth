@@ -196,6 +196,7 @@ pub trait Stage<DB: Database>: Send + Sync {
 
 /// Stage prune mode.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum PruneMode {
     /// Prune blocks before the `head-N` block number. In other words, keep last N blocks.
     Distance(u64),
@@ -249,5 +250,21 @@ pub trait PrunableStage<DB: Database>: Send + Sync + Stage<DB> {
             }
             .saturating_sub(1),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::PruneMode;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn prune_mode_deserialize() {
+        assert_matches!(serde_json::from_str(r#"{"distance": 10}"#), Ok(PruneMode::Distance(10)));
+        assert_matches!(serde_json::from_str(r#"{"before": 20}"#), Ok(PruneMode::Before(20)));
+        assert_matches!(
+            serde_json::from_str::<PruneMode>(r#"{"distance": 10, "before": 20}"#),
+            Err(_)
+        );
     }
 }
