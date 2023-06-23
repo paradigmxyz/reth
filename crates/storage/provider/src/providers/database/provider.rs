@@ -18,7 +18,7 @@ use reth_db::{
     },
     table::Table,
     tables,
-    transaction::{DbTx, DbTxMut, DbTxMutGAT},
+    transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
 use reth_interfaces::Result;
@@ -102,75 +102,51 @@ impl<'this, TX: DbTxMut<'this>> DatabaseProvider<'this, TX> {
     }
 }
 
-/// Unwind all history shards. For boundary shard, remove it from database and
-/// return last part of shard with still valid items. If all full shard were removed, return list
-/// would be empty.
-fn unwind_account_history_shards<'a, TX: reth_db::transaction::DbTxMutGAT<'a>>(
-    cursor: &mut <TX as DbTxMutGAT<'a>>::CursorMut<tables::AccountHistory>,
-    address: Address,
+/// For a given key, unwind all history shards that are below the given block number.
+///
+/// S - Sharded key subtype.
+/// T - Table to walk over.
+/// C - Cursor implementation.
+///
+/// This function walks the entries from the given start key and deletes all shards that belong to
+/// the key and are below the given block number.
+///
+/// The boundary shard (the shard is split by the block number) is removed from the database. Any
+/// indices that are above the block number are filtered out. The boundary shard is returned for
+/// reinsertion (if it's not empty).
+fn unwind_history_shards<'a, S, T, C>(
+    cursor: &mut C,
+    start_key: T::Key,
     block_number: BlockNumber,
-) -> Result<Vec<usize>> {
-    let mut item = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
-
+    mut shard_belongs_to_key: impl FnMut(&T::Key) -> bool,
+) -> Result<Vec<usize>>
+where
+    T: Table<Value = BlockNumberList>,
+    T::Key: AsRef<ShardedKey<S>>,
+    C: DbCursorRO<'a, T> + DbCursorRW<'a, T>,
+{
+    let mut item = cursor.seek_exact(start_key)?;
     while let Some((sharded_key, list)) = item {
-        // there is no more shard for address
-        if sharded_key.key != address {
+        // If the shard does not belong to the key, break.
+        if !shard_belongs_to_key(&sharded_key) {
             break
         }
         cursor.delete_current()?;
-        // check first item and if it is more and eq than `block_number` delete current
-        // item.
-        let first = list.iter(0).next().expect("List can't empty");
+
+        // Check the first item.
+        // If it is greater or eq to the block number, delete it.
+        let first = list.iter(0).next().expect("List can't be empty");
         if first >= block_number as usize {
             item = cursor.prev()?;
             continue
-        } else if block_number <= sharded_key.highest_block_number {
-            // if first element is in scope whole list would be removed.
-            // so at least this first element is present.
-            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
-        } else {
-            let new_list = list.iter(0).collect::<Vec<_>>();
-            return Ok(new_list)
-        }
-    }
-    Ok(Vec::new())
-}
-
-/// Unwind all history shards. For boundary shard, remove it from database and
-/// return last part of shard with still valid items. If all full shard were removed, return list
-/// would be empty but this does not mean that there is none shard left but that there is no
-/// split shards.
-fn unwind_storage_history_shards<'a, TX: reth_db::transaction::DbTxMutGAT<'a>>(
-    cursor: &mut <TX as DbTxMutGAT<'a>>::CursorMut<tables::StorageHistory>,
-    address: Address,
-    storage_key: H256,
-    block_number: BlockNumber,
-) -> Result<Vec<usize>> {
-    let mut item = cursor.seek_exact(StorageShardedKey::new(address, storage_key, u64::MAX))?;
-
-    while let Some((storage_sharded_key, list)) = item {
-        // there is no more shard for address
-        if storage_sharded_key.address != address ||
-            storage_sharded_key.sharded_key.key != storage_key
-        {
-            // there is no more shard for address and storage_key.
-            break
-        }
-        cursor.delete_current()?;
-        // check first item and if it is more and eq than `block_number` delete current
-        // item.
-        let first = list.iter(0).next().expect("List can't empty");
-        if first >= block_number as usize {
-            item = cursor.prev()?;
-            continue
-        } else if block_number <= storage_sharded_key.sharded_key.highest_block_number {
-            // if first element is in scope whole list would be removed.
-            // so at least this first element is present.
+        } else if block_number <= sharded_key.as_ref().highest_block_number {
+            // Filter out all elements greater than block number.
             return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
         } else {
             return Ok(list.iter(0).collect::<Vec<_>>())
         }
     }
+
     Ok(Vec::new())
 }
 
@@ -1651,47 +1627,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         Ok(())
     }
 
-    fn unwind_storage_history_indices(&self, range: Range<BlockNumberAddress>) -> Result<usize> {
-        let storage_changesets = self
-            .tx
-            .cursor_read::<tables::StorageChangeSet>()?
-            .walk_range(range)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let changesets = storage_changesets.len();
-
-        let last_indices = storage_changesets
-            .into_iter()
-            // reverse so we can get lowest block number where we need to unwind account.
-            .rev()
-            // fold all storages and get last block number
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
-                    // we just need address and lowest block number.
-                    accounts.insert((index.address(), storage.key), index.block_number());
-                    accounts
-                },
-            );
-
-        let mut cursor = self.tx.cursor_write::<tables::StorageHistory>()?;
-        for ((address, storage_key), rem_index) in last_indices {
-            let shard_part =
-                unwind_storage_history_shards::<TX>(&mut cursor, address, storage_key, rem_index)?;
-
-            // check last shard_part, if present, items needs to be reinserted.
-            if !shard_part.is_empty() {
-                // there are items in list
-                self.tx.put::<tables::StorageHistory>(
-                    StorageShardedKey::new(address, storage_key, u64::MAX),
-                    BlockNumberList::new(shard_part)
-                        .expect("There is at least one element in list and it is sorted."),
-                )?;
-            }
-        }
-
-        Ok(changesets)
-    }
-
     fn insert_account_history_index(
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
@@ -1744,6 +1679,53 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         Ok(())
     }
 
+    fn unwind_storage_history_indices(&self, range: Range<BlockNumberAddress>) -> Result<usize> {
+        let storage_changesets = self
+            .tx
+            .cursor_read::<tables::StorageChangeSet>()?
+            .walk_range(range)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let changesets = storage_changesets.len();
+
+        let last_indices = storage_changesets
+            .into_iter()
+            // reverse so we can get lowest block number where we need to unwind account.
+            .rev()
+            // fold all storages and get last block number
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
+                    // we just need address and lowest block number.
+                    accounts.insert((index.address(), storage.key), index.block_number());
+                    accounts
+                },
+            );
+
+        let mut cursor = self.tx.cursor_write::<tables::StorageHistory>()?;
+        for ((address, storage_key), rem_index) in last_indices {
+            let partial_shard = unwind_history_shards::<_, tables::StorageHistory, _>(
+                &mut cursor,
+                StorageShardedKey::last(address, storage_key),
+                rem_index,
+                |storage_sharded_key| {
+                    storage_sharded_key.address == address &&
+                        storage_sharded_key.sharded_key.key == storage_key
+                },
+            )?;
+
+            // Check the last returned partial shard.
+            // If it's not empty, the shard needs to be reinserted.
+            if !partial_shard.is_empty() {
+                cursor.insert(
+                    StorageShardedKey::last(address, storage_key),
+                    BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+
+        Ok(changesets)
+    }
+
     fn unwind_account_history_indices(&self, range: RangeInclusive<BlockNumber>) -> Result<usize> {
         let account_changeset = self
             .tx
@@ -1762,18 +1744,23 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
                 accounts.insert(account.address, index);
                 accounts
             });
-        // try to unwind the index
+
+        // Unwind the account history index.
         let mut cursor = self.tx.cursor_write::<tables::AccountHistory>()?;
         for (address, rem_index) in last_indices {
-            let shard_part = unwind_account_history_shards::<TX>(&mut cursor, address, rem_index)?;
+            let partial_shard = unwind_history_shards::<_, tables::AccountHistory, _>(
+                &mut cursor,
+                ShardedKey::last(address),
+                rem_index,
+                |sharded_key| sharded_key.key == address,
+            )?;
 
-            // check last shard_part, if present, items needs to be reinserted.
-            if !shard_part.is_empty() {
-                // there are items in list
-                self.tx.put::<tables::AccountHistory>(
-                    ShardedKey::new(address, u64::MAX),
-                    BlockNumberList::new(shard_part)
-                        .expect("There is at least one element in list and it is sorted."),
+            // Check the last returned partial shard.
+            // If it's not empty, the shard needs to be reinserted.
+            if !partial_shard.is_empty() {
+                cursor.insert(
+                    ShardedKey::last(address),
+                    BlockNumberList::new_pre_sorted(partial_shard),
                 )?;
             }
         }
