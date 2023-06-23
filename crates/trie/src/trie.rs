@@ -54,7 +54,7 @@ impl<'a, 'b, TX, H> StateRoot<'a, 'b, TX, H> {
         self
     }
 
-    /// Set the threshold to maximum value so that itermediate progress is not returned.
+    /// Set the threshold to maximum value so that intermediate progress is not returned.
     pub fn with_no_threshold(mut self) -> Self {
         self.threshold = u64::MAX;
         self
