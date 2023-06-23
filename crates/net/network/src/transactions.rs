@@ -546,6 +546,8 @@ where
             }
         }
 
+        this.inflight_requests.shrink_to_fit();
+
         this.update_import_metrics();
 
         // Advance all imports
