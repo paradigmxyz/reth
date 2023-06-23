@@ -2,8 +2,12 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{database::Database, table::Table, DatabaseEnvRO, TableViewer, Tables};
 use reth_primitives::hex;
+use reth_db::{
+    database::Database,
+    mdbx::{Env, WriteMap},
+    table::{DupSort, Table},
+    DatabaseEnvRO, TableType, TableViewer, Tables,
 use std::cell::RefCell;
 use tracing::error;
 
@@ -39,7 +43,17 @@ pub struct Command {
 impl Command {
     /// Execute `db list` command
     pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
+<<<<<<< HEAD
         self.table.view(&ListTableViewer { tool, args: &self })
+=======
+        if self.table.table_type() == TableType::DupSort {
+            self.table.view_dupsort(&ListTableViewer { tool, args: &self })?;
+        } else {
+            self.table.view(&ListTableViewer { tool, args: &self })?;
+        }
+
+        Ok(())
+>>>>>>> 5b1f48f2 (work in progress)
     }
 
     /// Generate [`ListFilter`] from command.
@@ -49,7 +63,7 @@ impl Command {
             .as_ref()
             .map(|search| {
                 if let Some(search) = search.strip_prefix("0x") {
-                    return hex::decode(search).unwrap()
+                    return hex::decode(search).unwrap();
                 }
                 search.as_bytes().to_vec()
             })
@@ -98,6 +112,47 @@ impl TableViewer<()> for ListTableViewer<'_> {
                 if self.args.count {
                     println!("{count} entries found.")
                 } else {
+                    println!("{}", serde_json::to_string_pretty(&list)?);
+                }
+                Ok(())
+
+            } else {
+                let list_filter = RefCell::new(list_filter);
+                DbListTUI::<_, T>::new(|skip, len| {
+                    list_filter.borrow_mut().update_page(skip, len);
+                    self.tool.list::<T>(&list_filter.borrow()).unwrap().0
+                }, self.args.skip, self.args.len, total_entries).run()
+            }
+        })??;
+
+        Ok(())
+    }
+
+    fn view_dupsort<T: Table + DupSort>(&self) -> Result<(), Self::Error> {
+        self.tool.db.view(|tx| {
+            let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
+            let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
+            let total_entries = stats.entries();
+            if self.args.skip > total_entries - 1 {
+                error!(
+                    target: "reth::cli",
+                    "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
+                    start = self.args.skip,
+                    final_entry_idx = total_entries - 1,
+                    table = self.args.table.name()
+                );
+                return Ok(());
+            }
+
+
+            let list_filter = self.args.list_filter();
+
+            if self.args.json || self.args.count {
+                let (list, count) = self.tool.list::<T>(&list_filter)?;
+
+                if self.args.count {
+                    println!("{count} entries found.")
+                }else {
                     println!("{}", serde_json::to_string_pretty(&list)?);
                 }
                 Ok(())
