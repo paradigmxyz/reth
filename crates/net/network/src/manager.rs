@@ -367,10 +367,10 @@ where
 
     /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
     /// configured.
-    fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
-        if let Some(ref tx) = self.to_transactions_manager {
-            let _ = tx.try_send(event);
-        }
+    fn notify_tx_manager(&self, _event: NetworkTransactionEvent) {
+        // if let Some(ref tx) = self.to_transactions_manager {
+        // let _ = tx.try_send(event);
+        // }
     }
 
     /// Sends an event to the [`EthRequestManager`](crate::eth_requests::EthRequestHandler) if
