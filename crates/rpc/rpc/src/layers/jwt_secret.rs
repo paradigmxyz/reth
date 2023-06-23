@@ -1,3 +1,4 @@
+use crate::fs;
 use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
@@ -32,6 +33,18 @@ pub enum JwtError {
     IOWrite { err: std::io::Error, path: PathBuf },
     #[error("An I/O error occurred: {0}")]
     IOError(#[from] std::io::Error),
+}
+
+impl JwtError {
+    /// Returns the complementary error variant for [`std::fs::write`].
+    pub fn write(source: std::io::Error, path: impl Into<PathBuf>) -> Self {
+        JwtError::IOWrite { err: source, path: path.into() }
+    }
+
+    /// Returns the complementary error variant for [`std::fs::read`].
+    pub fn read(source: std::io::Error, path: impl Into<PathBuf>) -> Self {
+        JwtError::IORead { err: source, path: path.into() }
+    }
 }
 
 /// Length of the hex-encoded 256 bit secret key.
@@ -80,8 +93,7 @@ impl JwtSecret {
     /// I/O or secret validation errors might occur during read operations in the form of
     /// a [`JwtError`].
     pub fn from_file(fpath: &Path) -> Result<Self, JwtError> {
-        let hex = std::fs::read_to_string(fpath)
-            .map_err(|err| JwtError::IORead { err, path: fpath.to_path_buf() })?;
+        let hex = fs::read_to_string(fpath)?;
         let secret = JwtSecret::from_hex(hex)?;
         Ok(secret)
     }

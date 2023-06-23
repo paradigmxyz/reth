@@ -29,6 +29,7 @@ mod call_guard;
 mod debug;
 mod engine;
 pub mod eth;
+pub mod fs;
 mod layers;
 mod net;
 mod rpc;
