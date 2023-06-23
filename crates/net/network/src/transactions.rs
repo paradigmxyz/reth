@@ -13,7 +13,7 @@ use reth_eth_wire::{
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
-use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
+use reth_metrics::common::mpsc::MeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
@@ -110,7 +110,7 @@ pub struct TransactionsManager<Pool> {
     /// Incoming commands from [`TransactionsHandle`].
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
-    transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
+    transaction_events: MeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -122,7 +122,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
     pub fn new(
         network: NetworkHandle,
         pool: Pool,
-        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent>,
+        from_network: mpsc::Receiver<NetworkTransactionEvent>,
     ) -> Self {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -141,10 +141,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: ReceiverStream::new(pending),
-            transaction_events: UnboundedMeteredReceiver::new(
-                from_network,
-                NETWORK_POOL_TRANSACTIONS_SCOPE,
-            ),
+            transaction_events: MeteredReceiver::new(from_network, NETWORK_POOL_TRANSACTIONS_SCOPE),
             metrics: Default::default(),
         }
     }

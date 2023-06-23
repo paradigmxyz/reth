@@ -40,7 +40,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
         pool: Pool,
     ) -> NetworkBuilder<C, TransactionsManager<Pool>, Eth> {
         let NetworkBuilder { mut network, request_handler, .. } = self;
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(1_000);
         network.set_transactions(tx);
         let handle = network.handle().clone();
         let transactions = TransactionsManager::new(handle, pool, rx);
