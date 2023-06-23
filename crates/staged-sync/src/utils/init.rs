@@ -9,8 +9,10 @@ use reth_db::{
     version::{check_db_version_file, create_db_version_file, DatabaseVersionError},
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
-use reth_provider::{AccountWriter, DatabaseProviderRW, HashingWriter, PostState, ProviderFactory};
-use std::{fs, path::Path, sync::Arc};
+use reth_provider::{
+    AccountWriter, DatabaseProviderRW, HashingWriter, HistoryWriter, PostState, ProviderFactory,
+};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 use tracing::debug;
 
 /// Opens up an existing database or creates a new one at the specified path.
@@ -86,7 +88,9 @@ pub fn init_genesis<DB: Database>(
     // use transaction to insert genesis header
     let factory = ProviderFactory::new(&db, chain.clone());
     let provider_rw = factory.provider_rw()?;
-    insert_genesis_hashes(provider_rw, genesis)?;
+    insert_genesis_hashes(&provider_rw, genesis)?;
+    insert_genesis_history(&provider_rw, genesis)?;
+    provider_rw.commit()?;
 
     // Insert header
     let tx = db.tx_mut()?;
@@ -139,7 +143,7 @@ pub fn insert_genesis_state<DB: Database>(
 
 /// Inserts hashes for the genesis state.
 pub fn insert_genesis_hashes<DB: Database>(
-    provider: DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
     genesis: &reth_primitives::Genesis,
 ) -> Result<(), InitDatabaseError> {
     // insert and hash accounts to hashing table
@@ -157,7 +161,26 @@ pub fn insert_genesis_hashes<DB: Database>(
         })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
-    provider.commit()?;
+
+    Ok(())
+}
+
+/// Inserts history indices for genesis accounts and storage.
+pub fn insert_genesis_history<DB: Database>(
+    provider: &DatabaseProviderRW<'_, &DB>,
+    genesis: &reth_primitives::Genesis,
+) -> Result<(), InitDatabaseError> {
+    let account_transitions =
+        genesis.alloc.keys().map(|addr| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
+    provider.insert_account_history_index(account_transitions)?;
+
+    let storage_transitions = genesis
+        .alloc
+        .iter()
+        .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
+        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![0])))
+        .collect::<BTreeMap<_, _>>();
+    provider.insert_storage_history_index(storage_transitions)?;
 
     Ok(())
 }
@@ -180,17 +203,30 @@ pub fn insert_genesis_header<DB: Database>(
 
 #[cfg(test)]
 mod tests {
-    use super::{init_db, init_genesis, InitDatabaseError};
+    use super::*;
     use assert_matches::assert_matches;
     use reth_db::{
         mdbx::test_utils::create_test_rw_db,
-        version::{db_version_file_path, DatabaseVersionError},
+        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+        table::Table,
+        version::db_version_file_path,
     };
     use reth_primitives::{
-        GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
+        Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
+        GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
     };
-    use std::fs;
+    use std::collections::HashMap;
     use tempfile::tempdir;
+
+    fn collect_table_entries<DB, T>(
+        tx: &<DB as DatabaseGAT<'_>>::TX,
+    ) -> Result<Vec<(T::Key, T::Value)>, InitDatabaseError>
+    where
+        DB: Database,
+        T: Table,
+    {
+        Ok(tx.cursor_read::<T>()?.walk_range(..)?.collect::<Result<Vec<_>, _>>()?)
+    }
 
     #[test]
     fn success_init_genesis_mainnet() {
@@ -234,6 +270,59 @@ mod tests {
                 database_hash: SEPOLIA_GENESIS
             }
         )
+    }
+
+    #[test]
+    fn init_genesis_history() {
+        let address_with_balance = Address::from_low_u64_be(1);
+        let address_with_storage = Address::from_low_u64_be(2);
+        let storage_key = H256::from_low_u64_be(1);
+        let chain_spec = Arc::new(ChainSpec {
+            chain: Chain::Id(1),
+            genesis: Genesis {
+                alloc: HashMap::from([
+                    (
+                        address_with_balance,
+                        GenesisAccount { balance: U256::from(1), ..Default::default() },
+                    ),
+                    (
+                        address_with_storage,
+                        GenesisAccount {
+                            storage: Some(HashMap::from([(storage_key, H256::random())])),
+                            ..Default::default()
+                        },
+                    ),
+                ]),
+                ..Default::default()
+            },
+            hardforks: BTreeMap::default(),
+            fork_timestamps: ForkTimestamps { shanghai: None },
+            genesis_hash: None,
+            paris_block_and_final_difficulty: None,
+        });
+
+        let db = create_test_rw_db();
+        init_genesis(db.clone(), chain_spec).unwrap();
+
+        let tx = db.tx().expect("failed to init tx");
+
+        assert_eq!(
+            collect_table_entries::<Arc<Env<WriteMap>>, tables::AccountHistory>(&tx)
+                .expect("failed to collect"),
+            vec![
+                (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
+                (ShardedKey::new(address_with_storage, u64::MAX), IntegerList::new([0]).unwrap())
+            ],
+        );
+
+        assert_eq!(
+            collect_table_entries::<Arc<Env<WriteMap>>, tables::StorageHistory>(&tx)
+                .expect("failed to collect"),
+            vec![(
+                StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
+                IntegerList::new([0]).unwrap()
+            )],
+        );
     }
 
     #[test]
