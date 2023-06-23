@@ -5099,6 +5099,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "confy",
  "reth-discv4",
+ "reth-downloaders",
  "reth-net-nat",
  "reth-network",
  "reth-stages",
@@ -5825,7 +5826,6 @@ dependencies = [
  "reth-blockchain-tree",
  "reth-codecs",
  "reth-db",
- "reth-downloaders",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics",

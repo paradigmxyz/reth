@@ -10,8 +10,9 @@ repository.workspace = true
 [dependencies]
 # reth
 reth-network = { path = "../net/network" }
+reth-net-nat = { path = "../net/nat" }
 reth-discv4 = { path = "../net/discv4" }
-reth-net-nat = { path = "../../crates/net/nat" }
+reth-downloaders = { path = "../net/downloaders" }
 reth-stages = { path = "../../crates/stages" }
 
 # io

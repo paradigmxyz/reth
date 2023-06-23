@@ -23,7 +23,6 @@ reth-codecs = { path = "../storage/codecs" }
 reth-provider = { workspace = true }
 reth-metrics = { workspace = true }
 reth-trie = { path = "../trie" }
-reth-downloaders = { path = "../net/downloaders" }
 
 # async
 tokio = { workspace = true, features = ["sync"] }
