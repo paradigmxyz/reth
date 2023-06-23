@@ -1,4 +1,4 @@
-//! Sharded key
+//! Storage sharded key
 
 use crate::{
     table::{Decode, Encode},
@@ -31,6 +31,15 @@ impl StorageShardedKey {
     /// Creates a new `StorageShardedKey`.
     pub fn new(address: H160, storage_key: H256, highest_block_number: BlockNumber) -> Self {
         Self { address, sharded_key: ShardedKey { key: storage_key, highest_block_number } }
+    }
+
+    /// Creates a new key with the highest block number set to maximum.
+    /// This is useful when we want to search the last value for a given key.
+    pub fn last(address: H160, storage_key: H256) -> Self {
+        Self {
+            address,
+            sharded_key: ShardedKey { key: storage_key, highest_block_number: u64::MAX },
+        }
     }
 }
 

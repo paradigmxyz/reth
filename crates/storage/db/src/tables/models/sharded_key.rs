@@ -29,6 +29,12 @@ impl<T> ShardedKey<T> {
     pub fn new(key: T, highest_block_number: BlockNumber) -> Self {
         ShardedKey { key, highest_block_number }
     }
+
+    /// Creates a new key with the highest block number set to maximum.
+    /// This is useful when we want to search the last value for a given key.
+    pub fn last(key: T) -> Self {
+        Self { key, highest_block_number: u64::MAX }
+    }
 }
 
 impl<T> Encode for ShardedKey<T>
