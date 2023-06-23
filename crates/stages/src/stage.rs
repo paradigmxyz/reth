@@ -197,9 +197,9 @@ pub trait Stage<DB: Database>: Send + Sync {
 /// Stage prune mode.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub enum PruneMode {
-    /// Prune last N blocks.
+    /// Prune blocks before the `head-N` block number. In other words, keep last N blocks.
     Distance(u64),
-    /// Prune all blocks before the specified block number.
+    /// Prune blocks before the specified block number. The specified block number is not pruned.
     Before(BlockNumber),
 }
 
@@ -232,16 +232,22 @@ pub trait PrunableStage<DB: Database>: Send + Sync + Stage<DB> {
     /// Returns prune mode of the stage, if any if set.
     fn prune_mode(&self) -> Option<PruneMode>;
 
-    /// Returns target block number to prune towards, according to stage prune mode retrieved via
-    /// [PrunableStage::prune_mode] and stage sync checkpoint [StageCheckpoint].
+    /// Returns target block number to prune towards, inclusive, according to stage prune mode
+    /// retrieved via [PrunableStage::prune_mode] and stage sync checkpoint [StageCheckpoint].
+    /// Target block number is also pruned.
     ///
     /// If no prune mode is set, returns `None`.
     fn prune_target(&self, sync_checkpoint: StageCheckpoint) -> Option<BlockNumber> {
         let Some(prune_mode) = self.prune_mode() else { return None };
 
-        Some(match prune_mode {
-            PruneMode::Distance(distance) => sync_checkpoint.block_number.saturating_sub(distance),
-            PruneMode::Before(before_block) => before_block.saturating_sub(1),
-        })
+        Some(
+            match prune_mode {
+                PruneMode::Distance(distance) => {
+                    sync_checkpoint.block_number.saturating_sub(distance)
+                }
+                PruneMode::Before(before_block) => before_block,
+            }
+            .saturating_sub(1),
+        )
     }
 }
