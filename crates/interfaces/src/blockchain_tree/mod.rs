@@ -1,6 +1,7 @@
 use crate::{blockchain_tree::error::InsertBlockError, Error};
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -214,6 +215,14 @@ pub trait BlockchainTreeViewer: Send + Sync {
     fn pending_block(&self) -> Option<SealedBlock> {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
     }
+
+    /// Returns the pending receipts if there is one.
+    fn pending_receipts(&self) -> Option<Vec<Receipt>> {
+        self.receipts_by_block_hash(self.pending_block_num_hash()?.hash)
+    }
+
+    /// Returns the pending receipts if there is one.
+    fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>>;
 
     /// Returns the pending block if there is one.
     fn pending_header(&self) -> Option<SealedHeader> {

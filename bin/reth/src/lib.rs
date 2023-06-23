@@ -12,6 +12,10 @@
 //! - `jemalloc`: Uses [jemallocator](https://github.com/tikv/jemallocator) as the global allocator.
 //!   This is **not recommended on Windows**. See [here](https://rust-lang.github.io/rfcs/1974-global-allocators.html#jemalloc)
 //!   for more info.
+//! - `jemalloc-prof`: Enables [jemallocator's](https://github.com/tikv/jemallocator) heap profiling
+//!   and leak detection functionality. See [jemalloc's opt.prof](https://jemalloc.net/jemalloc.3.html#opt.prof)
+//!   documentation for usage details. This is **not recommended on Windows**. See [here](https://rust-lang.github.io/rfcs/1974-global-allocators.html#jemalloc)
+//!   for more info.
 //! - `only-info-logs`: Disables all logs below `info` level. This can speed up the node, since
 //!   fewer calls to the logging component is made.
 

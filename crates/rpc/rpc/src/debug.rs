@@ -12,7 +12,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H256};
-use reth_provider::{BlockProviderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProviderBox};
+use reth_provider::{BlockProviderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,

@@ -2,8 +2,8 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
     BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, PostStateDataProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
-    WithdrawalsProvider,
+    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::StoredBlockBodyIndices;
@@ -238,6 +238,8 @@ impl ReceiptProvider for MockEthProvider {
         Ok(None)
     }
 }
+
+impl ReceiptProviderIdExt for MockEthProvider {}
 
 impl BlockHashProvider for MockEthProvider {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {

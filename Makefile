@@ -55,7 +55,7 @@ build-native-%:
 # The resulting binaries will be created in the `target/` directory.
 
 # No jemalloc on Windows
-build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc,$(FEATURES))
+build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std

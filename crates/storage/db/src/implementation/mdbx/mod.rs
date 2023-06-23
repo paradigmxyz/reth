@@ -2,7 +2,7 @@
 
 use crate::{
     database::{Database, DatabaseGAT},
-    tables::{TableType, TABLES},
+    tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
 };
@@ -67,7 +67,7 @@ impl<E: EnvironmentKind> Env<E> {
 
         let env = Env {
             inner: Environment::new()
-                .set_max_dbs(TABLES.len())
+                .set_max_dbs(Tables::ALL.len())
                 .set_geometry(Geometry {
                     // Maximum database size of 4 terabytes
                     size: Some(0..(4 * TERABYTE)),
@@ -96,13 +96,14 @@ impl<E: EnvironmentKind> Env<E> {
     pub fn create_tables(&self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?;
 
-        for (table_type, table) in TABLES {
-            let flags = match table_type {
+        for table in Tables::ALL {
+            let flags = match table.table_type() {
                 TableType::Table => DatabaseFlags::default(),
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
 
-            tx.create_db(Some(table), flags).map_err(|e| DatabaseError::TableCreation(e.into()))?;
+            tx.create_db(Some(table.name()), flags)
+                .map_err(|e| DatabaseError::TableCreation(e.into()))?;
         }
 
         tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
