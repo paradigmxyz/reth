@@ -123,7 +123,7 @@ impl<T> Stream for UnboundedMeteredReceiver<T> {
     type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(cx)
+        self.poll_recv(cx)
     }
 }
 
@@ -231,7 +231,7 @@ impl<T> Stream for MeteredReceiver<T> {
     type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(cx)
+        self.poll_recv(cx)
     }
 }
 
