@@ -230,12 +230,12 @@ pub trait PrunableStage<DB: Database>: Send + Sync + Stage<DB> {
         input: PruneInput,
     ) -> Result<PruneOutput, StageError>;
 
-    /// Returns prune mode of the stage, if any if set.
+    /// Returns prune mode of the stage, if any is set.
     fn prune_mode(&self) -> Option<PruneMode>;
 
-    /// Returns target block number to prune towards, inclusive, according to stage prune mode
-    /// retrieved via [PrunableStage::prune_mode] and stage sync checkpoint [StageCheckpoint].
-    /// Target block number is also pruned.
+    /// Returns target block number to prune towards, inclusive, according to stage sync checkpoint
+    /// [StageCheckpoint] and stage prune mode retrieved via [PrunableStage::prune_mode]. Target
+    /// block number is also pruned.
     ///
     /// If no prune mode is set, returns `None`.
     fn prune_target(&self, sync_checkpoint: StageCheckpoint) -> Option<BlockNumber> {
