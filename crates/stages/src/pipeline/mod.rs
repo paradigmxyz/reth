@@ -486,29 +486,42 @@ where
             let _enter = span.enter();
 
             let Some(sync_checkpoint) = provider_rw.get_stage_sync_checkpoint(stage_id)? else {
+                debug!(
+                    target: "sync::pipeline",
+                    stage = %stage_id,
+                    "Stage sync checkpoint is not found, nothing to prune"
+                );
                 continue
             };
-            let block_number = provider_rw.get_stage_prune_checkpoint(stage_id)?;
-            let mut input = PruneInput { sync_checkpoint, block_number };
+            let Some(target) = stage.prune_target(sync_checkpoint) else {
+                debug!(
+                    target: "sync::pipeline",
+                    stage = %stage_id,
+                    "Stage prune target is not set, skipping"
+                );
+                continue
+            };
 
-            if let Some(block_number) = block_number {
-                if stage.is_prune_done(input, PruneOutput { block_number }) {
-                    continue
-                }
-            }
-
-            loop {
-                match stage.prune(&mut provider_rw, input).await {
+            let mut checkpoint =
+                provider_rw.get_stage_prune_checkpoint(stage_id)?.unwrap_or_default();
+            // TODO(alexey): emit pipeline events via `self.listeners.notify`
+            while checkpoint < target {
+                match stage.prune(&mut provider_rw, PruneInput { checkpoint, target }).await {
                     Ok(output) => {
-                        provider_rw.save_stage_prune_checkpoint(stage_id, output.block_number)?;
+                        checkpoint = output.checkpoint;
+                        info!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            %target,
+                            progress = checkpoint,
+                            done = checkpoint == target,
+                            "Stage pruned"
+                        );
+
+                        provider_rw.save_stage_prune_checkpoint(stage_id, checkpoint)?;
 
                         provider_rw.commit()?;
                         provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
-
-                        if stage.is_prune_done(input, output) {
-                            break
-                        }
-                        input.block_number = Some(output.block_number);
                     }
                     Err(err) => return Err(PipelineError::Stage(StageError::Fatal(Box::new(err)))),
                 }

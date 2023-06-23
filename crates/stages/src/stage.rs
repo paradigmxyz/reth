@@ -206,17 +206,17 @@ pub enum PruneMode {
 /// Stage prune input, see [PrunableStage::prune].
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct PruneInput {
-    /// The sync checkpoint of this stage.
-    pub sync_checkpoint: StageCheckpoint,
     /// The highest block number this stage reached the last time it was pruned.
-    pub block_number: Option<BlockNumber>,
+    pub checkpoint: BlockNumber,
+    /// The block number this stage is pruning towards.
+    pub target: BlockNumber,
 }
 
 /// The output of a stage pruning.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct PruneOutput {
     /// The highest block number to which the stage has pruned to.
-    pub block_number: BlockNumber,
+    pub checkpoint: BlockNumber,
 }
 
 /// A stage is a segmented part of the pruning process of the node.
@@ -232,19 +232,16 @@ pub trait PrunableStage<DB: Database>: Send + Sync + Stage<DB> {
     /// Returns prune mode of the stage, if any if set.
     fn prune_mode(&self) -> Option<PruneMode>;
 
-    /// Returns `true` if stage finished pruning, according to its prune mode retrieved via
-    /// [PrunableStage::prune_mode].
+    /// Returns target block number to prune towards, according to stage prune mode retrieved via
+    /// [PrunableStage::prune_mode] and stage sync checkpoint [StageCheckpoint].
     ///
-    /// If no prune mode is set, returns `true`.
-    fn is_prune_done(&self, input: PruneInput, output: PruneOutput) -> bool {
-        let Some(prune_mode) = self.prune_mode() else { return true };
+    /// If no prune mode is set, returns `None`.
+    fn prune_target(&self, sync_checkpoint: StageCheckpoint) -> Option<BlockNumber> {
+        let Some(prune_mode) = self.prune_mode() else { return None };
 
-        // TODO(alexey): safe subtractions
-        match prune_mode {
-            PruneMode::Distance(distance) => {
-                output.block_number == input.sync_checkpoint.block_number - distance
-            }
-            PruneMode::Before(before_block) => output.block_number == before_block - 1,
-        }
+        Some(match prune_mode {
+            PruneMode::Distance(distance) => sync_checkpoint.block_number.saturating_sub(distance),
+            PruneMode::Before(before_block) => before_block.saturating_sub(1),
+        })
     }
 }
