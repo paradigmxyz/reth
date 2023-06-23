@@ -10,6 +10,17 @@ use std::{
 /// History Writer
 #[auto_impl(&, Arc, Box)]
 pub trait HistoryWriter: Send + Sync {
+    /// Unwind and clear account history indices.
+    ///
+    /// Returns number of changesets walked.
+    fn unwind_account_history_indices(&self, range: RangeInclusive<BlockNumber>) -> Result<usize>;
+
+    /// Insert account change index to database. Used inside AccountHistoryIndex stage
+    fn insert_account_history_index(
+        &self,
+        account_transitions: BTreeMap<Address, Vec<u64>>,
+    ) -> Result<()>;
+
     /// Unwind and clear storage history indices.
     ///
     /// Returns number of changesets walked.

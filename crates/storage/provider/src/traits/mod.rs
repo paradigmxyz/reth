@@ -1,7 +1,7 @@
 //! Collection of common provider traits.
 
 mod account;
-pub use account::{AccountExtReader, AccountReader, AccountWriter};
+pub use account::{AccountExtReader, AccountReader};
 
 mod storage;
 pub use storage::StorageReader;
