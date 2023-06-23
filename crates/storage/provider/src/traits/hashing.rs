@@ -1,12 +1,21 @@
 use auto_impl::auto_impl;
 use reth_db::models::BlockNumberAddress;
 use reth_interfaces::Result;
-use reth_primitives::{Address, BlockNumber, StorageEntry, H256};
+use reth_primitives::{Account, Address, BlockNumber, StorageEntry, H256};
 use std::ops::{Range, RangeInclusive};
 
 /// Hashing Writer
 #[auto_impl(&, Arc, Box)]
 pub trait HashingWriter: Send + Sync {
+    /// Unwind and clear account hashing
+    fn unwind_account_hashing(&self, range: RangeInclusive<BlockNumber>) -> Result<()>;
+
+    /// Inserts all accounts into [reth_db::tables::AccountHistory] table.
+    fn insert_account_for_hashing(
+        &self,
+        accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
+    ) -> Result<()>;
+
     /// Unwind and clear storage hashing
     fn unwind_storage_hashing(&self, range: Range<BlockNumberAddress>) -> Result<()>;
 
