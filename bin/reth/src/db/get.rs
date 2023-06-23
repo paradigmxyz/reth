@@ -1,7 +1,10 @@
+use std::error::Error;
+
 use crate::utils::DbTool;
 use clap::Parser;
 
-use reth_db::{database::Database, table::Table, TableType, TableViewer, Tables};
+use reth_db::{database::Database, table::{Table, DupSort}, TableType, TableViewer, Tables};
+use serde::Deserialize;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -16,17 +19,23 @@ pub struct Command {
     /// The key to get content for   
     #[arg(value_parser = maybe_json_value_parser)]
     pub key: String,
+
+    /// The subkey to get content for   
+    #[arg(value_parser = maybe_json_value_parser)]
+    pub subkey: Option<String>,
 }
 
 impl Command {
     /// Execute `db get` command
     pub fn execute<DB: Database>(self, tool: &DbTool<'_, DB>) -> eyre::Result<()> {
         if self.table.table_type() == TableType::DupSort {
+
+            self.table.view_dupsort(&GetValueViewer { tool, args: &self })?;
+
             error!(target: "reth::cli", "Unsupported table.");
 
             return Ok(())
         }
-
         self.table.view(&GetValueViewer { tool, args: &self })?;
 
         Ok(())
@@ -37,6 +46,12 @@ impl Command {
         assert_eq!(T::NAME, self.table.name());
 
         serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
+    }
+    /// Get an instance of subkey for given dupsort table
+    fn table_subkey<T: Table + DupSort>(&self) -> Result<T::SubKey, eyre::Error>
+    {
+        assert_eq!(T::NAME, self.table.name());
+        serde_json::from_str::<T::SubKey>(&self.subkey.clone().unwrap_or_default()).map_err(|e| eyre::eyre!(e))
     }
 }
 
@@ -49,22 +64,39 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
-        // get a key for given table
-        let key = self.args.table_key::<T>()?;
 
-        match self.tool.get::<T>(key)? {
+        let key = self.args.table_key::<T>()?;
+        assert_eq!(T::NAME, self.args.table.name());
+        match self.tool.clone().get::<T>(key)? {
             Some(content) => {
                 println!("{}", serde_json::to_string_pretty(&content)?);
             }
             None => {
-                error!(target: "reth::cli", "No content for the given table key.");
+                error!(target: "reth::cli", "No content for the given table key111.");
             }
         };
 
         Ok(())
     }
-}
 
+    fn view_dupsort<T: Table + DupSort>(&self) -> Result<(), Self::Error> { // error here
+        // get a key for given table
+        let key = self.args.table_key::<T>()?;
+
+        // process dupsort table
+        let subkey = self.args.table_subkey::<T>()?;
+
+        match self.tool.clone().get_dup::<T>(key, subkey)? {
+            Some(content) => {
+                println!("{}", serde_json::to_string_pretty(&content)?);
+            }
+            None => {
+                error!(target: "reth::cli", "No content for the given table subkey222s.");
+            }
+        };
+        Ok(())
+    }
+}
 /// Map the user input value to json
 fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error> {
     if serde_json::from_str::<serde::de::IgnoredAny>(value).is_ok() {

@@ -87,6 +87,9 @@ pub trait TableViewer<R> {
 
     /// operate on table in generic way
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
+
+    /// operate on dupsort table in generic way
+    fn view_dupsort<T: Table>(&self) -> Result<R, Self::Error>;
 }
 
 macro_rules! tables {
@@ -132,6 +135,19 @@ macro_rules! tables {
                         visitor.view::<$table>()
                     },)*
                 }
+            }
+
+            /// Allows to operate on specific table type
+            pub fn view_dupsort<T, R>(&self, visitor: &T) -> Result<R, T::Error>
+            where
+                T: TableViewer<R>,
+            {
+                    match self {
+                        $(Tables::$table => {
+                            visitor.view_dupsort::<$table>()
+                        },)*
+                    }
+
             }
         }
 

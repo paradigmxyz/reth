@@ -6,7 +6,7 @@ use eyre::WrapErr;
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
-    table::Table,
+    table::{Table, DupSort},
     TableType, TableViewer, Tables,
 };
 use tracing::error;
@@ -36,10 +36,10 @@ impl Command {
     /// Execute `db list` command
     pub fn execute(self, tool: &DbTool<'_, Env<WriteMap>>) -> eyre::Result<()> {
         if self.table.table_type() == TableType::DupSort {
-            error!(target: "reth::cli", "Unsupported table.");
+            self.table.view_dupsort(&ListTableViewer { tool, args: &self })?;
+        } else {
+            self.table.view(&ListTableViewer { tool, args: &self })?;
         }
-
-        self.table.view(&ListTableViewer { tool, args: &self })?;
 
         Ok(())
     }
@@ -54,6 +54,36 @@ impl TableViewer<()> for ListTableViewer<'_> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
+        self.tool.db.view(|tx| {
+            let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
+            let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
+            let total_entries = stats.entries();
+            if self.args.skip > total_entries - 1 {
+                error!(
+                    target: "reth::cli",
+                    "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
+                    start = self.args.skip,
+                    final_entry_idx = total_entries - 1,
+                    table = self.args.table.name()
+                );
+                return Ok(());
+            }
+
+            if self.args.json {
+                let list_result = self.tool.list::<T>(self.args.skip, self.args.len, self.args.reverse)?.into_iter().collect::<Vec<_>>();
+                println!("{}", serde_json::to_string_pretty(&list_result)?);
+                Ok(())
+            } else {
+                DbListTUI::<_, T>::new(|skip, count| {
+                    self.tool.list::<T>(skip, count, self.args.reverse).unwrap()
+                }, self.args.skip, self.args.len, total_entries).run()
+            }
+        })??;
+
+        Ok(())
+    }
+
+    fn view_dupsort<T: Table + DupSort>(&self) -> Result<(), Self::Error> { // error here
         self.tool.db.view(|tx| {
             let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
             let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;

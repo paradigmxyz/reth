@@ -2,9 +2,9 @@
 
 use eyre::{Result, WrapErr};
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
-    table::Table,
+    table::{Table, DupSort},
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::p2p::{
@@ -92,6 +92,11 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Grabs the content of the table for the given key
     pub fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>> {
         self.db.view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
+    }
+
+    /// Grabs the content of the DupSort table for the given key and subkey
+    pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
+        self.db.view(|tx| tx.cursor_dup_read::<T>().unwrap().seek_by_key_subkey(key, subkey)).unwrap().map_err(|e| eyre::eyre!(e))
     }
 
     /// Drops the database at the given path.
