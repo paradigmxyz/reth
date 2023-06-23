@@ -10,7 +10,7 @@ pub trait HashingWriter: Send + Sync {
     /// Unwind and clear account hashing
     fn unwind_account_hashing(&self, range: RangeInclusive<BlockNumber>) -> Result<()>;
 
-    /// iterate over accounts and insert them to hashing table
+    /// Inserts all accounts into [reth_db::tables::AccountHistory] table.
     fn insert_account_for_hashing(
         &self,
         accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
