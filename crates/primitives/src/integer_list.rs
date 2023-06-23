@@ -30,9 +30,24 @@ impl IntegerList {
     /// Creates an IntegerList from a list of integers. `usize` is safe to use since
     /// [`sucds::EliasFano`] restricts its compilation to 64bits.
     ///
-    /// List should be pre-sorted and not empty.
+    /// # Returns
+    ///
+    /// Returns an error if the list is empty or not pre-sorted.
     pub fn new<T: AsRef<[usize]>>(list: T) -> Result<Self, EliasFanoError> {
         Ok(Self(EliasFano::from_ints(list.as_ref()).map_err(|_| EliasFanoError::InvalidInput)?))
+    }
+
+    // Creates an IntegerList from a pre-sorted list of integers. `usize` is safe to use since
+    /// [`sucds::EliasFano`] restricts its compilation to 64bits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the list is empty or not pre-sorted.
+    pub fn new_pre_sorted<T: AsRef<[usize]>>(list: T) -> Self {
+        Self(
+            EliasFano::from_ints(list.as_ref())
+                .expect("IntegerList must be pre-sorted and non-empty."),
+        )
     }
 
     /// Serializes a [`IntegerList`] into a sequence of bytes.
