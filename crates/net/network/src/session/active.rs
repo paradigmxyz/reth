@@ -109,6 +109,12 @@ impl ActiveSession {
         id
     }
 
+    /// Shrinks the capacity of the internal buffers.
+    pub fn shrink_to_fit(&mut self) {
+        self.received_requests_from_remote.shrink_to_fit();
+        self.queued_outgoing.shrink_to_fit();
+    }
+
     /// Handle a message read from the connection.
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
@@ -437,17 +443,6 @@ impl ActiveSession {
     }
 }
 
-/// Calculates a new timeout using an updated estimation of the RTT
-#[inline]
-fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
-    let new_timeout = estimated_rtt.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
-
-    // this dampens sudden changes by taking a weighted mean of the old and new values
-    let smoothened_timeout = current_timeout.mul_f64(1.0 - SAMPLE_IMPACT) + new_timeout;
-
-    smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
-}
-
 impl Future for ActiveSession {
     type Output = ();
 
@@ -605,6 +600,8 @@ impl Future for ActiveSession {
                     }
                 }
 
+                this.shrink_to_fit();
+
                 return Poll::Pending
             }
         }
@@ -703,6 +700,16 @@ impl From<EthBroadcastMessage> for OutgoingMessage {
     }
 }
 
+/// Calculates a new timeout using an updated estimation of the RTT
+#[inline]
+fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
+    let new_timeout = estimated_rtt.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
+
+    // this dampens sudden changes by taking a weighted mean of the old and new values
+    let smoothened_timeout = current_timeout.mul_f64(1.0 - SAMPLE_IMPACT) + new_timeout;
+
+    smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
+}
 #[cfg(test)]
 mod tests {
     #![allow(dead_code)]
