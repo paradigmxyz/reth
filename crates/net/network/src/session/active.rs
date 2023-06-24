@@ -76,7 +76,7 @@ pub(crate) struct ActiveSession {
     /// Incoming commands from the manager
     pub(crate) commands_rx: ReceiverStream<SessionCommand>,
     /// Sink to send messages to the [`SessionManager`](super::SessionManager).
-    pub(crate) to_session: MeteredSender<ActiveSessionMessage>,
+    pub(crate) to_session_manager: MeteredSender<ActiveSessionMessage>,
     /// A message that needs to be delivered to the session manager
     pub(crate) pending_message_to_session: Option<ActiveSessionMessage>,
     /// Incoming request to send to delegate to the remote peer.
@@ -107,6 +107,12 @@ impl ActiveSession {
         let id = self.next_id;
         self.next_id += 1;
         id
+    }
+
+    /// Shrinks the capacity of the internal buffers.
+    pub fn shrink_to_fit(&mut self) {
+        self.received_requests_from_remote.shrink_to_fit();
+        self.queued_outgoing.shrink_to_fit();
     }
 
     /// Handle a message read from the connection.
@@ -294,7 +300,7 @@ impl ActiveSession {
     #[allow(clippy::result_large_err)]
     fn try_emit_broadcast(&self, message: PeerMessage) -> Result<(), ActiveSessionMessage> {
         match self
-            .to_session
+            .to_session_manager
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
         {
             Ok(_) => Ok(()),
@@ -319,7 +325,7 @@ impl ActiveSession {
     #[allow(clippy::result_large_err)]
     fn try_emit_request(&self, message: PeerMessage) -> Result<(), ActiveSessionMessage> {
         match self
-            .to_session
+            .to_session_manager
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
         {
             Ok(_) => Ok(()),
@@ -344,7 +350,7 @@ impl ActiveSession {
     /// Notify the manager that the peer sent a bad message
     fn on_bad_message(&self) {
         let _ = self
-            .to_session
+            .to_session_manager
             .try_send(ActiveSessionMessage::BadMessage { peer_id: self.remote_peer_id });
     }
 
@@ -352,7 +358,7 @@ impl ActiveSession {
     fn emit_disconnect(&self) {
         trace!(target: "net::session", remote_peer_id=?self.remote_peer_id, "emitting disconnect");
         // NOTE: we clone here so there's enough capacity to deliver this message
-        let _ = self.to_session.clone().try_send(ActiveSessionMessage::Disconnected {
+        let _ = self.to_session_manager.clone().try_send(ActiveSessionMessage::Disconnected {
             peer_id: self.remote_peer_id,
             remote_addr: self.remote_addr,
         });
@@ -361,11 +367,13 @@ impl ActiveSession {
     /// Report back that this session has been closed due to an error
     fn close_on_error(&self, error: EthStreamError) {
         // NOTE: we clone here so there's enough capacity to deliver this message
-        let _ = self.to_session.clone().try_send(ActiveSessionMessage::ClosedOnConnectionError {
-            peer_id: self.remote_peer_id,
-            remote_addr: self.remote_addr,
-            error,
-        });
+        let _ = self.to_session_manager.clone().try_send(
+            ActiveSessionMessage::ClosedOnConnectionError {
+                peer_id: self.remote_peer_id,
+                remote_addr: self.remote_addr,
+                error,
+            },
+        );
     }
 
     /// Starts the disconnect process
@@ -435,17 +443,6 @@ impl ActiveSession {
         self.internal_request_timeout.store(request_timeout.as_millis() as u64, Ordering::Relaxed);
         self.internal_request_timeout_interval = tokio::time::interval(request_timeout);
     }
-}
-
-/// Calculates a new timeout using an updated estimation of the RTT
-#[inline]
-fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
-    let new_timeout = estimated_rtt.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
-
-    // this dampens sudden changes by taking a weighted mean of the old and new values
-    let smoothened_timeout = current_timeout.mul_f64(1.0 - SAMPLE_IMPACT) + new_timeout;
-
-    smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
 }
 
 impl Future for ActiveSession {
@@ -551,7 +548,7 @@ impl Future for ActiveSession {
                 // try to resend the pending message that we could not send because the channel was
                 // full.
                 if let Some(msg) = this.pending_message_to_session.take() {
-                    match this.to_session.try_send(msg) {
+                    match this.to_session_manager.try_send(msg) {
                         Ok(_) => {}
                         Err(err) => {
                             match err {
@@ -619,11 +616,13 @@ impl Future for ActiveSession {
             let _ = this.internal_request_timeout_interval.poll_tick(cx);
             // check for timed out requests
             if this.check_timed_out_requests(Instant::now()) {
-                let _ = this.to_session.clone().try_send(ActiveSessionMessage::ProtocolBreach {
-                    peer_id: this.remote_peer_id,
-                });
+                let _ = this.to_session_manager.clone().try_send(
+                    ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id },
+                );
             }
         }
+
+        this.shrink_to_fit();
 
         Poll::Pending
     }
@@ -721,6 +720,16 @@ impl From<EthBroadcastMessage> for OutgoingMessage {
     }
 }
 
+/// Calculates a new timeout using an updated estimation of the RTT
+#[inline]
+fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
+    let new_timeout = estimated_rtt.mul_f64(SAMPLE_IMPACT) * TIMEOUT_SCALING;
+
+    // this dampens sudden changes by taking a weighted mean of the old and new values
+    let smoothened_timeout = current_timeout.mul_f64(1.0 - SAMPLE_IMPACT) + new_timeout;
+
+    smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
+}
 #[cfg(test)]
 mod tests {
     #![allow(dead_code)]
@@ -840,7 +849,7 @@ mod tests {
                         remote_capabilities: Arc::clone(&capabilities),
                         session_id,
                         commands_rx: ReceiverStream::new(commands_rx),
-                        to_session: MeteredSender::new(
+                        to_session_manager: MeteredSender::new(
                             self.active_session_tx.clone(),
                             "network_active_session",
                         ),

@@ -24,6 +24,12 @@ pub struct ShardedKey<T> {
     pub highest_block_number: BlockNumber,
 }
 
+impl<T> AsRef<ShardedKey<T>> for ShardedKey<T> {
+    fn as_ref(&self) -> &ShardedKey<T> {
+        self
+    }
+}
+
 impl<T> ShardedKey<T> {
     /// Creates a new `ShardedKey<T>`.
     pub fn new(key: T, highest_block_number: BlockNumber) -> Self {
