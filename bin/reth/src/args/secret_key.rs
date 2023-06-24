@@ -3,7 +3,6 @@ use reth_network::config::rng_secret_key;
 use reth_primitives::fs;
 use secp256k1::{Error as SecretKeyBaseError, SecretKey};
 use std::{
-    fs::read_to_string,
     io,
     path::{Path, PathBuf},
 };
@@ -17,10 +16,6 @@ pub enum SecretKeyError {
     SecretKeyDecodeError(#[from] SecretKeyBaseError),
     #[error("Failed to create parent directory {dir:?} for secret key: {error}")]
     FailedToCreateSecretParentDir { error: io::Error, dir: PathBuf },
-    #[error("Failed to write secret key file {secret_file:?}: {error}")]
-    FailedToWriteSecretKeyFile { error: io::Error, secret_file: PathBuf },
-    #[error("Failed to read secret key file {secret_file:?}: {error}")]
-    FailedToReadSecretKeyFile { error: io::Error, secret_file: PathBuf },
     #[error("Failed to access key file {secret_file:?}: {error}")]
     FailedToAccessKeyFile { error: io::Error, secret_file: PathBuf },
 }
@@ -33,12 +28,7 @@ pub fn get_secret_key(secret_key_path: &Path) -> eyre::Result<SecretKey> {
 
     match exists {
         Ok(true) => {
-            let contents = read_to_string(secret_key_path).map_err(|error| {
-                SecretKeyError::FailedToReadSecretKeyFile {
-                    error,
-                    secret_file: secret_key_path.to_path_buf(),
-                }
-            })?;
+            let contents = fs::read_to_string(secret_key_path)?;
             Ok((contents.as_str().parse::<SecretKey>())
                 .map_err(SecretKeyError::SecretKeyDecodeError)?)
         }
