@@ -15,6 +15,7 @@ use reth_db::{
     mdbx::Env,
     TxHashNumber,
 };
+use reth_primitives::fs;
 use std::{collections::HashSet, time::Instant};
 use test_fuzz::runtime::num_traits::Zero;
 
@@ -85,7 +86,7 @@ where
         // Setup phase before each benchmark iteration
         let setup = || {
             // Reset DB
-            let _ = std::fs::remove_dir_all(bench_db_path);
+            let _ = fs::remove_dir_all(bench_db_path);
             let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
 
             let mut unsorted_input = unsorted_input.clone();

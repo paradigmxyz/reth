@@ -1,5 +1,6 @@
 use hex::encode as hex_encode;
 use reth_network::config::rng_secret_key;
+use reth_primitives::fs;
 use secp256k1::{Error as SecretKeyBaseError, SecretKey};
 use std::{
     fs::read_to_string,
@@ -27,7 +28,7 @@ pub enum SecretKeyError {
 /// Attempts to load a [`SecretKey`] from a specified path. If no file exists there, then it
 /// generates a secret key and stores it in the provided path. I/O errors might occur during write
 /// operations in the form of a [`SecretKeyError`]
-pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyError> {
+pub fn get_secret_key(secret_key_path: &Path) -> eyre::Result<SecretKey> {
     let exists = secret_key_path.try_exists();
 
     match exists {
@@ -38,29 +39,24 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
                     secret_file: secret_key_path.to_path_buf(),
                 }
             })?;
-            (contents.as_str().parse::<SecretKey>()).map_err(SecretKeyError::SecretKeyDecodeError)
+            Ok((contents.as_str().parse::<SecretKey>())
+                .map_err(SecretKeyError::SecretKeyDecodeError)?)
         }
         Ok(false) => {
             if let Some(dir) = secret_key_path.parent() {
                 // Create parent directory
-                std::fs::create_dir_all(dir).map_err(|error| {
-                    SecretKeyError::FailedToCreateSecretParentDir { error, dir: dir.to_path_buf() }
-                })?;
+                fs::create_dir_all(dir)?;
             }
 
             let secret = rng_secret_key();
             let hex = hex_encode(secret.as_ref());
-            std::fs::write(secret_key_path, hex).map_err(|error| {
-                SecretKeyError::FailedToWriteSecretKeyFile {
-                    error,
-                    secret_file: secret_key_path.to_path_buf(),
-                }
-            })?;
+            fs::write(secret_key_path, hex)?;
             Ok(secret)
         }
         Err(error) => Err(SecretKeyError::FailedToAccessKeyFile {
             error,
             secret_file: secret_key_path.to_path_buf(),
-        }),
+        }
+        .into()),
     }
 }

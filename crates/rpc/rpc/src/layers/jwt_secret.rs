@@ -1,10 +1,10 @@
-use crate::fs;
 use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
+use reth_primitives::fs;
 use serde::{Deserialize, Serialize};
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
@@ -27,24 +27,8 @@ pub enum JwtError {
     MissingOrInvalidAuthorizationHeader,
     #[error("JWT decoding error {0}")]
     JwtDecodingError(String),
-    #[error("IO error occurred while reading {path}: {err}")]
-    IORead { err: std::io::Error, path: PathBuf },
-    #[error("IO error occurred while writing {path}: {err}")]
-    IOWrite { err: std::io::Error, path: PathBuf },
     #[error("An I/O error occurred: {0}")]
     IOError(#[from] std::io::Error),
-}
-
-impl JwtError {
-    /// Returns the complementary error variant for [`std::fs::write`].
-    pub fn write(source: std::io::Error, path: impl Into<PathBuf>) -> Self {
-        JwtError::IOWrite { err: source, path: path.into() }
-    }
-
-    /// Returns the complementary error variant for [`std::fs::read`].
-    pub fn read(source: std::io::Error, path: impl Into<PathBuf>) -> Self {
-        JwtError::IORead { err: source, path: path.into() }
-    }
 }
 
 /// Length of the hex-encoded 256 bit secret key.
@@ -92,7 +76,7 @@ impl JwtSecret {
     /// Tries to load a [`JwtSecret`] from the specified file path.
     /// I/O or secret validation errors might occur during read operations in the form of
     /// a [`JwtError`].
-    pub fn from_file(fpath: &Path) -> Result<Self, JwtError> {
+    pub fn from_file(fpath: &Path) -> eyre::Result<Self> {
         let hex = fs::read_to_string(fpath)?;
         let secret = JwtSecret::from_hex(hex)?;
         Ok(secret)
@@ -100,17 +84,16 @@ impl JwtSecret {
 
     /// Creates a random [`JwtSecret`] and tries to store it at the specified path. I/O errors might
     /// occur during write operations in the form of a [`JwtError`]
-    pub fn try_create(fpath: &Path) -> Result<Self, JwtError> {
+    pub fn try_create(fpath: &Path) -> eyre::Result<Self> {
         if let Some(dir) = fpath.parent() {
             // Create parent directory
-            std::fs::create_dir_all(dir)?
+            fs::create_dir_all(dir)?
         }
 
         let secret = JwtSecret::random();
         let bytes = &secret.0;
         let hex = hex::encode(bytes);
-        std::fs::write(fpath, hex)
-            .map_err(|err| JwtError::IOWrite { err, path: fpath.to_path_buf() })?;
+        fs::write(fpath, hex)?;
         Ok(secret)
     }
 }

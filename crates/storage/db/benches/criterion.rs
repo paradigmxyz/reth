@@ -8,6 +8,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     tables::*,
 };
+use reth_primitives::fs;
 use std::time::Instant;
 
 criterion_group! {
@@ -130,7 +131,7 @@ where
         b.iter_with_setup(
             || {
                 // Reset DB
-                let _ = std::fs::remove_dir_all(bench_db_path);
+                let _ = fs::remove_dir_all(bench_db_path);
                 (input.clone(), create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
             },
             |(input, db)| {
@@ -153,7 +154,7 @@ where
         b.iter_with_setup(
             || {
                 // Reset DB
-                let _ = std::fs::remove_dir_all(bench_db_path);
+                let _ = fs::remove_dir_all(bench_db_path);
                 (input, create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
             },
             |(input, db)| {
@@ -224,7 +225,7 @@ where
         b.iter_with_setup(
             || {
                 // Reset DB
-                let _ = std::fs::remove_dir_all(bench_db_path);
+                let _ = fs::remove_dir_all(bench_db_path);
                 (input.clone(), create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
             },
             |(input, db)| {
@@ -247,7 +248,7 @@ where
         b.iter_with_setup(
             || {
                 // Reset DB
-                let _ = std::fs::remove_dir_all(bench_db_path);
+                let _ = fs::remove_dir_all(bench_db_path);
 
                 (input, create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
             },

@@ -5640,6 +5640,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "ethers-core",
+ "eyre",
  "futures",
  "hex",
  "http",

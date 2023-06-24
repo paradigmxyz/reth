@@ -5,6 +5,7 @@ use reth_db::{
     table::*,
     transaction::{DbTx, DbTxMut},
 };
+use reth_primitives::fs;
 use std::path::Path;
 
 /// Path where the DB is initialized for benchmarks.
@@ -58,7 +59,7 @@ where
     T::Value: Default + Clone,
 {
     // Reset DB
-    let _ = std::fs::remove_dir_all(bench_db_path);
+    let _ = fs::remove_dir_all(bench_db_path);
     let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
 
     {
