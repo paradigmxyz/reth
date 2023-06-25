@@ -116,7 +116,7 @@ pub mod metrics;
 mod ordering;
 pub mod pool;
 mod traits;
-mod validate;
+pub mod validate;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking A pool
@@ -222,7 +222,7 @@ where
 impl<Client>
     Pool<EthTransactionValidator<Client, PooledTransaction>, CostOrdering<PooledTransaction>>
 where
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
     /// [PooledTransaction]s and ords via [CostOrdering]

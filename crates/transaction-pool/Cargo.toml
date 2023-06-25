@@ -23,12 +23,14 @@ reth-provider = { workspace = true }
 reth-interfaces = { workspace = true }
 reth-rlp = { workspace = true }
 reth-metrics = { workspace = true }
+reth-tasks = { workspace = true }
 
 # async/futures
 async-trait = { workspace = true}
 futures-util = { workspace = true }
 parking_lot = "0.12"
 tokio = { workspace = true, default-features = false, features = ["sync"] }
+tokio-stream.workspace = true
 
 # misc
 aquamarine = "0.3.0"
