@@ -671,7 +671,7 @@ where
         error: Error,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
-        warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
+        warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
 
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
