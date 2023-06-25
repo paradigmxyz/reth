@@ -199,6 +199,7 @@ mod tests {
     use assert_matches::assert_matches;
     use hex::encode as hex_encode;
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use reth_primitives::fs::FsPathError;
     use std::{
         path::Path,
         time::{Duration, SystemTime, UNIX_EPOCH},
@@ -370,7 +371,10 @@ mod tests {
     fn provided_file_not_exists() {
         let fpath = Path::new("secret3.hex");
         let result = JwtSecret::from_file(fpath);
-        assert_matches!(result, Err(JwtError::IORead {err: _, path}) if path == fpath.to_path_buf());
+        assert_matches!(
+            result.as_ref().map_err(|e| e.downcast_ref::<FsPathError>()),
+            Err(Some(FsPathError::Read { source: _, path })) if *path == fpath.to_path_buf()
+        );
         assert!(!exists(fpath));
     }
 
@@ -378,7 +382,7 @@ mod tests {
     fn provided_file_is_a_directory() {
         let dir = tempdir().unwrap();
         let result = JwtSecret::from_file(dir.path());
-        assert_matches!(result, Err(JwtError::IORead {err: _, path}) if path == dir.into_path());
+        assert_matches!(result.as_ref().map_err(|e| e.downcast_ref::<FsPathError>()), Err(Some(FsPathError::Read {source: _, path})) if *path == dir.into_path());
     }
 
     fn hex(secret: &JwtSecret) -> String {
