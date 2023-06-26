@@ -1008,7 +1008,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Canonicalize the given chain and commit it to the database.
-    fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
+    fn commit_canonical(&self, chain: Chain) -> Result<(), Error> {
         let provider = DatabaseProvider::new_rw(
             self.externals.db.tx_mut()?,
             self.externals.chain_spec.clone(),

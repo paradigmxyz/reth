@@ -582,8 +582,8 @@ mod tests {
         provider.commit().unwrap();
 
         // insert pre state
-        let mut provider = factory.provider_rw().unwrap();
-        let db_tx = provider.tx_mut();
+        let provider = factory.provider_rw().unwrap();
+        let db_tx = provider.tx_ref();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let code = hex!("5a465a905090036002900360015500");
@@ -695,8 +695,8 @@ mod tests {
         let balance = U256::from(0x3635c9adc5dea00000u128);
         let code_hash = keccak256(code);
         // pre state
-        let mut provider = factory.provider_rw().unwrap();
-        let db_tx = provider.tx_mut();
+        let provider = factory.provider_rw().unwrap();
+        let db_tx = provider.tx_ref();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
         let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
