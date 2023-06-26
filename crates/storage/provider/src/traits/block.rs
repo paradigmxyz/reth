@@ -6,7 +6,7 @@ use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
-    SealedBlock, SealedHeader, H256,
+    Receipt, SealedBlock, SealedHeader, H256,
 };
 
 /// A helper enum that represents the origin of the requested block.
@@ -71,6 +71,9 @@ pub trait BlockReader:
     /// Note: This returns a [SealedBlock] because it's expected that this is sealed by the provider
     /// and the caller does not know the hash.
     fn pending_block(&self) -> Result<Option<SealedBlock>>;
+
+    /// Returns the pending block and receipts if available.
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>>;
 
     /// Returns the ommers/uncle headers of the given block from the database.
     ///

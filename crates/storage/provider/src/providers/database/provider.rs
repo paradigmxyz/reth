@@ -1005,6 +1005,10 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         Ok(None)
     }
 
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        Ok(None)
+    }
+
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty

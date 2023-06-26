@@ -233,6 +233,10 @@ where
         Ok(self.tree.pending_block())
     }
 
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        Ok(self.tree.pending_block_and_receipts())
+    }
+
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.database.provider()?.ommers(id)
     }
@@ -626,6 +630,10 @@ where
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
         self.tree.pending_block_num_hash()
+    }
+
+    fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {
+        self.tree.pending_block_and_receipts()
     }
 
     fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>> {

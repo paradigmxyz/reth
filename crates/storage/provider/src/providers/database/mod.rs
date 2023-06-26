@@ -184,6 +184,10 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
         self.provider()?.pending_block()
     }
 
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        self.provider()?.pending_block_and_receipts()
+    }
+
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         self.provider()?.ommers(id)
     }
