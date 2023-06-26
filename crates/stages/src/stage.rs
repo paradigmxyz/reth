@@ -204,15 +204,26 @@ pub enum PruneMode {
     Before(BlockNumber),
 }
 
+/// Prune target
+#[derive(Debug, Clone, Copy)]
+pub enum PruneTarget {
+    /// Prune all blocks, i.e. not save any data.
+    All,
+    /// Prune blocks up to the specified block number, inclusive.
+    Block(BlockNumber),
+}
+
 impl PruneMode {
-    /// Returns target block number to prune towards, inclusive, according to stage prune mode
-    /// [Self] and current head [BlockNumber]. Target block number should also be pruned.
-    pub fn target_block_number(&self, head: BlockNumber) -> BlockNumber {
+    /// Returns target to prune towards, according to stage prune mode [Self]
+    /// and current head [BlockNumber].
+    pub fn target(&self, head: BlockNumber) -> PruneTarget {
         match *self {
-            PruneMode::Distance(distance) => head.saturating_sub(distance),
-            PruneMode::Before(before_block) => before_block,
+            PruneMode::Distance(distance) if distance == 0 => PruneTarget::All,
+            PruneMode::Distance(distance) => {
+                PruneTarget::Block(head.saturating_sub(distance).saturating_sub(1))
+            }
+            PruneMode::Before(before_block) => PruneTarget::Block(before_block.saturating_sub(1)),
         }
-        .saturating_sub(1)
     }
 }
 
