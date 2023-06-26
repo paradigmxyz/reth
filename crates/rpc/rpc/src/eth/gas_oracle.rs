@@ -5,7 +5,7 @@ use crate::eth::{
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
 };
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, H256, U256};
-use reth_provider::BlockProviderIdExt;
+use reth_provider::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
@@ -94,7 +94,7 @@ pub struct GasPriceOracle<Provider> {
 
 impl<Provider> GasPriceOracle<Provider>
 where
-    Provider: BlockProviderIdExt + 'static,
+    Provider: BlockReaderIdExt + 'static,
 {
     /// Creates and returns the [GasPriceOracle].
     pub fn new(

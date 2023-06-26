@@ -3,7 +3,7 @@
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, H256};
-use reth_provider::{BlockProvider, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
 use schnellru::{ByMemoryUsage, Limiter, LruMap};
@@ -121,7 +121,7 @@ impl EthStateCache {
     /// See also [Self::spawn_with]
     pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
     where
-        Provider: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default())
     }
@@ -136,7 +136,7 @@ impl EthStateCache {
         executor: Tasks,
     ) -> Self
     where
-        Provider: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
         let EthStateCacheConfig { max_block_bytes, max_receipt_bytes, max_env_bytes } = config;
@@ -244,7 +244,7 @@ pub(crate) struct EthStateCacheService<
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     fn on_new_block(&mut self, block_hash: H256, res: Result<Option<Block>>) {
@@ -287,7 +287,7 @@ where
 
 impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     type Output = ();
