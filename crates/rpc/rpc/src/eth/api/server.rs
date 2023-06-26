@@ -437,6 +437,7 @@ mod tests {
     }
 
     /// Handler for: `eth_test_fee_history`
+    // TODO: Split this into multiple tests, and add tests for percentiles.
     #[tokio::test]
     async fn test_fee_history() {
         let mut rng = generators::rng();
