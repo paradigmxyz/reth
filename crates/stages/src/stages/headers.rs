@@ -20,7 +20,6 @@ use reth_primitives::{
     BlockHashOrNumber, BlockNumber, SealedHeader, H256,
 };
 use reth_provider::DatabaseProviderRW;
-use std::ops::Deref;
 use tokio::sync::watch;
 use tracing::*;
 
@@ -196,14 +195,14 @@ where
     /// starting from the tip of the chain
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
         let current_checkpoint = input.checkpoint();
 
         // Lookup the head and tip of the sync range
-        let gap = self.get_sync_gap(provider.deref(), current_checkpoint.block_number).await?;
+        let gap = self.get_sync_gap(provider, current_checkpoint.block_number).await?;
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
@@ -326,7 +325,7 @@ where
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block

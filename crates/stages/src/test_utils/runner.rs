@@ -48,9 +48,9 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
             let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
-            let mut provider = factory.provider_rw().unwrap();
+            let provider = factory.provider_rw().unwrap();
 
-            let result = stage.execute(&mut provider, input).await;
+            let result = stage.execute(&provider, input).await;
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send message")
         });
@@ -74,9 +74,9 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
             let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
-            let mut provider = factory.provider_rw().unwrap();
+            let provider = factory.provider_rw().unwrap();
 
-            let result = stage.unwind(&mut provider, input).await;
+            let result = stage.unwind(&provider, input).await;
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
         });
