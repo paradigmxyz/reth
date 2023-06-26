@@ -22,7 +22,7 @@ pub trait TransactionOrdering: Send + Sync + 'static {
 
 /// Default ordering for the pool.
 ///
-/// The transactions are ordered by their cost. The higher the cost,
+/// The transactions are ordered by their gas cost. The higher the gas cost,
 /// the higher the priority of this transaction is.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -36,7 +36,7 @@ where
     type Transaction = T;
 
     fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
-        transaction.cost()
+        transaction.gas_cost()
     }
 }
 
