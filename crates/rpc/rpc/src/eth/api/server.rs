@@ -122,6 +122,15 @@ where
         Ok(EthApi::ommers(self, number)?.map(|ommers| U256::from(ommers.len())))
     }
 
+    /// Handler for: `eth_getBlockReceipts`
+    async fn block_receipts(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> Result<Option<Vec<TransactionReceipt>>> {
+        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockReceipts");
+        Ok(EthApi::block_receipts(self, number).await?)
+    }
+
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
     async fn uncle_by_block_hash_and_index(
         &self,

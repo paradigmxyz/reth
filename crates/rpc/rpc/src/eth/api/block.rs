@@ -1,12 +1,15 @@
 //! Contains RPC handler implementations specific to blocks.
 
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::{
+        api::transactions::build_transaction_receipt_with_block_receipts,
+        error::{EthApiError, EthResult},
+    },
     EthApi,
 };
-use reth_primitives::BlockId;
+use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{Block, Index, RichBlock};
+use reth_rpc_types::{Block, Index, RichBlock, TransactionReceipt};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -44,6 +47,47 @@ where
             .nth(index)
             .map(|header| Block::uncle_block_from_header(header).into());
         Ok(uncle)
+    }
+
+    /// Returns all transaction receipts in the block.
+    ///
+    /// Returns `None` if the block wasn't found.
+    pub(crate) async fn block_receipts(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> EthResult<Option<Vec<TransactionReceipt>>> {
+        let mut block_and_receipts = None;
+
+        if number.is_pending() {
+            block_and_receipts = self.provider().pending_block_and_receipts()?;
+        } else if let Some(block_hash) = self.provider().block_hash_for_id(number.into())? {
+            block_and_receipts = self.cache().get_block_and_receipts(block_hash).await?;
+        }
+
+        if let Some((block, receipts)) = block_and_receipts {
+            let block_number = block.number;
+            let base_fee = block.base_fee_per_gas;
+            let block_hash = block.hash;
+            let receipts = block
+                .body
+                .into_iter()
+                .zip(receipts.clone())
+                .enumerate()
+                .map(|(idx, (tx, receipt))| {
+                    let meta = TransactionMeta {
+                        tx_hash: tx.hash,
+                        index: idx as u64,
+                        block_hash,
+                        block_number,
+                        base_fee,
+                    };
+                    build_transaction_receipt_with_block_receipts(tx, meta, receipt, &receipts)
+                })
+                .collect::<EthResult<Vec<_>>>();
+            return receipts.map(Some)
+        }
+
+        Ok(None)
     }
 
     /// Returns the number transactions in the given block.

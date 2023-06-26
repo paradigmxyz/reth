@@ -71,6 +71,13 @@ pub trait EthApi {
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<U256>>;
 
+    /// Returns all transaction receipts for a given block.
+    #[method(name = "getBlockReceipts")]
+    async fn block_receipts(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Vec<TransactionReceipt>>>;
+
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
     async fn uncle_by_block_hash_and_index(

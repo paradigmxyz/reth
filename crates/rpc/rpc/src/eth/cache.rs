@@ -201,6 +201,19 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
+    /// Fetches both receipts and block for the given block hash.
+    pub(crate) async fn get_block_and_receipts(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        let block = self.get_sealed_block(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (block, receipts) = futures::try_join!(block, receipts)?;
+
+        Ok(block.zip(receipts))
+    }
+
     /// Requests the evm env config for the block hash.
     ///
     /// Returns an error if the corresponding header (required for populating the envs) was not
