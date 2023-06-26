@@ -5,7 +5,7 @@ use clap::{
     builder::{PossibleValue, TypedValueParser},
     Arg, Args, Command,
 };
-use futures::{FutureExt, TryFutureExt};
+use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
     BlockReaderIdExt, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -287,8 +287,10 @@ impl RpcServerArgs {
             handle
         });
 
-        let launch_auth = auth_module.start_server(auth_config).inspect(|_| {
-            info!(target: "reth::cli", "RPC auth server started");
+        let launch_auth = auth_module.start_server(auth_config).map_ok(|handle| {
+            let addr = handle.local_addr();
+            info!(target: "reth::cli", url=%addr, "RPC auth server started");
+            handle
         });
 
         // launch servers concurrently
