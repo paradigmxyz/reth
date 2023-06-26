@@ -106,8 +106,8 @@ where
         )));
 
         Ok(FeeHistory {
-            base_fee_per_gas,
-            gas_used_ratio,
+            base_fee_per_gas: Some(base_fee_per_gas),
+            gas_used_ratio: Some(gas_used_ratio),
             oldest_block: U256::from(start_block),
             reward: reward_percentiles.map(|_| rewards),
         })
