@@ -200,7 +200,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
 
 /// BlockExecution Writer
 #[auto_impl(&, Arc, Box)]
-pub trait BlockExecutionWriter: Send + Sync {
+pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
     /// Get range of blocks and its execution result
     fn get_block_and_execution_range(
         &self,
