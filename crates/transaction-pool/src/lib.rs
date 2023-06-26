@@ -225,7 +225,7 @@ where
     Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [CostOrdering]
+    /// [PooledTransaction]s and ords via [GasCostOrdering]
     pub fn eth_pool(
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
