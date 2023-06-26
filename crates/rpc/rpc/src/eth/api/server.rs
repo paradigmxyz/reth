@@ -12,8 +12,8 @@ use crate::{
 use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
-    H256, H64, U256, U64,
+    serde_helper::{num::U64HexOrNumber, JsonStorageKey},
+    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, EvmEnvProvider, HeaderProvider,
@@ -295,8 +295,8 @@ where
     /// Handler for: `eth_feeHistory`
     async fn fee_history(
         &self,
-        block_count: U64,
-        newest_block: BlockId,
+        block_count: U64HexOrNumber,
+        newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
@@ -386,50 +386,78 @@ mod tests {
         EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
-    use rand::random;
+    use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::test_utils::NoopNetwork;
-    use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256};
-    use reth_provider::test_utils::{MockEthProvider, NoopProvider};
+    use reth_primitives::{
+        basefee::calculate_next_block_base_fee, Block, BlockNumberOrTag, Header, TransactionSigned,
+        H256, U256,
+    };
+    use reth_provider::{
+        test_utils::{MockEthProvider, NoopProvider},
+        BlockReader, BlockReaderIdExt, EvmEnvProvider, StateProviderFactory,
+    };
     use reth_rpc_api::EthApiServer;
-    use reth_transaction_pool::test_utils::testing_pool;
+    use reth_rpc_types::FeeHistory;
+    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
-    #[tokio::test]
-    /// Handler for: `eth_test_fee_history`
-    async fn test_fee_history() {
-        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
-        let eth_api = EthApi::new(
-            NoopProvider::default(),
+    fn build_test_eth_api<
+        P: BlockReaderIdExt
+            + BlockReader
+            + EvmEnvProvider
+            + StateProviderFactory
+            + Unpin
+            + Clone
+            + 'static,
+    >(
+        provider: P,
+    ) -> EthApi<P, TestPool, NoopNetwork> {
+        let cache = EthStateCache::spawn(provider.clone(), Default::default());
+        EthApi::new(
+            provider.clone(),
             testing_pool(),
             NoopNetwork,
             cache.clone(),
-            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
-        );
+            GasPriceOracle::new(provider, Default::default(), cache),
+        )
+    }
 
+    /// Invalid block range
+    #[tokio::test]
+    async fn test_fee_history_empty() {
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
-            &eth_api,
+            &build_test_eth_api(NoopProvider::default()),
             1.into(),
-            BlockNumberOrTag::Latest.into(),
+            BlockNumberOrTag::Latest,
             None,
         )
         .await;
         assert!(response.is_err());
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+    }
+
+    /// Handler for: `eth_test_fee_history`
+    // TODO: Split this into multiple tests, and add tests for percentiles.
+    #[tokio::test]
+    async fn test_fee_history() {
+        let mut rng = generators::rng();
 
         let block_count = 10;
         let newest_block = 1337;
 
+        // Build mock data
         let mut oldest_block = None;
         let mut gas_used_ratios = Vec::new();
         let mut base_fees_per_gas = Vec::new();
-
+        let mut last_header = None;
         let mock_provider = MockEthProvider::default();
 
-        for i in (0..=block_count).rev() {
+        for i in (0..block_count).rev() {
             let hash = H256::random();
-            let gas_limit: u64 = random();
-            let gas_used: u64 = random();
-            let base_fee_per_gas: Option<u64> = random::<bool>().then(random);
+            let gas_limit: u64 = rng.gen();
+            let gas_used: u64 = rng.gen();
+            // Note: Generates a u32 to avoid overflows later
+            let base_fee_per_gas: Option<u64> = rng.gen::<bool>().then(|| rng.gen::<u32>() as u64);
 
             let header = Header {
                 number: newest_block - i,
@@ -438,10 +466,11 @@ mod tests {
                 base_fee_per_gas,
                 ..Default::default()
             };
+            last_header = Some(header.clone());
 
             let mut transactions = vec![];
             for _ in 0..100 {
-                let random_fee: u128 = random();
+                let random_fee: u128 = rng.gen();
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned {
@@ -480,17 +509,17 @@ mod tests {
                 .push(base_fee_per_gas.map(|fee| U256::try_from(fee).unwrap()).unwrap_or_default());
         }
 
-        gas_used_ratios.pop();
+        // Add final base fee (for the next block outside of the request)
+        let last_header = last_header.unwrap();
+        base_fees_per_gas.push(U256::from(calculate_next_block_base_fee(
+            last_header.gas_used,
+            last_header.gas_limit,
+            last_header.base_fee_per_gas.unwrap_or_default(),
+        )));
 
-        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
-        let eth_api = EthApi::new(
-            mock_provider.clone(),
-            testing_pool(),
-            NoopNetwork,
-            cache.clone(),
-            GasPriceOracle::new(mock_provider, Default::default(), cache.clone()),
-        );
+        let eth_api = build_test_eth_api(mock_provider);
 
+        // Invalid block range (request is before genesis)
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (newest_block + 1).into(),
@@ -502,20 +531,85 @@ mod tests {
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
-        // newest_block is finalized
+        // Invalid block range (request is in in the future)
+        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+            &eth_api,
+            (1).into(),
+            (newest_block + 1000).into(),
+            Some(vec![10.0]),
+        )
+        .await;
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
+        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+
+        // Requesting no block should result in a default response
+        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+            &eth_api,
+            (0).into(),
+            (newest_block).into(),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response,
+            FeeHistory::default(),
+            "none: requesting no block should yield a default response"
+        );
+
+        // Requesting a single block should return 1 block (+ base fee for the next block over)
+        let fee_history = eth_api.fee_history(1, (newest_block).into(), None).await.unwrap();
+        assert_eq!(
+            &fee_history.base_fee_per_gas,
+            &base_fees_per_gas[base_fees_per_gas.len() - 2..],
+            "one: base fee per gas is incorrect"
+        );
+        assert_eq!(
+            fee_history.base_fee_per_gas.len(),
+            2,
+            "one: should return base fee of the next block as well"
+        );
+        assert_eq!(
+            &fee_history.gas_used_ratio,
+            &gas_used_ratios[gas_used_ratios.len() - 1..],
+            "one: gas used ratio is incorrect"
+        );
+        assert_eq!(
+            fee_history.oldest_block,
+            U256::from(newest_block),
+            "one: oldest block is incorrect"
+        );
+        assert!(
+            fee_history.reward.is_none(),
+            "one: no percentiles were requested, so there should be no rewards result"
+        );
+
+        // Requesting all blocks should be ok
         let fee_history =
-            eth_api.fee_history(block_count, (newest_block - 1).into(), None).await.unwrap();
+            eth_api.fee_history(block_count, (newest_block).into(), None).await.unwrap();
 
-        assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
-        assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
-        assert_eq!(fee_history.oldest_block, U256::from(newest_block - block_count));
-
-        // newest_block is pending
-        let fee_history =
-            eth_api.fee_history(block_count, (newest_block - 1).into(), None).await.unwrap();
-
-        assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
-        assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
-        assert_eq!(fee_history.oldest_block, U256::from(newest_block - block_count));
+        assert_eq!(
+            &fee_history.base_fee_per_gas, &base_fees_per_gas,
+            "all: base fee per gas is incorrect"
+        );
+        assert_eq!(
+            fee_history.base_fee_per_gas.len() as u64,
+            block_count + 1,
+            "all: should return base fee of the next block as well"
+        );
+        assert_eq!(
+            &fee_history.gas_used_ratio, &gas_used_ratios,
+            "all: gas used ratio is incorrect"
+        );
+        assert_eq!(
+            fee_history.oldest_block,
+            U256::from(newest_block - block_count + 1),
+            "all: oldest block is incorrect"
+        );
+        assert!(
+            fee_history.reward.is_none(),
+            "all: no percentiles were requested, so there should be no rewards result"
+        );
     }
 }
