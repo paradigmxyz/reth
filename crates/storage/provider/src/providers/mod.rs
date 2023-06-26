@@ -1,5 +1,5 @@
 use crate::{
-    BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
@@ -144,7 +144,7 @@ where
     }
 }
 
-impl<DB, Tree> BlockHashProvider for BlockchainProvider<DB, Tree>
+impl<DB, Tree> BlockHashReader for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: Send + Sync,
@@ -158,7 +158,7 @@ where
     }
 }
 
-impl<DB, Tree> BlockNumProvider for BlockchainProvider<DB, Tree>
+impl<DB, Tree> BlockNumReader for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
@@ -180,7 +180,7 @@ where
     }
 }
 
-impl<DB, Tree> BlockIdProvider for BlockchainProvider<DB, Tree>
+impl<DB, Tree> BlockIdReader for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
@@ -198,7 +198,7 @@ where
     }
 }
 
-impl<DB, Tree> BlockProvider for BlockchainProvider<DB, Tree>
+impl<DB, Tree> BlockReader for BlockchainProvider<DB, Tree>
 where
     DB: Database,
     Tree: BlockchainTreeViewer + Send + Sync,
@@ -637,7 +637,7 @@ impl<DB, Tree> CanonChainTracker for BlockchainProvider<DB, Tree>
 where
     DB: Send + Sync,
     Tree: Send + Sync,
-    Self: BlockProvider,
+    Self: BlockReader,
 {
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
         // update timestamp
@@ -669,9 +669,9 @@ where
     }
 }
 
-impl<DB, Tree> BlockProviderIdExt for BlockchainProvider<DB, Tree>
+impl<DB, Tree> BlockReaderIdExt for BlockchainProvider<DB, Tree>
 where
-    Self: BlockProvider + BlockIdProvider + ReceiptProviderIdExt,
+    Self: BlockReader + BlockIdReader + ReceiptProviderIdExt,
     Tree: BlockchainTreeEngine,
 {
     fn block_by_id(&self, id: BlockId) -> Result<Option<Block>> {

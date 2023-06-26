@@ -5,12 +5,12 @@ use crate::{
     EthApi,
 };
 use reth_primitives::BlockId;
-use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Block, Index, RichBlock};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Provider: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Returns the uncle headers of the given block
     ///

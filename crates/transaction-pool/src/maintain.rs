@@ -6,7 +6,7 @@ use crate::{
 };
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
 use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
-use reth_provider::{BlockProviderIdExt, CanonStateNotification, PostState, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, CanonStateNotification, PostState, StateProviderFactory};
 use std::{
     borrow::Borrow,
     collections::HashSet,
@@ -25,7 +25,7 @@ pub fn maintain_transaction_pool_future<Client, V, T, St>(
     events: St,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory + BlockProviderIdExt + Send + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
     V: TransactionValidator + Send + 'static,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction> + Send + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
@@ -45,7 +45,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
     pool: Pool<V, T>,
     mut events: St,
 ) where
-    Client: StateProviderFactory + BlockProviderIdExt + Send + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
     V: TransactionValidator + Send + 'static,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction> + Send + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
