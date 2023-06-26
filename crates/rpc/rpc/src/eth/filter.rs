@@ -9,7 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock, H256};
+use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
@@ -283,7 +283,8 @@ where
             FilterBlockOption::AtBlockHash(block_hash) => {
                 let mut all_logs = Vec::new();
                 // all matching logs in the block, if it exists
-                if let Some((block, receipts)) = self.block_and_receipts_by_hash(block_hash).await?
+                if let Some((block, receipts)) =
+                    self.eth_cache.get_block_and_receipts(block_hash).await?
                 {
                     let filter = FilteredParams::new(Some(filter));
                     logs_utils::append_matching_block_logs(
@@ -343,20 +344,7 @@ where
             None => return Ok(None),
         };
 
-        self.block_and_receipts_by_hash(block_hash).await
-    }
-
-    /// Fetches both receipts and block for the given block hash.
-    async fn block_and_receipts_by_hash(
-        &self,
-        block_hash: H256,
-    ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        let block = self.eth_cache.get_sealed_block(block_hash);
-        let receipts = self.eth_cache.get_receipts(block_hash);
-
-        let (block, receipts) = futures::try_join!(block, receipts)?;
-
-        Ok(block.zip(receipts))
+        Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
     }
 
     /// Returns all logs in the given _inclusive_ range that match the filter

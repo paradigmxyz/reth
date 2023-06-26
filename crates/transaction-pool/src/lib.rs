@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs)]
 #![deny(
     unused_must_use,
@@ -95,7 +101,7 @@ use tracing::{instrument, trace};
 pub use crate::{
     config::PoolConfig,
     error::PoolResult,
-    ordering::{CostOrdering, TransactionOrdering},
+    ordering::{GasCostOrdering, TransactionOrdering},
     pool::TransactionEvents,
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
@@ -220,17 +226,17 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, CostOrdering<PooledTransaction>>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, GasCostOrdering<PooledTransaction>>
 where
     Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [CostOrdering]
+    /// [PooledTransaction]s and ords via [GasCostOrdering]
     pub fn eth_pool(
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, CostOrdering::default(), config)
+        Self::new(validator, GasCostOrdering::default(), config)
     }
 }
 

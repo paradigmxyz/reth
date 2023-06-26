@@ -63,3 +63,4 @@ futures = { workspace = true }
 jsonrpsee = { version = "0.18", features = ["client"] }
 assert_matches = "1.5.0"
 tempfile = "3.5.0"
+reth-interfaces = { workspace = true, features = ["test-utils"] }

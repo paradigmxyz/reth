@@ -179,6 +179,19 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
+    /// Fetches both transactions and receipts for the given block hash.
+    pub(crate) async fn get_transactions_and_receipts(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<(Vec<TransactionSigned>, Vec<Receipt>)>> {
+        let transactions = self.get_block_transactions(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (transactions, receipts) = futures::try_join!(transactions, receipts)?;
+
+        Ok(transactions.zip(receipts))
+    }
+
     /// Requests the [Receipt] for the block hash
     ///
     /// Returns `None` if the block was not found.
@@ -186,6 +199,19 @@ impl EthStateCache {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
+
+    /// Fetches both receipts and block for the given block hash.
+    pub(crate) async fn get_block_and_receipts(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        let block = self.get_sealed_block(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (block, receipts) = futures::try_join!(block, receipts)?;
+
+        Ok(block.zip(receipts))
     }
 
     /// Requests the evm env config for the block hash.
