@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 pub struct StagePruneConfig {
     /// Sender Recovery stage pruning configuration.
     pub sender_recovery: Option<PruneMode>,
-    /// Execution stage pruning configuration.
-    pub execution: Option<PruneMode>,
+    /// Execution stage pruning configuration for changesets.
+    pub execution_changesets: Option<PruneMode>,
+    /// Execution stage pruning configuration for receipts.
+    pub execution_receipts: Option<PruneMode>,
     /// Transaction Lookup stage pruning configuration.
     pub transaction_lookup: Option<PruneMode>,
     /// Index Account History stage pruning configuration.
