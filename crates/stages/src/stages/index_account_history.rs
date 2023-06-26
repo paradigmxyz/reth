@@ -75,7 +75,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::test_utils::TestTransaction;
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner,
+    };
+
+    stage_test_suite_ext!(IndexAccountHistoryTestRunner, index_account_history);
     use reth_db::{
         models::{
             sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
@@ -356,5 +361,91 @@ mod tests {
                 (shard(u64::MAX), vec![2, 3])
             ])
         );
+    }
+
+    struct IndexAccountHistoryTestRunner {
+        pub(crate) tx: TestTransaction,
+        commit_threshold: u64,
+    }
+
+    impl Default for IndexAccountHistoryTestRunner {
+        fn default() -> Self {
+            Self { tx: TestTransaction::default(), commit_threshold: 1000 }
+        }
+    }
+
+    impl StageTestRunner for IndexAccountHistoryTestRunner {
+        type S = IndexAccountHistoryStage;
+
+        fn tx(&self) -> &TestTransaction {
+            &self.tx
+        }
+
+        fn stage(&self) -> Self::S {
+            Self::S { commit_threshold: self.commit_threshold }
+        }
+    }
+
+    impl ExecuteStageTestRunner for IndexAccountHistoryTestRunner {
+        type Seed = ();
+
+        fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let end = input.target();
+            self.tx
+                .commit(|tx| {
+                    // we just need first and last
+                    tx.put::<tables::BlockBodyIndices>(
+                        0,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )
+                    .unwrap();
+
+                    tx.put::<tables::BlockBodyIndices>(
+                        end,
+                        StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
+                    )
+                    .unwrap();
+
+                    // setup changeset that are going to be applied to history index
+                    tx.put::<tables::AccountChangeSet>(end, acc()).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+
+            Ok(())
+        }
+
+        fn validate_execution(
+            &self,
+            input: ExecInput,
+            output: Option<ExecOutput>,
+        ) -> Result<(), TestRunnerError> {
+            if let Some(output) = output {
+                let start_block = input.next_block();
+                let end_block = output.checkpoint.block_number;
+                if start_block > end_block {
+                    return Ok(())
+                }
+
+                assert_eq!(
+                    output,
+                    ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true }
+                );
+                let table = cast(self.tx.table::<tables::AccountHistory>().unwrap());
+                assert_eq!(
+                    table,
+                    BTreeMap::from([(shard(u64::MAX), vec![input.target() as usize])])
+                );
+            }
+            Ok(())
+        }
+    }
+
+    impl UnwindStageTestRunner for IndexAccountHistoryTestRunner {
+        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+            let table = self.tx.table::<tables::AccountHistory>().unwrap();
+            assert!(table.is_empty());
+            Ok(())
+        }
     }
 }
