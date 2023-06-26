@@ -6,8 +6,8 @@ use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, ChainSpec,
-    Header, SealedBlock, SealedBlockWithSenders, SealedHeader, H256,
+    Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
+    ChainSpec, Header, SealedBlock, SealedBlockWithSenders, SealedHeader, H256,
 };
 use std::ops::RangeInclusive;
 
@@ -225,4 +225,27 @@ pub trait BlockExecutionWriter: Send + Sync {
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<(SealedBlockWithSenders, PostState)>>;
+}
+
+/// Block Writer
+#[auto_impl(&, Arc, Box)]
+pub trait BlockWriter: Send + Sync {
+    /// Insert full block and make it canonical. Parent tx num and transition id is taken from
+    /// parent block in database.
+    ///
+    /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
+    /// transition in the block.
+    fn insert_block(
+        &self,
+        block: SealedBlock,
+        senders: Option<Vec<Address>>,
+    ) -> Result<StoredBlockBodyIndices>;
+
+    /// Append blocks and insert its post state.
+    /// This will insert block data to all related tables and will update pipeline progress.
+    fn append_blocks_with_post_state(
+        &self,
+        blocks: Vec<SealedBlockWithSenders>,
+        state: PostState,
+    ) -> Result<()>;
 }

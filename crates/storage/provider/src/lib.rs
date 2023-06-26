@@ -16,7 +16,7 @@
 mod traits;
 pub use traits::{
     AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockHashProvider,
-    BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt, BlockSource,
+    BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt, BlockSource, BlockWriter,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
     ExecutorFactory, HashingWriter, HeaderProvider, HistoryWriter, PostStateDataProvider,
@@ -35,10 +35,6 @@ pub use providers::{
 /// Execution result
 pub mod post_state;
 pub use post_state::PostState;
-
-/// Common database utilities.
-mod utils;
-pub use utils::{insert_block, insert_canonical_block};
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.
