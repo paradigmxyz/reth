@@ -63,6 +63,10 @@ impl BlockReader for NoopProvider {
         Ok(None)
     }
 
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        Ok(None)
+    }
+
     fn ommers(&self, _id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
         Ok(None)
     }

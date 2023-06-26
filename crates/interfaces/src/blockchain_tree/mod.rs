@@ -216,6 +216,9 @@ pub trait BlockchainTreeViewer: Send + Sync {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
     }
 
+    /// Returns the pending block and its receipts.
+    fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)>;
+
     /// Returns the pending receipts if there is one.
     fn pending_receipts(&self) -> Option<Vec<Receipt>> {
         self.receipts_by_block_hash(self.pending_block_num_hash()?.hash)
