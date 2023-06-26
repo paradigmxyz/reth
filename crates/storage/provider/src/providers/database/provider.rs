@@ -2,9 +2,9 @@ use crate::{
     insert_canonical_block,
     post_state::StorageChangeset,
     traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
-    AccountReader, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
-    HashingWriter, HeaderProvider, HistoryWriter, PostState, ProviderError, StageCheckpointReader,
-    StorageReader, TransactionsProvider, WithdrawalsProvider,
+    AccountReader, BlockExecutionWriter, BlockHashProvider, BlockNumProvider, BlockProvider,
+    EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, PostState, ProviderError,
+    StageCheckpointReader, StorageReader, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -191,24 +191,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
 
     // TODO(joshie) TEMPORARY should be moved to trait providers
 
-    /// Get range of blocks and its execution result
-    pub fn get_block_and_execution_range(
-        &self,
-        chain_spec: &ChainSpec,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
-        self.get_take_block_and_execution_range::<false>(chain_spec, range)
-    }
-
-    /// Take range of blocks and its execution result
-    pub fn take_block_and_execution_range(
-        &self,
-        chain_spec: &ChainSpec,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
-        self.get_take_block_and_execution_range::<true>(chain_spec, range)
-    }
-
     /// Traverse over changesets and plain state and recreate the [`PostState`]s for the given range
     /// of blocks.
     ///
@@ -388,72 +370,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             }
         }
         Ok(block_states.into_values().collect())
-    }
-
-    /// Return range of blocks and its execution result
-    pub fn get_take_block_and_execution_range<const TAKE: bool>(
-        &self,
-        chain_spec: &ChainSpec,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
-        if TAKE {
-            let storage_range = BlockNumberAddress::range(range.clone());
-
-            self.unwind_account_hashing(range.clone())?;
-            self.unwind_account_history_indices(range.clone())?;
-            self.unwind_storage_hashing(storage_range.clone())?;
-            self.unwind_storage_history_indices(storage_range)?;
-
-            // merkle tree
-            let (new_state_root, trie_updates) =
-                StateRoot::incremental_root_with_updates(&self.tx, range.clone())
-                    .map_err(Into::<reth_db::DatabaseError>::into)?;
-
-            let parent_number = range.start().saturating_sub(1);
-            let parent_state_root = self
-                .header_by_number(parent_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
-                .state_root;
-
-            // state root should be always correct as we are reverting state.
-            // but for sake of double verification we will check it again.
-            if new_state_root != parent_state_root {
-                let parent_hash = self
-                    .block_hash(parent_number)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
-                return Err(ProviderError::UnwindStateRootMismatch {
-                    got: new_state_root,
-                    expected: parent_state_root,
-                    block_number: parent_number,
-                    block_hash: parent_hash,
-                }
-                .into())
-            }
-            trie_updates.flush(&self.tx)?;
-        }
-        // get blocks
-        let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
-        let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
-        // get execution res
-        let execution_res = self.get_take_block_execution_result_range::<TAKE>(range.clone())?;
-        // combine them
-        let blocks_with_exec_result: Vec<_> =
-            blocks.into_iter().zip(execution_res.into_iter()).collect();
-
-        // remove block bodies it is needed for both get block range and get block execution results
-        // that is why it is deleted afterwards.
-        if TAKE {
-            // rm block bodies
-            self.get_or_take::<tables::BlockBodyIndices, TAKE>(range)?;
-
-            // Update pipeline progress
-            if let Some(fork_number) = unwind_to {
-                self.update_pipeline_stages(fork_number, true)?;
-            }
-        }
-
-        // return them
-        Ok(blocks_with_exec_result)
     }
 
     /// Return list of entries from table
@@ -1766,5 +1682,72 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         }
 
         Ok(changesets)
+    }
+}
+
+impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseProvider<'this, TX> {
+    fn get_or_take_block_and_execution_range<const TAKE: bool>(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+        if TAKE {
+            let storage_range = BlockNumberAddress::range(range.clone());
+
+            self.unwind_account_hashing(range.clone())?;
+            self.unwind_account_history_indices(range.clone())?;
+            self.unwind_storage_hashing(storage_range.clone())?;
+            self.unwind_storage_history_indices(storage_range)?;
+
+            // merkle tree
+            let (new_state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(&self.tx, range.clone())
+                    .map_err(Into::<reth_db::DatabaseError>::into)?;
+
+            let parent_number = range.start().saturating_sub(1);
+            let parent_state_root = self
+                .header_by_number(parent_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
+                .state_root;
+
+            // state root should be always correct as we are reverting state.
+            // but for sake of double verification we will check it again.
+            if new_state_root != parent_state_root {
+                let parent_hash = self
+                    .block_hash(parent_number)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
+                return Err(ProviderError::UnwindStateRootMismatch {
+                    got: new_state_root,
+                    expected: parent_state_root,
+                    block_number: parent_number,
+                    block_hash: parent_hash,
+                }
+                .into())
+            }
+            trie_updates.flush(&self.tx)?;
+        }
+        // get blocks
+        let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
+        let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
+        // get execution res
+        let execution_res = self.get_take_block_execution_result_range::<TAKE>(range.clone())?;
+        // combine them
+        let blocks_with_exec_result: Vec<_> =
+            blocks.into_iter().zip(execution_res.into_iter()).collect();
+
+        // remove block bodies it is needed for both get block range and get block execution results
+        // that is why it is deleted afterwards.
+        if TAKE {
+            // rm block bodies
+            self.get_or_take::<tables::BlockBodyIndices, TAKE>(range)?;
+
+            // Update pipeline progress
+            if let Some(fork_number) = unwind_to {
+                self.update_pipeline_stages(fork_number, true)?;
+            }
+        }
+
+        // return them
+        Ok(blocks_with_exec_result)
     }
 }

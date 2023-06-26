@@ -1,13 +1,15 @@
 use crate::{
-    BlockIdProvider, BlockNumProvider, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockIdProvider, BlockNumProvider, HeaderProvider, PostState, ReceiptProvider,
+    ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
 };
+use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
-    SealedBlock, SealedHeader, H256,
+    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, ChainSpec,
+    Header, SealedBlock, SealedBlockWithSenders, SealedHeader, H256,
 };
+use std::ops::RangeInclusive;
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -194,4 +196,33 @@ pub trait BlockProviderIdExt: BlockProvider + BlockIdProvider + ReceiptProviderI
     ///
     /// Returns `None` if block is not found.
     fn ommers_by_id(&self, id: BlockId) -> Result<Option<Vec<Header>>>;
+}
+
+/// BlockExecution Writer
+#[auto_impl(&, Arc, Box)]
+pub trait BlockExecutionWriter: Send + Sync {
+    /// Get range of blocks and its execution result
+    fn get_block_and_execution_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+        self.get_or_take_block_and_execution_range::<false>(chain_spec, range)
+    }
+
+    /// Take range of blocks and its execution result
+    fn take_block_and_execution_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+        self.get_or_take_block_and_execution_range::<true>(chain_spec, range)
+    }
+
+    /// Return range of blocks and its execution result
+    fn get_or_take_block_and_execution_range<const TAKE: bool>(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>>;
 }

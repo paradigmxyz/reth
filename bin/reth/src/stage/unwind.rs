@@ -13,7 +13,7 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::ProviderFactory;
+use reth_provider::{BlockExecutionWriter, ProviderFactory};
 use std::{ops::RangeInclusive, sync::Arc};
 
 /// `reth stage unwind` command

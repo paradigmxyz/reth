@@ -22,7 +22,7 @@ use reth_primitives::{
 use reth_provider::{
     chain::{ChainSplit, SplitAt},
     post_state::PostState,
-    BlockNumProvider, CanonStateNotification, CanonStateNotificationSender,
+    BlockExecutionWriter, BlockNumProvider, CanonStateNotification, CanonStateNotificationSender,
     CanonStateNotifications, Chain, DatabaseProvider, DisplayBlocksChain, ExecutorFactory,
     HeaderProvider,
 };
