@@ -103,22 +103,6 @@ impl ExecInput {
     }
 }
 
-/// The output of a stage execution.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct ExecOutput {
-    /// How far the stage got.
-    pub checkpoint: StageCheckpoint,
-    /// Whether or not the stage is done.
-    pub done: bool,
-}
-
-impl ExecOutput {
-    /// Mark the stage as done, checkpointing at the given place.
-    pub fn done(checkpoint: StageCheckpoint) -> Self {
-        Self { checkpoint, done: true }
-    }
-}
-
 /// Stage unwind input, see [Stage::unwind].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
@@ -151,6 +135,22 @@ impl UnwindInput {
 
         let is_final_range = unwind_to == self.unwind_to;
         (start..=end.block_number, unwind_to, is_final_range)
+    }
+}
+
+/// The output of a stage execution.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ExecOutput {
+    /// How far the stage got.
+    pub checkpoint: StageCheckpoint,
+    /// Whether or not the stage is done.
+    pub done: bool,
+}
+
+impl ExecOutput {
+    /// Mark the stage as done, checkpointing at the given place.
+    pub fn done(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: true }
     }
 }
 
