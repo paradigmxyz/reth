@@ -3,47 +3,6 @@ use reth_primitives::{BlockHash, BlockNumber, H256};
 use reth_trie::StateRootError;
 use std::fmt::Debug;
 
-/// An error that can occur when using the transaction container
-#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
-pub enum TransactionError {
-    /// The transaction encountered a database error.
-    #[error(transparent)]
-    Database(#[from] DbError),
-    /// The transaction encountered a database integrity error.
-    #[error(transparent)]
-    DatabaseIntegrity(#[from] ProviderError),
-    /// The trie error.
-    #[error(transparent)]
-    TrieError(#[from] StateRootError),
-    /// Root mismatch
-    #[error("Merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
-    StateRootMismatch {
-        /// Expected root
-        expected: H256,
-        /// Calculated root
-        got: H256,
-        /// Block number
-        block_number: BlockNumber,
-        /// Block hash
-        block_hash: BlockHash,
-    },
-    /// Root mismatch during unwind
-    #[error("Unwind merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
-    UnwindStateRootMismatch {
-        /// Expected root
-        expected: H256,
-        /// Calculated root
-        got: H256,
-        /// Target block number
-        block_number: BlockNumber,
-        /// Block hash
-        block_hash: BlockHash,
-    },
-    /// Internal interfaces error
-    #[error("Internal error")]
-    InternalError(#[from] reth_interfaces::Error),
-}
-
 #[cfg(test)]
 mod test {
     use crate::{

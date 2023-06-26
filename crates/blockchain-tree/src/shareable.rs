@@ -11,7 +11,8 @@ use reth_interfaces::{
     Error,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader,
 };
 use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, ExecutorFactory,
@@ -151,6 +152,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn pending_block(&self) -> Option<SealedBlock> {
         trace!(target: "blockchain_tree", "Returning first pending block");
         self.tree.read().pending_block().cloned()
+    }
+
+    fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>> {
+        let tree = self.tree.read();
+        Some(tree.receipts_by_block_hash(block_hash)?.to_vec())
     }
 }
 

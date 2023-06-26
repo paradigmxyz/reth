@@ -1,4 +1,4 @@
-use crate::BlockNumProvider;
+use crate::BlockNumReader;
 use reth_interfaces::Result;
 use reth_primitives::{
     Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
@@ -8,7 +8,7 @@ use std::ops::RangeBounds;
 
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionsProvider: BlockNumProvider + Send + Sync {
+pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     /// Get internal transaction identifier by transaction hash.
     ///
     /// This is the inverse of [TransactionsProvider::transaction_by_id].

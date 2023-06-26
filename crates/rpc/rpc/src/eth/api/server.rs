@@ -16,7 +16,7 @@ use reth_primitives::{
     H256, H64, U256, U64,
 };
 use reth_provider::{
-    BlockIdProvider, BlockProvider, BlockProviderIdExt, EvmEnvProvider, HeaderProvider,
+    BlockIdReader, BlockReader, BlockReaderIdExt, EvmEnvProvider, HeaderProvider,
     StateProviderFactory,
 };
 use reth_rpc_api::EthApiServer;
@@ -33,9 +33,9 @@ impl<Provider, Pool, Network> EthApiServer for EthApi<Provider, Pool, Network>
 where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
-    Provider: BlockProvider
-        + BlockIdProvider
-        + BlockProviderIdExt
+    Provider: BlockReader
+        + BlockIdReader
+        + BlockReaderIdExt
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider

@@ -285,10 +285,10 @@ where
                 listener.discarded(tx.hash());
                 Err(PoolError::InvalidTransaction(*tx.hash(), err))
             }
-            TransactionValidationOutcome::Error(tx, err) => {
+            TransactionValidationOutcome::Error(tx_hash, err) => {
                 let mut listener = self.event_listener.write();
-                listener.discarded(tx.hash());
-                Err(PoolError::Other(*tx.hash(), err))
+                listener.discarded(&tx_hash);
+                Err(PoolError::Other(tx_hash, err))
             }
         }
     }

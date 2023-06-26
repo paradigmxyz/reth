@@ -10,7 +10,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock, H256};
-use reth_provider::{BlockIdProvider, BlockProvider, EvmEnvProvider};
+use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
 use reth_tasks::TaskSpawner;
@@ -66,7 +66,7 @@ impl<Provider, Pool> EthFilter<Provider, Pool> {
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
 where
-    Provider: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Executes the given filter on a new task.
@@ -178,7 +178,7 @@ where
 #[async_trait]
 impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
 where
-    Provider: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
@@ -274,7 +274,7 @@ struct EthFilterInner<Provider, Pool> {
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
 where
-    Provider: BlockProvider + BlockIdProvider + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.

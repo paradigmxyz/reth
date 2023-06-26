@@ -73,7 +73,7 @@ pub(crate) async fn initialize_with_db_metrics(
         // TODO: A generic stats abstraction for other DB types to deduplicate this and `reth db
         // stats`
         let _ = db.view(|tx| {
-            for table in tables::TABLES.iter().map(|(_, name)| name) {
+            for table in tables::Tables::ALL.iter().map(|table| table.name()) {
                 let table_db =
                     tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 
@@ -89,10 +89,10 @@ pub(crate) async fn initialize_with_db_metrics(
                 let num_pages = leaf_pages + branch_pages + overflow_pages;
                 let table_size = page_size * num_pages;
 
-                absolute_counter!("db.table_size", table_size as u64, "table" => *table);
-                absolute_counter!("db.table_pages", leaf_pages as u64, "table" => *table, "type" => "leaf");
-                absolute_counter!("db.table_pages", branch_pages as u64, "table" => *table, "type" => "branch");
-                absolute_counter!("db.table_pages", overflow_pages as u64, "table" => *table, "type" => "overflow");
+                absolute_counter!("db.table_size", table_size as u64, "table" => table);
+                absolute_counter!("db.table_pages", leaf_pages as u64, "table" => table, "type" => "leaf");
+                absolute_counter!("db.table_pages", branch_pages as u64, "table" => table, "type" => "branch");
+                absolute_counter!("db.table_pages", overflow_pages as u64, "table" => table, "type" => "overflow");
             }
 
             Ok::<(), eyre::Report>(())

@@ -41,7 +41,13 @@ Assuming you have done that, run:
 RUST_LOG=info lighthouse bn \
     --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
     --execution-endpoint http://localhost:8551 \
-    --execution-jwt ~/.local/share/reth/jwtsecret/jwt.hex
+    --execution-jwt ~/.local/share/reth/mainnet/jwt.hex
+```
+
+If you don't intend on running validators on your node you can add :
+
+``` bash
+  --disable-deposit-contract-sync
 ```
 
 Your Reth node should start receiving "fork choice updated" messages, and begin syncing the chain.

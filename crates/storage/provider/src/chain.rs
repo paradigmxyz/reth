@@ -126,6 +126,12 @@ impl Chain {
         Self { state, blocks: block_num_hash }
     }
 
+    /// Get all receipts for the given block.
+    pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<&[Receipt]> {
+        let num = self.block_number(block_hash)?;
+        Some(self.state.receipts(num))
+    }
+
     /// Get all receipts with attachment.
     ///
     /// Attachment includes block number, block hash, transaction hash and transaction index.

@@ -404,7 +404,7 @@ mod tests {
             TestHeadersClient,
         };
         use reth_primitives::U256;
-        use reth_provider::{BlockHashProvider, BlockNumProvider, HeaderProvider};
+        use reth_provider::{BlockHashReader, BlockNumReader, HeaderProvider};
         use std::sync::Arc;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {

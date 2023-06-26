@@ -4,7 +4,6 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::SealedHeader;
-use reth_provider::TransactionError;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -59,9 +58,6 @@ pub enum StageError {
     /// The stage encountered a database integrity error.
     #[error("A database integrity error occurred: {0}")]
     DatabaseIntegrity(#[from] ProviderError),
-    /// The stage encountered an error related to the current database transaction.
-    #[error("A database transaction error occurred: {0}")]
-    Transaction(#[from] TransactionError),
     /// Invalid download response. Applicable for stages which
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
@@ -92,8 +88,7 @@ impl StageError {
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageCheckpoint(_) |
                 StageError::ChannelClosed |
-                StageError::Fatal(_) |
-                StageError::Transaction(_)
+                StageError::Fatal(_)
         )
     }
 }

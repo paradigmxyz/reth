@@ -4,7 +4,7 @@ use crate::{
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
-    metrics::TransactionsManagerMetrics,
+    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
@@ -13,6 +13,7 @@ use reth_eth_wire::{
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
+use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
@@ -109,7 +110,7 @@ pub struct TransactionsManager<Pool> {
     /// Incoming commands from [`TransactionsHandle`].
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
-    transaction_events: UnboundedReceiverStream<NetworkTransactionEvent>,
+    transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -140,7 +141,10 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: ReceiverStream::new(pending),
-            transaction_events: UnboundedReceiverStream::new(from_network),
+            transaction_events: UnboundedMeteredReceiver::new(
+                from_network,
+                NETWORK_POOL_TRANSACTIONS_SCOPE,
+            ),
             metrics: Default::default(),
         }
     }
@@ -156,6 +160,10 @@ where
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
+    }
+
+    fn update_import_metrics(&self) {
+        self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
     }
 
     /// Request handler for an incoming request for transactions
@@ -538,6 +546,10 @@ where
             }
         }
 
+        this.inflight_requests.shrink_to_fit();
+
+        this.update_import_metrics();
+
         // Advance all imports
         while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
             match import_res {
@@ -557,6 +569,8 @@ where
                 }
             }
         }
+
+        this.update_import_metrics();
 
         // handle and propagate new transactions
         let mut new_txs = Vec::new();

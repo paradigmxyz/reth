@@ -18,10 +18,10 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    SealedHeader, H256, U256,
+    H256, U256,
 };
 use reth_provider::{
-    BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
+    BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
@@ -29,7 +29,6 @@ use reth_rpc_types::engine::{
 };
 use reth_stages::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
-use schnellru::{ByLength, LruMap};
 use std::{
     pin::Pin,
     sync::Arc,
@@ -52,6 +51,8 @@ pub use error::{
     BeaconOnNewPayloadError,
 };
 
+mod invalid_headers;
+use invalid_headers::InvalidHeaderCache;
 mod metrics;
 
 mod event;
@@ -68,7 +69,7 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
 /// for more information.
-pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = 2 * EPOCH_SLOTS;
+pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
@@ -216,7 +217,7 @@ pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
-    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointReader,
+    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -256,7 +257,7 @@ where
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointReader + 'static,
+    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -670,7 +671,7 @@ where
         error: Error,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
-        warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
+        warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
 
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
@@ -1287,7 +1288,7 @@ where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     BT: BlockchainTreeEngine
-        + BlockProvider
+        + BlockReader
         + CanonChainTracker
         + StageCheckpointReader
         + Unpin
@@ -1347,37 +1348,6 @@ where
                 }
             }
         }
-    }
-}
-
-/// Keeps track of invalid headers.
-struct InvalidHeaderCache {
-    /// This maps a header hash to a reference to its invalid ancestor.
-    headers: LruMap<H256, Arc<Header>>,
-}
-
-impl InvalidHeaderCache {
-    fn new(max_length: u32) -> Self {
-        Self { headers: LruMap::new(ByLength::new(max_length)) }
-    }
-
-    /// Returns the invalid ancestor's header if it exists in the cache.
-    fn get(&mut self, hash: &H256) -> Option<&mut Arc<Header>> {
-        self.headers.get(hash)
-    }
-
-    /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
-        warn!(target: "consensus::engine", hash=?header_hash, ?invalid_ancestor, "Bad block with existing invalid ancestor");
-        self.headers.insert(header_hash, invalid_ancestor);
-    }
-
-    /// Inserts an invalid ancestor into the map.
-    fn insert(&mut self, invalid_ancestor: SealedHeader) {
-        let hash = invalid_ancestor.hash;
-        let header = invalid_ancestor.unseal();
-        warn!(target: "consensus::engine", ?hash, ?header, "Bad block with hash");
-        self.headers.insert(hash, Arc::new(header));
     }
 }
 
