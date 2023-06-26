@@ -206,11 +206,10 @@ pub enum PruneMode {
 
 impl PruneMode {
     /// Returns target block number to prune towards, inclusive, according to stage prune mode
-    /// [Self] and stage sync checkpoint [StageCheckpoint]. Target block number should also be
-    /// pruned.
-    pub fn target_block_number(&self, sync_checkpoint: StageCheckpoint) -> BlockNumber {
+    /// [Self] and current head [BlockNumber]. Target block number should also be pruned.
+    pub fn target_block_number(&self, head: BlockNumber) -> BlockNumber {
         match *self {
-            PruneMode::Distance(distance) => sync_checkpoint.block_number.saturating_sub(distance),
+            PruneMode::Distance(distance) => head.saturating_sub(distance),
             PruneMode::Before(before_block) => before_block,
         }
         .saturating_sub(1)
