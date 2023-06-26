@@ -131,36 +131,31 @@ where
         percentiles: &[f64],
         header: &SealedHeader,
     ) -> Result<Vec<U256>, EthApiError> {
-        let Some(receipts) =
-            self.cache().get_receipts(header.hash).await? else {
-            // If there are no receipts, then we do not have all info on the block
-            return Err(EthApiError::InvalidBlockRange)
-        };
-        let Some(mut transactions): Option<Vec<_>> = self
+        let (transactions, receipts) = self
             .cache()
-            .get_block_transactions(header.hash).await?
-            .map(|txs|txs
-                .into_iter()
-                .zip(receipts.into_iter())
-                .scan(0, |previous_gas, (tx, receipt)| {
-                    // Convert the cumulative gas used in the receipts
-                    // to the gas usage by the transaction
-                    //
-                    // While we will sum up the gas again later, it is worth
-                    // noting that the order of the transactions will be different,
-                    // so the sum will also be different for each receipt.
-                    let gas_used = receipt.cumulative_gas_used - *previous_gas;
-                    *previous_gas = receipt.cumulative_gas_used;
+            .get_transactions_and_receipts(header.hash)
+            .await?
+            .ok_or(EthApiError::InvalidBlockRange)?;
 
-                    Some(TxGasAndReward {
-                        gas_used,
-                        reward: tx.effective_gas_tip(header.base_fee_per_gas).unwrap_or_default(),
-                    })
+        let mut transactions = transactions
+            .into_iter()
+            .zip(receipts.into_iter())
+            .scan(0, |previous_gas, (tx, receipt)| {
+                // Convert the cumulative gas used in the receipts
+                // to the gas usage by the transaction
+                //
+                // While we will sum up the gas again later, it is worth
+                // noting that the order of the transactions will be different,
+                // so the sum will also be different for each receipt.
+                let gas_used = receipt.cumulative_gas_used - *previous_gas;
+                *previous_gas = receipt.cumulative_gas_used;
+
+                Some(TxGasAndReward {
+                    gas_used,
+                    reward: tx.effective_gas_tip(header.base_fee_per_gas).unwrap_or_default(),
                 })
-                .collect()) else {
-            // If there are no transactions, then we do not have all info on the block
-            return Err(EthApiError::InvalidBlockRange)
-        };
+            })
+            .collect::<Vec<_>>();
 
         // Sort the transactions by their rewards in ascending order
         transactions.sort_by_key(|tx| tx.reward);

@@ -179,6 +179,19 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
+    /// Fetches both transactions and receipts for the given block hash.
+    pub(crate) async fn get_transactions_and_receipts(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<(Vec<TransactionSigned>, Vec<Receipt>)>> {
+        let transactions = self.get_block_transactions(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (transactions, receipts) = futures::try_join!(transactions, receipts)?;
+
+        Ok(transactions.zip(receipts))
+    }
+
     /// Requests the [Receipt] for the block hash
     ///
     /// Returns `None` if the block was not found.
