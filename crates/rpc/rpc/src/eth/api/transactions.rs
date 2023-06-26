@@ -651,54 +651,8 @@ where
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
 {
-    pub(crate) fn sign_request(
-        &self,
-        from: &Address,
-        request: TypedTransactionRequest,
-    ) -> EthResult<TransactionSigned> {
-        for signer in self.inner.signers.iter() {
-            if signer.is_signer_for(from) {
-                return match signer.sign_transaction(request, from) {
-                    Ok(tx) => Ok(tx),
-                    Err(e) => Err(e.into()),
-                }
-            }
-        }
-        Err(EthApiError::InvalidTransactionSignature)
-    }
-
-    /// Get Transaction by [BlockId] and the index of the transaction within that Block.
-    ///
-    /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
-    pub(crate) async fn transaction_by_block_and_tx_index(
-        &self,
-        block_id: impl Into<BlockId>,
-        index: Index,
-    ) -> EthResult<Option<Transaction>> {
-        let block_id = block_id.into();
-
-        if let Some(block) = self.block(block_id).await? {
-            let block_hash = block.hash;
-            let block = block.unseal();
-            if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
-                let tx =
-                    tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-                return Ok(Some(Transaction::from_recovered_with_block_context(
-                    tx,
-                    block_hash,
-                    block.header.number,
-                    block.header.base_fee_per_gas,
-                    index.into(),
-                )))
-            }
-        }
-
-        Ok(None)
-    }
 
     /// Helper function for `eth_getTransactionReceipt`
     ///
@@ -780,6 +734,59 @@ where
         }
 
         Ok(res_receipt)
+    }
+
+}
+
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+where
+    Pool: TransactionPool + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: 'static,
+{
+    pub(crate) fn sign_request(
+        &self,
+        from: &Address,
+        request: TypedTransactionRequest,
+    ) -> EthResult<TransactionSigned> {
+        for signer in self.inner.signers.iter() {
+            if signer.is_signer_for(from) {
+                return match signer.sign_transaction(request, from) {
+                    Ok(tx) => Ok(tx),
+                    Err(e) => Err(e.into()),
+                }
+            }
+        }
+        Err(EthApiError::InvalidTransactionSignature)
+    }
+
+    /// Get Transaction by [BlockId] and the index of the transaction within that Block.
+    ///
+    /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
+    pub(crate) async fn transaction_by_block_and_tx_index(
+        &self,
+        block_id: impl Into<BlockId>,
+        index: Index,
+    ) -> EthResult<Option<Transaction>> {
+        let block_id = block_id.into();
+
+        if let Some(block) = self.block(block_id).await? {
+            let block_hash = block.hash;
+            let block = block.unseal();
+            if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
+                let tx =
+                    tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+                return Ok(Some(Transaction::from_recovered_with_block_context(
+                    tx,
+                    block_hash,
+                    block.header.number,
+                    block.header.base_fee_per_gas,
+                    index.into(),
+                )))
+            }
+        }
+
+        Ok(None)
     }
 }
 /// Represents from where a transaction was fetched.
