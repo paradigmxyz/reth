@@ -561,18 +561,18 @@ mod tests {
         // Requesting a single block should return 1 block (+ base fee for the next block over)
         let fee_history = eth_api.fee_history(1, (newest_block).into(), None).await.unwrap();
         assert_eq!(
-            fee_history.base_fee_per_gas.as_ref().map(|fees| fees.as_ref()),
-            Some(&base_fees_per_gas[base_fees_per_gas.len() - 2..]),
+            &fee_history.base_fee_per_gas,
+            &base_fees_per_gas[base_fees_per_gas.len() - 2..],
             "one: base fee per gas is incorrect"
         );
         assert_eq!(
-            fee_history.base_fee_per_gas.as_ref().map(|fees| fees.len() as u64),
-            Some(2),
+            fee_history.base_fee_per_gas.len(),
+            2,
             "one: should return base fee of the next block as well"
         );
         assert_eq!(
-            fee_history.gas_used_ratio.as_ref().map(|gas| gas.as_ref()),
-            Some(&gas_used_ratios[gas_used_ratios.len() - 1..]),
+            &fee_history.gas_used_ratio,
+            &gas_used_ratios[gas_used_ratios.len() - 1..],
             "one: gas used ratio is incorrect"
         );
         assert_eq!(
@@ -590,18 +590,16 @@ mod tests {
             eth_api.fee_history(block_count, (newest_block).into(), None).await.unwrap();
 
         assert_eq!(
-            fee_history.base_fee_per_gas.as_ref(),
-            Some(&base_fees_per_gas),
+            &fee_history.base_fee_per_gas, &base_fees_per_gas,
             "all: base fee per gas is incorrect"
         );
         assert_eq!(
-            fee_history.base_fee_per_gas.as_ref().map(|fees| fees.len() as u64),
-            Some(&block_count + 1),
+            fee_history.base_fee_per_gas.len() as u64,
+            block_count + 1,
             "all: should return base fee of the next block as well"
         );
         assert_eq!(
-            fee_history.gas_used_ratio.as_ref(),
-            Some(&gas_used_ratios),
+            &fee_history.gas_used_ratio, &gas_used_ratios,
             "all: gas used ratio is incorrect"
         );
         assert_eq!(
