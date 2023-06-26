@@ -1,6 +1,13 @@
-/target
-/book
-/assets
-/.github
-/data
-*.tar.gz
+# ignore all
+*
+
+# exclude source files
+!/bin
+!/crates
+!/testing
+!book.toml
+!Cargo.lock
+!Cargo.toml
+!Cross.toml
+!deny.toml
+!Makefile
