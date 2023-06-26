@@ -42,7 +42,10 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm::primitives::SpecI
     } else if chain_spec.fork(Hardfork::Frontier).active_at_head(&block) {
         revm::primitives::FRONTIER
     } else {
-        panic!("wrong configuration")
+        panic!(
+            "invalid hardfork chainspec: expected at least one hardfork, got {:?}",
+            chain_spec.hardforks
+        )
     }
 }
 

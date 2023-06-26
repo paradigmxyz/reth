@@ -123,7 +123,7 @@ Rust Version (MSRV) which is listed under the `rust-version` key in Reth's
 
 If compilation fails with `(signal: 9, SIGKILL: kill)`, this could mean your machine ran out of
 memory during compilation. If you are on Docker, consider increasing the memory of the container, or use a [pre-built
-binary](../binaries.md).
+binary](../installation/binaries.md).
 
 If compilation fails with `error: linking with cc failed: exit code: 1`, try running `cargo clean`.
 

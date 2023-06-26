@@ -16,6 +16,10 @@ Commands:
           Gets the content of a table for the given key
   drop
           Deletes all database entries
+  version
+          Lists current and local database versions
+  path
+          Returns the full database path
   help
           Print this message or the help of the given subcommand(s)
 
@@ -67,6 +71,7 @@ Usage: reth db stats [OPTIONS]
 
 Options:
   -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `reth db list`
@@ -124,6 +129,42 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+## `reth db version`
+
+```bash
+$ reth db version --help
+Lists current and local database versions
+
+Usage: reth db version [OPTIONS]
+
+Options:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+          
+          Defaults to the OS-specific data directory:
+          
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+          
+          [default: default]
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          
+          Possible values are either a built-in chain or the path to a chain specification file.
+          
+          Built-in chains:
+          - mainnet
+          - goerli
+          - sepolia
+          
+          [default: mainnet]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## `reth db drop`
 
 ```bash
@@ -131,6 +172,32 @@ $ reth db drop --help
 Deletes all database entries
 
 Usage: reth db drop [OPTIONS]
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `reth db version`
+
+```bash
+$ reth db version --help
+Lists current and local database versions
+
+Usage: reth db version [OPTIONS]
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `reth db path`
+
+```bash
+$ reth db path --help
+Returns the full database path
+
+Usage: reth db path [OPTIONS]
 
 Options:
   -h, --help

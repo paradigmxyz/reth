@@ -18,7 +18,7 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    SealedHeader, H256, U256,
+    H256, U256,
 };
 use reth_provider::{
     BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
@@ -29,7 +29,6 @@ use reth_rpc_types::engine::{
 };
 use reth_stages::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
-use schnellru::{ByLength, LruMap};
 use std::{
     pin::Pin,
     sync::Arc,
@@ -52,6 +51,8 @@ pub use error::{
     BeaconOnNewPayloadError,
 };
 
+mod invalid_headers;
+use invalid_headers::InvalidHeaderCache;
 mod metrics;
 
 mod event;
@@ -61,9 +62,14 @@ pub(crate) mod sync;
 use crate::engine::forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
 pub use event::BeaconConsensusEngineEvent;
 use reth_interfaces::blockchain_tree::InsertPayloadOk;
+use reth_primitives::constants::EPOCH_SLOTS;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
+
+/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
+/// for more information.
+pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
@@ -234,6 +240,18 @@ where
     invalid_headers: InvalidHeaderCache,
     /// Consensus engine metrics.
     metrics: EngineMetrics,
+    /// After downloading a block corresponding to a recent forkchoice update, the engine will
+    /// check whether or not we can connect the block to the current canonical chain. If we can't,
+    /// we need to download and execute the missing parents of that block.
+    ///
+    /// When the block can't be connected, its block number will be compared to the canonical head,
+    /// resulting in a heuristic for the number of missing blocks, or the size of the gap between
+    /// the new block and the canonical head.
+    ///
+    /// If the gap is larger than this threshold, the engine will download and execute the missing
+    /// blocks using the pipeline. Otherwise, the engine, sync controller, and blockchain tree will
+    /// be used to download and execute the missing blocks.
+    pipeline_run_threshold: u64,
 }
 
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
@@ -254,6 +272,7 @@ where
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
+        pipeline_run_threshold: u64,
     ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -266,6 +285,7 @@ where
             run_pipeline_continuously,
             payload_builder,
             target,
+            pipeline_run_threshold,
             to_engine,
             rx,
         )
@@ -294,6 +314,7 @@ where
         run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
+        pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
@@ -316,6 +337,7 @@ where
             listeners: EventListeners::default(),
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
+            pipeline_run_threshold,
         };
 
         let maybe_pipeline_target = match target {
@@ -649,7 +671,7 @@ where
         error: Error,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
-        warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
+        warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
 
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
@@ -678,10 +700,7 @@ where
 
         // we assume the FCU is valid and at least the head is missing, so we need to start syncing
         // to it
-
-        // if this is the first FCU we received from the beacon node, then we start triggering the
-        // pipeline
-        if self.forkchoice_state_tracker.is_empty() {
+        let target = if self.forkchoice_state_tracker.is_empty() {
             // find the appropriate target to sync to, if we don't have the safe block hash then we
             // start syncing to the safe block via pipeline first
             let target = if !state.safe_block_hash.is_zero() &&
@@ -694,19 +713,24 @@ where
 
             // we need to first check the buffer for the head and its ancestors
             let lowest_unknown_hash = self.lowest_buffered_ancestor_or(target);
-
-            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering pipeline with target instead of downloading");
-
-            self.sync.set_pipeline_sync_target(lowest_unknown_hash);
+            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for missing ancestors of the new head");
+            lowest_unknown_hash
         } else {
             // we need to first check the buffer for the head and its ancestors
             let lowest_unknown_hash = self.lowest_buffered_ancestor_or(state.head_block_hash);
-
             trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for missing ancestors of the new head");
+            lowest_unknown_hash
+        };
 
+        // if the threshold is zero, we should not download the block first, and just use the
+        // pipeline. Otherwise we use the tree to insert the block first
+        if self.pipeline_run_threshold == 0 {
+            // use the pipeline to sync to the target
+            self.sync.set_pipeline_sync_target(target);
+        } else {
             // trigger a full block download for missing hash, or the parent of its lowest buffered
             // ancestor
-            self.sync.download_full_block(lowest_unknown_hash);
+            self.sync.download_full_block(target);
         }
 
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
@@ -735,21 +759,19 @@ where
         head: Header,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
-        // 7. Client software MUST ensure that payloadAttributes.timestamp is
-        //    greater than timestamp of a block referenced by
-        //    forkchoiceState.headBlockHash. If this condition isn't held client
-        //    software MUST respond with -38003: `Invalid payload attributes` and
-        //    MUST NOT begin a payload build process. In such an event, the
-        //    forkchoiceState update MUST NOT be rolled back.
+        // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
+        //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
+        //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
+        //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
+        //    be rolled back.
         if attrs.timestamp <= head.timestamp.into() {
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 
         // 8. Client software MUST begin a payload build process building on top of
-        //    forkchoiceState.headBlockHash and identified via buildProcessId value
-        //    if payloadAttributes is not null and the forkchoice state has been
-        //    updated successfully. The build process is specified in the Payload
-        //    building section.
+        //    forkchoiceState.headBlockHash and identified via buildProcessId value if
+        //    payloadAttributes is not null and the forkchoice state has been updated successfully.
+        //    The build process is specified in the Payload building section.
         let attributes = PayloadBuilderAttributes::new(state.head_block_hash, attrs);
 
         // send the payload to the builder and return the receiver for the pending payload id,
@@ -797,9 +819,7 @@ where
         let block_hash = block.hash();
 
         // now check the block itself
-        if let Some(status) = self.check_invalid_ancestor(block.parent_hash) {
-            // The parent is invalid, so this block is also invalid
-            self.invalid_headers.insert(block.header);
+        if let Some(status) = self.check_invalid_ancestor_with_head(block.parent_hash, block.hash) {
             return Ok(status)
         }
 
@@ -821,7 +841,7 @@ where
                 Ok(status)
             }
             Err(error) => {
-                debug!(target: "consensus::engine", ?error, "Error while processing payload");
+                warn!(target: "consensus::engine", ?error, "Error while processing payload");
                 self.map_insert_error(error)
             }
         };
@@ -1030,14 +1050,45 @@ where
                         self.try_make_sync_target_canonical(num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
-                        // continue downloading the missing parent
-                        self.sync.download_full_block(missing_parent.hash);
+                        // compare the missing parent with the canonical tip
+                        let canonical_tip_num = self.blockchain.canonical_tip().number;
+
+                        // if the number of missing blocks is greater than the max, run the
+                        // pipeline
+                        if missing_parent.number >= canonical_tip_num &&
+                            missing_parent.number - canonical_tip_num >
+                                self.pipeline_run_threshold
+                        {
+                            if let Some(state) = self.forkchoice_state_tracker.sync_target_state() {
+                                // if we have already canonicalized the finalized block, we should
+                                // skip the pipeline run
+                                if Ok(None) ==
+                                    self.blockchain.header_by_hash_or_number(
+                                        state.finalized_block_hash.into(),
+                                    )
+                                {
+                                    self.sync.set_pipeline_sync_target(state.finalized_block_hash)
+                                }
+                            }
+                        } else {
+                            // continue downloading the missing parent
+                            //
+                            // this happens if either:
+                            //  * the missing parent block num < canonical tip num
+                            //    * this case represents a missing block on a fork that is shorter
+                            //      than the canonical chain
+                            //  * the missing parent block num >= canonical tip num, but the number
+                            //    of missing blocks is less than the pipeline threshold
+                            //    * this case represents a potentially long range of blocks to
+                            //      download and execute
+                            self.sync.download_full_block(missing_parent.hash);
+                        }
                     }
                     _ => (),
                 }
             }
             Err(err) => {
-                debug!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
+                warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
                 if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
                     // non-internal error kinds occur if the payload is invalid
                     self.invalid_headers.insert(err.into_block().header);
@@ -1251,20 +1302,9 @@ where
         // Process all incoming messages from the CL, these can affect the state of the
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
-            // If a new pipeline run is pending we poll the sync controller first so that it takes
-            // precedence over any FCU messages. This ensures that a queued pipeline run via
-            // [EngineSyncController::set_pipeline_sync_target] are processed before any forkchoice
-            // updates.
-            if this.sync.is_pipeline_sync_pending() {
-                // the next event is guaranteed to be a [EngineSyncEvent::PipelineStarted]
-                if let Poll::Ready(sync_event) = this.sync.poll(cx) {
-                    if let Some(res) = this.on_sync_event(sync_event) {
-                        return Poll::Ready(res)
-                    }
-                }
-            }
+            let mut engine_messages_pending = false;
 
-            // handle next engine message, else exit the loop
+            // handle next engine message
             match this.engine_message_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(msg)) => match msg {
                     BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
@@ -1289,52 +1329,25 @@ where
                 }
                 Poll::Pending => {
                     // no more CL messages to process
-                    break
+                    engine_messages_pending = true;
+                }
+            }
+
+            // process sync events if any
+            match this.sync.poll(cx) {
+                Poll::Ready(sync_event) => {
+                    if let Some(res) = this.on_sync_event(sync_event) {
+                        return Poll::Ready(res)
+                    }
+                }
+                Poll::Pending => {
+                    if engine_messages_pending {
+                        // both the sync and the engine message receiver are pending
+                        return Poll::Pending
+                    }
                 }
             }
         }
-
-        // drain the sync controller
-        while let Poll::Ready(sync_event) = this.sync.poll(cx) {
-            if let Some(res) = this.on_sync_event(sync_event) {
-                return Poll::Ready(res)
-            }
-        }
-
-        Poll::Pending
-    }
-}
-
-/// Keeps track of invalid headers.
-struct InvalidHeaderCache {
-    /// This maps a header hash to a reference to its invalid ancestor.
-    headers: LruMap<H256, Arc<Header>>,
-}
-
-impl InvalidHeaderCache {
-    fn new(max_length: u32) -> Self {
-        Self { headers: LruMap::new(ByLength::new(max_length)) }
-    }
-
-    /// Returns the invalid ancestor's header if it exists in the cache.
-    fn get(&mut self, hash: &H256) -> Option<&mut Arc<Header>> {
-        self.headers.get(hash)
-    }
-
-    /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    fn insert_with_invalid_ancestor(&mut self, header_hash: H256, invalid_ancestor: Arc<Header>) {
-        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
-        header_hash, invalid_ancestor);
-        self.headers.insert(header_hash, invalid_ancestor);
-    }
-
-    /// Inserts an invalid ancestor into the map.
-    fn insert(&mut self, invalid_ancestor: SealedHeader) {
-        let hash = invalid_ancestor.hash;
-        let header = invalid_ancestor.unseal();
-        warn!(target: "consensus::engine", "Bad block with header hash: {:?}, invalid ancestor: {:?}",
-        hash, header);
-        self.headers.insert(hash, Arc::new(header));
     }
 }
 
@@ -1434,52 +1447,112 @@ mod tests {
         }
     }
 
-    fn setup_consensus_engine(
+    struct TestConsensusEngineBuilder {
         chain_spec: Arc<ChainSpec>,
         pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
         executor_results: Vec<PostState>,
-    ) -> (TestBeaconConsensusEngine, TestEnv<Arc<Env<WriteMap>>>) {
-        reth_tracing::init_test_tracing();
-        let db = create_test_rw_db();
-        let consensus = TestConsensus::default();
-        let payload_builder = spawn_test_payload_service();
+        pipeline_run_threshold: Option<u64>,
+        max_block: Option<BlockNumber>,
+    }
 
-        let executor_factory = TestExecutorFactory::new(chain_spec.clone());
-        executor_factory.extend(executor_results);
+    impl TestConsensusEngineBuilder {
+        /// Create a new `TestConsensusEngineBuilder` with the given `ChainSpec`.
+        fn new(chain_spec: Arc<ChainSpec>) -> Self {
+            Self {
+                chain_spec,
+                pipeline_exec_outputs: VecDeque::new(),
+                executor_results: Vec::new(),
+                pipeline_run_threshold: None,
+                max_block: None,
+            }
+        }
 
-        // Setup pipeline
-        let (tip_tx, tip_rx) = watch::channel(H256::default());
-        let pipeline = Pipeline::builder()
-            .add_stages(TestStages::new(pipeline_exec_outputs, Default::default()))
-            .with_tip_sender(tip_tx)
-            .build(db.clone(), chain_spec.clone());
+        /// Set the pipeline execution outputs to use for the test consensus engine.
+        fn with_pipeline_exec_outputs(
+            mut self,
+            pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
+        ) -> Self {
+            self.pipeline_exec_outputs = pipeline_exec_outputs;
+            self
+        }
 
-        // Setup blockchain tree
-        let externals =
-            TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec.clone());
-        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
-        let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, canon_state_notification_sender, config)
-                .expect("failed to create tree"),
-        );
-        let factory = ProviderFactory::new(db.clone(), chain_spec.clone());
-        let latest = chain_spec.genesis_header().seal_slow();
-        let blockchain_provider = BlockchainProvider::with_latest(factory, tree, latest);
-        let (engine, handle) = BeaconConsensusEngine::new(
-            NoopFullBlockClient::default(),
-            pipeline,
-            blockchain_provider,
-            Box::<TokioTaskExecutor>::default(),
-            Box::<NoopSyncStateUpdater>::default(),
-            None,
-            false,
-            payload_builder,
-            None,
-        )
-        .expect("failed to create consensus engine");
+        /// Set the executor results to use for the test consensus engine.
+        fn with_executor_results(mut self, executor_results: Vec<PostState>) -> Self {
+            self.executor_results = executor_results;
+            self
+        }
 
-        (engine, TestEnv::new(db, tip_rx, handle))
+        /// Sets the max block for the pipeline to run.
+        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+            self.max_block = Some(max_block);
+            self
+        }
+
+        /// Disables blockchain tree driven sync. This is the same as setting the pipeline run
+        /// threshold to 0.
+        fn disable_blockchain_tree_sync(mut self) -> Self {
+            self.pipeline_run_threshold = Some(0);
+            self
+        }
+
+        /// Builds the test consensus engine into a `TestConsensusEngine` and `TestEnv`.
+        fn build(self) -> (TestBeaconConsensusEngine, TestEnv<Arc<Env<WriteMap>>>) {
+            reth_tracing::init_test_tracing();
+            let db = create_test_rw_db();
+            let consensus = TestConsensus::default();
+            let payload_builder = spawn_test_payload_service();
+
+            let executor_factory = TestExecutorFactory::new(self.chain_spec.clone());
+            executor_factory.extend(self.executor_results);
+
+            // Setup pipeline
+            let (tip_tx, tip_rx) = watch::channel(H256::default());
+            let mut pipeline = Pipeline::builder()
+                .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
+                .with_tip_sender(tip_tx);
+
+            if let Some(max_block) = self.max_block {
+                pipeline = pipeline.with_max_block(max_block);
+            }
+
+            let pipeline = pipeline.build(db.clone(), self.chain_spec.clone());
+
+            // Setup blockchain tree
+            let externals = TreeExternals::new(
+                db.clone(),
+                consensus,
+                executor_factory,
+                self.chain_spec.clone(),
+            );
+            let config = BlockchainTreeConfig::new(1, 2, 3, 2);
+            let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
+            let tree = ShareableBlockchainTree::new(
+                BlockchainTree::new(externals, canon_state_notification_sender, config)
+                    .expect("failed to create tree"),
+            );
+            let shareable_db = ProviderFactory::new(db.clone(), self.chain_spec.clone());
+            let latest = self.chain_spec.genesis_header().seal_slow();
+            let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
+            let (mut engine, handle) = BeaconConsensusEngine::new(
+                NoopFullBlockClient::default(),
+                pipeline,
+                blockchain_provider,
+                Box::<TokioTaskExecutor>::default(),
+                Box::<NoopSyncStateUpdater>::default(),
+                None,
+                false,
+                payload_builder,
+                None,
+                self.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
+            )
+            .expect("failed to create consensus engine");
+
+            if let Some(max_block) = self.max_block {
+                engine.sync.set_max_block(max_block)
+            }
+
+            (engine, TestEnv::new(db, tip_rx, handle))
+        }
     }
 
     fn spawn_consensus_engine(
@@ -1503,11 +1576,13 @@ mod tests {
                 .paris_activated()
                 .build(),
         );
-        let (consensus_engine, env) = setup_consensus_engine(
-            chain_spec.clone(),
-            VecDeque::from([Err(StageError::ChannelClosed)]),
-            Vec::default(),
-        );
+
+        let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+            .with_pipeline_exec_outputs(VecDeque::from([Err(StageError::ChannelClosed)]))
+            .disable_blockchain_tree_sync()
+            .with_max_block(1)
+            .build();
+
         let res = spawn_consensus_engine(consensus_engine);
 
         let _ = env
@@ -1532,11 +1607,13 @@ mod tests {
                 .paris_activated()
                 .build(),
         );
-        let (consensus_engine, env) = setup_consensus_engine(
-            chain_spec.clone(),
-            VecDeque::from([Err(StageError::ChannelClosed)]),
-            Vec::default(),
-        );
+
+        let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+            .with_pipeline_exec_outputs(VecDeque::from([Err(StageError::ChannelClosed)]))
+            .disable_blockchain_tree_sync()
+            .with_max_block(1)
+            .build();
+
         let mut rx = spawn_consensus_engine(consensus_engine);
 
         // consensus engine is idle
@@ -1572,14 +1649,16 @@ mod tests {
                 .paris_activated()
                 .build(),
         );
-        let (consensus_engine, env) = setup_consensus_engine(
-            chain_spec.clone(),
-            VecDeque::from([
+
+        let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+            .with_pipeline_exec_outputs(VecDeque::from([
                 Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true }),
                 Err(StageError::ChannelClosed),
-            ]),
-            Vec::default(),
-        );
+            ]))
+            .disable_blockchain_tree_sync()
+            .with_max_block(2)
+            .build();
+
         let rx = spawn_consensus_engine(consensus_engine);
 
         let _ = env
@@ -1605,15 +1684,16 @@ mod tests {
                 .paris_activated()
                 .build(),
         );
-        let (mut consensus_engine, env) = setup_consensus_engine(
-            chain_spec.clone(),
-            VecDeque::from([Ok(ExecOutput {
+
+        let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+            .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(max_block),
                 done: true,
-            })]),
-            Vec::default(),
-        );
-        consensus_engine.sync.set_max_block(max_block);
+            })]))
+            .with_max_block(max_block)
+            .disable_blockchain_tree_sync()
+            .build();
+
         let rx = spawn_consensus_engine(consensus_engine);
 
         let _ = env
@@ -1639,7 +1719,7 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use reth_db::{tables, transaction::DbTxMut};
-        use reth_interfaces::test_utils::generators::random_block;
+        use reth_interfaces::test_utils::{generators, generators::random_block};
         use reth_rpc_types::engine::ForkchoiceUpdateError;
 
         #[tokio::test]
@@ -1651,14 +1731,13 @@ mod tests {
                     .paris_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
+
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
                     checkpoint: StageCheckpoint::new(0),
-                })]),
-                Vec::default(),
-            );
+                    done: true,
+                })]))
+                .build();
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
@@ -1675,6 +1754,7 @@ mod tests {
 
         #[tokio::test]
         async fn valid_forkchoice() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1682,17 +1762,16 @@ mod tests {
                     .paris_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
-                Vec::default(),
-            );
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
+                })]))
+                .build();
+
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
             env.db
                 .update(|tx| {
@@ -1723,6 +1802,8 @@ mod tests {
 
         #[tokio::test]
         async fn unknown_head_hash() {
+            let mut rng = generators::rng();
+
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1730,22 +1811,22 @@ mod tests {
                     .paris_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                ]),
-                Vec::default(),
-            );
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
+                ]))
+                .disable_blockchain_tree_sync()
+                .build();
+
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
-            let next_head = random_block(2, Some(block1.hash), None, Some(0));
+            let next_head = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
             let next_forkchoice_state = ForkchoiceState {
                 head_block_hash: next_head.hash,
                 finalized_block_hash: block1.hash,
@@ -1772,6 +1853,7 @@ mod tests {
 
         #[tokio::test]
         async fn unknown_finalized_hash() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1779,17 +1861,17 @@ mod tests {
                     .paris_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
-                Vec::default(),
-            );
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
+                })]))
+                .disable_blockchain_tree_sync()
+                .build();
+
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let engine = spawn_consensus_engine(consensus_engine);
@@ -1808,6 +1890,7 @@ mod tests {
 
         #[tokio::test]
         async fn forkchoice_updated_pre_merge() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1816,25 +1899,24 @@ mod tests {
                     .paris_at_ttd(U256::from(3))
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                ]),
-                Vec::default(),
-            );
 
-            let genesis = random_block(0, None, None, Some(0));
-            let mut block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
+                ]))
+                .build();
+
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let mut block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block1.header.difficulty = U256::from(1);
 
             // a second pre-merge block
-            let mut block2 = random_block(1, Some(genesis.hash), None, Some(0));
+            let mut block2 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block2.header.difficulty = U256::from(1);
 
             // a transition block
-            let mut block3 = random_block(1, Some(genesis.hash), None, Some(0));
+            let mut block3 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block3.header.difficulty = U256::from(1);
 
             insert_blocks(
@@ -1862,6 +1944,7 @@ mod tests {
 
         #[tokio::test]
         async fn forkchoice_updated_invalid_pow() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1869,17 +1952,16 @@ mod tests {
                     .london_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                    Ok(ExecOutput { done: true, checkpoint: StageCheckpoint::new(0) }),
-                ]),
-                Vec::default(),
-            );
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
+                    Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
+                ]))
+                .build();
+
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
 
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
@@ -1903,12 +1985,13 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_interfaces::test_utils::generators::random_block;
+        use reth_interfaces::test_utils::{generators, generators::random_block};
         use reth_primitives::{Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1916,24 +1999,25 @@ mod tests {
                     .paris_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
+
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
                     checkpoint: StageCheckpoint::new(0),
-                })]),
-                Vec::default(),
-            );
+                    done: true,
+                })]))
+                .build();
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
             // Send new payload
-            let res = env.send_new_payload(random_block(0, None, None, Some(0)).into()).await;
+            let res =
+                env.send_new_payload(random_block(&mut rng, 0, None, None, Some(0)).into()).await;
             // Invalid, because this is a genesis block
             assert_matches!(res, Ok(result) => assert_matches!(result.status, PayloadStatusEnum::Invalid { .. }));
 
             // Send new payload
-            let res = env.send_new_payload(random_block(1, None, None, Some(0)).into()).await;
+            let res =
+                env.send_new_payload(random_block(&mut rng, 1, None, None, Some(0)).into()).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -1942,6 +2026,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_known() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1949,18 +2034,17 @@ mod tests {
                     .paris_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
-                Vec::default(),
-            );
 
-            let genesis = random_block(0, None, None, Some(0));
-            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
-            let block2 = random_block(2, Some(block1.hash), None, Some(0));
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
+                })]))
+                .build();
+
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block2 = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
             insert_blocks(
                 env.db.as_ref(),
                 chain_spec.clone(),
@@ -1992,6 +2076,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_parent_unknown() {
+            let mut rng = generators::rng();
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -1999,16 +2084,15 @@ mod tests {
                     .paris_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
-                    checkpoint: StageCheckpoint::new(0),
-                })]),
-                Vec::default(),
-            );
 
-            let genesis = random_block(0, None, None, Some(0));
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    checkpoint: StageCheckpoint::new(0),
+                    done: true,
+                })]))
+                .build();
+
+            let genesis = random_block(&mut rng, 0, None, None, Some(0));
 
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis].into_iter());
 
@@ -2027,7 +2111,7 @@ mod tests {
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
-            let block = random_block(2, Some(H256::random()), None, Some(0));
+            let block = random_block(&mut rng, 2, Some(H256::random()), None, Some(0));
             let res = env.send_new_payload(block.into()).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
@@ -2056,14 +2140,14 @@ mod tests {
                     .london_activated()
                     .build(),
             );
-            let (consensus_engine, env) = setup_consensus_engine(
-                chain_spec.clone(),
-                VecDeque::from([Ok(ExecOutput {
-                    done: true,
+
+            let (consensus_engine, env) = TestConsensusEngineBuilder::new(chain_spec.clone())
+                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
                     checkpoint: StageCheckpoint::new(0),
-                })]),
-                Vec::from([exec_result2]),
-            );
+                    done: true,
+                })]))
+                .with_executor_results(Vec::from([exec_result2]))
+                .build();
 
             insert_blocks(
                 env.db.as_ref(),

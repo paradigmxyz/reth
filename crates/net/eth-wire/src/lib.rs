@@ -5,6 +5,11 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 //! Implementation of the `eth` wire protocol.
+//!
+//! ## Feature Flags
+//!
+//! - `serde` (default): Enable serde support
+//! - `arbitrary`: Adds `proptest` and `arbitrary` support for wire types.
 
 pub mod builder;
 pub mod capability;

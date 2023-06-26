@@ -16,6 +16,8 @@ pub struct TracingInspectorConfig {
     pub record_state_diff: bool,
     /// Whether to ignore precompile calls.
     pub exclude_precompile_calls: bool,
+    /// Whether to record logs
+    pub record_logs: bool,
 }
 
 impl TracingInspectorConfig {
@@ -27,6 +29,7 @@ impl TracingInspectorConfig {
             record_stack_snapshots: true,
             record_state_diff: false,
             exclude_precompile_calls: false,
+            record_logs: true,
         }
     }
 
@@ -40,6 +43,7 @@ impl TracingInspectorConfig {
             record_stack_snapshots: false,
             record_state_diff: false,
             exclude_precompile_calls: true,
+            record_logs: false,
         }
     }
 
@@ -53,6 +57,7 @@ impl TracingInspectorConfig {
             record_stack_snapshots: true,
             record_state_diff: true,
             exclude_precompile_calls: false,
+            record_logs: false,
         }
     }
 
@@ -95,6 +100,12 @@ impl TracingInspectorConfig {
     /// Configure whether the tracer should record state diffs
     pub fn set_state_diffs(mut self, record_state_diff: bool) -> Self {
         self.record_state_diff = record_state_diff;
+        self
+    }
+
+    /// Configure whether the tracer should record logs
+    pub fn set_record_logs(mut self, record_logs: bool) -> Self {
+        self.record_logs = record_logs;
         self
     }
 }

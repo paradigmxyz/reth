@@ -1,6 +1,6 @@
 [package]
 name = "reth-rpc"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -47,7 +47,7 @@ tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = "0.7"
 pin-project = { workspace = true }
 
-bytes = "1.4"
+bytes.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -61,3 +61,5 @@ futures = { workspace = true }
 
 [dev-dependencies]
 jsonrpsee = { version = "0.18", features = ["client"] }
+assert_matches = "1.5.0"
+tempfile = "3.5.0"

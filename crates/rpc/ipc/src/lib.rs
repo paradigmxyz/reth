@@ -5,7 +5,11 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Reth IPC implementation
+//! Reth IPC transport implementation
+//!
+//! ## Feature Flags
+//!
+//! - `client`: Enables JSON-RPC client support.
 
 #[cfg(unix)]
 pub mod client;

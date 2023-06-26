@@ -1,10 +1,10 @@
-//! Sharded key
+//! Storage sharded key
 
 use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-
+use derive_more::AsRef;
 use reth_primitives::{BlockNumber, H160, H256};
 use serde::{Deserialize, Serialize};
 
@@ -19,11 +19,12 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 /// `Address | Storagekey | 200` -> data is from transition 0 to 200.
 ///
 /// `Address | StorageKey | 300` -> data is from transition 201 to 300.
-#[derive(Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq, AsRef, Serialize, Deserialize)]
 pub struct StorageShardedKey {
     /// Storage account address.
     pub address: H160,
     /// Storage slot with highest transition id.
+    #[as_ref]
     pub sharded_key: ShardedKey<H256>,
 }
 
@@ -31,6 +32,15 @@ impl StorageShardedKey {
     /// Creates a new `StorageShardedKey`.
     pub fn new(address: H160, storage_key: H256, highest_block_number: BlockNumber) -> Self {
         Self { address, sharded_key: ShardedKey { key: storage_key, highest_block_number } }
+    }
+
+    /// Creates a new key with the highest block number set to maximum.
+    /// This is useful when we want to search the last value for a given key.
+    pub fn last(address: H160, storage_key: H256) -> Self {
+        Self {
+            address,
+            sharded_key: ShardedKey { key: storage_key, highest_block_number: u64::MAX },
+        }
     }
 }
 

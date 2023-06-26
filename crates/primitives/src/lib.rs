@@ -8,7 +8,11 @@
 //! Commonly used types in reth.
 //!
 //! This crate contains Ethereum primitive types and helper functions.
-
+//!
+//! ## Feature Flags
+//!
+//! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
+//! - `test-utils`: Export utilities for testing
 pub mod abi;
 mod account;
 pub mod basefee;
@@ -48,7 +52,7 @@ pub use block::{
 pub use bloom::Bloom;
 pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, DisplayHardforks,
-    ForkCondition, GOERLI, MAINNET, SEPOLIA,
+    ForkCondition, ForkTimestamps, GOERLI, MAINNET, SEPOLIA,
 };
 pub use compression::*;
 pub use constants::{

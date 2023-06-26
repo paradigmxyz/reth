@@ -4,7 +4,7 @@ use crate::{
     traits::{CanonicalStateUpdate, ChangedAccount},
     BlockInfo, Pool, TransactionOrdering, TransactionPool, TransactionValidator,
 };
-use futures_util::{Stream, StreamExt};
+use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
 use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
 use reth_provider::{BlockProviderIdExt, CanonStateNotification, PostState, StateProviderFactory};
 use std::{
@@ -18,6 +18,24 @@ use tracing::debug;
 /// last_seen.number`
 const MAX_UPDATE_DEPTH: u64 = 64;
 
+/// Returns a spawnable future for maintaining the state of the transaction pool.
+pub fn maintain_transaction_pool_future<Client, V, T, St>(
+    client: Client,
+    pool: Pool<V, T>,
+    events: St,
+) -> BoxFuture<'static, ()>
+where
+    Client: StateProviderFactory + BlockProviderIdExt + Send + 'static,
+    V: TransactionValidator + Send + 'static,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction> + Send + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+{
+    async move {
+        maintain_transaction_pool(client, pool, events).await;
+    }
+    .boxed()
+}
+
 /// Maintains the state of the transaction pool by handling new blocks and reorgs.
 ///
 /// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
@@ -27,10 +45,10 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
     pool: Pool<V, T>,
     mut events: St,
 ) where
-    Client: StateProviderFactory + BlockProviderIdExt,
-    V: TransactionValidator,
-    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    St: Stream<Item = CanonStateNotification> + Unpin,
+    Client: StateProviderFactory + BlockProviderIdExt + Send + 'static,
+    V: TransactionValidator + Send + 'static,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction> + Send + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {

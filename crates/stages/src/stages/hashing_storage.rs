@@ -16,7 +16,7 @@ use reth_primitives::{
     },
     StorageEntry,
 };
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, HashingWriter, StorageReader};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
@@ -171,12 +171,11 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         } else {
             // Aggregate all changesets and and make list of storages that have been
             // changed.
-            let lists =
-                provider.get_addresses_and_keys_of_changed_storages(from_block..=to_block)?;
+            let lists = provider.changed_storages_with_range(from_block..=to_block)?;
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
-            let storages = provider.get_plainstate_storages(lists)?;
+            let storages = provider.plainstate_storages(lists)?;
             provider.insert_storage_for_hashing(storages.into_iter())?;
         }
 
@@ -231,13 +230,15 @@ mod tests {
         TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
+    use rand::Rng;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         mdbx::{tx::Tx, WriteMap, RW},
         models::{BlockNumberAddress, StoredBlockBodyIndices},
     };
-    use reth_interfaces::test_utils::generators::{
-        random_block_range, random_contract_account_range,
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block_range, random_contract_account_range},
     };
     use reth_primitives::{
         stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
@@ -487,11 +488,12 @@ mod tests {
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.next_block();
             let end = input.target();
+            let mut rng = generators::rng();
 
             let n_accounts = 31;
-            let mut accounts = random_contract_account_range(&mut (0..n_accounts));
+            let mut accounts = random_contract_account_range(&mut rng, &mut (0..n_accounts));
 
-            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..3);
+            let blocks = random_block_range(&mut rng, stage_progress..=end, H256::zero(), 0..3);
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
@@ -510,14 +512,13 @@ mod tests {
                                 transaction.clone().into(),
                             )?;
 
-                            let (addr, _) = accounts
-                                .get_mut(rand::random::<usize>() % n_accounts as usize)
-                                .unwrap();
+                            let (addr, _) =
+                                accounts.get_mut(rng.gen::<usize>() % n_accounts as usize).unwrap();
 
                             for _ in 0..2 {
                                 let new_entry = StorageEntry {
-                                    key: keccak256([rand::random::<u8>()]),
-                                    value: U256::from(rand::random::<u8>() % 30 + 1),
+                                    key: keccak256([rng.gen::<u8>()]),
+                                    value: U256::from(rng.gen::<u8>() % 30 + 1),
                                 };
                                 self.insert_storage_entry(
                                     tx,
@@ -533,14 +534,14 @@ mod tests {
                     )?;
 
                     // Randomize rewards
-                    let has_reward: bool = rand::random();
+                    let has_reward: bool = rng.gen();
                     if has_reward {
                         self.insert_storage_entry(
                             tx,
                             (block_number, Address::random()).into(),
                             StorageEntry {
                                 key: keccak256("mining"),
-                                value: U256::from(rand::random::<u32>()),
+                                value: U256::from(rng.gen::<u32>()),
                             },
                             progress.header.number == stage_progress,
                         )?;

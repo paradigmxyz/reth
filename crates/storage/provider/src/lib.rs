@@ -7,17 +7,22 @@
 
 //! This crate contains a collection of traits and trait implementations for common database
 //! operations.
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountExtReader, AccountReader, AccountWriter, BlockExecutor, BlockHashProvider,
-    BlockIdProvider, BlockNumProvider, BlockProvider, BlockProviderIdExt, BlockSource,
+    AccountExtReader, AccountReader, BlockExecutor, BlockHashProvider, BlockIdProvider,
+    BlockNumProvider, BlockProvider, BlockProviderIdExt, BlockSource,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
-    ExecutorFactory, HeaderProvider, PostStateDataProvider, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StageCheckpointWriter, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
+    ExecutorFactory, HashingWriter, HeaderProvider, HistoryWriter, PostStateDataProvider,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StageCheckpointWriter,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageReader,
+    TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
@@ -31,10 +36,6 @@ pub use providers::{
 pub mod post_state;
 pub use post_state::PostState;
 
-/// Helper types for interacting with the database
-mod transaction;
-pub use transaction::TransactionError;
-
 /// Common database utilities.
 mod utils;
 pub use utils::{insert_block, insert_canonical_block};
@@ -47,4 +48,4 @@ pub mod test_utils;
 pub use reth_interfaces::provider::ProviderError;
 
 pub mod chain;
-pub use chain::Chain;
+pub use chain::{Chain, DisplayBlocksChain};

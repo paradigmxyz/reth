@@ -88,8 +88,8 @@ where
     /// This method is going to return the batch as soon as one of the conditions below
     /// is fulfilled:
     ///     1. The number of non-empty headers in the batch equals requested.
-    ///     2. The total number of headers in the batch (both empty and non-empty)
-    ///        is greater than or equal to the stream batch size.
+    ///     2. The total number of headers in the batch (both empty and non-empty) is greater than
+    ///        or equal to the stream batch size.
     ///     3. Downloader reached the end of the range
     ///
     /// NOTE: The batches returned have a variable length.
@@ -329,10 +329,11 @@ where
 
         // Check if the provided range is the next expected range.
         let is_next_consecutive_range = *range.start() == *self.download_range.end() + 1;
+        let distance = *range.end() - *range.start();
         if is_next_consecutive_range {
             // New range received.
             tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
-            info!(target: "downloaders::bodies", "Downloading bodies {range:?}");
+            info!(target: "downloaders::bodies", distance, "Downloading bodies {range:?}");
             self.download_range = range;
             return Ok(())
         }
@@ -340,7 +341,7 @@ where
         // The block range is reset. This can happen either after unwind or after the bodies were
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
-        info!(target: "downloaders::bodies", "Downloading bodies {range:?}");
+        info!(target: "downloaders::bodies", distance, "Downloading bodies {range:?}");
         self.clear();
         self.download_range = range;
         Ok(())
@@ -595,7 +596,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_interfaces::test_utils::{generators::random_block_range, TestConsensus};
+    use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, H256};
     use std::{collections::HashMap, sync::Arc};
 
@@ -632,7 +633,8 @@ mod tests {
     async fn requests_correct_number_of_times() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let blocks = random_block_range(0..=199, H256::zero(), 1..2);
+        let mut rng = generators::rng();
+        let blocks = random_block_range(&mut rng, 0..=199, H256::zero(), 1..2);
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
         let bodies = blocks

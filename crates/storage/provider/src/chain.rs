@@ -6,7 +6,7 @@ use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TxHash,
 };
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, fmt};
 
 /// A chain of blocks and their final state.
 ///
@@ -126,6 +126,12 @@ impl Chain {
         Self { state, blocks: block_num_hash }
     }
 
+    /// Get all receipts for the given block.
+    pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<&[Receipt]> {
+        let num = self.block_number(block_hash)?;
+        Some(self.state.receipts(num))
+    }
+
     /// Get all receipts with attachment.
     ///
     /// Attachment includes block number, block hash, transaction hash and transaction index.
@@ -214,6 +220,34 @@ impl Chain {
             canonical: Chain { state: canonical_state, blocks: self.blocks },
             pending: Chain { state: self.state, blocks: higher_number_blocks },
         }
+    }
+}
+
+/// Wrapper type for `blocks` display in `Chain`
+pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders>);
+
+impl<'a> fmt::Display for DisplayBlocksChain<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.len() <= 3 {
+            write!(f, "[")?;
+            let mut iter = self.0.values().map(|block| block.num_hash());
+            if let Some(block_num_hash) = iter.next() {
+                write!(f, "{:?}", block_num_hash)?;
+                for block_num_hash_iter in iter {
+                    write!(f, ", {:?}", block_num_hash_iter)?;
+                }
+            }
+            write!(f, "]")?;
+        } else {
+            write!(
+                f,
+                "[{:?}, ..., {:?}]",
+                self.0.values().next().unwrap().num_hash(),
+                self.0.values().last().unwrap().num_hash()
+            )?;
+        }
+
+        Ok(())
     }
 }
 

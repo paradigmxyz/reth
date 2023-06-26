@@ -203,13 +203,18 @@ impl AuthServerConfigBuilder {
     pub fn build(self) -> AuthServerConfig {
         AuthServerConfig {
             socket_addr: self.socket_addr.unwrap_or_else(|| {
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), constants::DEFAULT_AUTH_PORT)
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), constants::DEFAULT_AUTH_PORT)
             }),
             secret: self.secret,
             server_config: self.server_config.unwrap_or_else(|| {
                 ServerBuilder::new()
-                    // allows for 300mb responses (for large eth_getLogs deposit logs)
-                    .max_response_body_size(300 * 1024 * 1024)
+                    // This needs to large enough to handle large eth_getLogs responses and maximum
+                    // payload bodies limit for `engine_getPayloadBodiesByRangeV`
+                    // ~750MB per response should be enough
+                    .max_response_body_size(750 * 1024 * 1024)
+                    // bump the default request size slightly, there aren't any methods exposed with
+                    // dynamic request params that can exceed this
+                    .max_request_body_size(25 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
         }

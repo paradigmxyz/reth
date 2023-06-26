@@ -38,13 +38,13 @@ struct NodeState {
 }
 
 impl NodeState {
-    fn new(network: Option<NetworkHandle>) -> Self {
+    fn new(network: Option<NetworkHandle>, latest_block_number: Option<BlockNumber>) -> Self {
         Self {
             network,
             current_stage: None,
             eta: Eta::default(),
             current_checkpoint: StageCheckpoint::new(0),
-            latest_canonical_engine_block: None,
+            latest_canonical_engine_block: latest_block_number,
         }
     }
 
@@ -190,11 +190,14 @@ impl From<ConsensusLayerHealthEvent> for NodeEvent {
 
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events<E>(network: Option<NetworkHandle>, events: E)
-where
+pub async fn handle_events<E>(
+    network: Option<NetworkHandle>,
+    latest_block_number: Option<BlockNumber>,
+    events: E,
+) where
     E: Stream<Item = NodeEvent> + Unpin,
 {
-    let state = NodeState::new(network);
+    let state = NodeState::new(network, latest_block_number);
 
     let mut info_interval = tokio::time::interval(INFO_MESSAGE_INTERVAL);
     info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

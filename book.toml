@@ -7,6 +7,7 @@ title = "reth Book"
 description = "A book on all things Reth"
 
 [output.html]
+theme = "book/theme"
 git-repository-url = "https://github.com/paradigmxyz/reth"
 default-theme = "ayu"
 no-section-label = true

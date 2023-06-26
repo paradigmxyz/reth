@@ -1,6 +1,6 @@
 [package]
 name = "reth-provider"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -24,7 +24,6 @@ tokio-stream = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 
 # misc
-thiserror = { workspace = true }
 auto_impl = "1.0"
 itertools = "0.10"
 pin-project = { workspace = true }
@@ -42,5 +41,4 @@ reth-trie = { path = "../../trie", features = ["test-utils"] }
 parking_lot = "0.12"
 
 [features]
-bench = []
 test-utils = ["reth-rlp"]

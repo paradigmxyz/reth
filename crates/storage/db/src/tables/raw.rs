@@ -2,7 +2,7 @@ use crate::{
     table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value},
     DatabaseError,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Raw table that can be used to access any table and its data in raw mode.
 /// This is useful for delayed decoding/encoding of data.
@@ -39,7 +39,7 @@ impl<T: DupSort> DupSort for RawDupSort<T> {
 }
 
 /// Raw table key.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RawKey<K: Key> {
     key: Vec<u8>,
     _phantom: std::marker::PhantomData<K>,
