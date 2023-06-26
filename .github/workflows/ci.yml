@@ -52,11 +52,21 @@ jobs:
       - name: Check if documentation builds
         run: RUSTDOCFLAGS="-D warnings" cargo doc --all --no-deps --all-features --document-private-items
 
+  grafana-lint:
+    name: grafana lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check dashboard JSON with jq
+        uses: sergeysova/jq-action@v2
+        with:
+          cmd: jq empty etc/grafana/dashboards/overview.json
+
   lint-success:
     if: always()
     name: lint success
     runs-on: ubuntu-latest
-    needs: [lint, doc-lint]
+    needs: [lint, doc-lint, grafana-lint]
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1
