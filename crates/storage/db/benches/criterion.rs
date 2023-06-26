@@ -8,7 +8,6 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     tables::*,
 };
-use reth_primitives::fs;
 use std::time::Instant;
 
 criterion_group! {

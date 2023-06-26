@@ -15,7 +15,6 @@ use reth_db::{
     mdbx::Env,
     TxHashNumber,
 };
-use reth_primitives::fs;
 use std::{collections::HashSet, time::Instant};
 use test_fuzz::runtime::num_traits::Zero;
 
