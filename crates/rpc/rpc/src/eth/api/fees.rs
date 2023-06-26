@@ -6,9 +6,9 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    basefee::calculate_next_block_base_fee, BlockId, BlockNumberOrTag, Header, U256,
+    basefee::calculate_next_block_base_fee, BlockNumberOrTag, Header, SealedHeader, U256,
 };
-use reth_provider::{BlockProviderIdExt, BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 
@@ -51,7 +51,7 @@ where
             return Err(EthApiError::InvalidBlockRange)
         }
 
-        let Some(end_block) = self.inner.provider.block_number_for_id(newest_block.into())? else {
+        let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
             return Err(EthApiError::UnknownBlockNumber) };
 
         // Check that we would not be querying outside of genesis
@@ -74,7 +74,7 @@ where
         // Treat a request for 1 block as a request for `newest_block..=newest_block`,
         // otherwise `newest_block - 2
         let start_block = end_block - block_count + 1;
-        let headers = self.inner.provider.headers_range(start_block..=end_block)?;
+        let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
         if headers.len() != block_count as usize {
             return Err(EthApiError::InvalidBlockRange)
         }
@@ -90,7 +90,7 @@ where
 
             // Percentiles were specified, so we need to collect reward percentile ino
             if let Some(percentiles) = &reward_percentiles {
-                rewards.push(self.calculate_reward_percentiles(percentiles, header)?);
+                rewards.push(self.calculate_reward_percentiles(percentiles, header).await?);
             }
         }
 
@@ -114,20 +114,19 @@ where
     }
 
     // todo: docs
-    fn calculate_reward_percentiles(
+    async fn calculate_reward_percentiles(
         &self,
         percentiles: &[f64],
-        header: &Header,
+        header: &SealedHeader,
     ) -> Result<Vec<U256>, EthApiError> {
         let Some(receipts) =
-            self.inner.provider.receipts_by_block(header.number.into())? else {
+            self.cache().get_receipts(header.hash.into()).await? else {
             // If there are no receipts, then we do not have all info on the block
             return Err(EthApiError::InvalidBlockRange)
         };
         let Some(mut transactions): Option<Vec<_>> = self
-            .inner
-            .provider
-            .transactions_by_block(header.number.into())?
+            .cache()
+            .get_block_transactions(header.hash).await?
             .map(|txs|txs
                 .into_iter()
                 .zip(receipts.into_iter())
