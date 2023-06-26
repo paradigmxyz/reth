@@ -14,6 +14,8 @@ name: bench
 jobs:
   iai:
     runs-on: ubuntu-latest
+    # Only run benchmarks in merge groups
+    if: github.event_name != 'pull_request'
     steps:
       - name: Checkout main sources
         uses: actions/checkout@v3
