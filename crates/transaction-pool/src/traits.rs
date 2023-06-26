@@ -36,6 +36,9 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// This tracks the block that the pool has last seen.
     fn block_info(&self) -> BlockInfo;
 
+    /// Sets the current block info for the pool.
+    fn set_block_info(&self, info: BlockInfo);
+
     /// Event listener for when the pool needs to be updated
     ///
     /// Implementers need to update the pool accordingly.

@@ -178,13 +178,6 @@ where
         self.inner().config()
     }
 
-    /// Sets the current block info for the pool.
-    #[instrument(skip(self), target = "txpool")]
-    pub fn set_block_info(&self, info: BlockInfo) {
-        trace!(target: "txpool", "updating pool block info");
-        self.pool.set_block_info(info)
-    }
-
     /// Returns future that validates all transaction in the given iterator.
     async fn validate_all(
         &self,
@@ -255,6 +248,12 @@ where
 
     fn block_info(&self) -> BlockInfo {
         self.pool.block_info()
+    }
+
+    #[instrument(skip(self), target = "txpool")]
+    fn set_block_info(&self, info: BlockInfo) {
+        trace!(target: "txpool", "updating pool block info");
+        self.pool.set_block_info(info)
     }
 
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
