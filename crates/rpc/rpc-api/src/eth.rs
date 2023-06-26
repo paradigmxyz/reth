@@ -1,7 +1,7 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
-    serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
-    H256, H64, U256, U64,
+    serde_helper::{num::U64HexOrNumber, JsonStorageKey},
+    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
 };
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, CallRequest, EIP1186AccountProofResponse, FeeHistory,
@@ -194,8 +194,8 @@ pub trait EthApi {
     #[method(name = "feeHistory")]
     async fn fee_history(
         &self,
-        block_count: U64,
-        newest_block: BlockId,
+        block_count: U64HexOrNumber,
+        newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> RpcResult<FeeHistory>;
 
