@@ -69,7 +69,7 @@ impl Command {
 
         let db = Arc::new(init_db(db_path)?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         let execution_checkpoint_block =
             provider_rw.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;

@@ -123,7 +123,7 @@ impl Command {
         info!(target: "reth::cli", "Database opened");
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
