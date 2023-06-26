@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    basefee::calculate_next_block_base_fee, BlockNumberOrTag, Header, SealedHeader, U256,
+    basefee::calculate_next_block_base_fee, BlockNumberOrTag, SealedHeader, U256,
 };
 use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
