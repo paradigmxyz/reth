@@ -1,7 +1,7 @@
 use reth_interfaces::Result;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
 
-use crate::BlockIdProvider;
+use crate::BlockIdReader;
 
 ///  Client trait for fetching [Receipt] data .
 #[auto_impl::auto_impl(&, Arc)]
@@ -29,10 +29,10 @@ pub trait ReceiptProvider: Send + Sync {
 /// which can be a number, hash, or tag such as `BlockNumberOrTag::Safe`.
 ///
 /// Resolving tags requires keeping track of block hashes or block numbers associated with the tag,
-/// so this trait can only be implemented for types that implement `BlockIdProvider`. The
-/// `BlockIdProvider` methods should be used to resolve `BlockId`s to block numbers or hashes, and
+/// so this trait can only be implemented for types that implement `BlockIdReader`. The
+/// `BlockIdReader` methods should be used to resolve `BlockId`s to block numbers or hashes, and
 /// retrieving the receipts should be done using the type's `ReceiptProvider` methods.
-pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdProvider {
+pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     /// Get receipt by block id
     fn receipts_by_block_id(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
         let id = match block {

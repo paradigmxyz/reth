@@ -654,7 +654,7 @@ mod tests {
     };
     use reth_provider::{
         post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
-        AccountReader, BlockHashProvider, StateProvider, StateRootProvider,
+        AccountReader, BlockHashReader, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
@@ -700,7 +700,7 @@ mod tests {
         }
     }
 
-    impl BlockHashProvider for StateProviderTest {
+    impl BlockHashReader for StateProviderTest {
         fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
             Ok(self.block_hash.get(&number).cloned())
         }

@@ -1,5 +1,5 @@
 use crate::{
-    BlockIdProvider, BlockNumProvider, HeaderProvider, PostState, ReceiptProvider,
+    BlockIdReader, BlockNumReader, HeaderProvider, PostState, ReceiptProvider,
     ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
 };
 use auto_impl::auto_impl;
@@ -47,8 +47,8 @@ impl BlockSource {
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from
 /// the database.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockProvider:
-    BlockNumProvider
+pub trait BlockReader:
+    BlockNumReader
     + HeaderProvider
     + TransactionsProvider
     + ReceiptProvider
@@ -104,18 +104,18 @@ pub trait BlockProvider:
     fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>>;
 }
 
-/// Trait extension for `BlockProvider`, for types that implement `BlockId` conversion.
+/// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.
 ///
-/// The `BlockProvider` trait should be implemented on types that can retrieve a block from either
+/// The `BlockReader` trait should be implemented on types that can retrieve a block from either
 /// a block number or hash. However, it might be desirable to fetch a block from a `BlockId` type,
 /// which can be a number, hash, or tag such as `BlockNumberOrTag::Safe`.
 ///
 /// Resolving tags requires keeping track of block hashes or block numbers associated with the tag,
-/// so this trait can only be implemented for types that implement `BlockIdProvider`. The
-/// `BlockIdProvider` methods should be used to resolve `BlockId`s to block numbers or hashes, and
-/// retrieving the block should be done using the type's `BlockProvider` methods.
+/// so this trait can only be implemented for types that implement `BlockIdReader`. The
+/// `BlockIdReader` methods should be used to resolve `BlockId`s to block numbers or hashes, and
+/// retrieving the block should be done using the type's `BlockReader` methods.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockProviderIdExt: BlockProvider + BlockIdProvider + ReceiptProviderIdExt {
+pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     /// Returns the block with matching tag from the database
     ///
     /// Returns `None` if block is not found.

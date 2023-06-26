@@ -1,5 +1,5 @@
 use super::AccountReader;
-use crate::{post_state::PostState, BlockHashProvider, BlockIdProvider};
+use crate::{post_state::PostState, BlockHashReader, BlockIdReader};
 use auto_impl::auto_impl;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
@@ -12,9 +12,7 @@ pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
-pub trait StateProvider:
-    BlockHashProvider + AccountReader + StateRootProvider + Send + Sync
-{
+pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + Send + Sync {
     /// Get storage of given account.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;
 
@@ -96,7 +94,7 @@ pub trait StateProvider:
 /// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
-pub trait StateProviderFactory: BlockIdProvider + Send + Sync {
+pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> Result<StateProviderBox<'_>>;
 

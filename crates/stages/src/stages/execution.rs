@@ -19,7 +19,7 @@ use reth_primitives::{
     BlockNumber, Header, U256,
 };
 use reth_provider::{
-    post_state::PostState, BlockExecutor, BlockProvider, DatabaseProviderRW, ExecutorFactory,
+    post_state::PostState, BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory,
     HeaderProvider, LatestStateProviderRef, ProviderError,
 };
 use std::{ops::RangeInclusive, time::Instant};

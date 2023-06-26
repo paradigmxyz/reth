@@ -1,9 +1,8 @@
 use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
-    BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StageCheckpointReader, StateProviderBox, TransactionsProvider,
-    WithdrawalsProvider,
+    BlockHashReader, BlockNumReader, BlockReader, EvmEnvProvider, HeaderProvider, ProviderError,
+    StageCheckpointReader, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::Result;
@@ -34,14 +33,14 @@ pub struct ProviderFactory<DB> {
 impl<DB: Database> ProviderFactory<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
-    /// [`BlockHashProvider`]. This may fail if the inner read database transaction fails to open.
+    /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     pub fn provider(&self) -> Result<DatabaseProviderRO<'_, DB>> {
         Ok(DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone()))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
-    /// [`BlockHashProvider`].  This may fail if the inner read/write database transaction fails to
+    /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     pub fn provider_rw(&self) -> Result<DatabaseProviderRW<'_, DB>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone())))
@@ -144,7 +143,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> BlockHashProvider for ProviderFactory<DB> {
+impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         self.provider()?.block_hash(number)
     }
@@ -154,7 +153,7 @@ impl<DB: Database> BlockHashProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> BlockNumProvider for ProviderFactory<DB> {
+impl<DB: Database> BlockNumReader for ProviderFactory<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
         self.provider()?.chain_info()
     }
@@ -172,7 +171,7 @@ impl<DB: Database> BlockNumProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> BlockProvider for ProviderFactory<DB> {
+impl<DB: Database> BlockReader for ProviderFactory<DB> {
     fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
         self.provider()?.find_block_by_hash(hash, source)
     }
@@ -329,7 +328,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;
-    use crate::{BlockHashProvider, BlockNumProvider};
+    use crate::{BlockHashReader, BlockNumReader};
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_primitives::{ChainSpecBuilder, H256};
     use std::sync::Arc;
