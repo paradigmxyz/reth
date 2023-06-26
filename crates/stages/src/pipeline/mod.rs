@@ -1,6 +1,4 @@
-use crate::{
-    error::*, ExecInput, ExecOutput, PrunableStage, PruneInput, Stage, StageError, UnwindInput,
-};
+use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
@@ -30,9 +28,6 @@ use sync_metrics::*;
 
 /// A container for a queued stage.
 pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
-
-/// A container for a queued prunable stage.
-pub(crate) type BoxedPrunableStage<DB> = Box<dyn PrunableStage<DB>>;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [Pipeline::run_as_fut].
@@ -102,8 +97,6 @@ pub struct Pipeline<DB: Database> {
     chain_spec: Arc<ChainSpec>,
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
-    /// All configured prunable stages in the order they will be pruned.
-    prunable_stages: Vec<BoxedPrunableStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     /// All listeners for events the pipeline emits.
@@ -470,64 +463,6 @@ where
                 }
             }
         }
-    }
-
-    /// Prunes the stages according to their prune modes.
-    pub async fn prune(&mut self) -> Result<(), PipelineError> {
-        let stages = self.prunable_stages.iter_mut();
-
-        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
-
-        for stage in stages {
-            let stage_id = stage.id();
-            let span = info_span!("Pruning", stage = %stage_id);
-            let _enter = span.enter();
-
-            let Some(sync_checkpoint) = provider_rw.get_stage_sync_checkpoint(stage_id)? else {
-                debug!(
-                    target: "sync::pipeline",
-                    stage = %stage_id,
-                    "Stage sync checkpoint is not found, nothing to prune"
-                );
-                continue
-            };
-            let Some(target) = stage.prune_target(sync_checkpoint) else {
-                debug!(
-                    target: "sync::pipeline",
-                    stage = %stage_id,
-                    "Stage prune target is not set, skipping"
-                );
-                continue
-            };
-
-            let mut checkpoint =
-                provider_rw.get_stage_prune_checkpoint(stage_id)?.unwrap_or_default();
-            // TODO(alexey): emit pipeline events via `self.listeners.notify`
-            while checkpoint < target {
-                match stage.prune(&mut provider_rw, PruneInput { checkpoint, target }).await {
-                    Ok(output) => {
-                        checkpoint = output.checkpoint;
-                        info!(
-                            target: "sync::pipeline",
-                            stage = %stage_id,
-                            %target,
-                            progress = checkpoint,
-                            done = checkpoint == target,
-                            "Stage pruned"
-                        );
-
-                        provider_rw.save_stage_prune_checkpoint(stage_id, checkpoint)?;
-
-                        provider_rw.commit()?;
-                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
-                    }
-                    Err(err) => return Err(PipelineError::Stage(StageError::Fatal(Box::new(err)))),
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 

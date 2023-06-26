@@ -204,55 +204,6 @@ pub enum PruneMode {
     Before(BlockNumber),
 }
 
-/// Stage prune input, see [PrunableStage::prune].
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct PruneInput {
-    /// The highest block number this stage reached the last time it was pruned.
-    pub checkpoint: BlockNumber,
-    /// The block number this stage is pruning towards.
-    pub target: BlockNumber,
-}
-
-/// The output of a stage pruning.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct PruneOutput {
-    /// The highest block number to which the stage has pruned to.
-    pub checkpoint: BlockNumber,
-}
-
-/// A stage is a segmented part of the pruning process of the node.
-#[async_trait::async_trait]
-pub trait PrunableStage<DB: Database>: Send + Sync + Stage<DB> {
-    /// Prune the stage.
-    async fn prune(
-        &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
-        input: PruneInput,
-    ) -> Result<PruneOutput, StageError>;
-
-    /// Returns prune mode of the stage, if any is set.
-    fn prune_mode(&self) -> Option<PruneMode>;
-
-    /// Returns target block number to prune towards, inclusive, according to stage sync checkpoint
-    /// [StageCheckpoint] and stage prune mode retrieved via [PrunableStage::prune_mode]. Target
-    /// block number is also pruned.
-    ///
-    /// If no prune mode is set, returns `None`.
-    fn prune_target(&self, sync_checkpoint: StageCheckpoint) -> Option<BlockNumber> {
-        let Some(prune_mode) = self.prune_mode() else { return None };
-
-        Some(
-            match prune_mode {
-                PruneMode::Distance(distance) => {
-                    sync_checkpoint.block_number.saturating_sub(distance)
-                }
-                PruneMode::Before(before_block) => before_block,
-            }
-            .saturating_sub(1),
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::PruneMode;
