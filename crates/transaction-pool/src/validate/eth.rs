@@ -284,8 +284,8 @@ where
         }
 
         // Checks for max cost
-        if transaction.cost() > account.balance {
-            let cost = transaction.cost();
+        let cost = transaction.cost();
+        if cost > account.balance {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::InsufficientFunds {

@@ -255,7 +255,6 @@ where
                 let encoded_length = transaction.encoded_length();
 
                 let tx = ValidPoolTransaction {
-                    cost: transaction.cost(),
                     transaction,
                     transaction_id,
                     propagate: false,
