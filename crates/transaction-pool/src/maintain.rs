@@ -135,7 +135,7 @@ where
                     .transactions()
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
                     .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(|tx| <P as TransactionPool>::Transaction::from_recovered_transaction(tx))
+                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
                     .collect();
 
                 // update the pool first
@@ -192,7 +192,7 @@ where
                 let pruned_old_transactions = blocks
                     .transactions()
                     .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(|tx| <P as TransactionPool>::Transaction::from_recovered_transaction(tx))
+                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
                     .collect();
 
                 // all transactions that were mined in the old chain need to be re-injected
