@@ -9,7 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock, H256};
+use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};

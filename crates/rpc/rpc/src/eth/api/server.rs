@@ -127,8 +127,8 @@ where
         &self,
         number: BlockNumberOrTag,
     ) -> Result<Option<Vec<TransactionReceipt>>> {
-        trace!(target: "rpc::eth", ?number, "Serving eth_getUncleCountByBlockNumber");
-        Ok(EthApi::block_receipts(self, number)?)
+        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockReceipts");
+        Ok(EthApi::block_receipts(self, number).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
