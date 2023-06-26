@@ -175,6 +175,13 @@ pub struct ChainSpec {
 }
 
 impl ChainSpec {
+    /// Set block gas limit in `ChainSpec`
+    pub fn chainspec_with_block_gas_limit(&self, new_block_gas_limit: u64) -> ChainSpec {
+        let mut new_spec = self.clone();
+        new_spec.block_gas_limit = new_block_gas_limit;
+        new_spec
+    }
+
     /// The default Ethereum block gas limit.
     pub fn block_gas_limit_default() -> u64 {
         ETHEREUM_BLOCK_GAS_LIMIT

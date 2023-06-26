@@ -142,7 +142,7 @@ where
                         logs_bloom: Default::default(),
                         difficulty: U256::from(2),
                         number: storage.best_block + 1,
-                        gas_limit: ChainSpec::block_gas_limit_default(),
+                        gas_limit: chain_spec.block_gas_limit,
                         gas_used: 0,
                         timestamp: SystemTime::now()
                             .duration_since(UNIX_EPOCH)

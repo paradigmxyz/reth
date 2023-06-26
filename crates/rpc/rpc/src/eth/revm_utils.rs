@@ -2,8 +2,8 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
-    constants::ETHEREUM_BLOCK_GAS_LIMIT, AccessList, Address, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, H256, U256,
+    AccessList, Address, ChainSpec, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256,
+    U256,
 };
 use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
@@ -250,7 +250,7 @@ where
             // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
             // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94
             trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap as the maximum gas limit");
-            env.tx.gas_limit = ETHEREUM_BLOCK_GAS_LIMIT;
+            env.tx.gas_limit = ChainSpec::block_gas_limit_default();
         }
     }
 

@@ -7,8 +7,7 @@ use crate::{
     TransactionValidationOutcome, TransactionValidator, MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
 };
 use reth_primitives::{
-    constants::ETHEREUM_BLOCK_GAS_LIMIT, ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    ChainSpec, InvalidTransactionError, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -43,12 +42,12 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
         T: TaskSpawner,
     {
         let inner = EthTransactionValidatorInner {
-            chain_spec,
+            chain_spec: Arc::clone(&chain_spec),
             client,
             shanghai: true,
             eip2718: true,
             eip1559: true,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            block_gas_limit: chain_spec.as_ref().block_gas_limit,
             minimum_priority_fee: None,
             _marker: Default::default(),
         };
