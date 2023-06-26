@@ -1,7 +1,7 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
-    traits::{CanonicalStateUpdate, ChangedAccount},
+    traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
     BlockInfo, TransactionPool,
 };
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
@@ -26,7 +26,7 @@ pub fn maintain_transaction_pool_future<Client, P, St>(
 ) -> BoxFuture<'static, ()>
 where
     Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
-    P: TransactionPool + 'static,
+    P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     async move {
@@ -42,7 +42,7 @@ where
 pub async fn maintain_transaction_pool<Client, P, St>(client: Client, pool: P, mut events: St)
 where
     Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
-    P: TransactionPool + 'static,
+    P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     // ensure the pool points to latest state

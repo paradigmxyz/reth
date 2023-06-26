@@ -36,9 +36,6 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// This tracks the block that the pool has last seen.
     fn block_info(&self) -> BlockInfo;
 
-    /// Sets the current block info for the pool.
-    fn set_block_info(&self, info: BlockInfo);
-
     /// Event listener for when the pool needs to be updated
     ///
     /// Implementers need to update the pool accordingly.
@@ -208,6 +205,13 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+}
+
+/// Extension for [TransactionPool] trait that allows to set the current block info.
+#[auto_impl::auto_impl(Arc)]
+pub trait TransactionPoolExt: TransactionPool {
+    /// Sets the current block info for the pool.
+    fn set_block_info(&self, info: BlockInfo);
 }
 
 /// A Helper type that bundles all transactions in the pool.

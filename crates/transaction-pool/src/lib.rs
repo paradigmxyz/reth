@@ -97,6 +97,7 @@ use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
+use traits::TransactionPoolExt;
 
 pub use crate::{
     config::PoolConfig,
@@ -250,12 +251,6 @@ where
         self.pool.block_info()
     }
 
-    #[instrument(skip(self), target = "txpool")]
-    fn set_block_info(&self, info: BlockInfo) {
-        trace!(target: "txpool", "updating pool block info");
-        self.pool.set_block_info(info)
-    }
-
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
         self.pool.on_canonical_state_change(update);
     }
@@ -365,6 +360,18 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+}
+
+impl<V: TransactionValidator, T: TransactionOrdering> TransactionPoolExt for Pool<V, T>
+where
+    V: TransactionValidator,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+{
+    #[instrument(skip(self), target = "txpool")]
+    fn set_block_info(&self, info: BlockInfo) {
+        trace!(target: "txpool", "updating pool block info");
+        self.pool.set_block_info(info)
     }
 }
 
