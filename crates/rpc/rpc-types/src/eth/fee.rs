@@ -41,6 +41,7 @@ pub struct FeeHistory {
     ///
     /// The `Option` is only for compatability with Erigon and Geth.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub base_fee_per_gas: Vec<U256>,
     /// An array of block gas used ratios. These are calculated as the ratio
     /// of `gasUsed` and `gasLimit`.
@@ -49,6 +50,7 @@ pub struct FeeHistory {
     ///
     /// The `Option` is only for compatability with Erigon and Geth.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub gas_used_ratio: Vec<f64>,
     /// Lowest number block of the returned range.
     pub oldest_block: U256,
