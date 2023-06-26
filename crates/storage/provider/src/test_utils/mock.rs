@@ -209,14 +209,14 @@ impl TransactionsProvider for MockEthProvider {
         Ok(map.into_values().collect())
     }
 
-    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
-        unimplemented!()
-    }
-
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
     ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
+        unimplemented!()
+    }
+
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         unimplemented!()
     }
 
@@ -321,6 +321,10 @@ impl BlockReader for MockEthProvider {
     }
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
+        Ok(None)
+    }
+
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
         Ok(None)
     }
 

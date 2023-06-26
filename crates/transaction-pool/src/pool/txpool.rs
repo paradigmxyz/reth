@@ -748,7 +748,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     tx.state.insert(TxState::NO_NONCE_GAPS);
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                     tx.cumulative_cost = U256::ZERO;
-                    if tx.transaction.cost > info.balance {
+                    if tx.transaction.cost() > info.balance {
                         // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
@@ -1268,7 +1268,7 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> PoolInternalTransaction<T> {
     fn next_cumulative_cost(&self) -> U256 {
-        self.cumulative_cost + self.transaction.cost
+        self.cumulative_cost + self.transaction.cost()
     }
 }
 

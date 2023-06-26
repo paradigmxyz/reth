@@ -14,10 +14,10 @@ use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U256, U64};
 use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderBox, StateProviderFactory};
-use reth_rpc_types::{FeeHistoryCache, SyncInfo, SyncStatus};
+use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use std::{future::Future, num::NonZeroUsize, sync::Arc};
+use std::{future::Future, sync::Arc};
 use tokio::sync::oneshot;
 
 mod block;
@@ -29,9 +29,6 @@ mod state;
 mod transactions;
 
 pub use transactions::{EthTransactions, TransactionSource};
-
-/// Cache limit of block-level fee history for `eth_feeHistory` RPC method.
-const FEE_HISTORY_CACHE_LIMIT: usize = 2048;
 
 /// `Eth` API trait.
 ///
@@ -118,9 +115,6 @@ where
             gas_oracle,
             starting_block: U256::from(latest_block),
             task_spawner,
-            fee_history_cache: FeeHistoryCache::new(
-                NonZeroUsize::new(FEE_HISTORY_CACHE_LIMIT).unwrap(),
-            ),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -290,6 +284,4 @@ struct EthApiInner<Provider, Pool, Network> {
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
-    /// The cache for fee history entries,
-    fee_history_cache: FeeHistoryCache,
 }
