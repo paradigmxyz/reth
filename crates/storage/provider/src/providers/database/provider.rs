@@ -735,15 +735,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(())
     }
 
-    /// Load shard and check if it is full and remove if it is not. If list is empty, last
-    /// shard was full or there is no shards at all.
+    /// Load shard and remove it. If list is empty, last shard was full or there is no shards at all.
     fn take_shard<T>(&self, key: T::Key) -> Result<Vec<u64>>
     where
         T: Table<Value = BlockNumberList>,
     {
         let mut cursor = self.tx.cursor_read::<T>()?;
-        let last = cursor.seek_exact(key)?;
-        if let Some((shard_key, list)) = last {
+        let shard = cursor.seek_exact(key)?;
+        if let Some((shard_key, list)) = shard {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
             let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
@@ -759,7 +758,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     /// inserts the new shards back into the database.
     ///
     /// This function is used by history indexing stages.
-    fn insert_history_index<P, T>(
+    fn append_history_index<P, T>(
         &self,
         index_updates: BTreeMap<P, Vec<u64>>,
         mut sharded_key_factory: impl FnMut(P, BlockNumber) -> T::Key,
@@ -1661,7 +1660,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         &self,
         storage_transitions: BTreeMap<(Address, H256), Vec<u64>>,
     ) -> Result<()> {
-        self.insert_history_index::<_, tables::StorageHistory>(
+        self.append_history_index::<_, tables::StorageHistory>(
             storage_transitions,
             |(address, storage_key), highest_block_number| {
                 StorageShardedKey::new(address, storage_key, highest_block_number)
@@ -1714,7 +1713,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
     ) -> Result<()> {
-        self.insert_history_index::<_, tables::AccountHistory>(account_transitions, ShardedKey::new)
+        self.append_history_index::<_, tables::AccountHistory>(account_transitions, ShardedKey::new)
     }
 
     fn unwind_account_history_indices(&self, range: RangeInclusive<BlockNumber>) -> Result<usize> {
