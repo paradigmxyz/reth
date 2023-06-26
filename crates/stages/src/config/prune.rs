@@ -1,19 +1,26 @@
-use crate::PruneMode;
+use crate::{
+    stages::{
+        ExecutionStage, IndexAccountHistoryStage, IndexStorageHistoryStage, SenderRecoveryStage,
+        TransactionLookupStage,
+    },
+    PruneMode,
+};
+use reth_db::tables::{AccountChangeSet, Receipts, StorageChangeSet};
 use serde::{Deserialize, Serialize};
 
-/// Pruning configuration for each stage supporting it.
+/// Pruning configuration for the stages supporting it.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Serialize)]
 pub struct StagePruneConfig {
-    /// Sender Recovery stage pruning configuration.
+    /// [SenderRecoveryStage] pruning configuration.
     pub sender_recovery: Option<PruneMode>,
-    /// Execution stage pruning configuration for changesets.
-    pub execution_changesets: Option<PruneMode>,
-    /// Execution stage pruning configuration for receipts.
-    pub execution_receipts: Option<PruneMode>,
-    /// Transaction Lookup stage pruning configuration.
+    /// [TransactionLookupStage] pruning configuration.
     pub transaction_lookup: Option<PruneMode>,
-    /// Index Account History stage pruning configuration.
-    pub index_account_history: Option<PruneMode>,
-    /// Index Storage History stage pruning configuration.
-    pub index_storage_history: Option<PruneMode>,
+    /// [ExecutionStage] (only [Receipts] table) pruning configuration.
+    pub receipts: Option<PruneMode>,
+    /// [IndexAccountHistoryStage] and [ExecutionStage] (only [AccountChangeSet] table)
+    /// pruning configuration.
+    pub account_history: Option<PruneMode>,
+    /// [IndexStorageHistoryStage] and [ExecutionStage] (only [StorageChangeSet] table)
+    /// pruning configuration.
+    pub storage_history: Option<PruneMode>,
 }
