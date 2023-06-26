@@ -735,7 +735,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(())
     }
 
-    /// Load shard and remove it. If list is empty, last shard was full or there is no shards at all.
+    /// Load shard and remove it. If list is empty, last shard was full or
+    /// there are no shards at all.
     fn take_shard<T>(&self, key: T::Key) -> Result<Vec<u64>>
     where
         T: Table<Value = BlockNumberList>,
