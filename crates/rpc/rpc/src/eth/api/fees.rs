@@ -120,7 +120,7 @@ where
         header: &SealedHeader,
     ) -> Result<Vec<U256>, EthApiError> {
         let Some(receipts) =
-            self.cache().get_receipts(header.hash.into()).await? else {
+            self.cache().get_receipts(header.hash).await? else {
             // If there are no receipts, then we do not have all info on the block
             return Err(EthApiError::InvalidBlockRange)
         };
