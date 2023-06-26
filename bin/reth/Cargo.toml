@@ -88,7 +88,11 @@ humantime = "2.1.0"
 [features]
 jemalloc = ["dep:jemallocator"]
 jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
-only-info-logs = ["tracing/release_max_level_info"]
+min-error-logs = ["tracing/release_max_level_error"]
+min-warn-logs = ["tracing/release_max_level_warn"]
+min-info-logs = ["tracing/release_max_level_info"]
+min-debug-logs = ["tracing/release_max_level_debug"]
+min-trace-logs = ["tracing/release_max_level_trace"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

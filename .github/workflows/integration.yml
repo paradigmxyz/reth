@@ -84,7 +84,7 @@ jobs:
 
       - name: Run sync (${{ matrix.profile }})
         run: |
-          cargo run --profile release --features jemalloc,only-info-logs \
+          cargo run --profile release --features jemalloc,min-error-logs \
             --bin reth -- node \
             --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
             --debug.max-block 100000 \
