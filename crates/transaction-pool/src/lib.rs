@@ -95,7 +95,7 @@ use tracing::{instrument, trace};
 pub use crate::{
     config::PoolConfig,
     error::PoolResult,
-    ordering::{CostOrdering, TransactionOrdering},
+    ordering::{GasCostOrdering, TransactionOrdering},
     pool::TransactionEvents,
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
@@ -220,7 +220,7 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, CostOrdering<PooledTransaction>>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, GasCostOrdering<PooledTransaction>>
 where
     Client: StateProviderFactory + Clone + 'static,
 {
@@ -230,7 +230,7 @@ where
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, CostOrdering::default(), config)
+        Self::new(validator, GasCostOrdering::default(), config)
     }
 }
 

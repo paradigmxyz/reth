@@ -26,9 +26,9 @@ pub trait TransactionOrdering: Send + Sync + 'static {
 /// the higher the priority of this transaction is.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct CostOrdering<T>(PhantomData<T>);
+pub struct GasCostOrdering<T>(PhantomData<T>);
 
-impl<T> TransactionOrdering for CostOrdering<T>
+impl<T> TransactionOrdering for GasCostOrdering<T>
 where
     T: PoolTransaction + 'static,
 {
@@ -40,7 +40,7 @@ where
     }
 }
 
-impl<T> Default for CostOrdering<T> {
+impl<T> Default for GasCostOrdering<T> {
     fn default() -> Self {
         Self(Default::default())
     }
