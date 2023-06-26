@@ -216,7 +216,10 @@ pub trait BlockchainTreeViewer: Send + Sync {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
     }
 
-    /// Returns the pending block and its receipts.
+    /// Returns the pending block and its receipts in one call.
+    ///
+    /// This exits to prevent a potential data race if the pending block changes in between
+    /// [Self::pending_block] and [Self::pending_receipts] calls.
     fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)>;
 
     /// Returns the pending receipts if there is one.
