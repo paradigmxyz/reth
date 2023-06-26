@@ -46,11 +46,6 @@ where
             return Ok(FeeHistory::default())
         }
 
-        // The spec states that you can request a maximum of 1024 blocks.
-        if block_count > 1024 {
-            return Err(EthApiError::InvalidBlockRange)
-        }
-
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
             return Err(EthApiError::UnknownBlockNumber) };
 
