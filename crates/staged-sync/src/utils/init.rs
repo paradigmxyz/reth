@@ -297,6 +297,7 @@ mod tests {
             fork_timestamps: ForkTimestamps { shanghai: None },
             genesis_hash: None,
             paris_block_and_final_difficulty: None,
+            block_gas_limit: ChainSpec::block_gas_limit_default(),
         });
 
         let db = create_test_rw_db();
