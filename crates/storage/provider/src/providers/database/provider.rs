@@ -2,9 +2,9 @@ use crate::{
     insert_canonical_block,
     post_state::StorageChangeset,
     traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
-    AccountReader, BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider,
-    HashingWriter, HeaderProvider, HistoryWriter, PostState, ProviderError, StageCheckpointReader,
-    StorageReader, TransactionsProvider, WithdrawalsProvider,
+    AccountReader, BlockHashReader, BlockNumReader, BlockReader, EvmEnvProvider, HashingWriter,
+    HeaderProvider, HistoryWriter, PostState, ProviderError, StageCheckpointReader, StorageReader,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -81,7 +81,7 @@ impl<'this, DB: Database> DatabaseProviderRW<'this, DB> {
 }
 
 /// A provider struct that fetchs data from the database.
-/// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashProvider`]
+/// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
 #[derive(Debug)]
 pub struct DatabaseProvider<'this, TX>
 where
@@ -938,7 +938,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockHashProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> BlockHashReader for DatabaseProvider<'this, TX> {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
     }
@@ -953,7 +953,7 @@ impl<'this, TX: DbTx<'this>> BlockHashProvider for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockNumProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> BlockNumReader for DatabaseProvider<'this, TX> {
     fn chain_info(&self) -> Result<ChainInfo> {
         let best_number = self.best_block_number()?;
         let best_hash = self.block_hash(best_number)?.unwrap_or_default();
@@ -976,7 +976,7 @@ impl<'this, TX: DbTx<'this>> BlockNumProvider for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockProvider for DatabaseProvider<'this, TX> {
+impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
     fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
         if source.is_database() {
             self.block(hash.into())

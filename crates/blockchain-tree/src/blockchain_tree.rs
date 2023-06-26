@@ -22,9 +22,8 @@ use reth_primitives::{
 use reth_provider::{
     chain::{ChainSplit, SplitAt},
     post_state::PostState,
-    BlockNumProvider, CanonStateNotification, CanonStateNotificationSender,
-    CanonStateNotifications, Chain, DatabaseProvider, DisplayBlocksChain, ExecutorFactory,
-    HeaderProvider,
+    BlockNumReader, CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    Chain, DatabaseProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider,
 };
 use std::{
     collections::{BTreeMap, HashMap},

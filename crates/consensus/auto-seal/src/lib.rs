@@ -20,7 +20,7 @@ use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Header, SealedBlock,
     SealedHeader, H256, U256,
 };
-use reth_provider::{BlockProviderIdExt, CanonStateNotificationSender};
+use reth_provider::{BlockReaderIdExt, CanonStateNotificationSender};
 use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -90,7 +90,7 @@ pub struct AutoSealBuilder<Client, Pool> {
 
 impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool>
 where
-    Client: BlockProviderIdExt,
+    Client: BlockReaderIdExt,
 {
     /// Creates a new builder instance to configure all parts.
     pub fn new(

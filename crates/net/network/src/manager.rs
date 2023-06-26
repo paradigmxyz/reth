@@ -42,7 +42,7 @@ use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{listener::EventListeners, NodeRecord, PeerId, H256};
-use reth_provider::BlockProvider;
+use reth_provider::BlockReader;
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
     net::SocketAddr,
@@ -156,7 +156,7 @@ impl<C> NetworkManager<C> {
 
 impl<C> NetworkManager<C>
 where
-    C: BlockProvider,
+    C: BlockReader,
 {
     /// Creates the manager of a new network.
     ///
@@ -586,7 +586,7 @@ where
 
 impl<C> Future for NetworkManager<C>
 where
-    C: BlockProvider + Unpin,
+    C: BlockReader + Unpin,
 {
     type Output = ();
 

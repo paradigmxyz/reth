@@ -41,7 +41,7 @@ use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkMan
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Head, SealedHeader, H256};
 use reth_provider::{
-    BlockHashProvider, BlockProvider, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
+    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
     StageCheckpointReader,
 };
 use reth_revm::Factory;
@@ -498,7 +498,7 @@ impl Command {
         default_peers_path: PathBuf,
     ) -> Result<NetworkHandle, NetworkError>
     where
-        C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+        C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Unpin + 'static,
     {
         let client = config.client.clone();
@@ -725,7 +725,7 @@ async fn run_network_until_shutdown<C>(
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
 ) where
-    C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+    C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
 {
     pin_mut!(network, shutdown);
 

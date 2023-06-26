@@ -7,13 +7,13 @@ mod storage;
 pub use storage::StorageReader;
 
 mod block;
-pub use block::{BlockProvider, BlockProviderIdExt, BlockSource};
+pub use block::{BlockReader, BlockReaderIdExt, BlockSource};
 
 mod block_hash;
-pub use block_hash::BlockHashProvider;
+pub use block_hash::BlockHashReader;
 
 mod block_id;
-pub use block_id::{BlockIdProvider, BlockNumProvider};
+pub use block_id::{BlockIdReader, BlockNumReader};
 
 mod evm_env;
 pub use evm_env::EvmEnvProvider;

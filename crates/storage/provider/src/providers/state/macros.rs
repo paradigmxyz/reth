@@ -24,7 +24,7 @@ pub(crate) use delegate_impls_to_as_ref;
 /// Delegates the provider trait implementations to the `as_ref` function of the type:
 ///
 /// [AccountReader](crate::AccountReader)
-/// [BlockHashProvider](crate::BlockHashProvider)
+/// [BlockHashReader](crate::BlockHashReader)
 /// [StateProvider](crate::StateProvider)
 macro_rules! delegate_provider_impls {
     ($target:ty $(where [$($generics:tt)*])?) => {
@@ -36,7 +36,7 @@ macro_rules! delegate_provider_impls {
             AccountReader $(where [$($generics)*])? {
                 fn basic_account(&self, address: reth_primitives::Address) -> reth_interfaces::Result<Option<reth_primitives::Account>>;
             }
-            BlockHashProvider $(where [$($generics)*])? {
+            BlockHashReader $(where [$($generics)*])? {
                 fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<reth_primitives::H256>>;
                 fn canonical_hashes_range(&self, start: reth_primitives::BlockNumber, end: reth_primitives::BlockNumber) -> reth_interfaces::Result<Vec<reth_primitives::H256>>;
             }
