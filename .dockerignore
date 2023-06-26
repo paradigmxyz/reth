@@ -14,3 +14,6 @@
 
 # include dist directory, where the reth binary is located after compilation
 !/dist
+
+# include licenses
+!LICENSE-*
