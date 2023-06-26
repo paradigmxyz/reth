@@ -12,8 +12,8 @@ use crate::{
 use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
-    H256, H64, U256, U64,
+    serde_helper::{num::U64HexOrNumber, JsonStorageKey},
+    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, EvmEnvProvider, HeaderProvider,
@@ -295,7 +295,7 @@ where
     /// Handler for: `eth_feeHistory`
     async fn fee_history(
         &self,
-        block_count: U64,
+        block_count: U64HexOrNumber,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
