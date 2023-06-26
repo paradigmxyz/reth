@@ -113,8 +113,6 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.
     pub propagate: bool,
-    /// Total cost of the transaction: `feeCap x gasLimit + transferredValue`.
-    pub cost: U256,
     /// Timestamp when this was added to the pool.
     pub timestamp: Instant,
     /// Where this transaction originated from.
@@ -156,19 +154,30 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.nonce()
     }
 
+    /// Returns the cost that this transaction is allowed to consume:
+    ///
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
+    /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    pub fn cost(&self) -> U256 {
+        self.transaction.cost()
+    }
+
+    /// Returns the gas cost for this transaction.
+    ///
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
+    /// For legacy transactions: `gas_price * gas_limit`.
+    pub fn gas_cost(&self) -> U256 {
+        self.transaction.gas_cost()
+    }
+
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
-    ///  For legacy transactions this is gas_price.
+    /// For legacy transactions this is `gas_price`.
     pub fn max_fee_per_gas(&self) -> u128 {
         self.transaction.max_fee_per_gas()
     }
 
-    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
-    pub fn effective_gas_price(&self) -> u128 {
-        self.transaction.effective_gas_price()
-    }
-
-    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
+    /// Maximum amount of gas that the transaction is allowed to consume.
     pub fn gas_limit(&self) -> u64 {
         self.transaction.gas_limit()
     }
@@ -197,7 +206,6 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
             transaction: self.transaction.clone(),
             transaction_id: self.transaction_id,
             propagate: self.propagate,
-            cost: self.cost,
             timestamp: self.timestamp,
             origin: self.origin,
             encoded_length: self.encoded_length,
