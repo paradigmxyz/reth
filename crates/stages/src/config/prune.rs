@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Pruning configuration for each stage supporting it.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Serialize)]
-pub struct PruneConfig {
+pub struct StagePruneConfig {
     /// Sender Recovery stage pruning configuration.
     pub sender_recovery: Option<PruneMode>,
     /// Execution stage pruning configuration.

@@ -5,7 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_stages::PruneConfig;
+use reth_stages::StagePruneConfig;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -17,7 +17,7 @@ pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
-    /// Configuration for stage pruning.
+    /// Configuration for pruning.
     pub prune: PruneConfig,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
@@ -277,6 +277,22 @@ pub struct IndexHistoryConfig {
 impl Default for IndexHistoryConfig {
     fn default() -> Self {
         Self { commit_threshold: 100_000 }
+    }
+}
+
+/// Pruning configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct PruneConfig {
+    /// Minimal pruning interval measured in blocks.
+    pub block_interval: u64,
+    /// Stage pruning configuration.
+    pub stages: StagePruneConfig,
+}
+
+impl Default for PruneConfig {
+    fn default() -> Self {
+        Self { block_interval: 10, stages: StagePruneConfig::default() }
     }
 }
 
