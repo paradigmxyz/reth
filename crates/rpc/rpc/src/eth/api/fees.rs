@@ -11,6 +11,7 @@ use reth_primitives::{
 use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
+use tracing::debug;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -38,12 +39,27 @@ where
     /// provided.
     pub(crate) async fn fee_history(
         &self,
-        block_count: u64,
+        mut block_count: u64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
         if block_count == 0 {
             return Ok(FeeHistory::default())
+        }
+
+        let max_fee_history = if reward_percentiles.is_none() {
+            self.gas_oracle().config().max_header_history
+        } else {
+            self.gas_oracle().config().max_block_history
+        };
+
+        if block_count > max_fee_history {
+            debug!(
+                requested = block_count,
+                truncated = max_fee_history,
+                "Sanitizing fee history block count"
+            );
+            block_count = max_fee_history
         }
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
