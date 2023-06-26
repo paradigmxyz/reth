@@ -287,6 +287,7 @@ pub struct PruneConfig {
     /// Minimal pruning interval measured in blocks.
     pub block_interval: u64,
     /// Stage pruning configuration.
+    #[serde(flatten)]
     pub stages: StagePruneConfig,
 }
 
