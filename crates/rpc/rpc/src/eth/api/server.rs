@@ -394,15 +394,15 @@ mod tests {
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
-        BlockProvider, BlockProviderIdExt, EvmEnvProvider, StateProviderFactory,
+        BlockReader, BlockReaderIdExt, EvmEnvProvider, StateProviderFactory,
     };
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
     fn build_test_eth_api<
-        P: BlockProviderIdExt
-            + BlockProvider
+        P: BlockReaderIdExt
+            + BlockReader
             + EvmEnvProvider
             + StateProviderFactory
             + Unpin
