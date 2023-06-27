@@ -71,10 +71,8 @@ impl Command {
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
-        let execution_checkpoint_block = provider_rw
-            .get_stage_sync_checkpoint(StageId::Execution)?
-            .unwrap_or_default()
-            .block_number;
+        let execution_checkpoint_block =
+            provider_rw.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
         assert!(execution_checkpoint_block < self.to, "Nothing to run");
 
         // Check if any of hashing or merkle stages aren't on the same block number as
@@ -82,7 +80,7 @@ impl Command {
         let should_reset_stages =
             [StageId::AccountHashing, StageId::StorageHashing, StageId::MerkleExecute]
                 .into_iter()
-                .map(|stage_id| provider_rw.get_stage_sync_checkpoint(stage_id))
+                .map(|stage_id| provider_rw.get_stage_checkpoint(stage_id))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .map(Option::unwrap_or_default)

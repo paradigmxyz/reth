@@ -217,8 +217,7 @@ impl Command {
             assert!(exec_stage.type_id() == unwind_stage.type_id());
         }
 
-        let checkpoint =
-            provider_rw.get_stage_sync_checkpoint(exec_stage.id())?.unwrap_or_default();
+        let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
 
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 

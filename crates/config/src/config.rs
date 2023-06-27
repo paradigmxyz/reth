@@ -5,7 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_stages::StagePruneConfig;
+use reth_primitives::PruneMode;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -48,7 +48,6 @@ impl Config {
     }
 }
 
-// TODO(alexey): move to `reth_stages::config::StageConfig`
 /// Configuration for each stage in the pipeline.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
@@ -286,15 +285,30 @@ impl Default for IndexHistoryConfig {
 pub struct PruneConfig {
     /// Minimal pruning interval measured in blocks.
     pub block_interval: u64,
-    /// Stage pruning configuration.
-    #[serde(flatten)]
-    pub stages: StagePruneConfig,
+    /// Pruning configuration for every part of the data that can be pruned.
+    pub parts: PruneParts,
 }
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 10, stages: StagePruneConfig::default() }
+        Self { block_interval: 10, parts: PruneParts::default() }
     }
+}
+
+/// Pruning configuration for every part of the data that can be pruned.
+#[derive(Debug, Clone, Default, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct PruneParts {
+    /// [reth_primitives::PrunePart::SenderRecovery] pruning configuration.
+    pub sender_recovery: Option<PruneMode>,
+    /// [reth_primitives::PrunePart::TransactionLookup] pruning configuration.
+    pub transaction_lookup: Option<PruneMode>,
+    /// [reth_primitives::PrunePart::Receipts] pruning configuration.
+    pub receipts: Option<PruneMode>,
+    /// [reth_primitives::PrunePart::AccountHistory] pruning configuration.
+    pub account_history: Option<PruneMode>,
+    /// [reth_primitives::PrunePart::StorageHistory] pruning configuration.
+    pub storage_history: Option<PruneMode>,
 }
 
 #[cfg(test)]

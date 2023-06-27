@@ -322,15 +322,11 @@ impl StateProviderFactory for NoopProvider {
 }
 
 impl StageCheckpointReader for NoopProvider {
-    fn get_stage_sync_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
+    fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(None)
     }
 
-    fn get_stage_sync_checkpoint_progress(&self, _id: StageId) -> Result<Option<Vec<u8>>> {
-        Ok(None)
-    }
-
-    fn get_stage_prune_checkpoint(&self, _id: StageId) -> Result<Option<BlockNumber>> {
+    fn get_stage_checkpoint_progress(&self, _id: StageId) -> Result<Option<Vec<u8>>> {
         Ok(None)
     }
 }

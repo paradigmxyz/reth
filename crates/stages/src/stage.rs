@@ -3,10 +3,9 @@ use async_trait::async_trait;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    BlockNumber, TxNumber,
+    BlockNumber, PruneMode, TxNumber,
 };
 use reth_provider::DatabaseProviderRW;
-use serde::{Deserialize, Serialize};
 use std::{
     cmp::{max, min},
     ops::RangeInclusive,
@@ -194,17 +193,7 @@ pub trait Stage<DB: Database>: Send + Sync {
     ) -> Result<UnwindOutput, StageError>;
 }
 
-/// Stage prune mode.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PruneMode {
-    /// Prune blocks before the `head-N` block number. In other words, keep last N blocks.
-    Distance(u64),
-    /// Prune blocks before the specified block number. The specified block number is not pruned.
-    Before(BlockNumber),
-}
-
-/// Prune target
+/// Prune target.
 #[derive(Debug, Clone, Copy)]
 pub enum PruneTarget {
     /// Prune all blocks, i.e. not save any data.
@@ -213,32 +202,21 @@ pub enum PruneTarget {
     Block(BlockNumber),
 }
 
-impl PruneMode {
-    /// Returns target to prune towards, according to stage prune mode [Self]
+impl PruneTarget {
+    /// Returns new target to prune towards, according to stage prune mode [PruneMode]
     /// and current head [BlockNumber].
-    pub fn target(&self, head: BlockNumber) -> PruneTarget {
-        match *self {
-            PruneMode::Distance(distance) if distance == 0 => PruneTarget::All,
+    pub fn new(prune_mode: PruneMode, head: BlockNumber) -> Self {
+        match prune_mode {
+            PruneMode::Full => PruneTarget::All,
             PruneMode::Distance(distance) => {
-                PruneTarget::Block(head.saturating_sub(distance).saturating_sub(1))
+                Self::Block(head.saturating_sub(distance).saturating_sub(1))
             }
-            PruneMode::Before(before_block) => PruneTarget::Block(before_block.saturating_sub(1)),
+            PruneMode::Before(before_block) => Self::Block(before_block.saturating_sub(1)),
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::PruneMode;
-    use assert_matches::assert_matches;
-
-    #[test]
-    fn prune_mode_deserialize() {
-        assert_matches!(serde_json::from_str(r#"{"distance": 10}"#), Ok(PruneMode::Distance(10)));
-        assert_matches!(serde_json::from_str(r#"{"before": 20}"#), Ok(PruneMode::Before(20)));
-        assert_matches!(
-            serde_json::from_str::<PruneMode>(r#"{"distance": 10, "before": 20}"#),
-            Err(_)
-        );
+    /// Returns true if the target is [PruneTarget::All], i.e. prune all blocks.
+    pub fn is_all(&self) -> bool {
+        matches!(self, Self::All)
     }
 }

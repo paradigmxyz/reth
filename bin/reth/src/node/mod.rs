@@ -523,8 +523,7 @@ impl Command {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
-        let head =
-            provider.get_stage_sync_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
+        let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
 
         let header = provider
             .header_by_number(head)?

@@ -145,7 +145,7 @@ where
             let stage_id = stage.id();
             self.metrics.stage_checkpoint(
                 stage_id,
-                provider.get_stage_sync_checkpoint(stage_id)?.unwrap_or_default(),
+                provider.get_stage_checkpoint(stage_id)?.unwrap_or_default(),
                 None,
             );
         }
@@ -236,7 +236,7 @@ where
             previous_stage = Some(
                 factory
                     .provider()?
-                    .get_stage_sync_checkpoint(stage_id)?
+                    .get_stage_checkpoint(stage_id)?
                     .unwrap_or_default()
                     .block_number,
             );
@@ -264,8 +264,7 @@ where
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
 
-            let mut checkpoint =
-                provider_rw.get_stage_sync_checkpoint(stage_id)?.unwrap_or_default();
+            let mut checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
             if checkpoint.block_number < to {
                 debug!(target: "sync::pipeline", from = %checkpoint, %to, "Unwind point too far for stage");
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
@@ -295,7 +294,7 @@ where
                             // doesn't change when we unwind.
                             None,
                         );
-                        provider_rw.save_stage_sync_checkpoint(stage_id, checkpoint)?;
+                        provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
@@ -330,7 +329,7 @@ where
         let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         loop {
-            let prev_checkpoint = provider_rw.get_stage_sync_checkpoint(stage_id)?;
+            let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
@@ -374,7 +373,7 @@ where
                         "Stage committed progress"
                     );
                     self.metrics.stage_checkpoint(stage_id, checkpoint, target);
-                    provider_rw.save_stage_sync_checkpoint(stage_id, checkpoint)?;
+                    provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran {
                         pipeline_position: stage_index + 1,

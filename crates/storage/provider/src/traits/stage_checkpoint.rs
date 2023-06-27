@@ -8,26 +8,20 @@ use reth_primitives::{
 #[auto_impl::auto_impl(&, Arc)]
 pub trait StageCheckpointReader: Send + Sync {
     /// Fetch the checkpoint for the given stage.
-    fn get_stage_sync_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>>;
+    fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>>;
 
     /// Get stage checkpoint progress.
-    fn get_stage_sync_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>>;
-
-    /// Fetch the checkpoint for the given stage.
-    fn get_stage_prune_checkpoint(&self, id: StageId) -> Result<Option<BlockNumber>>;
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>>;
 }
 
 /// The trait for updating stage checkpoint related data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait StageCheckpointWriter: Send + Sync {
     /// Save stage checkpoint.
-    fn save_stage_sync_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) -> Result<()>;
+    fn save_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) -> Result<()>;
 
     /// Save stage checkpoint progress.
-    fn save_stage_sync_checkpoint_progress(&self, id: StageId, checkpoint: Vec<u8>) -> Result<()>;
-
-    /// Save stage checkpoint.
-    fn save_stage_prune_checkpoint(&self, id: StageId, block_number: BlockNumber) -> Result<()>;
+    fn save_stage_checkpoint_progress(&self, id: StageId, checkpoint: Vec<u8>) -> Result<()>;
 
     /// Update all pipeline sync stage progress.
     fn update_pipeline_stages(

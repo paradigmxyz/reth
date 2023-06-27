@@ -827,7 +827,7 @@ impl<'this, TX: DbTx<'this>> BlockNumReader for DatabaseProvider<'this, TX> {
 
     fn best_block_number(&self) -> Result<BlockNumber> {
         Ok(self
-            .get_stage_sync_checkpoint(StageId::Finish)?
+            .get_stage_checkpoint(StageId::Finish)?
             .map(|checkpoint| checkpoint.block_number)
             .unwrap_or_default())
     }
@@ -1197,33 +1197,25 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for DatabaseProvider<'this, TX> {
 }
 
 impl<'this, TX: DbTx<'this>> StageCheckpointReader for DatabaseProvider<'this, TX> {
-    fn get_stage_sync_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
+    fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
         Ok(self.tx.get::<tables::SyncStage>(id.to_string())?)
     }
 
     /// Get stage checkpoint progress.
-    fn get_stage_sync_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
         Ok(self.tx.get::<tables::SyncStageProgress>(id.to_string())?)
-    }
-
-    fn get_stage_prune_checkpoint(&self, id: StageId) -> Result<Option<BlockNumber>> {
-        Ok(self.tx.get::<tables::PruneStage>(id.to_string())?)
     }
 }
 
 impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this, TX> {
-    /// Save stage checkpoint.
-    fn save_stage_sync_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) -> Result<()> {
-        Ok(self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)?)
-    }
-
     /// Save stage checkpoint progress.
-    fn save_stage_sync_checkpoint_progress(&self, id: StageId, checkpoint: Vec<u8>) -> Result<()> {
+    fn save_stage_checkpoint_progress(&self, id: StageId, checkpoint: Vec<u8>) -> Result<()> {
         Ok(self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)?)
     }
 
-    fn save_stage_prune_checkpoint(&self, id: StageId, block_number: BlockNumber) -> Result<()> {
-        Ok(self.tx.put::<tables::PruneStage>(id.to_string(), block_number)?)
+    /// Save stage checkpoint.
+    fn save_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) -> Result<()> {
+        Ok(self.tx.put::<tables::SyncStage>(id.to_string(), checkpoint)?)
     }
 
     fn update_pipeline_stages(

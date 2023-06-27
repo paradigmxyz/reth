@@ -382,16 +382,12 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn get_stage_sync_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
-        self.database.provider()?.get_stage_sync_checkpoint(id)
+    fn get_stage_checkpoint(&self, id: StageId) -> Result<Option<StageCheckpoint>> {
+        self.database.provider()?.get_stage_checkpoint(id)
     }
 
-    fn get_stage_sync_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
-        self.database.provider()?.get_stage_sync_checkpoint_progress(id)
-    }
-
-    fn get_stage_prune_checkpoint(&self, id: StageId) -> Result<Option<BlockNumber>> {
-        self.database.provider()?.get_stage_prune_checkpoint(id)
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> Result<Option<Vec<u8>>> {
+        self.database.provider()?.get_stage_checkpoint_progress(id)
     }
 }
 

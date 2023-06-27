@@ -78,10 +78,8 @@ pub mod prelude;
 /// Implementations of stages.
 pub mod stages;
 
-mod config;
 pub mod sets;
 
-pub use config::*;
 pub use error::*;
 pub use pipeline::*;
 pub use stage::*;

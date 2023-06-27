@@ -14,6 +14,7 @@ reth-net-nat = { path = "../net/nat" }
 reth-discv4 = { path = "../net/discv4" }
 reth-downloaders = { path = "../net/downloaders" }
 reth-stages = { path = "../../crates/stages" }
+reth-primitives = { path = "../primitives" }
 
 # io
 serde = { workspace = true }

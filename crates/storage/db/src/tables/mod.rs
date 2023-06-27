@@ -37,8 +37,8 @@ use crate::{
 use reth_primitives::{
     stage::StageCheckpoint,
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSignedNoHash, TxHash, TxNumber, H256,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
+    PrunePart, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -184,7 +184,7 @@ tables!([
     (TxSenders, TableType::Table),
     (SyncStage, TableType::Table),
     (SyncStageProgress, TableType::Table),
-    (PruneStage, TableType::Table)
+    (PruneCheckpoints, TableType::Table)
 ]);
 
 #[macro_export]
@@ -417,8 +417,8 @@ table!(
 );
 
 table!(
-    /// Stores the highest pruned block number.
-    ( PruneStage ) StageId | BlockNumber
+    /// Stores the prune mode and highest pruned block number of each prune part.
+    ( PruneCheckpoints ) PrunePart | PruneCheckpoint
 );
 
 /// Alias Types
@@ -460,7 +460,7 @@ mod tests {
         (TableType::Table, TxSenders::const_name()),
         (TableType::Table, SyncStage::const_name()),
         (TableType::Table, SyncStageProgress::const_name()),
-        (TableType::Table, PruneStage::const_name()),
+        (TableType::Table, PruneCheckpoints::const_name()),
     ];
 
     #[test]
