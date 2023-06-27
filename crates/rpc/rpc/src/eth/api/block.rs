@@ -129,7 +129,7 @@ where
             None => return Ok(None),
         };
 
-        Ok(self.cache().get_block(block_hash).await?.map(|block| block.seal(block_hash)))
+        Ok(self.cache().get_sealed_block(block_hash).await?)
     }
 
     /// Returns the populated rpc block object for the given block id.
