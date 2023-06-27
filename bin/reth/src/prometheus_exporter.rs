@@ -210,8 +210,28 @@ fn describe_memory_stats() {
     );
 }
 
-#[cfg(not(feature = "jemalloc"))]
+#[cfg(all(target_os = "linux", target_env = "gnu", not(feature = "jemalloc")))]
+fn collect_memory_stats() {
+    use reth_metrics::metrics::gauge;
+
+    let mallinfo = unsafe { libc::mallinfo() };
+    gauge!("malloc.arena", mallinfo.arena as u32 as f64);
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu", not(feature = "jemalloc")))]
+fn describe_memory_stats() {
+    use reth_metrics::metrics::describe_gauge;
+
+    describe_gauge!(
+        "malloc.arena",
+        Unit::Bytes,
+        "The total amount of memory allocated by means other than mmap(2). \
+        This figure includes both in-use blocks and blocks on the free list."
+    );
+}
+
+#[cfg(all(not(target_os = "linux"), not(target_env = "gnu"), not(feature = "jemalloc")))]
 fn collect_memory_stats() {}
 
-#[cfg(not(feature = "jemalloc"))]
+#[cfg(all(not(target_os = "linux"), not(target_env = "gnu"), not(feature = "jemalloc")))]
 fn describe_memory_stats() {}

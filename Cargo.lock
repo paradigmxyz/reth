@@ -4932,6 +4932,7 @@ dependencies = [
  "hyper",
  "jemalloc-ctl",
  "jemallocator",
+ "libc",
  "metrics-exporter-prometheus",
  "metrics-process",
  "metrics-util",
