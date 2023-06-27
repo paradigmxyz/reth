@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -15,8 +21,8 @@
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountExtReader, AccountReader, BlockExecutor, BlockHashProvider, BlockIdProvider,
-    BlockNumProvider, BlockProvider, BlockProviderIdExt, BlockSource,
+    AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockHashReader,
+    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
     ExecutorFactory, HashingWriter, HeaderProvider, HistoryWriter, PostStateDataProvider,
@@ -35,10 +41,6 @@ pub use providers::{
 /// Execution result
 pub mod post_state;
 pub use post_state::PostState;
-
-/// Common database utilities.
-mod utils;
-pub use utils::{insert_block, insert_canonical_block};
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.

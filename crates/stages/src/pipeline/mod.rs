@@ -257,7 +257,7 @@ where
         let unwind_pipeline = self.stages.iter_mut().rev();
 
         let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -326,7 +326,7 @@ where
         let target = self.max_block.or(previous_stage);
 
         let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         loop {
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
