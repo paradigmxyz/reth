@@ -5,7 +5,7 @@ use super::tui::DbListTUI;
 use eyre::WrapErr;
 use reth_db::{
     database::Database,
-    mdbx::{Env, WriteMap},
+    mdbx::{Env, NoWriteMap},
     table::Table,
     TableType, TableViewer, Tables,
 };
@@ -34,7 +34,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db list` command
-    pub fn execute(self, tool: &DbTool<'_, Env<WriteMap>>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<'_, Env<NoWriteMap>>) -> eyre::Result<()> {
         if self.table.table_type() == TableType::DupSort {
             error!(target: "reth::cli", "Unsupported table.");
         }
@@ -46,7 +46,7 @@ impl Command {
 }
 
 struct ListTableViewer<'a> {
-    tool: &'a DbTool<'a, Env<WriteMap>>,
+    tool: &'a DbTool<'a, Env<NoWriteMap>>,
     args: &'a Command,
 }
 

@@ -12,7 +12,7 @@ use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, Status};
 use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET};
-use reth_provider::{BlockProvider, HeaderProvider};
+use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{
@@ -97,7 +97,7 @@ impl<C> NetworkConfig<C> {
 
 impl<C> NetworkConfig<C>
 where
-    C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+    C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
 {
     /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {

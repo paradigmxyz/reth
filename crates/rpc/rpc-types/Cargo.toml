@@ -18,14 +18,10 @@ reth-rlp = { workspace = true }
 # errors
 thiserror = { workspace = true }
 
-# async
-tokio = { workspace = true, features = ["sync"] }
-
 # misc
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 jsonrpsee-types = { version = "0.18" }
-lru = "0.9"
 
 [dev-dependencies]
 # reth

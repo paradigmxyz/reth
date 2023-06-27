@@ -88,14 +88,14 @@ impl AccountHashingStage {
             generators::{random_block_range, random_eoa_account_range},
         };
         use reth_primitives::{Account, H256, U256};
-        use reth_provider::insert_canonical_block;
+        use reth_provider::BlockWriter;
 
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, opts.blocks.clone(), H256::zero(), opts.txs);
 
         for block in blocks {
-            insert_canonical_block(provider.tx_ref(), block, None).unwrap();
+            provider.insert_block(block, None).unwrap();
         }
         let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
         {

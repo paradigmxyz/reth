@@ -1,4 +1,4 @@
-use super::BlockHashProvider;
+use super::BlockHashReader;
 use reth_interfaces::Result;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, H256};
 
@@ -7,7 +7,7 @@ use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag,
 ///
 /// This trait also supports fetching block hashes and block numbers from a [BlockHashOrNumber].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
+pub trait BlockNumReader: BlockHashReader + Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
 
@@ -46,10 +46,10 @@ pub trait BlockNumProvider: BlockHashProvider + Send + Sync {
 /// are provided if the type implements the `pending_block_num_hash`, `finalized_block_num`, and
 /// `safe_block_num` methods.
 ///
-/// The resulting block numbers can be converted to hashes using the underlying [BlockNumProvider]
+/// The resulting block numbers can be converted to hashes using the underlying [BlockNumReader]
 /// methods, and vice versa.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockIdProvider: BlockNumProvider + Send + Sync {
+pub trait BlockIdReader: BlockNumReader + Send + Sync {
     /// Converts the `BlockNumberOrTag` variants to a block number.
     fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<BlockNumber>> {
         let num = match num {

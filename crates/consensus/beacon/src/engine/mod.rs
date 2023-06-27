@@ -21,7 +21,7 @@ use reth_primitives::{
     H256, U256,
 };
 use reth_provider::{
-    BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
+    BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
@@ -69,7 +69,7 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
 /// for more information.
-pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = 2 * EPOCH_SLOTS;
+pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
@@ -217,7 +217,7 @@ pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
-    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointReader,
+    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -257,7 +257,7 @@ where
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointReader + 'static,
+    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -469,7 +469,7 @@ where
         head: H256,
     ) -> Option<PayloadStatus> {
         // check if the check hash was previously marked as invalid
-        let header = { self.invalid_headers.get(&check)?.clone() };
+        let header = self.invalid_headers.get(&check)?;
 
         // populate the latest valid hash field
         let status = self.prepare_invalid_response(header.parent_hash);
@@ -674,7 +674,7 @@ where
         error: Error,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
-        warn!(target: "consensus::engine", ?error, ?state, "Error canonicalizing the head hash");
+        warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
 
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
@@ -1291,7 +1291,7 @@ where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     BT: BlockchainTreeEngine
-        + BlockProvider
+        + BlockReader
         + CanonChainTracker
         + StageCheckpointReader
         + Unpin
@@ -1371,7 +1371,8 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::TestExecutorFactory, ProviderFactory,
+        providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockWriter,
+        ProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
@@ -1714,8 +1715,10 @@ mod tests {
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
         let factory = ProviderFactory::new(db, chain);
-        let mut provider = factory.provider_rw().unwrap();
-        blocks.try_for_each(|b| provider.insert_block(b.clone(), None)).expect("failed to insert");
+        let provider = factory.provider_rw().unwrap();
+        blocks
+            .try_for_each(|b| provider.insert_block(b.clone(), None).map(|_| ()))
+            .expect("failed to insert");
         provider.commit().unwrap();
     }
 

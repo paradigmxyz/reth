@@ -4,7 +4,7 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-
+use derive_more::AsRef;
 use reth_primitives::{BlockNumber, H160, H256};
 use serde::{Deserialize, Serialize};
 
@@ -19,11 +19,12 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 /// `Address | Storagekey | 200` -> data is from transition 0 to 200.
 ///
 /// `Address | StorageKey | 300` -> data is from transition 201 to 300.
-#[derive(Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Eq, Ord, PartialOrd, PartialEq, AsRef, Serialize, Deserialize)]
 pub struct StorageShardedKey {
     /// Storage account address.
     pub address: H160,
     /// Storage slot with highest transition id.
+    #[as_ref]
     pub sharded_key: ShardedKey<H256>,
 }
 

@@ -26,7 +26,7 @@ During this process, a new `NetworkManager` is created through the `NetworkManag
 ```rust ignore
 impl<C> NetworkManager<C>
 where
-    C: BlockProvider,
+    C: BlockReader,
 {
     //--snip--
 
@@ -267,7 +267,7 @@ In Reth, once a new `NetworkState` is initialized as the node starts up and a ne
 ```rust ignore
 impl<C> NetworkState<C>
 where
-    C: BlockProvider,
+    C: BlockReader,
 {
     /// Advances the state
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateAction> {

@@ -7,11 +7,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256, Account as RethAccount, Address, BigEndianHash, BlockNumber, Bloom, Bytecode, Bytes,
-    ChainSpec, ChainSpecBuilder, Header as RethHeader, JsonU256, SealedBlock, SealedHeader,
-    StorageEntry, Withdrawal, H160, H256, H64, U256,
+    keccak256, Account as RethAccount, Address, BigEndianHash, Bloom, Bytecode, Bytes, ChainSpec,
+    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawal, H160,
+    H256, H64, U256,
 };
-use reth_rlp::Decodable;
 use serde::{self, Deserialize};
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -136,19 +135,6 @@ pub struct Block {
     pub transaction_sequence: Option<Vec<TransactionSequence>>,
     /// Withdrawals
     pub withdrawals: Option<Vec<Withdrawal>>,
-}
-
-impl Block {
-    /// Write the block to the database.
-    pub fn write_to_db<'a, Tx>(&self, tx: &'a Tx) -> Result<BlockNumber, Error>
-    where
-        Tx: DbTx<'a> + DbTxMut<'a>,
-    {
-        let decoded = SealedBlock::decode(&mut self.rlp.as_ref())?;
-        let block_number = decoded.number;
-        reth_provider::insert_canonical_block(tx, decoded, None)?;
-        Ok(block_number)
-    }
 }
 
 /// Transaction sequence in block

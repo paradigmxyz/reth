@@ -41,7 +41,7 @@ use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkMan
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Head, SealedHeader, H256};
 use reth_provider::{
-    BlockHashProvider, BlockProvider, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
+    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, ProviderFactory,
     StageCheckpointReader,
 };
 use reth_revm::Factory;
@@ -206,7 +206,12 @@ impl Command {
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            EthTransactionValidator::new(blockchain_db.clone(), Arc::clone(&self.chain)),
+            EthTransactionValidator::new(
+                blockchain_db.clone(),
+                Arc::clone(&self.chain),
+                ctx.task_executor.clone(),
+                1,
+            ),
             Default::default(),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
@@ -218,14 +223,11 @@ impl Command {
             let client = blockchain_db.clone();
             ctx.task_executor.spawn_critical(
                 "txpool maintenance task",
-                Box::pin(async move {
-                    reth_transaction_pool::maintain::maintain_transaction_pool(
-                        client,
-                        pool,
-                        chain_events,
-                    )
-                    .await
-                }),
+                reth_transaction_pool::maintain::maintain_transaction_pool_future(
+                    client,
+                    pool,
+                    chain_events,
+                ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
         }
@@ -496,7 +498,7 @@ impl Command {
         default_peers_path: PathBuf,
     ) -> Result<NetworkHandle, NetworkError>
     where
-        C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+        C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Unpin + 'static,
     {
         let client = config.client.clone();
@@ -724,7 +726,7 @@ async fn run_network_until_shutdown<C>(
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
 ) where
-    C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+    C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
 {
     pin_mut!(network, shutdown);
 
