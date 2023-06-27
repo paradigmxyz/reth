@@ -39,12 +39,12 @@ async fn unwind_and_copy<DB: Database>(
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
     let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
-    let mut provider = factory.provider_rw()?;
+    let provider = factory.provider_rw()?;
     let mut exec_stage = AccountHashingStage::default();
 
     exec_stage
         .unwind(
-            &mut provider,
+            &provider,
             UnwindInput {
                 unwind_to: from,
                 checkpoint: StageCheckpoint::new(tip_block_number),
@@ -69,7 +69,7 @@ async fn dry_run<DB: Database>(
     info!(target: "reth::cli", "Executing stage.");
 
     let factory = ProviderFactory::new(&output_db, chain);
-    let mut provider = factory.provider_rw()?;
+    let provider = factory.provider_rw()?;
     let mut exec_stage = AccountHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()
@@ -79,7 +79,7 @@ async fn dry_run<DB: Database>(
     while !exec_output {
         exec_output = exec_stage
             .execute(
-                &mut provider,
+                &provider,
                 reth_stages::ExecInput {
                     target: Some(to),
                     checkpoint: Some(StageCheckpoint::new(from)),

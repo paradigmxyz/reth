@@ -42,11 +42,11 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
 
         // Clear previous run
         stage
-            .unwind(&mut provider, unwind)
+            .unwind(&provider, unwind)
             .await
             .map_err(|e| {
                 format!(
@@ -70,16 +70,16 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
 
-        StorageHashingStage::default().unwind(&mut provider, unwind).await.unwrap();
-        AccountHashingStage::default().unwind(&mut provider, unwind).await.unwrap();
+        StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
+        AccountHashingStage::default().unwind(&provider, unwind).await.unwrap();
 
         // Clear previous run
-        stage.unwind(&mut provider, unwind).await.unwrap();
+        stage.unwind(&provider, unwind).await.unwrap();
 
-        AccountHashingStage::default().execute(&mut provider, input).await.unwrap();
-        StorageHashingStage::default().execute(&mut provider, input).await.unwrap();
+        AccountHashingStage::default().execute(&provider, input).await.unwrap();
+        StorageHashingStage::default().execute(&provider, input).await.unwrap();
 
         provider.commit().unwrap();
     });

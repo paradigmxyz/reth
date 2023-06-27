@@ -69,7 +69,7 @@ impl Command {
 
         let db = Arc::new(init_db(db_path)?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         let execution_checkpoint_block =
             provider_rw.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
@@ -110,7 +110,7 @@ impl Command {
 
             execution_stage
                 .execute(
-                    &mut provider_rw,
+                    &provider_rw,
                     ExecInput {
                         target: Some(block),
                         checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
@@ -122,7 +122,7 @@ impl Command {
             while !account_hashing_done {
                 let output = account_hashing_stage
                     .execute(
-                        &mut provider_rw,
+                        &provider_rw,
                         ExecInput {
                             target: Some(block),
                             checkpoint: progress.map(StageCheckpoint::new),
@@ -136,7 +136,7 @@ impl Command {
             while !storage_hashing_done {
                 let output = storage_hashing_stage
                     .execute(
-                        &mut provider_rw,
+                        &provider_rw,
                         ExecInput {
                             target: Some(block),
                             checkpoint: progress.map(StageCheckpoint::new),
@@ -148,7 +148,7 @@ impl Command {
 
             let incremental_result = merkle_stage
                 .execute(
-                    &mut provider_rw,
+                    &provider_rw,
                     ExecInput {
                         target: Some(block),
                         checkpoint: progress.map(StageCheckpoint::new),
@@ -171,7 +171,7 @@ impl Command {
 
                 let clean_input = ExecInput { target: Some(block), checkpoint: None };
                 loop {
-                    let clean_result = merkle_stage.execute(&mut provider_rw, clean_input).await;
+                    let clean_result = merkle_stage.execute(&provider_rw, clean_input).await;
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
                     if clean_result.unwrap().done {
                         break
