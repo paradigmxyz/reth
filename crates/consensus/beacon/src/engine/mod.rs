@@ -1368,7 +1368,8 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::TestExecutorFactory, ProviderFactory,
+        providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockWriter,
+        ProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
@@ -1711,8 +1712,10 @@ mod tests {
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
         let factory = ProviderFactory::new(db, chain);
-        let mut provider = factory.provider_rw().unwrap();
-        blocks.try_for_each(|b| provider.insert_block(b.clone(), None)).expect("failed to insert");
+        let provider = factory.provider_rw().unwrap();
+        blocks
+            .try_for_each(|b| provider.insert_block(b.clone(), None).map(|_| ()))
+            .expect("failed to insert");
         provider.commit().unwrap();
     }
 

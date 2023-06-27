@@ -21,14 +21,14 @@
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountExtReader, AccountReader, BlockExecutor, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, BlockchainTreePendingStateProvider,
-    CanonChainTracker, CanonStateNotification, CanonStateNotificationSender,
-    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, ExecutorFactory,
-    HashingWriter, HeaderProvider, HistoryWriter, PostStateDataProvider, ReceiptProvider,
-    ReceiptProviderIdExt, StageCheckpointReader, StageCheckpointWriter, StateProvider,
-    StateProviderBox, StateProviderFactory, StateRootProvider, StorageReader, TransactionsProvider,
-    WithdrawalsProvider,
+    AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockHashReader,
+    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
+    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
+    CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
+    ExecutorFactory, HashingWriter, HeaderProvider, HistoryWriter, PostStateDataProvider,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StageCheckpointWriter,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageReader,
+    TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
@@ -41,10 +41,6 @@ pub use providers::{
 /// Execution result
 pub mod post_state;
 pub use post_state::PostState;
-
-/// Common database utilities.
-mod utils;
-pub use utils::{insert_block, insert_canonical_block};
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.

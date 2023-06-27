@@ -76,10 +76,10 @@ impl TestTransaction {
     /// Invoke a callback with transaction committing it afterwards
     pub fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
+        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
         let mut tx = self.inner_rw();
-        f(tx.tx_mut())?;
+        f(tx.tx_ref())?;
         tx.commit().expect("failed to commit");
         Ok(())
     }
@@ -200,7 +200,7 @@ impl TestTransaction {
     }
 
     /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
-    fn insert_header(tx: &mut Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
+    fn insert_header(tx: &Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
         tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
         tx.put::<tables::Headers>(header.number, header.clone().unseal())
