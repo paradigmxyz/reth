@@ -48,11 +48,14 @@ component_management:
       name: rpc
       paths:
         - crates/rpc/**
-    - component_id: core
-      name: consensus/evm
+    - component_id: consensus
+      name: consensus
+      paths:
+        - crates/consensus/**
+    - component_id: revm
+      name: revm
       paths:
         - crates/revm/**
-        - crates/consensus/**
     - component_id: builder
       name: payload builder
       paths:
