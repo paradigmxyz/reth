@@ -162,6 +162,8 @@ where
                                 // received bad response
                                 this.client.report_bad_message(peer);
                             } else {
+                                // TODO: do we need to order the bodies?
+                                // or can we assume they are in the same order as the headers?
                                 this.bodies = Some(bodies);
                             }
                         }
