@@ -207,6 +207,13 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 }
 
+/// Extension for [TransactionPool] trait that allows to set the current block info.
+#[auto_impl::auto_impl(Arc)]
+pub trait TransactionPoolExt: TransactionPool {
+    /// Sets the current block info for the pool.
+    fn set_block_info(&self, info: BlockInfo);
+}
+
 /// A Helper type that bundles all transactions in the pool.
 #[derive(Debug, Clone, Default)]
 pub struct AllPoolTransactions<T: PoolTransaction> {

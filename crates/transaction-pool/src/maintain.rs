@@ -1,8 +1,8 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
-    traits::{CanonicalStateUpdate, ChangedAccount},
-    BlockInfo, Pool, TransactionOrdering, TransactionPool, TransactionValidator,
+    traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
+    BlockInfo, TransactionPool,
 };
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
 use reth_primitives::{Address, BlockHash, BlockNumberOrTag, FromRecoveredTransaction};
@@ -19,15 +19,14 @@ use tracing::debug;
 const MAX_UPDATE_DEPTH: u64 = 64;
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
-pub fn maintain_transaction_pool_future<Client, V, T, St>(
+pub fn maintain_transaction_pool_future<Client, P, St>(
     client: Client,
-    pool: Pool<V, T>,
+    pool: P,
     events: St,
 ) -> BoxFuture<'static, ()>
 where
     Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
-    V: TransactionValidator + Send + 'static,
-    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction> + Send + 'static,
+    P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     async move {
@@ -40,14 +39,10 @@ where
 ///
 /// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
 #[allow(unused)]
-pub async fn maintain_transaction_pool<Client, V, T, St>(
-    client: Client,
-    pool: Pool<V, T>,
-    mut events: St,
-) where
+pub async fn maintain_transaction_pool<Client, P, St>(client: Client, pool: P, mut events: St)
+where
     Client: StateProviderFactory + BlockReaderIdExt + Send + 'static,
-    V: TransactionValidator + Send + 'static,
-    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction> + Send + 'static,
+    P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     // ensure the pool points to latest state
@@ -140,9 +135,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                     .transactions()
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
                     .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(|tx| {
-                        <V as TransactionValidator>::Transaction::from_recovered_transaction(tx)
-                    })
+                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
                     .collect();
 
                 // update the pool first
@@ -199,9 +192,7 @@ pub async fn maintain_transaction_pool<Client, V, T, St>(
                 let pruned_old_transactions = blocks
                     .transactions()
                     .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(|tx| {
-                        <V as TransactionValidator>::Transaction::from_recovered_transaction(tx)
-                    })
+                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
                     .collect();
 
                 // all transactions that were mined in the old chain need to be re-injected

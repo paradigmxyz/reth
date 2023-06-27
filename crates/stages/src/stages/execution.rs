@@ -87,7 +87,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -262,7 +262,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Execute the stage
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         // For Ethereum transactions that reaches the max call depth (1024) revm can use more stack
@@ -289,7 +289,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -583,6 +583,7 @@ mod tests {
 
         // insert pre state
         let provider = factory.provider_rw().unwrap();
+
         let db_tx = provider.tx_ref();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
@@ -604,9 +605,9 @@ mod tests {
         db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         provider.commit().unwrap();
 
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let output = execution_stage.execute(&mut provider, input).await.unwrap();
+        let output = execution_stage.execute(&provider, input).await.unwrap();
         provider.commit().unwrap();
         assert_matches!(output, ExecOutput {
             checkpoint: StageCheckpoint {
@@ -696,6 +697,7 @@ mod tests {
         let code_hash = keccak256(code);
         // pre state
         let provider = factory.provider_rw().unwrap();
+
         let db_tx = provider.tx_ref();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
         let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
@@ -708,16 +710,16 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let result = execution_stage.execute(&mut provider, input).await.unwrap();
+        let result = execution_stage.execute(&provider, input).await.unwrap();
         provider.commit().unwrap();
 
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut stage = stage();
         let result = stage
             .unwind(
-                &mut provider,
+                &provider,
                 UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
             )
             .await
@@ -811,9 +813,9 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let _ = execution_stage.execute(&mut provider, input).await.unwrap();
+        let _ = execution_stage.execute(&provider, input).await.unwrap();
         provider.commit().unwrap();
 
         // assert unwind stage
