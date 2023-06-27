@@ -1,5 +1,5 @@
 use crate::BlockNumber;
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -35,29 +35,25 @@ impl Compact for PruneMode {
             }
             PruneMode::Distance(distance) => {
                 buf.put_u8(1);
-                1 + distance.to_compact(buf)
+                buf.put_u64(distance);
+                1 + 8
             }
             PruneMode::Before(block_number) => {
                 buf.put_u8(2);
-                1 + block_number.to_compact(buf)
+                buf.put_u64(block_number);
+                1 + 8
             }
         }
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
     where
         Self: Sized,
     {
-        match buf[0] {
-            0 => (Self::Full, &buf[1..]),
-            1 => {
-                let (distance, buf) = u64::from_compact(&buf[1..], std::mem::size_of::<u64>());
-                (Self::Distance(distance), buf)
-            }
-            2 => {
-                let (block_number, buf) = u64::from_compact(&buf[1..], std::mem::size_of::<u64>());
-                (Self::Before(block_number), buf)
-            }
+        match buf.get_u8() {
+            0 => (Self::Full, buf),
+            1 => (Self::Distance(buf.get_u64()), buf),
+            2 => (Self::Before(buf.get_u64()), buf),
             _ => unreachable!("Junk data in database: unknown PruneMode variant"),
         }
     }
