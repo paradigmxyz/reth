@@ -127,6 +127,24 @@ where
         self.inflight_full_block_requests.iter().any(|req| *req.hash() == hash)
     }
 
+    /// Starts requesting a range of blocks from the network, in reverse from the given hash.
+    ///
+    /// TODO: should it return `true` if there is already a larger range with the given start hash?
+    pub(crate) fn download_block_range(&mut self, hash: H256, count: u64) {
+        trace!(
+            target: "consensus::engine",
+            ?hash,
+            ?count,
+            "start downloading full block."
+        );
+
+        // let request = self.block_client.get_block_range(hash, count);
+        // self.inflight_block_range_requests.push(request);
+
+        // // TODO: need more metrics for block ranges
+        // self.update_block_download_metrics();
+    }
+
     /// Starts requesting a full block from the network.
     ///
     /// Returns `true` if the request was started, `false` if there's already a request for the

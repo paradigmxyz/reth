@@ -10,6 +10,9 @@ pub mod either;
 /// An implementation that uses headers and bodies traits to download full blocks
 pub mod full_block;
 
+/// An implementation that uses header and bodies traits to download ranges of full blocks.
+pub mod full_block_range;
+
 /// Traits for implementing P2P Header Clients. Also includes implementations
 /// of a Linear and a Parallel downloader generic over the [`Consensus`] and
 /// [`HeadersClient`].
