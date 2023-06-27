@@ -86,7 +86,7 @@ The `debug_traceTransaction` debugging method will attempt to run the transactio
 
 | Client | Method invocation                                           |
 |--------|-------------------------------------------------------------|
-| RPC    | `{"method": "debug_traceBlock", "params": [tx_hash, opts]}` |
+| RPC    | `{"method": "debug_traceTransaction", "params": [tx_hash, opts]}` |
 
 ## `debug_traceCall`
 
