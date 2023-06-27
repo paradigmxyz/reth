@@ -251,10 +251,6 @@ where
         self.pool.block_info()
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
-        self.pool.on_canonical_state_change(update);
-    }
-
     async fn add_transaction_and_subscribe(
         &self,
         origin: TransactionOrigin,
@@ -372,6 +368,10 @@ where
     fn set_block_info(&self, info: BlockInfo) {
         trace!(target: "txpool", "updating pool block info");
         self.pool.set_block_info(info)
+    }
+
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        self.pool.on_canonical_state_change(update);
     }
 }
 

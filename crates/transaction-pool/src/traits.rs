@@ -36,13 +36,6 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// This tracks the block that the pool has last seen.
     fn block_info(&self) -> BlockInfo;
 
-    /// Event listener for when the pool needs to be updated
-    ///
-    /// Implementers need to update the pool accordingly.
-    /// For example the base fee of the pending block is determined after a block is mined which
-    /// affects the dynamic fee requirement of pending transactions in the pool.
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
-
     /// Imports an _external_ transaction.
     ///
     /// This is intended to be used by the network to insert incoming transactions received over the
@@ -212,6 +205,13 @@ pub trait TransactionPool: Send + Sync + Clone {
 pub trait TransactionPoolExt: TransactionPool {
     /// Sets the current block info for the pool.
     fn set_block_info(&self, info: BlockInfo);
+
+    /// Event listener for when the pool needs to be updated
+    ///
+    /// Implementers need to update the pool accordingly.
+    /// For example the base fee of the pending block is determined after a block is mined which
+    /// affects the dynamic fee requirement of pending transactions in the pool.
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
 }
 
 /// A Helper type that bundles all transactions in the pool.
