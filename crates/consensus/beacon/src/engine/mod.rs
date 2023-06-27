@@ -956,26 +956,20 @@ where
         err: InsertBlockError,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (block, error) = err.split();
-        match error {
-            InsertBlockErrorKind::Internal(err) => {
-                // this is an internal error that is unrelated to the payload
-                Err(BeaconOnNewPayloadError::Internal(err))
-            }
-            InsertBlockErrorKind::SenderRecovery |
-            InsertBlockErrorKind::Consensus(_) |
-            InsertBlockErrorKind::Execution(_) |
-            InsertBlockErrorKind::Tree(_) => {
-                // all of these occurred if the payload is invalid
-                let parent_hash = block.parent_hash;
 
-                // keep track of the invalid header
-                self.invalid_headers.insert(block.header);
+        if error.is_invalid_block() {
+            // all of these occurred if the payload is invalid
+            let parent_hash = block.parent_hash;
 
-                let latest_valid_hash =
-                    self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-                let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
-                Ok(PayloadStatus::new(status, latest_valid_hash))
-            }
+            // keep track of the invalid header
+            self.invalid_headers.insert(block.header);
+
+            let latest_valid_hash =
+                self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
+            let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+            Ok(PayloadStatus::new(status, latest_valid_hash))
+        } else {
+            Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
         }
     }
 
@@ -1089,8 +1083,7 @@ where
             }
             Err(err) => {
                 warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
-                if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
-                    // non-internal error kinds occur if the payload is invalid
+                if err.kind().is_invalid_block() {
                     self.invalid_headers.insert(err.into_block().header);
                 }
             }

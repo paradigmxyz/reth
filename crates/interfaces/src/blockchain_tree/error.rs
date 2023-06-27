@@ -174,6 +174,48 @@ impl InsertBlockErrorKind {
         matches!(self, InsertBlockErrorKind::Consensus(_))
     }
 
+    /// Returns true if the error is caused by an invalid block
+    ///
+    /// This is intended to be used to determine if the block should be marked as invalid.
+    pub fn is_invalid_block(&self) -> bool {
+        match self {
+            InsertBlockErrorKind::SenderRecovery | InsertBlockErrorKind::Consensus(_) => true,
+            // other execution errors that are considered internal errors
+            InsertBlockErrorKind::Execution(err) => {
+                match err {
+                    BlockExecutionError::Validation(_) => {
+                        // this is caused by an invalid block
+                        true
+                    }
+                    // these are internal errors, not caused by an invalid block
+                    BlockExecutionError::ProviderError |
+                    BlockExecutionError::CanonicalRevert { .. } |
+                    BlockExecutionError::CanonicalCommit { .. } |
+                    BlockExecutionError::BlockHashNotFoundInChain { .. } |
+                    BlockExecutionError::AppendChainDoesntConnect { .. } |
+                    BlockExecutionError::UnavailableForTest => false,
+                }
+            }
+            InsertBlockErrorKind::Tree(err) => {
+                match err {
+                    BlockchainTreeError::PendingBlockIsFinalized { .. } => {
+                        // the block's number is lower than the finalized block's number
+                        true
+                    }
+                    BlockchainTreeError::BlockSideChainIdConsistency { .. } |
+                    BlockchainTreeError::CanonicalChain { .. } |
+                    BlockchainTreeError::BlockNumberNotFoundInChain { .. } |
+                    BlockchainTreeError::BlockHashNotFoundInChain { .. } |
+                    BlockchainTreeError::BlockBufferingFailed { .. } => false,
+                }
+            }
+            InsertBlockErrorKind::Internal(_) => {
+                // any other error, such as database errors, are considered internal errors
+                false
+            }
+        }
+    }
+
     /// Returns true if this is a block pre merge error.
     pub fn is_block_pre_merge(&self) -> bool {
         matches!(
