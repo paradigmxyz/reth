@@ -18,7 +18,7 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    H256, U256,
+    SealedHeader, H256, U256,
 };
 use reth_provider::{
     BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
@@ -575,7 +575,7 @@ where
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
 
                     // new VALID update that moved the canonical chain forward
-                    let _ = self.update_canon_chain(&state);
+                    let _ = self.update_canon_chain(outcome.header().clone(), &state);
                 } else {
                     debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
                 }
@@ -610,11 +610,30 @@ where
         Ok(OnForkChoiceUpdated::valid(status))
     }
 
-    /// Sets the state of the canon chain tracker based on the given forkchoice update.
+    /// Sets the state of the canon chain tracker based to the given head.
+    ///
+    /// This expects the given head to be the new canonical head.
+    ///
     /// Additionally, updates the head used for p2p handshakes.
     ///
     /// This should be called before issuing a VALID forkchoice update.
-    fn update_canon_chain(&self, update: &ForkchoiceState) -> Result<(), reth_interfaces::Error> {
+    fn update_canon_chain(
+        &self,
+        head: SealedHeader,
+        update: &ForkchoiceState,
+    ) -> Result<(), reth_interfaces::Error> {
+        let mut head_block = Head {
+            number: head.number,
+            hash: head.hash,
+            difficulty: head.difficulty,
+            timestamp: head.timestamp,
+            // NOTE: this will be set later
+            total_difficulty: Default::default(),
+        };
+
+        // we update the the tracked header first
+        self.blockchain.set_canonical_head(head);
+
         if !update.finalized_block_hash.is_zero() {
             let finalized = self
                 .blockchain
@@ -635,26 +654,14 @@ where
             self.blockchain.set_safe(safe.header.seal(update.safe_block_hash));
         }
 
-        // the consensus engine should ensure the head is not zero so we always update the head
-        let head = self
-            .blockchain
-            .find_block_by_hash(update.head_block_hash, BlockSource::Any)?
-            .ok_or_else(|| {
-                Error::Provider(ProviderError::UnknownBlockHash(update.head_block_hash))
+        head_block.total_difficulty =
+            self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
+                Error::Provider(ProviderError::TotalDifficultyNotFound {
+                    number: head_block.number,
+                })
             })?;
-        let head = head.header.seal(update.head_block_hash);
-        let head_td = self.blockchain.header_td_by_number(head.number)?.ok_or_else(|| {
-            Error::Provider(ProviderError::TotalDifficultyNotFound { number: head.number })
-        })?;
+        self.sync_state_updater.update_status(head_block);
 
-        self.sync_state_updater.update_status(Head {
-            number: head.number,
-            hash: head.hash,
-            difficulty: head.difficulty,
-            timestamp: head.timestamp,
-            total_difficulty: head_td,
-        });
-        self.blockchain.set_canonical_head(head);
         Ok(())
     }
 
@@ -1108,13 +1115,14 @@ where
                     let new_head = outcome.into_header();
                     debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
 
+                    // we can update the FCU blocks
+                    let _ = self.update_canon_chain(new_head, &target);
+
                     // we're no longer syncing
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
+
                     // clear any active block requests
                     self.sync.clear_full_block_requests();
-
-                    // we can update the FCU blocks
-                    let _ = self.update_canon_chain(&target);
                 }
                 Err(err) => {
                     // if we failed to make the FCU's head canonical, because we don't have that
