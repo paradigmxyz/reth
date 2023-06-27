@@ -56,9 +56,9 @@ confy = "0.5"
 toml = { version = "0.7", features = ["display"] }
 
 # metrics
-metrics-exporter-prometheus = "0.12.0"
-metrics-util = "0.15.0"
-metrics-process = "1.0.11"
+metrics-exporter-prometheus = "0.11.0"
+metrics-util = "0.14.0"
+metrics-process = "1.0.9"
 
 # test vectors generation
 proptest = "1.0"
