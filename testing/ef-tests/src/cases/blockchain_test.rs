@@ -77,7 +77,7 @@ impl Case for BlockchainTestCase {
             // Create the database
             let db = create_test_rw_db();
             let factory = ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()));
-            let mut provider = factory.provider_rw().unwrap();
+            let provider = factory.provider_rw().unwrap();
 
             // Insert test state
             provider.insert_block(
@@ -105,10 +105,7 @@ impl Case for BlockchainTestCase {
                     .block_on(async {
                         // ignore error
                         let _ = stage
-                            .execute(
-                                &mut provider,
-                                ExecInput { target: last_block, checkpoint: None },
-                            )
+                            .execute(&provider, ExecInput { target: last_block, checkpoint: None })
                             .await;
                     });
             }

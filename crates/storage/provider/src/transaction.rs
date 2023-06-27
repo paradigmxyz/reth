@@ -26,7 +26,7 @@ mod test {
             .build();
 
         let factory = ProviderFactory::new(db.as_ref(), Arc::new(chain_spec.clone()));
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
 
         let data = BlockChainTestData::default();
         let genesis = data.genesis.clone();
@@ -144,7 +144,7 @@ mod test {
         );
 
         let factory = ProviderFactory::new(db.as_ref(), chain_spec.clone());
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
 
         let data = BlockChainTestData::default();
         let genesis = data.genesis.clone();

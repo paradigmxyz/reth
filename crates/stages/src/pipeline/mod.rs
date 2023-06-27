@@ -276,7 +276,7 @@ where
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
-                let output = stage.unwind(&mut provider_rw, input).await;
+                let output = stage.unwind(&provider_rw, input).await;
                 match output {
                     Ok(unwind_output) => {
                         checkpoint = unwind_output.checkpoint;
@@ -358,7 +358,7 @@ where
             });
 
             match stage
-                .execute(&mut provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
+                .execute(&provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
                 .await
             {
                 Ok(out @ ExecOutput { checkpoint, done }) => {

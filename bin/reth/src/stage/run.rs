@@ -229,7 +229,7 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&mut provider_rw, unwind).await?;
+                let unwind_output = unwind_stage.unwind(&provider_rw, unwind).await?;
                 unwind.checkpoint = unwind_output.checkpoint;
 
                 if self.commit {
@@ -245,7 +245,7 @@ impl Command {
         };
 
         while let ExecOutput { checkpoint: stage_progress, done: false } =
-            exec_stage.execute(&mut provider_rw, input).await?
+            exec_stage.execute(&provider_rw, input).await?
         {
             input.checkpoint = Some(stage_progress);
 
