@@ -1,5 +1,5 @@
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
-WORKDIR app
+WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
 LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
@@ -28,13 +28,13 @@ RUN cargo build --profile $BUILD_PROFILE --locked --bin reth
 
 # Use Ubuntu as the release image
 FROM ubuntu AS runtime
-WORKDIR app
+WORKDIR /app
 
 # Copy reth over from the build stage
 COPY --from=builder /app/target/release/reth /usr/local/bin
 
 # Copy licenses
-COPY LICENSE-* .
+COPY LICENSE-* ./
 
 EXPOSE 30303 30303/udp 9001 8545 8546
 ENTRYPOINT ["/usr/local/bin/reth"]
