@@ -127,9 +127,14 @@ pub(crate) async fn initialize(
 
 #[cfg(feature = "jemalloc")]
 fn collect_memory_stats() {
-    use jemalloc_ctl::stats;
+    use jemalloc_ctl::{epoch, stats};
     use reth_metrics::metrics::gauge;
     use tracing::error;
+
+    if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
+    {
+        return
+    }
 
     if let Ok(value) = stats::active::read()
         .map_err(|error| error!(?error, "Failed to read jemalloc.stats.active"))
