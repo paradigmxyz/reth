@@ -3178,6 +3178,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "453ad9f582a441959e5f0d088b02ce04cfe8d51a8eaf077f12ac6d3e94164ca6"
 
 [[package]]
+name = "jemalloc-ctl"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1891c671f3db85d8ea8525dd43ab147f9977041911d24a03e5a36187a7bfde9"
+dependencies = [
+ "jemalloc-sys",
+ "libc",
+ "paste",
+]
+
+[[package]]
 name = "jemalloc-sys"
 version = "0.5.3+5.3.0-patched"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4935,6 +4946,7 @@ dependencies = [
  "human_bytes",
  "humantime",
  "hyper",
+ "jemalloc-ctl",
  "jemallocator",
  "metrics-exporter-prometheus",
  "metrics-process",
