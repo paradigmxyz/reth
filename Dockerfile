@@ -34,7 +34,7 @@ WORKDIR app
 COPY --from=builder /app/target/release/reth /usr/local/bin
 
 # Copy licenses
-COPY LICENSE-* .
+COPY LICENSE-* ./
 
 EXPOSE 30303 30303/udp 9001 8545 8546
 ENTRYPOINT ["/usr/local/bin/reth"]
