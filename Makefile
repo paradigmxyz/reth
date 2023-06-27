@@ -105,6 +105,14 @@ build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR dir
 
 ##@ Test
 
+.PHONY: unit
+unit: ## Run unit tests with coverage.
+	cargo llvm-cov nextest --html --locked --workspace --all-features -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+
+.PHONY: html
+html: ## Open coverage report in browser.
+	open target/llvm-cov/html/index.html
+
 # Downloads and unpacks Ethereum Foundation tests in the `$(EF_TESTS_DIR)` directory.
 #
 # Requires `wget` and `tar`
