@@ -22,8 +22,9 @@ use reth_primitives::{
 use reth_provider::{
     chain::{ChainSplit, SplitAt},
     post_state::PostState,
-    BlockNumReader, CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    Chain, DatabaseProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider,
+    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
+    CanonStateNotificationSender, CanonStateNotifications, Chain, DatabaseProvider,
+    DisplayBlocksChain, ExecutorFactory, HeaderProvider,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -1007,8 +1008,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Canonicalize the given chain and commit it to the database.
-    fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
-        let mut provider = DatabaseProvider::new_rw(
+    fn commit_canonical(&self, chain: Chain) -> Result<(), Error> {
+        let provider = DatabaseProvider::new_rw(
             self.externals.db.tx_mut()?,
             self.externals.chain_spec.clone(),
         );
@@ -1093,9 +1094,9 @@ mod tests {
         proofs::EMPTY_ROOT, stage::StageCheckpoint, ChainSpecBuilder, H256, MAINNET,
     };
     use reth_provider::{
-        insert_block,
         post_state::PostState,
         test_utils::{blocks::BlockChainTestData, TestExecutorFactory},
+        BlockWriter, ProviderFactory,
     };
     use std::{collections::HashSet, sync::Arc};
 
@@ -1122,16 +1123,23 @@ mod tests {
 
         genesis.header.header.number = 10;
         genesis.header.header.state_root = EMPTY_ROOT;
-        let tx_mut = db.tx_mut().unwrap();
+        let factory = ProviderFactory::new(&db, MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
 
-        insert_block(&tx_mut, genesis, None).unwrap();
+        provider.insert_block(genesis, None).unwrap();
 
         // insert first 10 blocks
         for i in 0..10 {
-            tx_mut.put::<tables::CanonicalHeaders>(i, H256([100 + i as u8; 32])).unwrap();
+            provider
+                .tx_ref()
+                .put::<tables::CanonicalHeaders>(i, H256([100 + i as u8; 32]))
+                .unwrap();
         }
-        tx_mut.put::<tables::SyncStage>("Finish".to_string(), StageCheckpoint::new(10)).unwrap();
-        tx_mut.commit().unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::SyncStage>("Finish".to_string(), StageCheckpoint::new(10))
+            .unwrap();
+        provider.commit().unwrap();
     }
 
     /// Test data structure that will check tree internals

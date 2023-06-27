@@ -6,7 +6,8 @@ use crate::{
 };
 use reth_db::mdbx::test_utils::create_test_rw_db;
 use reth_primitives::{BlockBody, SealedBlock};
-use reth_provider::ProviderFactory;
+use reth_provider::{BlockWriter, ProviderFactory};
+use reth_rlp::Decodable;
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, ffi::OsStr, fs, path::Path, sync::Arc};
 
@@ -79,8 +80,7 @@ impl Case for BlockchainTestCase {
             let mut provider = factory.provider_rw().unwrap();
 
             // Insert test state
-            reth_provider::insert_canonical_block(
-                provider.tx_ref(),
+            provider.insert_block(
                 SealedBlock::new(case.genesis_block_header.clone().into(), BlockBody::default()),
                 None,
             )?;
@@ -88,7 +88,9 @@ impl Case for BlockchainTestCase {
 
             let mut last_block = None;
             for block in case.blocks.iter() {
-                last_block = Some(block.write_to_db(provider.tx_ref())?);
+                let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
+                last_block = Some(decoded.number);
+                provider.insert_block(decoded, None)?;
             }
 
             // Call execution stage

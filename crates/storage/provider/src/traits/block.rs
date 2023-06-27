@@ -1,13 +1,15 @@
 use crate::{
-    BlockIdReader, BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockIdReader, BlockNumReader, HeaderProvider, PostState, ReceiptProvider,
+    ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
 };
+use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
-    Receipt, SealedBlock, SealedHeader, H256,
+    Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
+    ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, H256,
 };
+use std::ops::RangeInclusive;
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -197,4 +199,56 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     ///
     /// Returns `None` if block is not found.
     fn ommers_by_id(&self, id: BlockId) -> Result<Option<Vec<Header>>>;
+}
+
+/// BlockExecution Writer
+#[auto_impl(&, Arc, Box)]
+pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
+    /// Get range of blocks and its execution result
+    fn get_block_and_execution_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+        self.get_or_take_block_and_execution_range::<false>(chain_spec, range)
+    }
+
+    /// Take range of blocks and its execution result
+    fn take_block_and_execution_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+        self.get_or_take_block_and_execution_range::<true>(chain_spec, range)
+    }
+
+    /// Return range of blocks and its execution result
+    fn get_or_take_block_and_execution_range<const TAKE: bool>(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>>;
+}
+
+/// Block Writer
+#[auto_impl(&, Arc, Box)]
+pub trait BlockWriter: Send + Sync {
+    /// Insert full block and make it canonical. Parent tx num and transition id is taken from
+    /// parent block in database.
+    ///
+    /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
+    /// transition in the block.
+    fn insert_block(
+        &self,
+        block: SealedBlock,
+        senders: Option<Vec<Address>>,
+    ) -> Result<StoredBlockBodyIndices>;
+
+    /// Append blocks and insert its post state.
+    /// This will insert block data to all related tables and will update pipeline progress.
+    fn append_blocks_with_post_state(
+        &self,
+        blocks: Vec<SealedBlockWithSenders>,
+        state: PostState,
+    ) -> Result<()>;
 }
