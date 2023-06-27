@@ -12,7 +12,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
-use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase, Transaction};
+use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
@@ -20,9 +20,9 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, UnwindInput,
+    ExecInput, ExecOutput, PipelineError, Stage, UnwindInput,
 };
-use std::{any::Any, net::SocketAddr, ops::Deref, path::PathBuf, sync::Arc};
+use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth stage` command
@@ -120,7 +120,10 @@ impl Command {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
-        let mut tx = Transaction::new(db.as_ref())?;
+        info!(target: "reth::cli", "Database opened");
+
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -164,7 +167,7 @@ impl Command {
                             p2p_secret_key,
                             default_peers_path,
                         )
-                        .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
+                        .build(Arc::new(ProviderFactory::new(db.clone(), self.chain.clone())))
                         .start_network()
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);
@@ -219,7 +222,7 @@ impl Command {
             assert!(exec_stage.type_id() == unwind_stage.type_id());
         }
 
-        let checkpoint = get_stage_checkpoint(tx.deref(), exec_stage.id())?.unwrap_or_default();
+        let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
 
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
@@ -231,8 +234,13 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&mut tx, unwind).await?;
+                let unwind_output = unwind_stage.unwind(&provider_rw, unwind).await?;
                 unwind.checkpoint = unwind_output.checkpoint;
+
+                if self.commit {
+                    provider_rw.commit()?;
+                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                }
             }
         }
 
@@ -242,12 +250,13 @@ impl Command {
         };
 
         while let ExecOutput { checkpoint: stage_progress, done: false } =
-            exec_stage.execute(&mut tx, input).await?
+            exec_stage.execute(&provider_rw, input).await?
         {
             input.checkpoint = Some(stage_progress);
 
             if self.commit {
-                tx.commit()?;
+                provider_rw.commit()?;
+                provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
             }
         }
 

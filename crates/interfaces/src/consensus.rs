@@ -74,11 +74,15 @@ pub enum ConsensusError {
     #[error("Block parent [hash:{hash:?}] is not known.")]
     ParentUnknown { hash: BlockHash },
     #[error(
-        "Block number {block_number} is mismatch with parent block number {parent_block_number}"
+        "Block number {block_number} does not match parent block number {parent_block_number}"
     )]
     ParentBlockNumberMismatch { parent_block_number: BlockNumber, block_number: BlockNumber },
     #[error(
-    "Block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}."
+        "Parent hash {got_parent_hash:?} does not match the expected {expected_parent_hash:?}"
+    )]
+    ParentHashMismatch { expected_parent_hash: H256, got_parent_hash: H256 },
+    #[error(
+        "Block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}."
     )]
     TimestampIsInPast { parent_timestamp: u64, timestamp: u64 },
     #[error("Block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}.")]

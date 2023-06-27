@@ -65,7 +65,7 @@ where
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();
-    EthApiClient::fee_history(client, 0.into(), block_number.into(), None).await.unwrap();
+    EthApiClient::fee_history(client, 0.into(), block_number, None).await.unwrap();
     EthApiClient::balance(client, address, None).await.unwrap();
     EthApiClient::transaction_count(client, address, None).await.unwrap();
     EthApiClient::storage_at(client, address, U256::default().into(), None).await.unwrap();
@@ -90,7 +90,7 @@ where
     EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into()))
         .await
         .unwrap();
-    EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None)
+    EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None, None)
         .await
         .unwrap();
     EthApiClient::syncing(client).await.unwrap();
@@ -157,7 +157,9 @@ where
     TraceApiClient::trace_raw_transaction(client, Bytes::default(), HashSet::default(), None)
         .await
         .unwrap_err();
-    TraceApiClient::trace_call_many(client, vec![], None).await.unwrap();
+    TraceApiClient::trace_call_many(client, vec![], Some(BlockNumberOrTag::Latest.into()))
+        .await
+        .unwrap();
     TraceApiClient::replay_transaction(client, H256::default(), HashSet::default())
         .await
         .err()

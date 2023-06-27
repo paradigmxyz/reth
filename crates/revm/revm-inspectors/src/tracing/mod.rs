@@ -21,11 +21,20 @@ mod fourbyte;
 mod opcount;
 mod types;
 mod utils;
-use crate::tracing::types::{CallTraceNode, StorageChange};
-pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
+use crate::tracing::{
+    arena::PushTraceKind,
+    types::{CallTraceNode, StorageChange},
+};
+pub use builder::{
+    geth::{self, GethTraceBuilder},
+    parity::{self, ParityTraceBuilder},
+};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
+
+#[cfg(feature = "js-tracer")]
+pub mod js;
 
 /// An inspector that collects call traces.
 ///
@@ -121,10 +130,21 @@ impl TracingInspector {
         value: U256,
         kind: CallKind,
         caller: Address,
+        gas_limit: u64,
         maybe_precompile: Option<bool>,
     ) {
+        // This will only be true if the inspector is configured to exclude precompiles and the call
+        // is to a precompile
+        let push_kind = if maybe_precompile.unwrap_or(false) {
+            // We don't want to track precompiles
+            PushTraceKind::PushOnly
+        } else {
+            PushTraceKind::PushAndAttachToParent
+        };
+
         self.trace_stack.push(self.traces.push_trace(
             0,
+            push_kind,
             CallTrace {
                 depth,
                 address,
@@ -135,6 +155,7 @@ impl TracingInspector {
                 caller,
                 last_call_return_value: self.last_call_return_data.clone(),
                 maybe_precompile,
+                gas_limit,
                 ..Default::default()
             },
         ));
@@ -159,7 +180,6 @@ impl TracingInspector {
         let trace = &mut self.traces.arena[trace_idx].trace;
 
         trace.gas_used = gas.spend();
-        trace.gas_limit = gas.limit();
         trace.status = status;
         trace.success = matches!(status, return_ok!());
         trace.output = output.clone();
@@ -192,11 +212,20 @@ impl TracingInspector {
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
 
+        let op = OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+            .or_else(|| {
+                // if the opcode is invalid, we'll use the invalid opcode to represent it because
+                // this is invoked before the opcode is executed, the evm will eventually return a
+                // `Halt` with invalid/unknown opcode as result
+                let invalid_opcode = 0xfe;
+                OpCode::try_from_u8(invalid_opcode)
+            })
+            .expect("is valid opcode;");
+
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
             pc,
-            op: OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
-                .expect("is valid opcode;"),
+            op,
             contract: interp.contract.address,
             stack,
             memory,
@@ -307,8 +336,11 @@ where
 
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx];
-        trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
-        trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+
+        if self.config.record_logs {
+            trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
+            trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+        }
     }
 
     fn step_end(
@@ -364,6 +396,7 @@ where
             value,
             inputs.context.scheme.into(),
             from,
+            inputs.gas_limit,
             maybe_precompile,
         );
 
@@ -402,6 +435,7 @@ where
             inputs.value,
             inputs.scheme.into(),
             inputs.caller,
+            inputs.gas_limit,
             Some(false),
         );
 

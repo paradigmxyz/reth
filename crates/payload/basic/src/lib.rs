@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -11,19 +17,19 @@ use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_payload_builder::{
-    error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes,
-    PayloadJob, PayloadJobGenerator,
+    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
+    PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     constants::{
-        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION,
-        SLOT_DURATION,
+        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
+        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
     proofs, Block, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     SealedBlock, Withdrawal, EMPTY_OMMER_ROOT, H256, U256,
 };
-use reth_provider::{BlockProviderIdExt, BlockSource, PostState, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, BlockSource, PostState, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -98,7 +104,7 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {}
 
 impl<Client, Pool, Tasks> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Pool, Tasks>
 where
-    Client: StateProviderFactory + BlockProviderIdExt + Clone + Unpin + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
 {
@@ -149,6 +155,7 @@ where
             interval: tokio::time::interval(self.config.interval),
             best_payload: None,
             pending_block: None,
+            cached_reads: None,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
         })
@@ -172,7 +179,7 @@ impl PayloadTaskGuard {
 pub struct BasicPayloadJobGeneratorConfig {
     /// Data to include in the block's extra data field.
     extradata: Bytes,
-    /// Target gas ceiling for built blocks, defaults to 30_000_000 gas.
+    /// Target gas ceiling for built blocks, defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
     max_gas_limit: u64,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
@@ -218,7 +225,7 @@ impl BasicPayloadJobGeneratorConfig {
 
     /// Sets the target gas ceiling for mined blocks.
     ///
-    /// Defaults to 30_000_000 gas.
+    /// Defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
     pub fn max_gas_limit(mut self, max_gas_limit: u64) -> Self {
         self.max_gas_limit = max_gas_limit;
         self
@@ -231,7 +238,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
         RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
             extradata: extradata.freeze(),
-            max_gas_limit: 30_000_000,
+            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,
@@ -260,6 +267,11 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     pending_block: Option<PendingPayload>,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
+    /// Caches all disk reads for the state the new payloads builds on
+    ///
+    /// This is used to avoid reading the same state over and over again when new attempts are
+    /// triggerd, because during the building process we'll repeatedly execute the transactions.
+    cached_reads: Option<CachedReads>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
 }
@@ -295,10 +307,19 @@ where
                 let payload_config = this.config.clone();
                 let best_payload = this.best_payload.clone();
                 this.metrics.inc_initiated_payload_builds();
+                let cached_reads = this.cached_reads.take().unwrap_or_default();
                 this.executor.spawn_blocking(Box::pin(async move {
                     // acquire the permit for executing the task
                     let _permit = guard.0.acquire().await;
-                    build_payload(client, pool, payload_config, cancel, best_payload, tx)
+                    build_payload(
+                        client,
+                        pool,
+                        cached_reads,
+                        payload_config,
+                        cancel,
+                        best_payload,
+                        tx,
+                    )
                 }));
                 this.pending_block = Some(PendingPayload { _cancel, payload: rx });
             }
@@ -310,12 +331,14 @@ where
                 Poll::Ready(Ok(outcome)) => {
                     this.interval.reset();
                     match outcome {
-                        BuildOutcome::Better(payload) => {
+                        BuildOutcome::Better { payload, cached_reads } => {
+                            this.cached_reads = Some(cached_reads);
                             trace!("built better payload");
                             let payload = Arc::new(payload);
                             this.best_payload = Some(payload);
                         }
-                        BuildOutcome::Aborted { fees } => {
+                        BuildOutcome::Aborted { fees, cached_reads } => {
+                            this.cached_reads = Some(cached_reads);
                             trace!(?fees, "skipped payload build of worse block");
                         }
                         BuildOutcome::Cancelled => {
@@ -415,7 +438,7 @@ impl Future for ResolveBestPayload {
         if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
-                if let Ok(BuildOutcome::Better(payload)) = res {
+                if let Ok(BuildOutcome::Better { payload, .. }) = res {
                     return Poll::Ready(Ok(Arc::new(payload)))
                 }
             }
@@ -496,9 +519,18 @@ struct PayloadConfig {
 #[derive(Debug)]
 enum BuildOutcome {
     /// Successfully built a better block.
-    Better(BuiltPayload),
+    Better {
+        /// The new payload that was built.
+        payload: BuiltPayload,
+        /// The cached reads that were used to build the payload.
+        cached_reads: CachedReads,
+    },
     /// Aborted payload building because resulted in worse block wrt. fees.
-    Aborted { fees: U256 },
+    Aborted {
+        fees: U256,
+        /// The cached reads that were used to build the payload.
+        cached_reads: CachedReads,
+    },
     /// Build job was cancelled
     Cancelled,
 }
@@ -507,6 +539,7 @@ enum BuildOutcome {
 fn build_payload<Pool, Client>(
     client: Client,
     pool: Pool,
+    cached_reads: CachedReads,
     config: PayloadConfig,
     cancel: Cancelled,
     best_payload: Option<Arc<BuiltPayload>>,
@@ -519,6 +552,7 @@ fn build_payload<Pool, Client>(
     fn try_build<Pool, Client>(
         client: Client,
         pool: Pool,
+        mut cached_reads: CachedReads,
         config: PayloadConfig,
         cancel: Cancelled,
         best_payload: Option<Arc<BuiltPayload>>,
@@ -538,8 +572,8 @@ fn build_payload<Pool, Client>(
 
         debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
 
-        let state = client.state_by_block_hash(parent_block.hash)?;
-        let mut db = SubState::new(State::new(state));
+        let state = State::new(client.state_by_block_hash(parent_block.hash)?);
+        let mut db = CacheDB::new(cached_reads.as_db(&state));
         let mut post_state = PostState::default();
 
         let mut cumulative_gas_used = 0;
@@ -641,7 +675,7 @@ fn build_payload<Pool, Client>(
         // check if we have a better block
         if !is_better_payload(best_payload.as_deref(), total_fees) {
             // can skip building the block
-            return Ok(BuildOutcome::Aborted { fees: total_fees })
+            return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
         }
 
         let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
@@ -657,7 +691,7 @@ fn build_payload<Pool, Client>(
         let logs_bloom = post_state.logs_bloom(block_number);
 
         // calculate the state root
-        let state_root = db.db.0.state_root(post_state)?;
+        let state_root = state.state().state_root(post_state)?;
 
         // create the block header
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);
@@ -686,9 +720,12 @@ fn build_payload<Pool, Client>(
         let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
 
         let sealed_block = block.seal_slow();
-        Ok(BuildOutcome::Better(BuiltPayload::new(attributes.id, sealed_block, total_fees)))
+        Ok(BuildOutcome::Better {
+            payload: BuiltPayload::new(attributes.id, sealed_block, total_fees),
+            cached_reads,
+        })
     }
-    let _ = to_job.send(try_build(client, pool, config, cancel, best_payload));
+    let _ = to_job.send(try_build(client, pool, cached_reads, config, cancel, best_payload));
 }
 
 /// Builds an empty payload without any transactions.

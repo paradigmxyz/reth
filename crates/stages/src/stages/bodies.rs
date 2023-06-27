@@ -13,8 +13,8 @@ use reth_interfaces::{
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
 use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
-use reth_provider::Transaction;
-use std::{ops::Deref, sync::Arc};
+use reth_provider::DatabaseProviderRW;
+use std::sync::Arc;
 use tracing::*;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -67,21 +67,20 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// header, limited by the stage's batch size.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range();
-        if range.is_empty() {
-            let (from, to) = range.into_inner();
-            info!(target: "sync::stages::bodies", from, "Target block already downloaded, skipping.");
-            return Ok(ExecOutput::done(to))
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
+        let range = input.next_block_range();
         // Update the header range on the downloader
         self.downloader.set_download_range(range.clone())?;
         let (from_block, to_block) = range.into_inner();
 
         // Cursors used to write bodies, ommers and transactions
+        let tx = provider.tx_ref();
         let mut block_indices_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
@@ -156,7 +155,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let done = highest_block == to_block;
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(highest_block)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
             done,
         })
     }
@@ -164,9 +163,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
@@ -212,7 +212,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
 }
@@ -221,11 +221,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 //  beforehand how many bytes we need to download. So the good solution would be to measure the
 //  progress in gas as a proxy to size. Execution stage uses a similar approach.
 fn stage_checkpoint<DB: Database>(
-    tx: &Transaction<'_, DB>,
+    provider: &DatabaseProviderRW<'_, DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: tx.deref().entries::<tables::BlockBodyIndices>()? as u64,
-        total: tx.deref().entries::<tables::Headers>()? as u64,
+        processed: provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64,
+        total: provider.tx_ref().entries::<tables::Headers>()? as u64,
     })
 }
 
@@ -473,6 +473,7 @@ mod tests {
                 priority::Priority,
             },
             test_utils::{
+                generators,
                 generators::{random_block_range, random_signed_tx},
                 TestConsensus,
             },
@@ -556,7 +557,8 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.checkpoint().block_number;
                 let end = input.target();
-                let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
+                let mut rng = generators::rng();
+                let blocks = random_block_range(&mut rng, start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
@@ -566,7 +568,7 @@ mod tests {
                             tx_count: progress.body.len() as u64,
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
-                            let transaction = random_signed_tx();
+                            let transaction = random_signed_tx(&mut rng);
                             tx.put::<tables::Transactions>(tx_num, transaction.into())
                         })?;
 

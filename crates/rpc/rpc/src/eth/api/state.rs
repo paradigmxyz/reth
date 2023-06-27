@@ -9,14 +9,14 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    AccountProvider, BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory,
+    AccountReader, BlockReaderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: Send + Sync + 'static,
 {
@@ -89,7 +89,7 @@ where
         keys: Vec<JsonStorageKey>,
         block_id: Option<BlockId>,
     ) -> EthResult<EIP1186AccountProofResponse> {
-        let chain_info = self.client().chain_info()?;
+        let chain_info = self.provider().chain_info()?;
         let block_id = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
 
         // if we are trying to create a proof for the latest block, but have a BlockId as input

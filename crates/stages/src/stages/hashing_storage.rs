@@ -16,8 +16,8 @@ use reth_primitives::{
     },
     StorageEntry,
 };
-use reth_provider::Transaction;
-use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
+use reth_provider::{DatabaseProviderRW, HashingWriter, StorageReader};
+use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
 /// Storage hashing stage hashes plain storage.
@@ -54,14 +54,15 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let range = input.next_block_range();
-        if range.is_empty() {
-            return Ok(ExecOutput::done(*range.end()))
+        let tx = provider.tx_ref();
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
-        let (from_block, to_block) = range.into_inner();
+
+        let (from_block, to_block) = input.next_block_range().into_inner();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
@@ -161,7 +162,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         address: current_key,
                         storage: current_subkey,
                         block_range: CheckpointBlockRange { from: from_block, to: to_block },
-                        progress: stage_checkpoint_progress(tx)?,
+                        progress: stage_checkpoint_progress(provider)?,
                     },
                 );
 
@@ -170,19 +171,19 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         } else {
             // Aggregate all changesets and and make list of storages that have been
             // changed.
-            let lists = tx.get_addresses_and_keys_of_changed_storages(from_block..=to_block)?;
+            let lists = provider.changed_storages_with_range(from_block..=to_block)?;
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
-            let storages = tx.get_plainstate_storages(lists)?;
-            tx.insert_storage_for_hashing(storages.into_iter())?;
+            let storages = provider.plainstate_storages(lists)?;
+            provider.insert_storage_for_hashing(storages.into_iter())?;
         }
 
         // We finished the hashing stage, no future iterations is expected for the same block range,
         // so no checkpoint is needed.
         let checkpoint = StageCheckpoint::new(input.target())
             .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
-                progress: stage_checkpoint_progress(tx)?,
+                progress: stage_checkpoint_progress(provider)?,
                 ..Default::default()
             });
 
@@ -192,18 +193,18 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        tx.unwind_storage_hashing(BlockNumberAddress::range(range))?;
+        provider.unwind_storage_hashing(BlockNumberAddress::range(range))?;
 
         let mut stage_checkpoint =
             input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
 
-        stage_checkpoint.progress = stage_checkpoint_progress(tx)?;
+        stage_checkpoint.progress = stage_checkpoint_progress(provider)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_progress)
@@ -213,11 +214,11 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 }
 
 fn stage_checkpoint_progress<DB: Database>(
-    tx: &Transaction<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: tx.deref().entries::<tables::HashedStorage>()? as u64,
-        total: tx.deref().entries::<tables::PlainStorageState>()? as u64,
+        processed: provider.tx_ref().entries::<tables::HashedStorage>()? as u64,
+        total: provider.tx_ref().entries::<tables::PlainStorageState>()? as u64,
     })
 }
 
@@ -229,13 +230,15 @@ mod tests {
         TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
+    use rand::Rng;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         mdbx::{tx::Tx, WriteMap, RW},
         models::{BlockNumberAddress, StoredBlockBodyIndices},
     };
-    use reth_interfaces::test_utils::generators::{
-        random_block_range, random_contract_account_range,
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block_range, random_contract_account_range},
     };
     use reth_primitives::{
         stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
@@ -485,11 +488,12 @@ mod tests {
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.next_block();
             let end = input.target();
+            let mut rng = generators::rng();
 
             let n_accounts = 31;
-            let mut accounts = random_contract_account_range(&mut (0..n_accounts));
+            let mut accounts = random_contract_account_range(&mut rng, &mut (0..n_accounts));
 
-            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..3);
+            let blocks = random_block_range(&mut rng, stage_progress..=end, H256::zero(), 0..3);
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
@@ -508,14 +512,13 @@ mod tests {
                                 transaction.clone().into(),
                             )?;
 
-                            let (addr, _) = accounts
-                                .get_mut(rand::random::<usize>() % n_accounts as usize)
-                                .unwrap();
+                            let (addr, _) =
+                                accounts.get_mut(rng.gen::<usize>() % n_accounts as usize).unwrap();
 
                             for _ in 0..2 {
                                 let new_entry = StorageEntry {
-                                    key: keccak256([rand::random::<u8>()]),
-                                    value: U256::from(rand::random::<u8>() % 30 + 1),
+                                    key: keccak256([rng.gen::<u8>()]),
+                                    value: U256::from(rng.gen::<u8>() % 30 + 1),
                                 };
                                 self.insert_storage_entry(
                                     tx,
@@ -531,14 +534,14 @@ mod tests {
                     )?;
 
                     // Randomize rewards
-                    let has_reward: bool = rand::random();
+                    let has_reward: bool = rng.gen();
                     if has_reward {
                         self.insert_storage_entry(
                             tx,
                             (block_number, Address::random()).into(),
                             StorageEntry {
                                 key: keccak256("mining"),
-                                value: U256::from(rand::random::<u32>()),
+                                value: U256::from(rng.gen::<u32>()),
                             },
                             progress.header.number == stage_progress,
                         )?;

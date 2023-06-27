@@ -137,21 +137,21 @@ impl<'a> StructHandler<'a> {
             })
         } else {
             let ident_type = format_ident!("{ftype}");
-            self.lines.push(quote! {
-                let mut #name = #ident_type::default();
-            });
             if !is_flag_type(ftype) {
                 // It's a type that handles its own length requirements. (h256, Custom, ...)
                 self.lines.push(quote! {
-                    (#name, buf) = #ident_type::#from_compact_ident(buf, buf.len());
+                    let (#name, new_buf) = #ident_type::#from_compact_ident(buf, buf.len());
                 })
             } else if *is_compact {
                 self.lines.push(quote! {
-                    (#name, buf) = #ident_type::#from_compact_ident(buf, flags.#len() as usize);
+                    let (#name, new_buf) = #ident_type::#from_compact_ident(buf, flags.#len() as usize);
                 });
             } else {
                 todo!()
             }
+            self.lines.push(quote! {
+                buf = new_buf;
+            });
         }
     }
 }

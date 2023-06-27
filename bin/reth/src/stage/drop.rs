@@ -59,7 +59,7 @@ impl Command {
 
         let db = Env::<WriteMap>::open(db_path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
 
-        let tool = DbTool::new(&db)?;
+        let tool = DbTool::new(&db, self.chain.clone())?;
 
         tool.db.update(|tx| {
             match &self.stage {

@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -43,7 +49,7 @@
 //! #    db.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(H256::default());
-//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
+//! # let factory = Factory::new(MAINNET.clone());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
@@ -51,8 +57,12 @@
 //!     .add_stages(
 //!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)
 //!     )
-//!     .build(db);
+//!     .build(db, MAINNET.clone());
 //! ```
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 mod error;
 mod pipeline;
 mod stage;

@@ -4,7 +4,7 @@ use reth_db::{
     mdbx::{
         test_utils::{create_test_db, create_test_db_with_path},
         tx::Tx,
-        Env, EnvKind, WriteMap, RW,
+        Env, EnvKind, WriteMap, RO, RW,
     },
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
@@ -13,9 +13,10 @@ use reth_db::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
+    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
+    MAINNET, U256,
 };
-use reth_provider::Transaction;
+use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, ProviderFactory};
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
@@ -36,26 +37,35 @@ pub struct TestTransaction {
     /// WriteMap DB
     pub tx: Arc<Env<WriteMap>>,
     pub path: Option<PathBuf>,
+    pub factory: ProviderFactory<Arc<Env<WriteMap>>>,
 }
 
 impl Default for TestTransaction {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        Self { tx: create_test_db::<WriteMap>(EnvKind::RW), path: None }
+        let tx = create_test_db::<WriteMap>(EnvKind::RW);
+        Self { tx: tx.clone(), path: None, factory: ProviderFactory::new(tx, MAINNET.clone()) }
     }
 }
 
 impl TestTransaction {
     pub fn new(path: &Path) -> Self {
+        let tx = create_test_db::<WriteMap>(EnvKind::RW);
         Self {
-            tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, path)),
+            tx: tx.clone(),
             path: Some(path.to_path_buf()),
+            factory: ProviderFactory::new(tx, MAINNET.clone()),
         }
     }
 
-    /// Return a database wrapped in [Transaction].
-    pub fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
-        Transaction::new(self.tx.borrow()).expect("failed to create db container")
+    /// Return a database wrapped in [DatabaseProviderRW].
+    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<Env<WriteMap>>> {
+        self.factory.provider_rw().expect("failed to create db container")
+    }
+
+    /// Return a database wrapped in [DatabaseProviderRO].
+    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<Env<WriteMap>>> {
+        self.factory.provider().expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
@@ -66,20 +76,20 @@ impl TestTransaction {
     /// Invoke a callback with transaction committing it afterwards
     pub fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
+        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
-        let mut tx = self.inner();
-        f(&mut tx)?;
-        tx.commit()?;
+        let mut tx = self.inner_rw();
+        f(tx.tx_ref())?;
+        tx.commit().expect("failed to commit");
         Ok(())
     }
 
     /// Invoke a callback with a read transaction
     pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, DbError>,
+        F: FnOnce(&Tx<'_, RO, WriteMap>) -> Result<R, DbError>,
     {
-        f(&self.inner())
+        f(self.inner().tx_ref())
     }
 
     /// Check if the table is empty
@@ -190,7 +200,7 @@ impl TestTransaction {
     }
 
     /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
-    fn insert_header(tx: &mut Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
+    fn insert_header(tx: &Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
         tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
         tx.put::<tables::Headers>(header.number, header.clone().unseal())

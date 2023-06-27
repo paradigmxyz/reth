@@ -1,8 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockNumProvider, BlockProvider,
-    BlockProviderIdExt, EvmEnvProvider, HeaderProvider, PostState, StageCheckpointProvider,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    EvmEnvProvider, HeaderProvider, PostState, ReceiptProviderIdExt, StageCheckpointReader,
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
@@ -21,7 +22,7 @@ use std::ops::RangeBounds;
 pub struct NoopProvider;
 
 /// Noop implementation for testing purposes
-impl BlockHashProvider for NoopProvider {
+impl BlockHashReader for NoopProvider {
     fn block_hash(&self, _number: u64) -> Result<Option<H256>> {
         Ok(None)
     }
@@ -31,7 +32,7 @@ impl BlockHashProvider for NoopProvider {
     }
 }
 
-impl BlockNumProvider for NoopProvider {
+impl BlockNumReader for NoopProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
         Ok(ChainInfo::default())
     }
@@ -49,7 +50,7 @@ impl BlockNumProvider for NoopProvider {
     }
 }
 
-impl BlockProvider for NoopProvider {
+impl BlockReader for NoopProvider {
     fn find_block_by_hash(&self, hash: H256, _source: BlockSource) -> Result<Option<Block>> {
         self.block(hash.into())
     }
@@ -62,7 +63,7 @@ impl BlockProvider for NoopProvider {
         Ok(None)
     }
 
-    fn pending_header(&self) -> Result<Option<SealedHeader>> {
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
         Ok(None)
     }
 
@@ -73,9 +74,16 @@ impl BlockProvider for NoopProvider {
     fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
+
+    fn block_with_senders(
+        &self,
+        _number: BlockNumber,
+    ) -> Result<Option<reth_primitives::BlockWithSenders>> {
+        Ok(None)
+    }
 }
 
-impl BlockProviderIdExt for NoopProvider {
+impl BlockReaderIdExt for NoopProvider {
     fn block_by_id(&self, _id: BlockId) -> Result<Option<Block>> {
         Ok(None)
     }
@@ -93,7 +101,7 @@ impl BlockProviderIdExt for NoopProvider {
     }
 }
 
-impl BlockIdProvider for NoopProvider {
+impl BlockIdReader for NoopProvider {
     fn pending_block_num_hash(&self) -> Result<Option<reth_primitives::BlockNumHash>> {
         Ok(None)
     }
@@ -144,6 +152,21 @@ impl TransactionsProvider for NoopProvider {
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         Ok(Vec::default())
     }
+
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
+        Ok(Vec::default())
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
+        Ok(Vec::default())
+    }
+
+    fn transaction_sender(&self, _id: TxNumber) -> Result<Option<Address>> {
+        Ok(None)
+    }
 }
 
 impl ReceiptProvider for NoopProvider {
@@ -159,6 +182,8 @@ impl ReceiptProvider for NoopProvider {
         Ok(None)
     }
 }
+
+impl ReceiptProviderIdExt for NoopProvider {}
 
 impl HeaderProvider for NoopProvider {
     fn header(&self, _block_hash: &BlockHash) -> Result<Option<Header>> {
@@ -193,7 +218,7 @@ impl HeaderProvider for NoopProvider {
     }
 }
 
-impl AccountProvider for NoopProvider {
+impl AccountReader for NoopProvider {
     fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
         Ok(None)
     }
@@ -284,6 +309,10 @@ impl StateProviderFactory for NoopProvider {
         Ok(Box::new(*self))
     }
 
+    fn pending_state_by_hash(&self, _block_hash: H256) -> Result<Option<StateProviderBox<'_>>> {
+        Ok(Some(Box::new(*self)))
+    }
+
     fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
@@ -292,8 +321,25 @@ impl StateProviderFactory for NoopProvider {
     }
 }
 
-impl StageCheckpointProvider for NoopProvider {
+impl StageCheckpointReader for NoopProvider {
     fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>> {
+        Ok(None)
+    }
+
+    fn get_stage_checkpoint_progress(&self, _id: StageId) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
+}
+
+impl WithdrawalsProvider for NoopProvider {
+    fn latest_withdrawal(&self) -> Result<Option<reth_primitives::Withdrawal>> {
+        Ok(None)
+    }
+    fn withdrawals_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> Result<Option<Vec<reth_primitives::Withdrawal>>> {
         Ok(None)
     }
 }

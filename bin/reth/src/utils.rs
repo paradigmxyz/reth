@@ -11,10 +11,11 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, HeadersDirection, SealedHeader};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tracing::info;
 
@@ -58,18 +59,19 @@ where
 /// Wrapper over DB that implements many useful DB queries.
 pub struct DbTool<'a, DB: Database> {
     pub(crate) db: &'a DB,
+    pub(crate) chain: Arc<ChainSpec>,
 }
 
 impl<'a, DB: Database> DbTool<'a, DB> {
     /// Takes a DB where the tables have already been created.
-    pub(crate) fn new(db: &'a DB) -> eyre::Result<Self> {
-        Ok(Self { db })
+    pub(crate) fn new(db: &'a DB, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
+        Ok(Self { db, chain })
     }
 
     /// Grabs the contents of the table within a certain index range and places the
     /// entries into a [`HashMap`][std::collections::HashMap].
     pub fn list<T: Table>(
-        &mut self,
+        &self,
         skip: usize,
         len: usize,
         reverse: bool,
@@ -88,7 +90,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     }
 
     /// Grabs the content of the table for the given key
-    pub fn get<T: Table>(&mut self, key: T::Key) -> Result<Option<T::Value>> {
+    pub fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>> {
         self.db.view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
     }
 

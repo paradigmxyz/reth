@@ -4,6 +4,7 @@ use revm::{
     interpreter::{opcode, InstructionResult, Interpreter},
     Database, EVMData, Inspector,
 };
+use std::collections::BTreeSet;
 
 /// An [Inspector] that collects touched accounts and storage slots.
 ///
@@ -13,7 +14,7 @@ pub struct AccessListInspector {
     /// All addresses that should be excluded from the final accesslist
     excluded: HashSet<Address>,
     /// All addresses and touched slots
-    access_list: HashMap<Address, HashSet<H256>>,
+    access_list: HashMap<Address, BTreeSet<H256>>,
 }
 
 impl AccessListInspector {

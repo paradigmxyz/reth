@@ -5,7 +5,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, TxNumber,
 };
-use reth_provider::{ProviderError, Transaction};
+use reth_provider::DatabaseProviderRW;
 use std::{
     cmp::{max, min},
     ops::RangeInclusive,
@@ -75,20 +75,19 @@ impl ExecInput {
     /// the number of transactions exceeds the threshold.
     pub fn next_block_range_with_transaction_threshold<DB: Database>(
         &self,
-        tx: &Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, DB>,
         tx_threshold: u64,
     ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
         let start_block = self.next_block();
-        let start_block_body = tx
-            .get::<tables::BlockBodyIndices>(start_block)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(start_block))?;
+        let start_block_body = provider.block_body_indices(start_block)?;
 
         let target_block = self.target();
 
         let first_tx_number = start_block_body.first_tx_num();
         let mut last_tx_number = start_block_body.last_tx_num();
         let mut end_block_number = start_block;
-        let mut body_indices_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut body_indices_cursor =
+            provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
         for entry in body_indices_cursor.walk_range(start_block..=target_block)? {
             let (block, body) = entry?;
             last_tx_number = body.last_tx_num();
@@ -148,9 +147,9 @@ pub struct ExecOutput {
 }
 
 impl ExecOutput {
-    /// Mark the stage as done, checkpointing at the given block number.
-    pub fn done(block_number: BlockNumber) -> Self {
-        Self { checkpoint: StageCheckpoint::new(block_number), done: true }
+    /// Mark the stage as done, checkpointing at the given place.
+    pub fn done(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: true }
     }
 }
 
@@ -171,8 +170,7 @@ pub struct UnwindOutput {
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
-/// Stages receive [`Transaction`] which manages the lifecycle of a transaction,
-/// such as when to commit / reopen a new one etc.
+/// Stages receive [`DatabaseProviderRW`].
 #[async_trait]
 pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.
@@ -183,14 +181,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 }

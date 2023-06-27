@@ -1,12 +1,14 @@
 //! Database adapters for payload building.
 
-use hashbrown::{hash_map::Entry, HashMap};
 use reth_primitives::U256;
 use revm_primitives::{
     db::{Database, DatabaseRef},
     AccountInfo, Address, Bytecode, B256,
 };
-use std::cell::RefCell;
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+};
 
 /// A container type that caches all [DatabaseRef] reads from an underlying [DatabaseRef].
 ///

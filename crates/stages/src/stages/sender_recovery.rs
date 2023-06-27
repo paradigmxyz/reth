@@ -13,8 +13,8 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     TransactionSignedNoHash, TxNumber, H160,
 };
-use reth_provider::{ProviderError, Transaction};
-use std::{fmt::Debug, ops::Deref};
+use reth_provider::{DatabaseProviderRW, HeaderProvider, ProviderError};
+use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::*;
@@ -38,7 +38,7 @@ impl SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 50_000 }
+        Self { commit_threshold: 5_000_000 }
     }
 }
 
@@ -56,15 +56,15 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
     async fn execute(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint().block_number))
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let (tx_range, block_range, is_final_range) =
-            input.next_block_range_with_transaction_threshold(tx, self.commit_threshold)?;
+            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
 
         // No transactions to walk over
@@ -72,10 +72,12 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             info!(target: "sync::stages::sender_recovery", ?tx_range, "Target transaction already reached");
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
-                    .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                    .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: is_final_range,
             })
         }
+
+        let tx = provider.tx_ref();
 
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
@@ -99,6 +101,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Chunks are submitted instead of individual transactions to reduce the overhead of work
         // stealing in the threadpool workers.
         let chunk_size = self.commit_threshold as usize / rayon::current_num_threads();
+        // prevents an edge case
+        // where the chunk size is either 0 or too small
+        // to gain anything from using more than 1 thread
+        let chunk_size = chunk_size.max(16);
+
         for chunk in &tx_walker.chunks(chunk_size) {
             // An _unordered_ channel to receive results from a rayon job
             let (recovered_senders_tx, recovered_senders_rx) = mpsc::unbounded_channel();
@@ -133,7 +140,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
                                 // fetch the sealed header so we can use it in the sender recovery
                                 // unwind
-                                let sealed_header = tx.get_sealed_header(block_number)?;
+                                let sealed_header = provider
+                                    .sealed_header(block_number)?
+                                    .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
                                 return Err(StageError::Validation {
                                     block: sealed_header,
                                     error:
@@ -150,7 +159,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
             done: is_final_range,
         })
     }
@@ -158,18 +167,18 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        tx: &mut Transaction<'_, DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = tx.block_body_indices(unwind_to)?.last_tx_num();
-        tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
+        let latest_tx_id = provider.block_body_indices(unwind_to)?.last_tx_num();
+        provider.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
-                .with_entities_stage_checkpoint(stage_checkpoint(tx)?),
+                .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
 }
@@ -194,11 +203,11 @@ fn recover_sender(
 }
 
 fn stage_checkpoint<DB: Database>(
-    tx: &Transaction<'_, DB>,
+    provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: tx.deref().entries::<tables::TxSenders>()? as u64,
-        total: tx.deref().entries::<tables::Transactions>()? as u64,
+        processed: provider.tx_ref().entries::<tables::TxSenders>()? as u64,
+        total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
 
@@ -222,10 +231,14 @@ struct FailedSenderRecoveryError {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{random_block, random_block_range};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block, random_block_range},
+    };
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, H256,
     };
+    use reth_provider::TransactionsProvider;
 
     use super::*;
     use crate::test_utils::{
@@ -239,6 +252,7 @@ mod tests {
     #[tokio::test]
     async fn execute_single_transaction() {
         let (previous_stage, stage_progress) = (500, 100);
+        let mut rng = generators::rng();
 
         // Set up the runner
         let runner = SenderRecoveryTestRunner::default();
@@ -251,7 +265,13 @@ mod tests {
         let non_empty_block_number = stage_progress + 10;
         let blocks = (stage_progress..=input.target())
             .map(|number| {
-                random_block(number, None, Some((number == non_empty_block_number) as u8), None)
+                random_block(
+                    &mut rng,
+                    number,
+                    None,
+                    Some((number == non_empty_block_number) as u8),
+                    None,
+                )
             })
             .collect::<Vec<_>>();
         runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
@@ -278,13 +298,16 @@ mod tests {
     /// Execute the stage twice with input range that exceeds the commit threshold
     #[tokio::test]
     async fn execute_intermediate_commit() {
+        let mut rng = generators::rng();
+
         let threshold = 10;
         let mut runner = SenderRecoveryTestRunner::default();
         runner.set_threshold(threshold);
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
 
         // Manually seed once with full input range
-        let seed = random_block_range(stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+        let seed =
+            random_block_range(&mut rng, stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
         let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
@@ -358,13 +381,12 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TxSenders] table above
-        ///    a given block number.
+        /// 1. If there are any entries in the [tables::TxSenders] table above a given block number.
         ///
-        /// 2. If the is no requested block entry in the bodies table,
-        ///    but [tables::TxSenders] is not empty.
+        /// 2. If the is no requested block entry in the bodies table, but [tables::TxSenders] is
+        ///    not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().block_body_indices(block);
+            let body_result = self.tx.inner_rw().block_body_indices(block);
             match body_result {
                 Ok(body) => self
                     .tx
@@ -394,10 +416,11 @@ mod tests {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let mut rng = generators::rng();
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
 
-            let blocks = random_block_range(stage_progress..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(&mut rng, stage_progress..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }
@@ -408,7 +431,8 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             match output {
-                Some(output) => self.tx.query(|tx| {
+                Some(output) => {
+                    let provider = self.tx.inner();
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
 
@@ -416,23 +440,20 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+                    let mut body_cursor =
+                        provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
-                            let transaction: TransactionSigned = tx
-                                .get::<tables::Transactions>(tx_id)?
-                                .expect("no transaction entry")
-                                .into();
+                            let transaction: TransactionSigned =
+                                provider.transaction_by_id(tx_id)?.expect("no transaction entry");
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");
-                            assert_eq!(Some(signer), tx.get::<tables::TxSenders>(tx_id)?);
+                            assert_eq!(Some(signer), provider.transaction_sender(tx_id)?)
                         }
                     }
-
-                    Ok(())
-                })?,
+                }
                 None => self.ensure_no_senders_by_block(input.checkpoint().block_number)?,
             };
 

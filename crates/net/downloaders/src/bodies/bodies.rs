@@ -1,5 +1,5 @@
 use super::queue::BodiesRequestQueue;
-use crate::{bodies::task::TaskDownloader, metrics::DownloaderMetrics};
+use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
@@ -63,7 +63,7 @@ pub struct BodiesDownloader<B: BodiesClient, DB> {
     /// Queued body responses that can be returned for insertion into the database.
     queued_bodies: Vec<BlockResponse>,
     /// The bodies downloader metrics.
-    metrics: DownloaderMetrics,
+    metrics: BodyDownloaderMetrics,
 }
 
 impl<B, DB> BodiesDownloader<B, DB>
@@ -88,8 +88,8 @@ where
     /// This method is going to return the batch as soon as one of the conditions below
     /// is fulfilled:
     ///     1. The number of non-empty headers in the batch equals requested.
-    ///     2. The total number of headers in the batch (both empty and non-empty)
-    ///        is greater than or equal to the stream batch size.
+    ///     2. The total number of headers in the batch (both empty and non-empty) is greater than
+    ///        or equal to the stream batch size.
     ///     3. Downloader reached the end of the range
     ///
     /// NOTE: The batches returned have a variable length.
@@ -200,8 +200,8 @@ where
         self.download_range = RangeInclusive::new(1, 0);
         self.latest_queued_block_number.take();
         self.in_progress_queue.clear();
-        self.queued_bodies.clear();
-        self.buffered_responses.clear();
+        self.queued_bodies = Vec::new();
+        self.buffered_responses = BinaryHeap::new();
         self.num_buffered_blocks = 0;
 
         // reset metrics
@@ -270,6 +270,7 @@ where
     fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse>> {
         if self.queued_bodies.len() >= self.stream_batch_size {
             let next_batch = self.queued_bodies.drain(..self.stream_batch_size).collect::<Vec<_>>();
+            self.queued_bodies.shrink_to_fit();
             self.metrics.total_flushed.increment(next_batch.len() as u64);
             self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
             return Some(next_batch)
@@ -328,10 +329,11 @@ where
 
         // Check if the provided range is the next expected range.
         let is_next_consecutive_range = *range.start() == *self.download_range.end() + 1;
+        let distance = *range.end() - *range.start();
         if is_next_consecutive_range {
             // New range received.
             tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
-            info!(target: "downloaders::bodies", "Downloading bodies {range:?}");
+            info!(target: "downloaders::bodies", distance, "Downloading bodies {range:?}");
             self.download_range = range;
             return Ok(())
         }
@@ -339,7 +341,7 @@ where
         // The block range is reset. This can happen either after unwind or after the bodies were
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
-        info!(target: "downloaders::bodies", "Downloading bodies {range:?}");
+        info!(target: "downloaders::bodies", distance, "Downloading bodies {range:?}");
         self.clear();
         self.download_range = range;
         Ok(())
@@ -410,6 +412,9 @@ where
                 this.queue_bodies(buf_response);
             }
 
+            // shrink the buffer so that it doesn't grow indefinitely
+            this.buffered_responses.shrink_to_fit();
+
             if !new_request_submitted {
                 break
             }
@@ -422,6 +427,7 @@ where
             }
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size).collect::<Vec<_>>();
+            this.queued_bodies.shrink_to_fit();
             this.metrics.total_flushed.increment(next_batch.len() as u64);
             this.metrics.queued_blocks.set(this.queued_bodies.len() as f64);
             return Poll::Ready(Some(Ok(next_batch)))
@@ -559,7 +565,7 @@ impl BodiesDownloaderBuilder {
             concurrent_requests_range,
             max_buffered_blocks: max_buffered_responses,
         } = self;
-        let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
+        let metrics = BodyDownloaderMetrics::default();
         let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
         BodiesDownloader {
             client: Arc::new(client),
@@ -590,7 +596,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_interfaces::test_utils::{generators::random_block_range, TestConsensus};
+    use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, H256};
     use std::{collections::HashMap, sync::Arc};
 
@@ -627,7 +633,8 @@ mod tests {
     async fn requests_correct_number_of_times() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let blocks = random_block_range(0..=199, H256::zero(), 1..2);
+        let mut rng = generators::rng();
+        let blocks = random_block_range(&mut rng, 0..=199, H256::zero(), 1..2);
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
         let bodies = blocks

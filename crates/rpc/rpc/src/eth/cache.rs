@@ -3,7 +3,7 @@
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, H256};
-use reth_provider::{BlockProvider, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
 use schnellru::{ByMemoryUsage, Limiter, LruMap};
@@ -94,16 +94,16 @@ pub struct EthStateCache {
 
 impl EthStateCache {
     /// Creates and returns both [EthStateCache] frontend and the memory bound service.
-    fn create<Client, Tasks>(
-        client: Client,
+    fn create<Provider, Tasks>(
+        provider: Provider,
         action_task_spawner: Tasks,
         max_block_bytes: usize,
         max_receipt_bytes: usize,
         max_env_bytes: usize,
-    ) -> (Self, EthStateCacheService<Client, Tasks>) {
+    ) -> (Self, EthStateCacheService<Provider, Tasks>) {
         let (to_service, rx) = unbounded_channel();
         let service = EthStateCacheService {
-            client,
+            provider,
             full_block_cache: BlockLruCache::with_memory_budget(max_block_bytes),
             receipts_cache: ReceiptsLruCache::with_memory_budget(max_receipt_bytes),
             evm_env_cache: EnvLruCache::with_memory_budget(max_env_bytes),
@@ -119,29 +119,29 @@ impl EthStateCache {
     /// [tokio::spawn].
     ///
     /// See also [Self::spawn_with]
-    pub fn spawn<Client>(client: Client, config: EthStateCacheConfig) -> Self
+    pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
     where
-        Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     {
-        Self::spawn_with(client, config, TokioTaskExecutor::default())
+        Self::spawn_with(provider, config, TokioTaskExecutor::default())
     }
 
     /// Creates a new async LRU backed cache service task and spawns it to a new task via the given
     /// spawner.
     ///
     /// The cache is memory limited by the given max bytes values.
-    pub fn spawn_with<Client, Tasks>(
-        client: Client,
+    pub fn spawn_with<Provider, Tasks>(
+        provider: Provider,
         config: EthStateCacheConfig,
         executor: Tasks,
     ) -> Self
     where
-        Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
         let EthStateCacheConfig { max_block_bytes, max_receipt_bytes, max_env_bytes } = config;
         let (this, service) = Self::create(
-            client,
+            provider,
             executor.clone(),
             max_block_bytes,
             max_receipt_bytes,
@@ -179,6 +179,19 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
+    /// Fetches both transactions and receipts for the given block hash.
+    pub(crate) async fn get_transactions_and_receipts(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<(Vec<TransactionSigned>, Vec<Receipt>)>> {
+        let transactions = self.get_block_transactions(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (transactions, receipts) = futures::try_join!(transactions, receipts)?;
+
+        Ok(transactions.zip(receipts))
+    }
+
     /// Requests the [Receipt] for the block hash
     ///
     /// Returns `None` if the block was not found.
@@ -186,6 +199,19 @@ impl EthStateCache {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
+
+    /// Fetches both receipts and block for the given block hash.
+    pub(crate) async fn get_block_and_receipts(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        let block = self.get_sealed_block(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (block, receipts) = futures::try_join!(block, receipts)?;
+
+        Ok(block.zip(receipts))
     }
 
     /// Requests the evm env config for the block hash.
@@ -216,7 +242,7 @@ impl EthStateCache {
 /// to limit concurrent requests.
 #[must_use = "Type does nothing unless spawned"]
 pub(crate) struct EthStateCacheService<
-    Client,
+    Provider,
     Tasks,
     LimitBlocks = ByMemoryUsage,
     LimitReceipts = ByMemoryUsage,
@@ -227,7 +253,7 @@ pub(crate) struct EthStateCacheService<
     LimitEnvs: Limiter<H256, (CfgEnv, BlockEnv)>,
 {
     /// The type used to lookup data from disk
-    client: Client,
+    provider: Provider,
     /// The LRU cache for full blocks grouped by their hash.
     full_block_cache: BlockLruCache<LimitBlocks>,
     /// The LRU cache for full blocks grouped by their hash.
@@ -242,9 +268,9 @@ pub(crate) struct EthStateCacheService<
     action_task_spawner: Tasks,
 }
 
-impl<Client, Tasks> EthStateCacheService<Client, Tasks>
+impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
 where
-    Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     fn on_new_block(&mut self, block_hash: H256, res: Result<Option<Block>>) {
@@ -285,9 +311,9 @@ where
     }
 }
 
-impl<Client, Tasks> Future for EthStateCacheService<Client, Tasks>
+impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
 where
-    Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     type Output = ();
@@ -313,10 +339,10 @@ where
 
                             // block is not in the cache, request it if this is the first consumer
                             if this.full_block_cache.queue(block_hash, Either::Left(response_tx)) {
-                                let client = this.client.clone();
+                                let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    let res = client.block_by_hash(block_hash);
+                                    let res = provider.block_by_hash(block_hash);
                                     let _ = action_tx
                                         .send(CacheAction::BlockResult { block_hash, res });
                                 }));
@@ -331,10 +357,10 @@ where
 
                             // block is not in the cache, request it if this is the first consumer
                             if this.full_block_cache.queue(block_hash, Either::Right(response_tx)) {
-                                let client = this.client.clone();
+                                let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    let res = client.block_by_hash(block_hash);
+                                    let res = provider.block_by_hash(block_hash);
                                     let _ = action_tx
                                         .send(CacheAction::BlockResult { block_hash, res });
                                 }));
@@ -351,10 +377,10 @@ where
 
                             // block is not in the cache, request it if this is the first consumer
                             if this.receipts_cache.queue(block_hash, response_tx) {
-                                let client = this.client.clone();
+                                let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    let res = client.receipts_by_block(block_hash.into());
+                                    let res = provider.receipts_by_block(block_hash.into());
                                     let _ = action_tx
                                         .send(CacheAction::ReceiptsResult { block_hash, res });
                                 }));
@@ -370,12 +396,12 @@ where
                             // env data is not in the cache, request it if this is the first
                             // consumer
                             if this.evm_env_cache.queue(block_hash, response_tx) {
-                                let client = this.client.clone();
+                                let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     let mut cfg = CfgEnv::default();
                                     let mut block_env = BlockEnv::default();
-                                    let res = client
+                                    let res = provider
                                         .fill_env_at(&mut cfg, &mut block_env, block_hash.into())
                                         .map(|_| (cfg, block_env));
                                     let _ = action_tx.send(CacheAction::EnvResult {
@@ -499,19 +525,16 @@ where
 
             let blocks = blocks.iter().map(|(_, block)| block.block.clone()).collect::<Vec<_>>();
 
-            let mut receipts = Vec::new();
-
-            // TODO ideally we can map all receipts to their respective blocks
-
-            // we only have 1 block in the new chain, so we know all the receipts belong to the
-            // block
-            if blocks.len() == 1 {
+            // also cache all receipts of the blocks
+            let mut receipts = Vec::with_capacity(blocks.len());
+            for block in &blocks {
                 let block_receipts = BlockReceipts {
-                    block_hash: blocks[0].hash,
-                    receipts: state.receipts(blocks[0].number).to_vec(),
+                    block_hash: block.hash,
+                    receipts: state.receipts(block.number).to_vec(),
                 };
                 receipts.push(block_receipts);
             }
+
             let _ = eth_state_cache
                 .to_service
                 .send(CacheAction::CacheNewCanonicalChain { blocks, receipts });

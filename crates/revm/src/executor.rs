@@ -654,7 +654,7 @@ mod tests {
     };
     use reth_provider::{
         post_state::{AccountChanges, Storage, StorageTransition, StorageWipe},
-        AccountProvider, BlockHashProvider, StateProvider, StateRootProvider,
+        AccountReader, BlockHashReader, StateProvider, StateRootProvider,
     };
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
@@ -693,14 +693,14 @@ mod tests {
         }
     }
 
-    impl AccountProvider for StateProviderTest {
+    impl AccountReader for StateProviderTest {
         fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
             let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
             ret
         }
     }
 
-    impl BlockHashProvider for StateProviderTest {
+    impl BlockHashReader for StateProviderTest {
         fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
             Ok(self.block_hash.get(&number).cloned())
         }

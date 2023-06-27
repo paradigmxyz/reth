@@ -2,7 +2,7 @@
 
 use reth_db::database::Database;
 use reth_primitives::ChainSpec;
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use std::sync::Arc;
 
 /// A container for external components.
@@ -35,7 +35,7 @@ impl<DB, C, EF> TreeExternals<DB, C, EF> {
 
 impl<DB: Database, C, EF> TreeExternals<DB, C, EF> {
     /// Return shareable database helper structure.
-    pub fn database(&self) -> ShareableDatabase<&DB> {
-        ShareableDatabase::new(&self.db, self.chain_spec.clone())
+    pub fn database(&self) -> ProviderFactory<&DB> {
+        ProviderFactory::new(&self.db, self.chain_spec.clone())
     }
 }

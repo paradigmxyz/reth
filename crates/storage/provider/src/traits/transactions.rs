@@ -1,13 +1,14 @@
-use crate::BlockNumProvider;
+use crate::BlockNumReader;
 use reth_interfaces::Result;
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned, TxHash, TxNumber,
+    Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber,
 };
 use std::ops::RangeBounds;
 
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionsProvider: BlockNumProvider + Send + Sync {
+pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     /// Get internal transaction identifier by transaction hash.
     ///
     /// This is the inverse of [TransactionsProvider::transaction_by_id].
@@ -41,4 +42,18 @@ pub trait TransactionsProvider: BlockNumProvider + Send + Sync {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>>;
+
+    /// Get transactions by tx range.
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> Result<Vec<TransactionSignedNoHash>>;
+
+    /// Get Senders from a tx range.
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>>;
+
+    /// Get transaction sender.
+    ///
+    /// Returns None if the transaction is not found.
+    fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>>;
 }
