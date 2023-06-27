@@ -51,11 +51,11 @@ impl Compact for PruneMode {
         match buf[0] {
             0 => (Self::Full, &buf[1..]),
             1 => {
-                let (distance, buf) = u64::from_compact(&buf[1..], buf.len() - 1);
+                let (distance, buf) = u64::from_compact(&buf[1..], std::mem::size_of::<u64>());
                 (Self::Distance(distance), buf)
             }
             2 => {
-                let (block_number, buf) = u64::from_compact(&buf[1..], buf.len() - 1);
+                let (block_number, buf) = u64::from_compact(&buf[1..], std::mem::size_of::<u64>());
                 (Self::Before(block_number), buf)
             }
             _ => unreachable!("Junk data in database: unknown PruneMode variant"),

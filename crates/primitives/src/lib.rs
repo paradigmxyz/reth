@@ -77,7 +77,7 @@ pub use net::{
     SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
-pub use prune::{PruneCheckpoint, PruneMode, PrunePart};
+pub use prune::{PruneCheckpoint, PruneMode};
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;

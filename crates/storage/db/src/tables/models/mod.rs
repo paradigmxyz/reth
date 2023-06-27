@@ -6,7 +6,7 @@ use crate::{
 use reth_codecs::Compact;
 use reth_primitives::{
     trie::{StoredNibbles, StoredNibblesSubKey},
-    Address, PrunePart, H256,
+    Address, H256,
 };
 
 pub mod accounts;
@@ -135,43 +135,3 @@ impl Decode for StoredNibblesSubKey {
         Ok(Self::from_compact(buf, buf.len()).0)
     }
 }
-
-/// Macro that implements [`Encode`] and [`Decode`] for [`PrunePart`] variants, representing them as
-/// strings.
-macro_rules! impl_prune_part {
-    ($($key:ident => $value:expr),+) => {
-        impl Encode for PrunePart {
-            type Encoded = <String as Encode>::Encoded;
-
-            fn encode(self) -> Self::Encoded {
-                match self {
-                    $(
-                        PrunePart::$key => $value,
-                    )+
-                }
-                .to_string()
-                .encode()
-            }
-        }
-
-        impl Decode for PrunePart {
-            fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-                let decoded = String::decode(value)?;
-                Ok(match decoded.as_str() {
-                    $(
-                       $value => Self::$key,
-                    )+
-                    _ => unreachable!("Junk data in database: unknown PrunePart variant"),
-                })
-            }
-        }
-    };
-}
-
-impl_prune_part!(
-    SenderRecovery => "SenderRecovery",
-    TransactionLookup => "TransactionLookup",
-    Receipts => "Receipts",
-    AccountHistory => "AccountHistory",
-    StorageHistory => "StorageHistory"
-);

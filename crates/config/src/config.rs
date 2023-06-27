@@ -299,15 +299,15 @@ impl Default for PruneConfig {
 #[derive(Debug, Clone, Default, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct PruneParts {
-    /// [reth_primitives::PrunePart::SenderRecovery] pruning configuration.
+    /// Sender Recovery pruning configuration.
     pub sender_recovery: Option<PruneMode>,
-    /// [reth_primitives::PrunePart::TransactionLookup] pruning configuration.
+    /// Transaction Lookup pruning configuration.
     pub transaction_lookup: Option<PruneMode>,
-    /// [reth_primitives::PrunePart::Receipts] pruning configuration.
+    /// Receipts pruning configuration.
     pub receipts: Option<PruneMode>,
-    /// [reth_primitives::PrunePart::AccountHistory] pruning configuration.
+    /// Account History pruning configuration.
     pub account_history: Option<PruneMode>,
-    /// [reth_primitives::PrunePart::StorageHistory] pruning configuration.
+    /// Storage History pruning configuration.
     pub storage_history: Option<PruneMode>,
 }
 
