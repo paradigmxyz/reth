@@ -6,8 +6,8 @@ use reth_codecs::{main_codec, Compact};
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Default))]
 pub struct PruneCheckpoint {
-    /// Prune mode.
-    prune_mode: PruneMode,
     /// Highest pruned block number.
     block_number: BlockNumber,
+    /// Prune mode.
+    prune_mode: PruneMode,
 }
