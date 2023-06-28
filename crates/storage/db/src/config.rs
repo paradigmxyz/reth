@@ -1,6 +1,6 @@
 /// Configuration the database
 ///
-/// This allows for the configuration of the database via [Environment](reth_libmdbx::Environment)
+/// This allows the configuration of certain database settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
