@@ -87,9 +87,6 @@ thiserror = { workspace = true }
 pretty_assertions = "1.3.0"
 humantime = "2.1.0"
 
-[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
-libc = "0.2"
-
 [features]
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
