@@ -87,3 +87,39 @@ pub use abstraction::*;
 pub use reth_interfaces::db::DatabaseError;
 pub use tables::*;
 pub use utils::is_database_empty;
+
+#[cfg(feature = "mdbx")]
+use mdbx::{Env, EnvKind, WriteMap};
+
+#[cfg(feature = "mdbx")]
+/// Alias type for the database engine in use.
+pub type DatabaseEngine = Env<WriteMap>;
+
+/// Opens up an existing database or creates a new one at the specified path.
+pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEngine> {
+    use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
+    use eyre::WrapErr;
+
+    let rpath = path.as_ref();
+    if is_database_empty(rpath) {
+        std::fs::create_dir_all(rpath)
+            .wrap_err_with(|| format!("Could not create database directory {}", rpath.display()))?;
+        create_db_version_file(rpath)?;
+    } else {
+        match check_db_version_file(rpath) {
+            Ok(_) => (),
+            Err(DatabaseVersionError::MissingFile) => create_db_version_file(rpath)?,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    #[cfg(feature = "mdbx")]
+    {
+        let db = Env::<WriteMap>::open(rpath, EnvKind::RW)?;
+        db.create_tables()?;
+        Ok(db)
+    }
+    #[cfg(not(feature = "mdbx"))]
+    {
+        unimplemented!();
+    }
+}

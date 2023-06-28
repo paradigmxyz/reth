@@ -5027,6 +5027,7 @@ dependencies = [
  "bytes",
  "criterion",
  "derive_more",
+ "eyre",
  "futures",
  "heapless",
  "iai",

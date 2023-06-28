@@ -5,10 +5,10 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::{
-    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+    cursor::DbCursorRO, database::Database, init_db, table::TableImporter, tables,
+    transaction::DbTx,
 };
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::init::init_db;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 

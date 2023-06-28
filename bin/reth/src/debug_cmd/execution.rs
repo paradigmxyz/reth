@@ -12,6 +12,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{
     database::Database,
+    init_db,
     mdbx::{Env, WriteMap},
 };
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
@@ -27,7 +28,7 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
 use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     sets::DefaultStages,
     stages::{

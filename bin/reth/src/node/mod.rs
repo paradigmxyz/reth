@@ -22,6 +22,7 @@ use reth_blockchain_tree::{
 use reth_config::Config;
 use reth_db::{
     database::Database,
+    init_db,
     mdbx::{Env, WriteMap},
 };
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
@@ -47,7 +48,7 @@ use reth_provider::{
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     prelude::*,
     stages::{

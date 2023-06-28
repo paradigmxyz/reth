@@ -1,39 +1,13 @@
-use eyre::WrapErr;
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
-    is_database_empty,
-    mdbx::{Env, WriteMap},
     tables,
     transaction::{DbTx, DbTxMut},
-    version::{check_db_version_file, create_db_version_file, DatabaseVersionError},
 };
 use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
 use reth_provider::{DatabaseProviderRW, HashingWriter, HistoryWriter, PostState, ProviderFactory};
-use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 use tracing::debug;
-
-/// Opens up an existing database or creates a new one at the specified path.
-pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
-    if is_database_empty(&path) {
-        fs::create_dir_all(&path).wrap_err_with(|| {
-            format!("Could not create database directory {}", path.as_ref().display())
-        })?;
-        create_db_version_file(&path)?;
-    } else {
-        match check_db_version_file(&path) {
-            Ok(_) => (),
-            Err(DatabaseVersionError::MissingFile) => create_db_version_file(&path)?,
-            Err(err) => return Err(err.into()),
-        }
-    }
-
-    let db = Env::<WriteMap>::open(path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
-
-    db.create_tables()?;
-
-    Ok(db)
-}
 
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
@@ -204,10 +178,12 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_db::{
+        init_db,
         mdbx::test_utils::create_test_rw_db,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::Table,
-        version::db_version_file_path,
+        version::{db_version_file_path, DatabaseVersionError},
+        DatabaseEngine,
     };
     use reth_primitives::{
         Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
@@ -305,7 +281,7 @@ mod tests {
         let tx = db.tx().expect("failed to init tx");
 
         assert_eq!(
-            collect_table_entries::<Arc<Env<WriteMap>>, tables::AccountHistory>(&tx)
+            collect_table_entries::<Arc<DatabaseEngine>, tables::AccountHistory>(&tx)
                 .expect("failed to collect"),
             vec![
                 (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
@@ -314,7 +290,7 @@ mod tests {
         );
 
         assert_eq!(
-            collect_table_entries::<Arc<Env<WriteMap>>, tables::StorageHistory>(&tx)
+            collect_table_entries::<Arc<DatabaseEngine>, tables::StorageHistory>(&tx)
                 .expect("failed to collect"),
             vec![(
                 StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
@@ -341,7 +317,8 @@ mod tests {
 
         // Database is not empty, version file is malformed
         {
-            fs::write(path.path().join(db_version_file_path(&path)), "invalid-version").unwrap();
+            std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
+                .unwrap();
             let db = init_db(&path);
             assert!(db.is_err());
             assert_matches!(
@@ -352,7 +329,7 @@ mod tests {
 
         // Database is not empty, version file contains not matching version
         {
-            fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
+            std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
             let db = init_db(&path);
             assert!(db.is_err());
             assert_matches!(

@@ -4,13 +4,12 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
+use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     ChainSpec,
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader};
-use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
