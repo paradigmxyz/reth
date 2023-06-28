@@ -50,8 +50,8 @@ pub enum BlockExecutionError {
     PipelineStatusUpdate { inner: String },
 
     #[cfg(feature = "optimism")]
-    #[error("DB Error during transaction execution: {inner:?}")]
-    DBError { inner: String },
+    #[error("Could not get L1 block info from L2 block: {message:?}")]
+    L1BlockInfoError { message: String },
     #[cfg(feature = "optimism")]
     #[error("Insufficient funds to cover transaction L1 cost: want {want}, have {have}")]
     InsufficientFundsForL1Cost { want: u64, have: u64 },

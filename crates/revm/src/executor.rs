@@ -231,7 +231,7 @@ where
         self.init_env(&block.header, total_difficulty);
 
         #[cfg(feature = "optimism")]
-        let mut l1_cost_oracle = optimism::L1GasCostOracle::default();
+        let mut l1_block_info = optimism::L1BlockInfo::new(block)?;
 
         let mut cumulative_gas_used = 0;
         let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
@@ -250,9 +250,7 @@ where
             #[cfg(feature = "optimism")]
             {
                 let db = self.db();
-                let l1_cost = l1_cost_oracle
-                    .calculate_l1_cost(db, block.header.number, transaction)
-                    .map_err(|db_err| Error::DBError { inner: db_err.to_string() })?;
+                let l1_cost = l1_block_info.calculate_tx_l1_cost(transaction);
 
                 let sender_account = db.load_account(sender).map_err(|_| Error::ProviderError)?;
                 let old_sender_info = to_reth_acc(&sender_account.info);
