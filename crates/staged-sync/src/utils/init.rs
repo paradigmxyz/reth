@@ -176,13 +176,11 @@ pub fn insert_genesis_header<DB: Database>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_matches::assert_matches;
+
     use reth_db::{
-        init_db,
         mdbx::test_utils::create_test_rw_db,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::Table,
-        version::{db_version_file_path, DatabaseVersionError},
         DatabaseEngine,
     };
     use reth_primitives::{
@@ -190,7 +188,6 @@ mod tests {
         GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
     };
     use std::collections::HashMap;
-    use tempfile::tempdir;
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as DatabaseGAT<'_>>::TX,
