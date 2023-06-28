@@ -21,3 +21,6 @@ futures-util = { workspace = true }
 # misc
 tracing = { workspace = true }
 
+[dev-dependencies]
+reth-provider = { workspace = true, features = ["test-utils"] }
+tokio = { workspace = true }

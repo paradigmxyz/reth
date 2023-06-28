@@ -5471,6 +5471,7 @@ dependencies = [
  "futures-util",
  "reth-primitives",
  "reth-provider",
+ "tokio",
  "tracing",
 ]
 

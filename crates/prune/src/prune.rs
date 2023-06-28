@@ -66,7 +66,7 @@ where
         // block number. If that's the case, no pruning is needed as outdated data is also
         // reverted.
         if this.last_pruned_block_number.map_or(true, |last_pruned_block_number| {
-            tip.number.saturating_sub(last_pruned_block_number) > MIN_PRUNE_BLOCK_INTERVAL
+            tip.number.saturating_sub(last_pruned_block_number) >= MIN_PRUNE_BLOCK_INTERVAL
         }) {
             debug!(
                 target: "prune",
@@ -80,5 +80,75 @@ where
         }
 
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{prune::MIN_PRUNE_BLOCK_INTERVAL, Pruner};
+    use futures_util::FutureExt;
+    use reth_primitives::SealedBlockWithSenders;
+    use reth_provider::{
+        test_utils::{NoopProvider, TestCanonStateSubscriptions},
+        CanonStateSubscriptions, Chain,
+    };
+    use std::{future::poll_fn, sync::Arc, task::Poll};
+
+    #[tokio::test]
+    async fn pruner_respects_last_pruned_block_number() {
+        let mut canon_state_stream = TestCanonStateSubscriptions::default();
+        let mut pruner =
+            Pruner::new(canon_state_stream.canonical_state_stream(), NoopProvider::default(), 0);
+
+        // Last pruned block number is empty on initialization
+        assert_eq!(pruner.last_pruned_block_number, None);
+
+        let mut chain = Chain::default();
+
+        let first_block = SealedBlockWithSenders::default();
+        let first_block_number = first_block.number;
+        chain.blocks.insert(first_block_number, first_block);
+        canon_state_stream.add_next_commit(Arc::new(chain.clone()));
+
+        poll_fn(|cx| {
+            assert!(pruner.poll_unpin(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        // Last pruned block number is set to the first arrived block because we didn't have it set
+        // before
+        assert_eq!(pruner.last_pruned_block_number, Some(first_block_number));
+
+        let mut second_block = SealedBlockWithSenders::default();
+        second_block.block.header.number = first_block_number + MIN_PRUNE_BLOCK_INTERVAL;
+        let second_block_number = second_block.number;
+        chain.blocks.insert(second_block_number, second_block);
+        canon_state_stream.add_next_commit(Arc::new(chain.clone()));
+
+        poll_fn(|cx| {
+            assert!(pruner.poll_unpin(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        // Last pruned block number is updated because delta is larger than
+        // `MIN_PRUNE_BLOCK_INTERVAL`
+        assert_eq!(pruner.last_pruned_block_number, Some(second_block_number));
+
+        let mut third_block = SealedBlockWithSenders::default();
+        third_block.block.header.number = second_block_number + 1;
+        chain.blocks.insert(third_block.number, third_block);
+        canon_state_stream.add_next_commit(Arc::new(chain.clone()));
+
+        poll_fn(|cx| {
+            assert!(pruner.poll_unpin(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        // Last pruned block number is not updated because delta is smaller than
+        // `MIN_PRUNE_BLOCK_INTERVAL`
+        assert_eq!(pruner.last_pruned_block_number, Some(second_block_number));
     }
 }
