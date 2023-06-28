@@ -715,6 +715,14 @@ impl BlockNumHash {
     pub fn into_components(self) -> (BlockNumber, BlockHash) {
         (self.number, self.hash)
     }
+
+    /// Returns whether or not the block matches the given [BlockHashOrNumber].
+    pub fn matches_block_or_num(&self, block: &BlockHashOrNumber) -> bool {
+        match block {
+            BlockHashOrNumber::Hash(hash) => self.hash == *hash,
+            BlockHashOrNumber::Number(number) => self.number == *number,
+        }
+    }
 }
 
 impl From<(BlockNumber, BlockHash)> for BlockNumHash {

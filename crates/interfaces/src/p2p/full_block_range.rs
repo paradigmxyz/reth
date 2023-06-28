@@ -135,6 +135,14 @@ where
                                     // received bad response
                                     this.client.report_bad_message(peer);
                                 } else {
+                                    // get the bodies request so it can be polled later
+                                    let hashes =
+                                        headers.iter().map(|h| h.hash()).collect::<Vec<_>>();
+
+                                    // set the actual request
+                                    this.request.bodies =
+                                        Some(this.client.get_block_bodies(hashes));
+
                                     // set the headers response
                                     this.headers = Some(headers);
                                 }
@@ -234,4 +242,134 @@ enum RangeResponseResult {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::p2p::{
+        download::DownloadClient, headers::client::HeadersRequest, priority::Priority,
+    };
+    use parking_lot::Mutex;
+    use reth_primitives::{BlockHashOrNumber, BlockNumHash, PeerId, WithPeerId};
+    use std::{collections::HashMap, sync::Arc};
+
+    #[derive(Clone, Default, Debug)]
+    struct TestFullBlockRangeClient {
+        headers: Arc<Mutex<HashMap<H256, Header>>>,
+        bodies: Arc<Mutex<HashMap<H256, BlockBody>>>,
+    }
+
+    impl TestFullBlockRangeClient {
+        fn insert(&self, header: SealedHeader, body: BlockBody) {
+            let hash = header.hash();
+            let header = header.unseal();
+            self.headers.lock().insert(hash, header);
+            self.bodies.lock().insert(hash, body);
+        }
+    }
+
+    impl DownloadClient for TestFullBlockRangeClient {
+        fn report_bad_message(&self, _peer_id: PeerId) {}
+
+        fn num_connected_peers(&self) -> usize {
+            1
+        }
+    }
+
+    impl HeadersClient for TestFullBlockRangeClient {
+        type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
+
+        fn get_headers_with_priority(
+            &self,
+            request: HeadersRequest,
+            _priority: Priority,
+        ) -> Self::Output {
+            let headers = self.headers.lock();
+            let mut block: BlockHashOrNumber = match request.start {
+                BlockHashOrNumber::Hash(hash) => headers.get(&hash).cloned(),
+                BlockHashOrNumber::Number(num) => {
+                    headers.values().find(|h| h.number == num).cloned()
+                }
+            }
+            .map(|h| h.number.into())
+            .unwrap();
+
+            let mut resp = Vec::new();
+
+            for _ in 0..request.limit {
+                // fetch from storage
+                if let Some((_, header)) = headers.iter().find(|(hash, header)| {
+                    BlockNumHash::new(header.number, **hash).matches_block_or_num(&block)
+                }) {
+                    match request.direction {
+                        HeadersDirection::Falling => block = header.parent_hash.into(),
+                        HeadersDirection::Rising => {
+                            let next = header.number + 1;
+                            block = next.into()
+                        }
+                    }
+                    resp.push(header.clone());
+                } else {
+                    break
+                }
+            }
+            futures::future::ready(Ok(WithPeerId::new(PeerId::random(), resp)))
+        }
+    }
+
+    impl BodiesClient for TestFullBlockRangeClient {
+        type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
+
+        fn get_block_bodies_with_priority(
+            &self,
+            hashes: Vec<H256>,
+            _priority: Priority,
+        ) -> Self::Output {
+            let bodies = self.bodies.lock();
+            let mut all_bodies = Vec::new();
+            for hash in hashes {
+                if let Some(body) = bodies.get(&hash) {
+                    all_bodies.push(body.clone());
+                }
+            }
+            futures::future::ready(Ok(WithPeerId::new(PeerId::random(), all_bodies)))
+        }
+    }
+
+    #[tokio::test]
+    async fn download_single_full_block() {
+        let client = TestFullBlockRangeClient::default();
+        let header = SealedHeader::default();
+        let body = BlockBody::default();
+        client.insert(header.clone(), body.clone());
+        let client = FullBlockRangeClient::new(client);
+
+        let received = client.get_full_block_range(header.hash(), 1).await;
+        let received = received.first().expect("response should include a block");
+        assert_eq!(*received, SealedBlock::new(header, body));
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range() {
+        let client = TestFullBlockRangeClient::default();
+        let mut header = SealedHeader::default();
+        let body = BlockBody::default();
+        client.insert(header.clone(), body.clone());
+        for _ in 0..10 {
+            header.parent_hash = header.hash_slow();
+            header.number += 1;
+            header = header.header.seal_slow();
+            client.insert(header.clone(), body.clone());
+        }
+        let client = FullBlockRangeClient::new(client);
+
+        let received = client.get_full_block_range(header.hash(), 1).await;
+        let received = received.first().expect("response should include a block");
+        assert_eq!(*received, SealedBlock::new(header.clone(), body));
+
+        let received = client.get_full_block_range(header.hash(), 10).await;
+        assert_eq!(received.len(), 10);
+        for (i, block) in received.iter().enumerate() {
+            let expected_number = header.number - i as u64;
+            assert_eq!(block.header.number, expected_number);
+        }
+    }
+}
