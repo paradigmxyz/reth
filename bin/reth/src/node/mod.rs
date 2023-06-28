@@ -478,8 +478,8 @@ impl Command {
     async fn start_metrics_endpoint(&self, db: Arc<DatabaseEnv>) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-
-            prometheus_exporter::initialize_with_db_metrics(listen_addr, db).await?;
+            prometheus_exporter::initialize(listen_addr, db, metrics_process::Collector::default())
+                .await?;
         }
 
         Ok(())

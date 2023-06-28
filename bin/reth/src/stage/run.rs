@@ -127,7 +127,12 @@ impl Command {
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::initialize_with_db_metrics(listen_addr, Arc::clone(&db)).await?;
+            prometheus_exporter::initialize(
+                listen_addr,
+                Arc::clone(&db),
+                metrics_process::Collector::default(),
+            )
+            .await?;
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
