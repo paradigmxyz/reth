@@ -16,10 +16,13 @@ use tracing::debug;
 const MIN_PRUNE_BLOCK_INTERVAL: u64 = 5;
 
 /// Pruning routine. Implements [Future] where the pruning logic happens.
-pub struct Pruner<St> {
+pub struct Pruner<St, Client> {
     /// Stream of canonical state notifications. Pruning is triggered by new incoming
     /// notifications.
     canon_state_stream: St,
+    /// Database interaction client.
+    #[allow(dead_code)]
+    client: Client,
     /// Maximum reorg depth. Used to determine the pruning target for parts that are needed during
     /// the reorg, e.g. changesets.
     #[allow(dead_code)]
@@ -29,15 +32,22 @@ pub struct Pruner<St> {
     last_pruned_block_number: Option<BlockNumber>,
 }
 
-impl<St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static> Pruner<St> {
-    /// Creates a new [Pruner] with the specified stream of canonical state notifications and
-    /// maximum reorg depth.
-    pub fn new(canon_state_stream: St, max_reorg_depth: u64) -> Self {
-        Self { canon_state_stream, max_reorg_depth, last_pruned_block_number: None }
+impl<St, Client> Pruner<St, Client>
+where
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    Client: Send + Unpin + 'static,
+{
+    /// Creates a new [Pruner].
+    pub fn new(canon_state_stream: St, client: Client, max_reorg_depth: u64) -> Self {
+        Self { canon_state_stream, client, max_reorg_depth, last_pruned_block_number: None }
     }
 }
 
-impl<St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static> Future for Pruner<St> {
+impl<St, Client> Future for Pruner<St, Client>
+where
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    Client: Send + Unpin + 'static,
+{
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

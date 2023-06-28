@@ -283,6 +283,7 @@ impl Command {
             "pruning task",
             reth_prune::Pruner::new(
                 blockchain_db.canonical_state_stream(),
+                blockchain_db.clone(),
                 tree_config.max_reorg_depth(),
             ),
         );
