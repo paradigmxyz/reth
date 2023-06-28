@@ -4,6 +4,8 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server,
 };
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use libc as _;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::{
