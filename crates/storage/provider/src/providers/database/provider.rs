@@ -1695,9 +1695,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
             block.difficulty
         } else {
             let parent_block_number = block.number - 1;
-            let parent_ttd =
-                self.tx.get::<tables::HeaderTD>(parent_block_number)?.unwrap_or_default();
-            parent_ttd.0 + block.difficulty
+            let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
+            parent_ttd + block.difficulty
         };
 
         self.tx.put::<tables::HeaderTD>(block.number, ttd.into())?;
