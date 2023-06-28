@@ -163,9 +163,9 @@ where
 }
 
 fn append<T>(
-    db: Env<WriteMap>,
+    db: DatabaseEngine,
     input: Vec<(<T as Table>::Key, <T as Table>::Value)>,
-) -> Env<WriteMap>
+) -> DatabaseEngine
 where
     T: Table + Default,
 {
@@ -184,9 +184,9 @@ where
 }
 
 fn insert<T>(
-    db: Env<WriteMap>,
+    db: DatabaseEngine,
     input: Vec<(<T as Table>::Key, <T as Table>::Value)>,
-) -> Env<WriteMap>
+) -> DatabaseEngine
 where
     T: Table + Default,
 {
@@ -204,7 +204,10 @@ where
     db
 }
 
-fn put<T>(db: Env<WriteMap>, input: Vec<(<T as Table>::Key, <T as Table>::Value)>) -> Env<WriteMap>
+fn put<T>(
+    db: DatabaseEngine,
+    input: Vec<(<T as Table>::Key, <T as Table>::Value)>,
+) -> DatabaseEngine
 where
     T: Table + Default,
 {
@@ -231,7 +234,7 @@ struct TableStats {
     size: usize,
 }
 
-fn get_table_stats<T>(db: Env<WriteMap>)
+fn get_table_stats<T>(db: DatabaseEngine)
 where
     T: Table + Default,
 {

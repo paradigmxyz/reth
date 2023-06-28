@@ -1,3 +1,4 @@
+use reth_db::DatabaseEngine;
 #[allow(unused_imports)]
 use reth_db::{
     database::Database,
@@ -51,7 +52,7 @@ where
 fn set_up_db<T>(
     bench_db_path: &Path,
     pair: &Vec<(<T as Table>::Key, bytes::Bytes, <T as Table>::Value, bytes::Bytes)>,
-) -> reth_db::mdbx::Env<WriteMap>
+) -> DatabaseEngine
 where
     T: Table + Default,
     T::Key: Default + Clone,

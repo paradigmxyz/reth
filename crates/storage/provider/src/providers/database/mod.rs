@@ -393,7 +393,7 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let factory = ProviderFactory::<DatabaseEngine>::new_with_database_path(
-            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+            tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
         )
         .unwrap();
