@@ -63,7 +63,7 @@ where
         // Check minimum pruning interval according to the last pruned block and a new tip.
         // Saturating subtraction is needed for the case when `CanonStateNotification::Revert`
         // is received, meaning current block number might be less than the previously pruned
-        // block number. If that's the case, no pruning is needed as outdated data are also
+        // block number. If that's the case, no pruning is needed as outdated data is also
         // reverted.
         if this.last_pruned_block_number.map_or(true, |last_pruned_block_number| {
             tip.number.saturating_sub(last_pruned_block_number) > MIN_PRUNE_BLOCK_INTERVAL

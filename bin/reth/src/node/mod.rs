@@ -278,6 +278,7 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
+        // TODO(alexey): don't spawn pruning task if pruning is not enabled via config from https://github.com/paradigmxyz/reth/pull/3341
         debug!(target: "reth::cli", "Spawning pruning task");
         ctx.task_executor.spawn_critical(
             "pruning task",
