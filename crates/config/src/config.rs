@@ -283,7 +283,7 @@ impl Default for IndexHistoryConfig {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct PruneConfig {
-    /// Minimal pruning interval measured in blocks.
+    /// Minimum pruning interval measured in blocks.
     pub block_interval: u64,
     /// Pruning configuration for every part of the data that can be pruned.
     pub parts: PruneParts,
