@@ -18,6 +18,7 @@ pub struct Config {
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
     /// Configuration for pruning.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prune: Option<PruneConfig>,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
@@ -300,14 +301,19 @@ impl Default for PruneConfig {
 #[serde(default)]
 pub struct PruneParts {
     /// Sender Recovery pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sender_recovery: Option<PruneMode>,
     /// Transaction Lookup pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_lookup: Option<PruneMode>,
     /// Receipts pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub account_history: Option<PruneMode>,
     /// Storage History pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_history: Option<PruneMode>,
 }
 
