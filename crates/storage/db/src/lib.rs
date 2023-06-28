@@ -123,3 +123,53 @@ pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEngin
         unimplemented!();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        init_db,
+        version::{db_version_file_path, DatabaseVersionError},
+    };
+    use assert_matches::assert_matches;
+    use tempfile::tempdir;
+
+    #[test]
+    fn db_version() {
+        let path = tempdir().unwrap();
+
+        // Database is empty
+        {
+            let db = init_db(&path);
+            assert_matches!(db, Ok(_));
+        }
+
+        // Database is not empty, current version is the same as in the file
+        {
+            let db = init_db(&path);
+            assert_matches!(db, Ok(_));
+        }
+
+        // Database is not empty, version file is malformed
+        {
+            std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
+                .unwrap();
+            let db = init_db(&path);
+            assert!(db.is_err());
+            assert_matches!(
+                db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+                Some(DatabaseVersionError::MalformedFile)
+            )
+        }
+
+        // Database is not empty, version file contains not matching version
+        {
+            std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
+            let db = init_db(&path);
+            assert!(db.is_err());
+            assert_matches!(
+                db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+                Some(DatabaseVersionError::VersionMismatch { version: 0 })
+            )
+        }
+    }
+}
