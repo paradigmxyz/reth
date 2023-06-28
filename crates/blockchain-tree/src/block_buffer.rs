@@ -65,12 +65,20 @@ impl BlockBuffer {
             self.lru.push(num_hash, ()).filter(|(b, _)| *b != num_hash)
         {
             // evict the block if limit is hit
-            if let Some(evicted_block) = self.remove_from_blocks(&evicted_num_hash) {
+            if let Some(evicted_block) = self.remove_block(&evicted_num_hash) {
                 // evict the block if limit is hit
                 self.remove_from_parent(evicted_block.parent_hash, &evicted_num_hash);
             }
         }
         self.metrics.blocks.set(self.len() as f64);
+    }
+
+    /// Returns all known child blocks of the given parent block.
+    ///
+    /// Note: These are all the blocks that have the given block as a parent: all blocks have the
+    /// same height.
+    pub fn child_blocks(&self, parent: &BlockHash) -> Option<&HashSet<BlockNumHash>> {
+        self.parent_to_child.get(parent)
     }
 
     /// Removes the given block from the buffer and also all the children of the block.
@@ -82,7 +90,7 @@ impl BlockBuffer {
     pub fn remove_with_children(&mut self, parent: BlockNumHash) -> Vec<SealedBlockWithSenders> {
         // remove parent block if present
         let mut taken = Vec::new();
-        if let Some(block) = self.remove_from_blocks(&parent) {
+        if let Some(block) = self.remove_block(&parent) {
             taken.push(block);
         }
 
@@ -120,7 +128,7 @@ impl BlockBuffer {
         &self.blocks
     }
 
-    /// Return reference to the asked block.
+    /// Return reference to the requested block if it's buffered.
     pub fn block(&self, block: BlockNumHash) -> Option<&SealedBlockWithSenders> {
         self.blocks.get(&block.number)?.get(&block.hash)
     }
@@ -173,10 +181,10 @@ impl BlockBuffer {
         };
     }
 
-    /// Remove block from `self.blocks`, This will also remove block from `self.lru`.
+    /// Remove the buffered block from `self.blocks`, This will also remove block from `self.lru`.
     ///
     /// Note: This function will not remove block from the `self.parent_to_child` connection.
-    fn remove_from_blocks(&mut self, block: &BlockNumHash) -> Option<SealedBlockWithSenders> {
+    pub(crate) fn remove_block(&mut self, block: &BlockNumHash) -> Option<SealedBlockWithSenders> {
         self.remove_from_hash_to_num(&block.hash);
 
         if let Entry::Occupied(mut entry) = self.blocks.entry(block.number) {
@@ -202,7 +210,7 @@ impl BlockBuffer {
             if let Some(parent_childrens) = self.parent_to_child.remove(&parent_num_hash.hash) {
                 // remove child from buffer
                 for child in parent_childrens.iter() {
-                    if let Some(block) = self.remove_from_blocks(child) {
+                    if let Some(block) = self.remove_block(child) {
                         removed_blocks.push(block);
                     }
                 }
@@ -215,13 +223,13 @@ impl BlockBuffer {
 
 #[cfg(test)]
 mod tests {
-    use reth_interfaces::test_utils::generators;
-    use std::collections::HashMap;
-
-    use reth_interfaces::test_utils::generators::{random_block, Rng};
-    use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
-
     use crate::BlockBuffer;
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block, Rng},
+    };
+    use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
+    use std::collections::HashMap;
 
     fn create_block<R: Rng>(rng: &mut R, number: u64, parent: BlockHash) -> SealedBlockWithSenders {
         let block = random_block(rng, number, Some(parent), None, None);

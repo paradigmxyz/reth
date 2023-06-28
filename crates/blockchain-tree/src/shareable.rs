@@ -48,6 +48,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         res
     }
 
+    fn append_buffered_block_one(&self) -> Option<Result<BlockNumHash, InsertBlockError>> {
+        let mut tree = self.tree.write();
+
+        tree.append_buffered_block_one()
+    }
+
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,

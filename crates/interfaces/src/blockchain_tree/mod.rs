@@ -43,6 +43,12 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Buffer block with senders
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError>;
 
+    /// Tries to re-insert __one__ buffered block.
+    ///
+    /// This will return `Some` if there was a buffered block that could be inserted on top of a
+    /// side-chain.
+    fn append_buffered_block_one(&self) -> Option<Result<BlockNumHash, InsertBlockError>>;
+
     /// Insert block with senders
     fn insert_block(
         &self,

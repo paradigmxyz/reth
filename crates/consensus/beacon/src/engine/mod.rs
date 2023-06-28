@@ -1295,6 +1295,32 @@ where
 
         None
     }
+
+    /// This will attempt to append one buffered block to the blockchain tree.
+    ///
+    /// Returns `Poll::Ready` if a block was appended, `Poll::Pending` if no blocks available to
+    /// buffer.
+    fn poll_append_buffered_block(&mut self) -> Poll<()> {
+        // try to re-insert buffered blocks
+        if let Some(res) = self.blockchain.append_buffered_block_one() {
+            match res {
+                Ok(appended) => {
+                    debug!(target: "consensus::engine", ?appended, "Appended buffered block");
+                }
+                Err(error) => {
+                    debug!(target: "consensus::engine", ?error, "Error re-inserting buffered block");
+                    let (block, error) = error.split();
+                    if error.is_invalid_block() {
+                        self.invalid_headers.insert(block.header);
+                    }
+                }
+            }
+
+            return Poll::Ready(())
+        }
+
+        Poll::Pending
+    }
 }
 
 /// On initialization, the consensus engine will poll the message receiver and return
@@ -1323,7 +1349,7 @@ where
         // Process all incoming messages from the CL, these can affect the state of the
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
-            let mut engine_messages_pending = false;
+            let mut is_pending = false;
 
             // handle next engine message
             match this.engine_message_rx.poll_next_unpin(cx) {
@@ -1350,7 +1376,7 @@ where
                 }
                 Poll::Pending => {
                     // no more CL messages to process
-                    engine_messages_pending = true;
+                    is_pending = true;
                 }
             }
 
@@ -1362,11 +1388,17 @@ where
                     }
                 }
                 Poll::Pending => {
-                    if engine_messages_pending {
-                        // both the sync and the engine message receiver are pending
-                        return Poll::Pending
-                    }
+                    is_pending &= true;
                 }
+            }
+
+            // try to append one buffered block to the blockchain tree
+            if this.poll_append_buffered_block().is_ready() {
+                continue
+            }
+
+            if is_pending {
+                return Poll::Pending
             }
         }
     }

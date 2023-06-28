@@ -567,6 +567,12 @@ where
         self.tree.buffer_block(block)
     }
 
+    fn append_buffered_block_one(
+        &self,
+    ) -> Option<std::result::Result<BlockNumHash, InsertBlockError>> {
+        self.tree.append_buffered_block_one()
+    }
+
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,

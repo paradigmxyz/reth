@@ -144,7 +144,7 @@ impl BlockIndices {
     }
 
     /// Get the chain ID the block belongs to
-    pub(crate) fn get_blocks_chain_id(&self, block: &BlockHash) -> Option<BlockChainId> {
+    pub(crate) fn get_block_chain_id(&self, block: &BlockHash) -> Option<BlockChainId> {
         self.blocks_to_chain.get(block).cloned()
     }
 
