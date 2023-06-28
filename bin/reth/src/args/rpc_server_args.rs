@@ -135,6 +135,10 @@ pub struct RpcServerArgs {
     #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_TRACING_REQUESTS)]
     pub rpc_max_tracing_requests: u32,
 
+    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    #[arg(long, default_value_t = RPC_DEFAULT_GAS_CAP)]
+    pub rpc_gas_cap: u64,
+
     /// Gas price oracle configuration.
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
@@ -150,10 +154,6 @@ pub struct RpcServerArgs {
     /// Max size for cached evm env data in megabytes.
     #[arg(long, default_value_t = DEFAULT_ENV_CACHE_SIZE_BYTES_MB)]
     pub env_cache_size: usize,
-
-    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
-    #[arg(long, default_value_t = RPC_DEFAULT_GAS_CAP)]
-    pub rpc_gas_cap: u64,
 }
 
 impl RpcServerArgs {
