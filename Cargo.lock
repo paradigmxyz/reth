@@ -5468,25 +5468,9 @@ dependencies = [
 name = "reth-prune"
 version = "0.1.0-alpha.1"
 dependencies = [
- "aquamarine",
- "async-trait",
- "auto_impl",
- "bitflags 1.3.2",
- "fnv",
  "futures-util",
- "parking_lot 0.12.1",
- "paste",
- "rand 0.8.5",
- "reth-interfaces",
- "reth-metrics",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
- "reth-tasks",
- "serde",
- "thiserror",
- "tokio",
- "tokio-stream",
  "tracing",
 ]
 
