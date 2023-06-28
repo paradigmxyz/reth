@@ -21,7 +21,6 @@ const NON_ZERO_BYTE_COST: u64 = 16;
 /// uint64 _sequenceNumber, bytes32 _batcherHash, uint256 _l1FeeOverhead, uint256 _l1FeeScalar)
 ///
 /// For now, we only care about the fields necessary for L1 cost calculation.
-#[derive(Default)]
 pub struct L1BlockInfo {
     l1_base_fee: U256,
     l1_fee_overhead: U256,
