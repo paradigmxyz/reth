@@ -397,6 +397,12 @@ where
         self.handle.clone()
     }
 
+    /// Returns true if the distance from the local tip to the block is greater than the configured
+    /// threshold
+    fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
+        block > local_tip && block - local_tip > self.pipeline_run_threshold
+    }
+
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
@@ -1031,7 +1037,7 @@ where
     /// chain is invalid, which means the FCU that triggered the download is invalid. Here we can
     /// stop because there's nothing to do here and the engine needs to wait for another FCU.
     fn on_downloaded_block(&mut self, block: SealedBlock) {
-        let num_hash = block.num_hash();
+        let downloaded_num_hash = block.num_hash();
         trace!(target: "consensus::engine", hash=?block.hash, number=%block.number, "Downloaded full block");
         // check if the block's parent is already marked as invalid
         if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash).is_some() {
@@ -1044,23 +1050,37 @@ where
                 match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                         // block is connected to the current canonical head and is valid.
-                        self.try_make_sync_target_canonical(num_hash);
+                        self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Accepted) => {
                         // block is connected to the canonical chain, but not the current head
-                        self.try_make_sync_target_canonical(num_hash);
+                        self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
                         // compare the missing parent with the canonical tip
                         let canonical_tip_num = self.blockchain.canonical_tip().number;
+                        let sync_target_state = self.forkchoice_state_tracker.sync_target_state();
+
+                        let mut requires_pipeline = self.exceeds_pipeline_run_threshold(
+                            canonical_tip_num,
+                            missing_parent.number,
+                        );
+
+                        // check if the downloaded block is the tracked finalized block
+                        if let Some(ref state) = sync_target_state {
+                            if downloaded_num_hash.hash == state.finalized_block_hash {
+                                // we downloaded the finalized block
+                                requires_pipeline = self.exceeds_pipeline_run_threshold(
+                                    canonical_tip_num,
+                                    downloaded_num_hash.number,
+                                );
+                            }
+                        }
 
                         // if the number of missing blocks is greater than the max, run the
                         // pipeline
-                        if missing_parent.number >= canonical_tip_num &&
-                            missing_parent.number - canonical_tip_num >
-                                self.pipeline_run_threshold
-                        {
-                            if let Some(state) = self.forkchoice_state_tracker.sync_target_state() {
+                        if requires_pipeline {
+                            if let Some(state) = sync_target_state {
                                 // if we have already canonicalized the finalized block, we should
                                 // skip the pipeline run
                                 if Ok(None) ==
