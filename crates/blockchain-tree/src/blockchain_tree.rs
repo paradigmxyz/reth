@@ -840,11 +840,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &self,
         chain: &AppendableChain,
     ) -> Option<BlockNumHash> {
-        let chain_tip = chain.tip().hash();
-        let children = self.buffered_blocks.child_blocks(&chain_tip)?;
-        let buffered =
-            children.iter().copied().find(|block| self.buffered_blocks.block(*block).is_some())?;
-        Some(buffered)
+        // iterate over all blocks in chain
+        for (_, block) in chain.blocks.iter() {
+            let children = self.buffered_blocks.child_blocks(&block.hash())?;
+            // if buffered blocks is find return its block num hash.
+            if let Some(buffered) =
+                children.iter().find(|block| self.buffered_blocks.block(**block).is_some())
+            {
+                return Some(*buffered)
+            }
+        }
+        // there is no appendable buffered blocks
+        return None
     }
 
     /// Split a sidechain at the given point, and return the canonical part of it.
