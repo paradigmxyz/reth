@@ -2,9 +2,8 @@ use crate::{
     trie::{hash_builder::HashBuilderState, StoredSubNode},
     Address, BlockNumber, H256,
 };
-use bytes::{Buf, BufMut};
-use reth_codecs::{derive_arbitrary, main_codec, Compact};
-use serde::{Deserialize, Serialize};
+use bytes::Buf;
+use reth_codecs::{main_codec, Compact};
 use std::{
     fmt::{Display, Formatter},
     ops::RangeInclusive,
@@ -252,8 +251,8 @@ impl Display for StageCheckpoint {
 // TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
 //  is not a Copy type.
 /// Stage-specific checkpoint metrics.
-#[derive_arbitrary(compact)]
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+#[main_codec]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum StageUnitCheckpoint {
     /// Saves the progress of AccountHashing stage.
     Account(AccountHashingCheckpoint),
@@ -269,42 +268,16 @@ pub enum StageUnitCheckpoint {
     IndexHistory(IndexHistoryCheckpoint),
 }
 
-/// Generates:
-/// 1. [Compact::to_compact] and [Compact::from_compact] implementations for [StageUnitCheckpoint].
-/// 2. [StageCheckpoint] getter and builder methods.
+#[cfg(test)]
+impl Default for StageUnitCheckpoint {
+    fn default() -> Self {
+        Self::Account(AccountHashingCheckpoint::default())
+    }
+}
+
+/// Generates [StageCheckpoint] getter and builder methods.
 macro_rules! stage_unit_checkpoints {
     ($(($index:expr,$enum_variant:tt,$checkpoint_ty:ty,#[doc = $fn_get_doc:expr]$fn_get_name:ident,#[doc = $fn_build_doc:expr]$fn_build_name:ident)),+) => {
-        impl Compact for StageUnitCheckpoint {
-            fn to_compact<B>(self, buf: &mut B) -> usize
-            where
-                B: BufMut + AsMut<[u8]>,
-            {
-                match self {
-                    $(
-                        StageUnitCheckpoint::$enum_variant(data) => {
-                            buf.put_u8($index);
-                            1 + data.to_compact(buf)
-                        }
-                    )+
-                }
-            }
-
-            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-            where
-                Self: Sized,
-            {
-                match buf[0] {
-                    $(
-                        $index => {
-                            let (data, buf) = <$checkpoint_ty>::from_compact(&buf[1..], buf.len() - 1);
-                            (Self::$enum_variant(data), buf)
-                        }
-                    )+
-                    _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
-                }
-            }
-        }
-
         impl StageCheckpoint {
             $(
                 #[doc = $fn_get_doc]
@@ -409,54 +382,5 @@ mod tests {
         let encoded = checkpoint.clone().to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
-    }
-
-    #[test]
-    fn stage_unit_checkpoint_roundtrip() {
-        let mut rng = rand::thread_rng();
-        let checkpoints = vec![
-            StageUnitCheckpoint::Account(AccountHashingCheckpoint {
-                address: Some(Address::from_low_u64_be(rng.gen())),
-                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
-                progress: EntitiesCheckpoint {
-                    processed: rng.gen::<u32>() as u64,
-                    total: u32::MAX as u64 + rng.gen::<u64>(),
-                },
-            }),
-            StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
-                address: Some(Address::from_low_u64_be(rng.gen())),
-                storage: Some(H256::from_low_u64_be(rng.gen())),
-                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
-                progress: EntitiesCheckpoint {
-                    processed: rng.gen::<u32>() as u64,
-                    total: u32::MAX as u64 + rng.gen::<u64>(),
-                },
-            }),
-            StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                processed: rng.gen::<u32>() as u64,
-                total: u32::MAX as u64 + rng.gen::<u64>(),
-            }),
-            StageUnitCheckpoint::Execution(ExecutionCheckpoint {
-                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
-                progress: EntitiesCheckpoint {
-                    processed: rng.gen::<u32>() as u64,
-                    total: u32::MAX as u64 + rng.gen::<u64>(),
-                },
-            }),
-            StageUnitCheckpoint::Headers(HeadersCheckpoint {
-                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
-                progress: EntitiesCheckpoint {
-                    processed: rng.gen::<u32>() as u64,
-                    total: u32::MAX as u64 + rng.gen::<u64>(),
-                },
-            }),
-        ];
-
-        for checkpoint in checkpoints {
-            let mut buf = Vec::new();
-            let encoded = checkpoint.to_compact(&mut buf);
-            let (decoded, _) = StageUnitCheckpoint::from_compact(&buf, encoded);
-            assert_eq!(decoded, checkpoint);
-        }
     }
 }
