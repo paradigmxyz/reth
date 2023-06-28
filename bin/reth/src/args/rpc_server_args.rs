@@ -7,6 +7,7 @@ use clap::{
 };
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
+use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
 use reth_provider::{
     BlockReaderIdExt, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
@@ -47,6 +48,8 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 100;
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
+/// Default max gas limit for `eth_call` and call tracing RPC methods.
+pub(crate) const RPC_DEFAULT_GAS_CAP: u64 = ETHEREUM_BLOCK_GAS_LIMIT;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Eq, Default)]
@@ -147,6 +150,10 @@ pub struct RpcServerArgs {
     /// Max size for cached evm env data in megabytes.
     #[arg(long, default_value_t = DEFAULT_ENV_CACHE_SIZE_BYTES_MB)]
     pub env_cache_size: usize,
+
+    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    #[arg(long, default_value_t = RPC_DEFAULT_GAS_CAP)]
+    pub rpc_gas_cap: u64,
 }
 
 impl RpcServerArgs {
