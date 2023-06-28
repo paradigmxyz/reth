@@ -13,7 +13,7 @@ use tracing::debug;
 // TODO(alexey): use config field from https://github.com/paradigmxyz/reth/pull/3341
 /// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed, pruned,
 /// when the chain advances by the specified number of blocks.
-const MIN_PRUNE_BLOCK_INTERVAL: u64 = 5;
+pub const MIN_PRUNE_BLOCK_INTERVAL: u64 = 5;
 
 /// Pruning routine. Implements [Future] where the pruning logic happens.
 pub struct Pruner<St, Client> {
@@ -27,7 +27,7 @@ pub struct Pruner<St, Client> {
     /// the reorg, e.g. changesets.
     #[allow(dead_code)]
     max_reorg_depth: u64,
-    /// Last pruned block number. Used in conjuction with [MIN_PRUNE_BLOCK_INTERVAL] to determine
+    /// Last pruned block number. Used in conjunction with [MIN_PRUNE_BLOCK_INTERVAL] to determine
     /// when the pruning needs to be initiated.
     last_pruned_block_number: Option<BlockNumber>,
 }
@@ -44,7 +44,7 @@ where
 }
 
 /// Pruning logic. The behaviour is following:
-/// 1. Listen to new blocks via [CanonStateNotification] received from [St].
+/// 1. Listen to new blocks via [CanonStateNotification].
 /// 2. Check new block height according to [MIN_PRUNE_BLOCK_INTERVAL].
 /// 3. Prune.
 impl<St, Client> Future for Pruner<St, Client>
