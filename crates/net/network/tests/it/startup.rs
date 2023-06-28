@@ -1,4 +1,4 @@
-use reth_discv4::{Discv4Config, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::Discv4Config;
 use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
@@ -10,6 +10,7 @@ use std::{
     io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
 };
+use tokio::net::TcpListener;
 
 fn is_addr_in_use_kind(err: &NetworkError, kind: ServiceKind) -> bool {
     match err {
@@ -51,7 +52,10 @@ async fn test_listener_addr_in_use() {
 async fn test_discovery_addr_in_use() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let disc_config = Discv4Config::default();
-    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT));
+    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+    let any_port_listener = TcpListener::bind(addr).await.unwrap();
+    let port = any_port_listener.local_addr().unwrap().port();
+    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port));
     let _discovery = Discovery::new(addr, secret_key, Some(disc_config), None).await.unwrap();
     let disc_config = Discv4Config::default();
     let result = Discovery::new(addr, secret_key, Some(disc_config), None).await;
