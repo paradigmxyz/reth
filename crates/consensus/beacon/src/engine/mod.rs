@@ -1361,7 +1361,7 @@ mod tests {
         config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
         BlockchainTree, ShareableBlockchainTree,
     };
-    use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
+    use reth_db::{mdbx::test_utils::create_test_rw_db, DatabaseEnv};
     use reth_interfaces::{
         sync::NoopSyncStateUpdater,
         test_utils::{NoopFullBlockClient, TestConsensus},
@@ -1381,10 +1381,10 @@ mod tests {
     };
 
     type TestBeaconConsensusEngine = BeaconConsensusEngine<
-        Arc<Env<WriteMap>>,
+        Arc<DatabaseEnv>,
         BlockchainProvider<
-            Arc<Env<WriteMap>>,
-            ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
+            Arc<DatabaseEnv>,
+            ShareableBlockchainTree<Arc<DatabaseEnv>, TestConsensus, TestExecutorFactory>,
         >,
         NoopFullBlockClient,
     >;
@@ -1498,7 +1498,7 @@ mod tests {
         }
 
         /// Builds the test consensus engine into a `TestConsensusEngine` and `TestEnv`.
-        fn build(self) -> (TestBeaconConsensusEngine, TestEnv<Arc<Env<WriteMap>>>) {
+        fn build(self) -> (TestBeaconConsensusEngine, TestEnv<Arc<DatabaseEnv>>) {
             reth_tracing::init_test_tracing();
             let db = create_test_rw_db();
             let consensus = TestConsensus::default();

@@ -1,6 +1,9 @@
 use super::TestTransaction;
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::mdbx::{Env, WriteMap};
+use reth_db::{
+    mdbx::{Env, WriteMap},
+    DatabaseEnv,
+};
 use reth_primitives::MAINNET;
 use reth_provider::ProviderFactory;
 use std::{borrow::Borrow, sync::Arc};
@@ -19,7 +22,7 @@ pub(crate) enum TestRunnerError {
 /// A generic test runner for stages.
 #[async_trait::async_trait]
 pub(crate) trait StageTestRunner {
-    type S: Stage<Env<WriteMap>> + 'static;
+    type S: Stage<DatabaseEnv> + 'static;
 
     /// Return a reference to the database.
     fn tx(&self) -> &TestTransaction;

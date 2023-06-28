@@ -19,4 +19,7 @@ pub enum Error {
 
     #[error(transparent)]
     Network(#[from] reth_network_api::NetworkError),
+
+    #[error("{0}")]
+    Custom(std::string::String),
 }

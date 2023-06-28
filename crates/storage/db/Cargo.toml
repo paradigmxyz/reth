@@ -38,6 +38,7 @@ thiserror = { workspace = true }
 tempfile = { version = "3.3.0", optional = true }
 parking_lot = "0.12"
 derive_more = "0.99"
+eyre = "0.6.8"
 
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }

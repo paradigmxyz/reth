@@ -6,11 +6,7 @@ use hyper::{
 };
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use reth_db::{
-    database::Database,
-    mdbx::{Env, WriteMap},
-    tables,
-};
+use reth_db::{database::Database, tables, DatabaseEnv};
 use reth_metrics::metrics::{self, absolute_counter, describe_counter, Unit};
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
@@ -73,7 +69,7 @@ async fn start_endpoint<F: Hook + 'static>(
 /// metrics.
 pub(crate) async fn initialize(
     listen_addr: SocketAddr,
-    db: Arc<Env<WriteMap>>,
+    db: Arc<DatabaseEnv>,
     process: metrics_process::Collector,
 ) -> eyre::Result<()> {
     let db_stats = move || {
