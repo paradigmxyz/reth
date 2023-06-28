@@ -43,6 +43,10 @@ where
     }
 }
 
+/// Pruning logic. The behaviour is following:
+/// 1. Listen to new blocks via [CanonStateNotification] received from [St].
+/// 2. Check new block height according to [MIN_PRUNE_BLOCK_INTERVAL].
+/// 3. Prune.
 impl<St, Client> Future for Pruner<St, Client>
 where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
