@@ -13,7 +13,7 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     TransactionSignedNoHash, TxNumber, H160,
 };
-use reth_provider::{DatabaseProviderRW, HeaderProvider, ProviderError};
+use reth_provider::{BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError};
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -173,7 +173,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = provider.block_body_indices(unwind_to)?.last_tx_num();
+        let latest_tx_id = provider
+            .block_body_indices(unwind_to)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
+            .last_tx_num();
         provider.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
@@ -386,7 +389,11 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table, but [tables::TxSenders] is
         ///    not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner_rw().block_body_indices(block);
+            let body_result = self
+                .tx
+                .inner_rw()
+                .block_body_indices(block)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block));
             match body_result {
                 Ok(body) => self
                     .tx

@@ -560,15 +560,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(blocks)
     }
 
-    /// Query the block body by number.
-    pub fn block_body_indices(&self, number: BlockNumber) -> Result<StoredBlockBodyIndices> {
-        let body = self
-            .tx
-            .get::<tables::BlockBodyIndices>(number)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
-        Ok(body)
-    }
-
     /// Unwind table by some number key.
     /// Returns number of rows unwound.
     ///

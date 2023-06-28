@@ -353,7 +353,10 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         // Look up the start index for the transaction range
-        let first_tx_num = provider.block_body_indices(*range.start())?.first_tx_num();
+        let first_tx_num = provider
+            .block_body_indices(*range.start())?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(*range.start()))?
+            .first_tx_num();
 
         let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
