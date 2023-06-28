@@ -4,7 +4,7 @@ use crate::{
     BlockHashReader, BlockNumReader, BlockReader, EvmEnvProvider, HeaderProvider, ProviderError,
     StageCheckpointReader, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices};
+use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -51,6 +51,20 @@ impl<DB> ProviderFactory<DB> {
     /// create new database provider
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
         Self { db, chain_spec }
+    }
+}
+
+impl<DB: Database> ProviderFactory<DB> {
+    /// create new database provider by passing a path. [`ProviderFactory`] will own the database
+    /// instance.
+    pub fn new_with_database_path<P: AsRef<std::path::Path>>(
+        path: P,
+        chain_spec: Arc<ChainSpec>,
+    ) -> Result<ProviderFactory<DatabaseEnv>> {
+        Ok(ProviderFactory::<DatabaseEnv> {
+            db: init_db(path).map_err(|e| reth_interfaces::Error::Custom(e.to_string()))?,
+            chain_spec,
+        })
     }
 }
 
@@ -333,7 +347,13 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{BlockHashReader, BlockNumReader};
-    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_db::{
+        mdbx::{
+            test_utils::{create_test_db, ERROR_TEMPDIR},
+            EnvKind, WriteMap,
+        },
+        DatabaseEnv,
+    };
     use reth_primitives::{ChainSpecBuilder, H256};
     use std::sync::Arc;
 
@@ -362,6 +382,22 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let provider = factory.provider().unwrap();
+        provider.block_hash(0).unwrap();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.block_hash(0).unwrap();
+        provider.block_hash(0).unwrap();
+    }
+
+    #[test]
+    fn provider_factory_with_database_path() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
+            tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+            Arc::new(chain_spec),
+        )
+        .unwrap();
+
         let provider = factory.provider().unwrap();
         provider.block_hash(0).unwrap();
         let provider_rw = factory.provider_rw().unwrap();

@@ -11,14 +11,14 @@ use reth_provider::{ProviderFactory, StageCheckpointReader};
 
 use crate::args::utils::genesis_value_parser;
 use reth_config::Config;
-use reth_db::database::Database;
+use reth_db::{database::Database, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::{stage::StageId, ChainSpec, H256};
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     prelude::*,
     stages::{

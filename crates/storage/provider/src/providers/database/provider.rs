@@ -560,15 +560,6 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         Ok(blocks)
     }
 
-    /// Query the block body by number.
-    pub fn block_body_indices(&self, number: BlockNumber) -> Result<StoredBlockBodyIndices> {
-        let body = self
-            .tx
-            .get::<tables::BlockBodyIndices>(number)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(number))?;
-        Ok(body)
-    }
-
     /// Unwind table by some number key.
     /// Returns number of rows unwound.
     ///
@@ -1695,9 +1686,8 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
             block.difficulty
         } else {
             let parent_block_number = block.number - 1;
-            let parent_ttd =
-                self.tx.get::<tables::HeaderTD>(parent_block_number)?.unwrap_or_default();
-            parent_ttd.0 + block.difficulty
+            let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
+            parent_ttd + block.difficulty
         };
 
         self.tx.put::<tables::HeaderTD>(block.number, ttd.into())?;

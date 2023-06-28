@@ -10,7 +10,7 @@ use reth_db::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    DatabaseError as DbError,
+    DatabaseEnv, DatabaseError as DbError,
 };
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
@@ -35,9 +35,9 @@ use std::{
 #[derive(Debug)]
 pub struct TestTransaction {
     /// WriteMap DB
-    pub tx: Arc<Env<WriteMap>>,
+    pub tx: Arc<DatabaseEnv>,
     pub path: Option<PathBuf>,
-    pub factory: ProviderFactory<Arc<Env<WriteMap>>>,
+    pub factory: ProviderFactory<Arc<DatabaseEnv>>,
 }
 
 impl Default for TestTransaction {
@@ -59,17 +59,17 @@ impl TestTransaction {
     }
 
     /// Return a database wrapped in [DatabaseProviderRW].
-    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<Env<WriteMap>>> {
+    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<DatabaseEnv>> {
         self.factory.provider_rw().expect("failed to create db container")
     }
 
     /// Return a database wrapped in [DatabaseProviderRO].
-    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<Env<WriteMap>>> {
+    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<DatabaseEnv>> {
         self.factory.provider().expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
-    pub fn inner_raw(&self) -> Arc<Env<WriteMap>> {
+    pub fn inner_raw(&self) -> Arc<DatabaseEnv> {
         self.tx.clone()
     }
 

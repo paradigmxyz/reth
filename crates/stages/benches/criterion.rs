@@ -3,7 +3,7 @@ use criterion::{
     BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use reth_db::mdbx::{Env, WriteMap};
+use reth_db::DatabaseEnv;
 use reth_interfaces::test_utils::TestConsensus;
 use reth_primitives::{stage::StageCheckpoint, MAINNET};
 use reth_provider::ProviderFactory;
@@ -122,7 +122,7 @@ fn measure_stage_with_path<F, S>(
     stage_range: StageRange,
     label: String,
 ) where
-    S: Clone + Stage<Env<WriteMap>>,
+    S: Clone + Stage<DatabaseEnv>,
     F: Fn(S, &TestTransaction, StageRange),
 {
     let tx = TestTransaction::new(&path);
@@ -152,7 +152,7 @@ fn measure_stage<F, S>(
     block_interval: std::ops::Range<u64>,
     label: String,
 ) where
-    S: Clone + Stage<Env<WriteMap>>,
+    S: Clone + Stage<DatabaseEnv>,
     F: Fn(S, &TestTransaction, StageRange),
 {
     let path = setup::txs_testdata(block_interval.end);

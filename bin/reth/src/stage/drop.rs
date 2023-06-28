@@ -10,6 +10,7 @@ use reth_db::{
     mdbx::{Env, WriteMap},
     tables,
     transaction::DbTxMut,
+    DatabaseEnv,
 };
 use reth_primitives::{stage::StageId, ChainSpec};
 use reth_staged_sync::utils::init::{insert_genesis_header, insert_genesis_state};
@@ -70,7 +71,7 @@ impl Command {
                     tx.clear::<tables::BlockOmmers>()?;
                     tx.clear::<tables::BlockWithdrawals>()?;
                     tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
-                    insert_genesis_header::<Env<WriteMap>>(tx, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
                 }
                 StageEnum::Senders => {
                     tx.clear::<tables::TxSenders>()?;
@@ -90,7 +91,7 @@ impl Command {
                         StageId::Execution.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
+                    insert_genesis_state::<DatabaseEnv>(tx, self.chain.genesis())?;
                 }
                 StageEnum::AccountHashing => {
                     tx.clear::<tables::HashedAccount>()?;
@@ -155,7 +156,7 @@ impl Command {
                         StageId::TotalDifficulty.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<Env<WriteMap>>(tx, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
                 }
                 _ => {
                     info!("Nothing to do for stage {:?}", self.stage);

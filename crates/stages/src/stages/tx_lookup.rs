@@ -203,7 +203,7 @@ mod tests {
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
-    use reth_provider::TransactionsProvider;
+    use reth_provider::{BlockReader, ProviderError, TransactionsProvider};
 
     // Implement stage test suite.
     stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
@@ -345,7 +345,11 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table, but [tables::TxHashNumber] is
         ///    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner_rw().block_body_indices(number);
+            let body_result = self
+                .tx
+                .inner_rw()
+                .block_body_indices(number)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(number));
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
                     body.last_tx_num(),

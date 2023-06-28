@@ -10,10 +10,10 @@ use crate::{
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
+use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader};
-use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,

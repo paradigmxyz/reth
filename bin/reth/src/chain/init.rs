@@ -3,8 +3,9 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
+use reth_db::init_db;
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_staged_sync::utils::init::init_genesis;
 use std::sync::Arc;
 use tracing::info;
 

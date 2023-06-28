@@ -514,9 +514,10 @@ mod tests {
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
+        mdbx::test_utils::create_test_rw_db,
         tables,
         transaction::DbTxMut,
+        DatabaseEnv,
     };
     use reth_primitives::{
         hex_literal::hex,
@@ -1278,7 +1279,7 @@ mod tests {
     }
 
     fn extension_node_storage_trie(
-        tx: &DatabaseProviderRW<'_, &Env<WriteMap>>,
+        tx: &DatabaseProviderRW<'_, &DatabaseEnv>,
         hashed_address: H256,
     ) -> (H256, HashMap<Nibbles, BranchNodeCompact>) {
         let value = U256::from(1);
@@ -1304,7 +1305,7 @@ mod tests {
         (root, updates)
     }
 
-    fn extension_node_trie(tx: &DatabaseProviderRW<'_, &Env<WriteMap>>) -> H256 {
+    fn extension_node_trie(tx: &DatabaseProviderRW<'_, &DatabaseEnv>) -> H256 {
         let a =
             Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(H256::random()) };
         let val = encode_account(a, None);
