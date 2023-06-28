@@ -11,7 +11,7 @@ use std::{
 use tracing::debug;
 
 // TODO(alexey): use config field from https://github.com/paradigmxyz/reth/pull/3341
-/// Minimal pruning interval measured in blocks. All prune parts are checked and, if needed, pruned,
+/// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed, pruned,
 /// when the chain advances by the specified number of blocks.
 const MIN_PRUNE_BLOCK_INTERVAL: u64 = 5;
 
