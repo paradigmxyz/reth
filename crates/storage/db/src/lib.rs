@@ -71,10 +71,14 @@
 /// Traits defining the database abstractions, such as cursors and transactions.
 pub mod abstraction;
 
-mod implementation;
 pub mod tables;
-mod utils;
 pub mod version;
+
+/// Configuration of the database
+pub mod config;
+
+mod implementation;
+mod utils;
 
 #[cfg(feature = "mdbx")]
 /// Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
