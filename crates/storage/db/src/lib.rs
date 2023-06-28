@@ -93,10 +93,10 @@ use mdbx::{Env, EnvKind, WriteMap};
 
 #[cfg(feature = "mdbx")]
 /// Alias type for the database engine in use.
-pub type DatabaseEngine = Env<WriteMap>;
+pub type DatabaseEnv = Env<WriteMap>;
 
 /// Opens up an existing database or creates a new one at the specified path.
-pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEngine> {
+pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEnv> {
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
     use eyre::WrapErr;
 

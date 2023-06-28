@@ -645,7 +645,7 @@ mod tests {
         database::Database,
         mdbx::{test_utils, EnvKind},
         transaction::DbTx,
-        DatabaseEngine,
+        DatabaseEnv,
     };
     use reth_primitives::{proofs::EMPTY_ROOT, MAINNET};
     use reth_trie::test_utils::state_root;
@@ -1067,7 +1067,7 @@ mod tests {
 
     #[test]
     fn write_to_db_account_info() {
-        let db: Arc<DatabaseEngine> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -1136,7 +1136,7 @@ mod tests {
 
     #[test]
     fn write_to_db_storage() {
-        let db: Arc<DatabaseEngine> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
         let tx = db.tx_mut().expect("Could not get database tx");
 
         let mut post_state = PostState::new();
@@ -1272,7 +1272,7 @@ mod tests {
 
     #[test]
     fn write_to_db_multiple_selfdestructs() {
-        let db: Arc<DatabaseEngine> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
         let tx = db.tx_mut().expect("Could not get database tx");
 
         let address1 = Address::random();
@@ -1821,7 +1821,7 @@ mod tests {
 
     #[test]
     fn empty_post_state_state_root() {
-        let db: Arc<DatabaseEngine> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
         let tx = db.tx().unwrap();
 
         let post_state = PostState::new();
@@ -1840,7 +1840,7 @@ mod tests {
             })
             .collect();
 
-        let db: Arc<DatabaseEngine> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
 
         // insert initial state to the database
         db.update(|tx| {

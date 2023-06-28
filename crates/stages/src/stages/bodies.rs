@@ -459,7 +459,7 @@ mod tests {
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
-            DatabaseEngine,
+            DatabaseEnv,
         };
         use reth_interfaces::{
             p2p::{
@@ -740,7 +740,7 @@ mod tests {
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
-            db: Arc<DatabaseEngine>,
+            db: Arc<DatabaseEnv>,
             responses: HashMap<H256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
@@ -748,7 +748,7 @@ mod tests {
 
         impl TestBodyDownloader {
             pub(crate) fn new(
-                db: Arc<DatabaseEngine>,
+                db: Arc<DatabaseEnv>,
                 responses: HashMap<H256, BlockBody>,
                 batch_size: u64,
             ) -> Self {

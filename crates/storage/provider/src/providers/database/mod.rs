@@ -4,7 +4,7 @@ use crate::{
     BlockHashReader, BlockNumReader, BlockReader, EvmEnvProvider, HeaderProvider, ProviderError,
     StageCheckpointReader, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEngine};
+use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -60,8 +60,8 @@ impl<DB: Database> ProviderFactory<DB> {
     pub fn new_with_database_path<P: AsRef<std::path::Path>>(
         path: P,
         chain_spec: Arc<ChainSpec>,
-    ) -> Result<ProviderFactory<DatabaseEngine>> {
-        Ok(ProviderFactory::<DatabaseEngine> {
+    ) -> Result<ProviderFactory<DatabaseEnv>> {
+        Ok(ProviderFactory::<DatabaseEnv> {
             db: init_db(path).map_err(|e| reth_interfaces::Error::Custom(e.to_string()))?,
             chain_spec,
         })
@@ -352,7 +352,7 @@ mod tests {
             test_utils::{create_test_db, ERROR_TEMPDIR},
             EnvKind, WriteMap,
         },
-        DatabaseEngine,
+        DatabaseEnv,
     };
     use reth_primitives::{ChainSpecBuilder, H256};
     use std::sync::Arc;
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
-        let factory = ProviderFactory::<DatabaseEngine>::new_with_database_path(
+        let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
         )
