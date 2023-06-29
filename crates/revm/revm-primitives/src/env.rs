@@ -216,14 +216,9 @@ where
                 .collect();
         }
         #[cfg(feature = "optimism")]
-        Transaction::Deposit(TxDeposit { to, mint, value, gas_limit, input, .. }) => {
+        Transaction::Deposit(TxDeposit { to, value, gas_limit, input, .. }) => {
             tx_env.gas_limit = *gas_limit;
-            if let Some(m) = mint {
-                // TODO: why is this not zero?
-                tx_env.gas_price = U256::from(*m);
-            } else {
-                tx_env.gas_price = U256::ZERO;
-            }
+            tx_env.gas_price = U256::ZERO;
             tx_env.gas_priority_fee = None;
             match to {
                 TransactionKind::Call(to) => tx_env.transact_to = TransactTo::Call(*to),
