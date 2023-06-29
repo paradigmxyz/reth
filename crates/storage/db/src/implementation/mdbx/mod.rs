@@ -11,11 +11,16 @@ use reth_libmdbx::{
     SyncMode, RO, RW,
 };
 use std::{ops::Deref, path::Path};
+use tx::Tx;
 
 pub mod cursor;
-
 pub mod tx;
-use tx::Tx;
+
+const GIGABYTE: usize = 1024 * 1024 * 1024;
+const TERABYTE: usize = GIGABYTE * 1024;
+
+/// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
+const DEFAULT_MAX_READERS: u64 = 32_000;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -52,9 +57,6 @@ impl<E: EnvironmentKind> Database for Env<E> {
     }
 }
 
-const GIGABYTE: usize = 1024 * 1024 * 1024;
-const TERABYTE: usize = GIGABYTE * 1024;
-
 impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
@@ -85,6 +87,8 @@ impl<E: EnvironmentKind> Env<E> {
                     coalesce: true,
                     ..Default::default()
                 })
+                // configure more readers
+                .set_max_readers(DEFAULT_MAX_READERS)
                 .open(path)
                 .map_err(|e| DatabaseError::FailedToOpen(e.into()))?,
         };
