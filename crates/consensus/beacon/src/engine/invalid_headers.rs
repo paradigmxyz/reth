@@ -88,7 +88,7 @@ struct HeaderEntry {
 
 /// Metrics for the invalid headers cache.
 #[derive(Metrics)]
-#[metrics(scope = "invalid_header_cache")]
+#[metrics(scope = "consensus.engine.beacon.invalid_headers")]
 struct InvalidHeaderCacheMetrics {
     /// The total number of invalid headers in the cache.
     invalid_headers: Gauge,
