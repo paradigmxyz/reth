@@ -13,13 +13,13 @@ pub enum MetricEvent {
 }
 
 pub struct MetricsListener {
-    events_tx: UnboundedReceiver<MetricEvent>,
+    events_rx: UnboundedReceiver<MetricEvent>,
     pub(crate) sync_metrics: SyncMetrics,
 }
 
 impl MetricsListener {
-    pub fn new(events_tx: UnboundedReceiver<MetricEvent>) -> Self {
-        Self { events_tx, sync_metrics: SyncMetrics::default() }
+    pub fn new(events_rx: UnboundedReceiver<MetricEvent>) -> Self {
+        Self { events_rx, sync_metrics: SyncMetrics::default() }
     }
 
     fn handle_event(&mut self, event: MetricEvent) {
@@ -34,7 +34,7 @@ impl Future for MetricsListener {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let Some(event) = ready!(this.events_tx.poll_recv(cx)) else {
+        let Some(event) = ready!(this.events_rx.poll_recv(cx)) else {
             return Poll::Ready(())
         };
 
