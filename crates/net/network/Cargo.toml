@@ -86,7 +86,7 @@ enr = { version = "0.8.1", features = ["serde", "rust-secp256k1"] }
 # misc
 hex = "0.4"
 tempfile = "3.3"
-serial_test = "0.10"
+serial_test = "2.0"
 
 [features]
 default = ["serde"]
