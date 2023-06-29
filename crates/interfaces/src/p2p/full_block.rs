@@ -8,10 +8,11 @@ use crate::{
 };
 use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader, H256, HeadersDirection, WithPeerId};
 use std::{
+    cmp::Reverse,
     fmt::Debug,
     future::Future,
     pin::Pin,
-    task::{ready, Context, Poll}, cmp::Reverse,
+    task::{ready, Context, Poll},
 };
 use tracing::debug;
 
@@ -507,7 +508,7 @@ mod tests {
         download::DownloadClient, headers::client::HeadersRequest, priority::Priority,
     };
     use parking_lot::Mutex;
-    use reth_primitives::{BlockHashOrNumber, PeerId, WithPeerId, BlockNumHash};
+    use reth_primitives::{BlockHashOrNumber, BlockNumHash, PeerId, WithPeerId};
     use std::{collections::HashMap, sync::Arc};
 
     #[derive(Clone, Default, Debug)]
