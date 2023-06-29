@@ -199,9 +199,7 @@ jobs:
           | Payload Builders     | <TODO> |
           | Non-Payload Builders | <TODO>    |
           
-          *See [Update
-          Priorities](https://paradigmxyz.github.io/reth/installation-priorities.html)
-          more information about this table.*
+          *See [Update Priorities](https://paradigmxyz.github.io/reth/installation/priorities.html) for more information about this table.*
           
           ## All Changes
           
