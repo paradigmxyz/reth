@@ -178,9 +178,9 @@ mod tests {
     use super::*;
 
     use reth_db::{
-        mdbx::test_utils::create_test_rw_db,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::Table,
+        test_utils::create_test_rw_db,
         DatabaseEnv,
     };
     use reth_primitives::{

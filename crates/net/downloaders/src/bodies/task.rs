@@ -179,7 +179,7 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
-    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
     use std::sync::Arc;
 
@@ -187,7 +187,7 @@ mod tests {
     async fn download_one_by_one_on_task() {
         reth_tracing::init_test_tracing();
 
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(&db, &headers);
@@ -216,7 +216,7 @@ mod tests {
     async fn set_download_range_error_returned() {
         reth_tracing::init_test_tracing();
 
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let downloader = BodiesDownloaderBuilder::default().build(
             Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),

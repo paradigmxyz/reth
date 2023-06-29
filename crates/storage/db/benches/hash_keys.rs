@@ -12,7 +12,6 @@ use proptest::{
 };
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    mdbx::Env,
     TxHashNumber,
 };
 use std::{collections::HashSet, time::Instant};
@@ -86,7 +85,7 @@ where
         let setup = || {
             // Reset DB
             let _ = std::fs::remove_dir_all(bench_db_path);
-            let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
+            let db = Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap();
 
             let mut unsorted_input = unsorted_input.clone();
             if scenario_str == "append_all" {

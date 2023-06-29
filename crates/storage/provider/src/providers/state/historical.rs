@@ -223,9 +223,9 @@ mod tests {
     };
     use reth_db::{
         database::Database,
-        mdbx::test_utils::create_test_rw_db,
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
         tables,
+        test_utils::create_test_rw_db,
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };

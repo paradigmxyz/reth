@@ -1381,7 +1381,7 @@ mod tests {
         config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
         BlockchainTree, ShareableBlockchainTree,
     };
-    use reth_db::{mdbx::test_utils::create_test_rw_db, DatabaseEnv};
+    use reth_db::{test_utils::create_test_rw_db, DatabaseEnv};
     use reth_interfaces::{
         sync::NoopSyncStateUpdater,
         test_utils::{NoopFullBlockClient, TestConsensus},
