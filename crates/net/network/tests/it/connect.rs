@@ -21,7 +21,12 @@ use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
-use std::{collections::HashSet, net::SocketAddr, time::Duration};
+use std::{
+    collections::HashSet,
+    io::{BufRead, BufReader},
+    net::SocketAddr,
+    time::Duration,
+};
 use tokio::task;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -318,9 +323,32 @@ async fn test_incoming_node_id_blacklist() {
 
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
+        let mut geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+
+        // print geth stderr
+        // take the stderr of the geth instance and print it
+        let stderr = geth.stderr().unwrap();
+
+        // print logs in a new task
+        let mut err_reader = BufReader::new(stderr);
+
+        tokio::spawn(async move {
+            loop {
+                if let (Ok(line), line_str) = {
+                    let mut buf = String::new();
+                    (err_reader.read_line(&mut buf), buf.clone())
+                } {
+                    if line == 0 {
+                        break
+                    }
+                    if !line_str.is_empty() {
+                        eprintln!("GETH: {line_str}");
+                    }
+                }
+            }
+        });
 
         // get the peer id we should be expecting
         let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
