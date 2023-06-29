@@ -58,7 +58,7 @@ mod tests {
 
     use super::*;
     use reth_db::{
-        cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
+        cursor::DbCursorRW, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
     };
     use reth_primitives::{
         trie::{BranchNodeCompact, StorageTrieEntry},
