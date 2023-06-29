@@ -17,8 +17,8 @@ reth-primitives = { workspace = true }
 metrics = "0.20.1"
 
 # async
-tokio = { workspace = true, features = ["full"], optional = true }
+tokio = { workspace = true, features = ["sync"] }
 futures = { workspace = true, optional = true }
 
 [features]
-common = ["tokio", "futures"]
+common = ["tokio/full", "futures"]

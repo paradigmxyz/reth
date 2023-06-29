@@ -7,15 +7,22 @@ use reth_primitives::{
 };
 use std::collections::HashMap;
 
+/// Pipeline and live sync metrics collection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SyncMetricEvent {
+    /// Stage reached new checkpoint.
     StageCheckpoint {
+        /// Stage ID.
         stage_id: StageId,
+        /// Stage checkpoint.
         checkpoint: StageCheckpoint,
+        /// Maximum known block number reachable by this stage.
+        /// If specified, `entities_total` metric is updated.
         max_block_number: Option<BlockNumber>,
     },
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct SyncMetrics {
     stages: HashMap<StageId, StageMetrics>,
 }
