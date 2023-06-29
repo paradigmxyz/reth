@@ -18,10 +18,10 @@ pub struct CallFrame {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revert_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub calls: Option<Vec<CallFrame>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logs: Option<Vec<CallLogFrame>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<CallFrame>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub logs: Vec<CallLogFrame>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<U256>,
     #[serde(rename = "type")]
@@ -83,7 +83,6 @@ mod tests {
         let _trace: CallFrame = serde_json::from_str(DEFAULT).unwrap();
         let _trace: CallFrame = serde_json::from_str(LEGACY).unwrap();
         let _trace: CallFrame = serde_json::from_str(ONLY_TOP_CALL).unwrap();
-        let trace: CallFrame = serde_json::from_str(WITH_LOG).unwrap();
-        let _logs = trace.logs.unwrap();
+        let _trace: CallFrame = serde_json::from_str(WITH_LOG).unwrap();
     }
 }

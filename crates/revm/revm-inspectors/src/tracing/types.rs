@@ -378,8 +378,8 @@ impl CallTraceNode {
             output: Some(self.trace.output.clone().into()),
             error: None,
             revert_reason: None,
-            calls: None,
-            logs: None,
+            calls: Default::default(),
+            logs: Default::default(),
         };
 
         // we need to populate error and revert reason
@@ -388,17 +388,16 @@ impl CallTraceNode {
             call_frame.error = self.trace.as_error();
         }
 
-        if include_logs {
-            call_frame.logs = Some(
-                self.logs
-                    .iter()
-                    .map(|log| CallLogFrame {
-                        address: Some(self.trace.address),
-                        topics: Some(log.topics.clone()),
-                        data: Some(log.data.clone().into()),
-                    })
-                    .collect(),
-            );
+        if include_logs && !self.logs.is_empty() {
+            call_frame.logs = self
+                .logs
+                .iter()
+                .map(|log| CallLogFrame {
+                    address: Some(self.trace.address),
+                    topics: Some(log.topics.clone()),
+                    data: Some(log.data.clone().into()),
+                })
+                .collect();
         }
 
         call_frame
