@@ -138,10 +138,6 @@ pub struct Command {
     /// Automatically mine blocks for new transactions
     #[arg(long)]
     auto_mine: bool,
-
-    /// Configuring block gas limit
-    #[arg(long, default_value = "30000000")]
-    block_gas_limit: u64,
 }
 
 impl Command {
@@ -153,15 +149,8 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        // Create a new Arc with the modified ChainSpec
-        let chain_spec_with_gas_limit = Arc::new(
-            Arc::try_unwrap(self.chain.clone())
-                .expect("Expected a single reference to ChainSpec")
-                .chainspec_with_block_gas_limit(self.block_gas_limit),
-        );
-
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(chain_spec_with_gas_limit.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let config_path = self.config.clone().unwrap_or(data_dir.config_path());
 
         let mut config: Config = self.load_config(config_path.clone())?;
@@ -176,17 +165,17 @@ impl Command {
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
 
-        debug!(target: "reth::cli", chain=%chain_spec_with_gas_limit.chain, genesis=?chain_spec_with_gas_limit.genesis_hash(), "Initializing genesis");
+        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
-        let genesis_hash = init_genesis(db.clone(), chain_spec_with_gas_limit.clone())?;
+        let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::from(chain_spec_with_gas_limit.hardforks().clone()));
+        info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
-            Arc::new(AutoSealConsensus::new(Arc::clone(&chain_spec_with_gas_limit)))
+            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
         } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&chain_spec_with_gas_limit)))
+            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
         };
 
         self.init_trusted_nodes(&mut config);
@@ -195,8 +184,8 @@ impl Command {
         let tree_externals = TreeExternals::new(
             db.clone(),
             Arc::clone(&consensus),
-            Factory::new(chain_spec_with_gas_limit.clone()),
-            Arc::clone(&chain_spec_with_gas_limit),
+            Factory::new(self.chain.clone()),
+            Arc::clone(&self.chain),
         );
         let tree_config = BlockchainTreeConfig::default();
         // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
@@ -210,13 +199,13 @@ impl Command {
         )?);
 
         // setup the blockchain provider
-        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&chain_spec_with_gas_limit));
+        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             EthTransactionValidator::new(
                 blockchain_db.clone(),
-                Arc::clone(&chain_spec_with_gas_limit),
+                Arc::clone(&self.chain),
                 ctx.task_executor.clone(),
                 1,
             ),
@@ -279,7 +268,7 @@ impl Command {
                 .max_payload_tasks(self.builder.max_payload_tasks)
                 .extradata(self.builder.extradata_bytes())
                 .max_gas_limit(self.builder.max_gas_limit),
-            Arc::clone(&chain_spec_with_gas_limit),
+            Arc::clone(&self.chain),
         );
         let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
 
@@ -289,7 +278,7 @@ impl Command {
         // Configure the pipeline
         let (mut pipeline, client) = if self.auto_mine {
             let (_, client, mut task) = AutoSealBuilder::new(
-                Arc::clone(&chain_spec_with_gas_limit),
+                Arc::clone(&self.chain),
                 blockchain_db.clone(),
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
@@ -379,7 +368,7 @@ impl Command {
 
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
-            chain_spec_with_gas_limit.clone(),
+            self.chain.clone(),
             beacon_engine_handle,
             payload_builder.into(),
         );
