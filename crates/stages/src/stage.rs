@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    BlockNumber, TxNumber,
+    BlockNumber, PruneMode, TxNumber,
 };
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{BlockReader, DatabaseProviderRW, ProviderError};
 use std::{
     cmp::{max, min},
     ops::RangeInclusive,
@@ -79,7 +79,9 @@ impl ExecInput {
         tx_threshold: u64,
     ) -> Result<(RangeInclusive<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
         let start_block = self.next_block();
-        let start_block_body = provider.block_body_indices(start_block)?;
+        let start_block_body = provider
+            .block_body_indices(start_block)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(start_block))?;
 
         let target_block = self.target();
 
@@ -191,4 +193,32 @@ pub trait Stage<DB: Database>: Send + Sync {
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
+}
+
+/// Prune target.
+#[derive(Debug, Clone, Copy)]
+pub enum PruneTarget {
+    /// Prune all blocks, i.e. not save any data.
+    All,
+    /// Prune blocks up to the specified block number, inclusive.
+    Block(BlockNumber),
+}
+
+impl PruneTarget {
+    /// Returns new target to prune towards, according to stage prune mode [PruneMode]
+    /// and current head [BlockNumber].
+    pub fn new(prune_mode: PruneMode, head: BlockNumber) -> Self {
+        match prune_mode {
+            PruneMode::Full => PruneTarget::All,
+            PruneMode::Distance(distance) => {
+                Self::Block(head.saturating_sub(distance).saturating_sub(1))
+            }
+            PruneMode::Before(before_block) => Self::Block(before_block.saturating_sub(1)),
+        }
+    }
+
+    /// Returns true if the target is [PruneTarget::All], i.e. prune all blocks.
+    pub fn is_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
 }

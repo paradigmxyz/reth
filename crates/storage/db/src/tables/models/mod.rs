@@ -73,6 +73,7 @@ impl Decode for Address {
         Ok(Address::from_slice(value.as_ref()))
     }
 }
+
 impl Encode for H256 {
     type Encoded = [u8; 32];
     fn encode(self) -> Self::Encoded {

@@ -10,10 +10,7 @@ use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{
-    database::Database,
-    mdbx::{Env, WriteMap},
-};
+use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -27,7 +24,7 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
 use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     sets::DefaultStages,
     stages::{
@@ -153,7 +150,7 @@ impl Command {
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<Env<WriteMap>>,
+        db: Arc<DatabaseEnv>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {

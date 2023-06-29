@@ -20,10 +20,7 @@ use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_config::Config;
-use reth_db::{
-    database::Database,
-    mdbx::{Env, WriteMap},
-};
+use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -47,7 +44,7 @@ use reth_provider::{
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -489,11 +486,11 @@ impl Command {
         }
     }
 
-    async fn start_metrics_endpoint(&self, db: Arc<Env<WriteMap>>) -> eyre::Result<()> {
+    async fn start_metrics_endpoint(&self, db: Arc<DatabaseEnv>) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-
-            prometheus_exporter::initialize_with_db_metrics(listen_addr, db).await?;
+            prometheus_exporter::initialize(listen_addr, db, metrics_process::Collector::default())
+                .await?;
         }
 
         Ok(())
@@ -530,7 +527,7 @@ impl Command {
         Ok(handle)
     }
 
-    fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::Error> {
+    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> Result<Head, reth_interfaces::Error> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -615,12 +612,12 @@ impl Command {
     fn load_network_config(
         &self,
         config: &Config,
-        db: Arc<Env<WriteMap>>,
+        db: Arc<DatabaseEnv>,
         executor: TaskExecutor,
         head: Head,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
-    ) -> NetworkConfig<ProviderFactory<Arc<Env<WriteMap>>>> {
+    ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
         self.network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))

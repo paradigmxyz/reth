@@ -9,7 +9,7 @@ use reth_db::{
     DatabaseError,
 };
 use reth_primitives::{
-    rpc_utils::keccak256,
+    keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     TransactionSignedNoHash, TxNumber, H256,
 };
@@ -178,7 +178,7 @@ fn calculate_hash(
 ) -> Result<(H256, TxNumber), Box<StageError>> {
     let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
     tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-    Ok((H256(keccak256(rlp_buf)), tx_id))
+    Ok((keccak256(rlp_buf), tx_id))
 }
 
 fn stage_checkpoint<DB: Database>(
@@ -203,7 +203,7 @@ mod tests {
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
-    use reth_provider::TransactionsProvider;
+    use reth_provider::{BlockReader, ProviderError, TransactionsProvider};
 
     // Implement stage test suite.
     stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
@@ -345,7 +345,11 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table, but [tables::TxHashNumber] is
         ///    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner_rw().block_body_indices(number);
+            let body_result = self
+                .tx
+                .inner_rw()
+                .block_body_indices(number)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(number));
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
                     body.last_tx_num(),

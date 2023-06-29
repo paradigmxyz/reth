@@ -1085,10 +1085,7 @@ mod tests {
     use crate::block_buffer::BufferedBlocks;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
-    use reth_db::{
-        mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
-        transaction::DbTxMut,
-    };
+    use reth_db::{mdbx::test_utils::create_test_rw_db, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{
         proofs::EMPTY_ROOT, stage::StageCheckpoint, ChainSpecBuilder, H256, MAINNET,
@@ -1102,7 +1099,7 @@ mod tests {
 
     fn setup_externals(
         exec_res: Vec<PostState>,
-    ) -> TreeExternals<Arc<Env<WriteMap>>, Arc<TestConsensus>, TestExecutorFactory> {
+    ) -> TreeExternals<Arc<DatabaseEnv>, Arc<TestConsensus>, TestExecutorFactory> {
         let db = create_test_rw_db();
         let consensus = Arc::new(TestConsensus::default());
         let chain_spec = Arc::new(

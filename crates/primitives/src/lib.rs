@@ -39,6 +39,7 @@ pub mod listener;
 mod log;
 mod net;
 mod peer;
+mod prune;
 mod receipt;
 pub mod stage;
 mod storage;
@@ -76,6 +77,7 @@ pub use net::{
     SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
+pub use prune::{PruneCheckpoint, PruneMode};
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
@@ -113,7 +115,6 @@ pub type StorageValue = U256;
 pub type Selector = [u8; 4];
 
 pub use ethers_core::{
-    types as rpc,
     types::{BigEndianHash, H128, H64, U64},
     utils as rpc_utils,
 };

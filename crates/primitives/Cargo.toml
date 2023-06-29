@@ -13,7 +13,6 @@ description = "Commonly used types in reth."
 reth-rlp = { workspace = true, features = ["std", "derive", "ethereum-types"] }
 reth-rlp-derive = { path = "../rlp/rlp-derive" }
 reth-codecs = { path = "../storage/codecs" }
-
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
@@ -79,6 +78,8 @@ revm-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }
 proptest-derive = "0.3"
+assert_matches = "1.5.0"
+toml = "0.7.4"
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
