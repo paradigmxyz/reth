@@ -1,11 +1,12 @@
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    database::DatabaseGAT,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
     tables,
     test_utils::create_test_rw_db,
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseEnv, DatabaseError as DbError,
 };
 use reth_primitives::{
@@ -30,7 +31,7 @@ use std::{
 /// ```
 #[derive(Debug)]
 pub struct TestTransaction {
-    /// WriteMap DB
+    /// DB
     pub tx: Arc<DatabaseEnv>,
     pub path: Option<PathBuf>,
     pub factory: ProviderFactory<Arc<DatabaseEnv>>,
@@ -70,9 +71,9 @@ impl TestTransaction {
     }
 
     /// Invoke a callback with transaction committing it afterwards
-    pub fn commit<'a, TX: DbTxMut<'a> + DbTx<'a>, F>(&self, f: F) -> Result<(), DbError>
+    pub fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&'a TX) -> Result<(), DbError>,
+        F: FnOnce(&<DatabaseEnv as DatabaseGAT<'_>>::TXMut) -> Result<(), DbError>,
     {
         let mut tx = self.inner_rw();
         f(tx.tx_ref())?;
@@ -81,9 +82,9 @@ impl TestTransaction {
     }
 
     /// Invoke a callback with a read transaction
-    pub fn query<'a, TX: DbTx<'a>, F, R>(&self, f: F) -> Result<R, DbError>
+    pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&'a TX) -> Result<R, DbError>,
+        F: FnOnce(&<DatabaseEnv as DatabaseGAT<'_>>::TX) -> Result<R, DbError>,
     {
         f(self.inner().tx_ref())
     }
