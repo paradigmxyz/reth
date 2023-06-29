@@ -339,18 +339,19 @@ where
         Ok(id)
     }
 
-    /// Fetches both receipts and block for the given block number.
-    async fn block_and_receipts_by_number(
-        &self,
-        hash_or_number: BlockHashOrNumber,
-    ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
-            Some(hash) => hash,
-            None => return Ok(None),
-        };
+    // TODO:
+    // /// Fetches both receipts and block for the given block number.
+    // async fn block_and_receipts_by_number(
+    //     &self,
+    //     hash_or_number: BlockHashOrNumber,
+    // ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    //     let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
+    //         Some(hash) => hash,
+    //         None => return Ok(None),
+    //     };
 
-        Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
-    }
+    //     Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
+    // }
 
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
@@ -383,41 +384,30 @@ where
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
         for block_numbers in log_index_filter.iter() {
-            let headers = self.provider.headers(&block_numbers)?;
+            let blocks =
+                self.provider.blocks(block_numbers.into_iter().map(Into::into).collect())?;
 
-            for (idx, header) in headers.iter().enumerate() {
-                let header = match header {
-                    Some(header) => header,
+            for block in blocks {
+                let block = match block {
+                    Some(block) => block,
                     None => continue,
                 };
 
-                // If the headers are consecutive, we can use the parent hash of the next block to
-                // get the current header's hash.
-                let num_hash: BlockHashOrNumber = headers
-                    .get(idx + 1)
-                    .and_then(|h| {
-                        h.as_ref()
-                            .filter(|h| header.number + 1 == h.number)
-                            .map(|h| h.parent_hash.into())
-                    })
-                    .unwrap_or_else(|| header.number.into());
+                let block_hash = block.hash_slow();
+                let receipts =
+                    self.provider.receipts_by_block(block.number.into())?.unwrap_or_default();
 
-                if let Some((block, receipts)) = self.block_and_receipts_by_number(num_hash).await?
-                {
-                    let block_hash = block.hash;
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &filter_params,
+                    (block.number, block_hash).into(),
+                    block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
+                    false,
+                );
 
-                    logs_utils::append_matching_block_logs(
-                        &mut all_logs,
-                        &filter_params,
-                        (block.number, block_hash).into(),
-                        block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
-                        false,
-                    );
-
-                    // size check
-                    if all_logs.len() > self.max_logs_per_response {
-                        return Err(FilterError::QueryExceedsMaxResults(self.max_logs_per_response))
-                    }
+                // size check
+                if all_logs.len() > self.max_logs_per_response {
+                    return Err(FilterError::QueryExceedsMaxResults(self.max_logs_per_response))
                 }
             }
         }

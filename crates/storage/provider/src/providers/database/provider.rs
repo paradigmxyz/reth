@@ -1046,6 +1046,73 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         Ok(None)
     }
 
+    fn blocks(&self, ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>> {
+        let mut block_number_cursor = self.tx.cursor_read::<tables::HeaderNumbers>()?;
+        let mut headers_cursor = self.tx.cursor_read::<tables::Headers>()?;
+        let mut block_indices_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
+
+        let mut result = Vec::with_capacity(ids.len());
+
+        for id in ids {
+            let maybe_number = match id {
+                BlockHashOrNumber::Number(num) => Some(num),
+                BlockHashOrNumber::Hash(hash) => {
+                    block_number_cursor.seek_exact(hash)?.map(|entry| entry.1)
+                }
+            };
+
+            if let Some(number) = maybe_number {
+                if let Some((_, header)) = headers_cursor.seek_exact(number)? {
+                    if let Some((_, body_indices)) = block_indices_cursor.seek_exact(number)? {
+                        let withdrawals = if self
+                            .chain_spec
+                            .is_shanghai_activated_at_timestamp(header.timestamp)
+                        {
+                            withdrawals_cursor.seek_exact(number)?.map(|entry| entry.1.withdrawals)
+                        } else {
+                            None
+                        };
+
+                        let ommers =
+                            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
+                                Vec::new()
+                            } else {
+                                ommers_cursor
+                                    .seek_exact(number)?
+                                    .map(|o| o.1.ommers)
+                                    .unwrap_or_default()
+                            };
+
+                        let transactions = {
+                            let mut txs = Vec::with_capacity(body_indices.tx_count as usize);
+                            for tx_id in body_indices.tx_num_range() {
+                                // TODO: fix error
+                                let (_, transaction) = tx_cursor.seek_exact(tx_id)?.unwrap();
+                                txs.push(transaction.into());
+                            }
+                            txs
+                        };
+
+                        result.push(Some(Block {
+                            header,
+                            body: transactions,
+                            ommers,
+                            withdrawals,
+                        }));
+                    }
+                }
+            }
+
+            // Some data was missing
+            result.push(None);
+        }
+
+        Ok(result)
+    }
+
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(None)
     }

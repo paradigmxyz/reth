@@ -234,6 +234,11 @@ where
         }
     }
 
+    fn blocks(&self, ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>> {
+        // TODO:
+        self.database.provider()?.blocks(ids)
+    }
+
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(self.tree.pending_block())
     }

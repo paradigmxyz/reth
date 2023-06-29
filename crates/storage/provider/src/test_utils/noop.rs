@@ -59,6 +59,10 @@ impl BlockReader for NoopProvider {
         Ok(None)
     }
 
+    fn blocks(&self, _ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>> {
+        Ok(Vec::new())
+    }
+
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(None)
     }

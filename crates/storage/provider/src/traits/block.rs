@@ -68,6 +68,9 @@ pub trait BlockReader:
     /// Returns `None` if block is not found.
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>>;
 
+    /// TODO:
+    fn blocks(&self, ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>>;
+
     /// Returns the pending block if available
     ///
     /// Note: This returns a [SealedBlock] because it's expected that this is sealed by the provider

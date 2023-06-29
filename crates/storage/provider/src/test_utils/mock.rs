@@ -331,6 +331,10 @@ impl BlockReader for MockEthProvider {
         }
     }
 
+    fn blocks(&self, ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>> {
+        ids.into_iter().map(|id| self.block(id)).collect::<Result<Vec<_>>>()
+    }
+
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
         Ok(None)
     }

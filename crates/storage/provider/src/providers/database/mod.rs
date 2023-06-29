@@ -198,6 +198,10 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
         self.provider()?.block(id)
     }
 
+    fn blocks(&self, ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>> {
+        self.provider()?.blocks(ids)
+    }
+
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
         self.provider()?.pending_block()
     }
