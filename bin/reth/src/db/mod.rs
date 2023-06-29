@@ -12,7 +12,7 @@ use reth_db::{
     database::Database,
     mdbx::{Env, NoWriteMap, WriteMap},
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
-    DatabaseEnv, Tables,
+    DatabaseEnv, DatabaseEnvRO, Tables,
 };
 use reth_primitives::ChainSpec;
 use std::{path::Path, sync::Arc};
@@ -173,7 +173,7 @@ impl Command {
     }
 }
 
-fn read_only_db(path: &Path) -> eyre::Result<Env<NoWriteMap>> {
+fn read_only_db(path: &Path) -> eyre::Result<DatabaseEnvRO> {
     Env::<NoWriteMap>::open(path, reth_db::mdbx::EnvKind::RO)
         .with_context(|| format!("Could not open database at path: {}", path.display()))
 }

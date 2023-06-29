@@ -92,8 +92,12 @@ pub use utils::is_database_empty;
 use mdbx::{Env, EnvKind, WriteMap};
 
 #[cfg(feature = "mdbx")]
-/// Alias type for the database engine in use.
+/// Alias type for the database environment in use. Read/Write mode.
 pub type DatabaseEnv = Env<WriteMap>;
+
+#[cfg(feature = "mdbx")]
+/// Alias type for the database engine in use. Read only mode.
+pub type DatabaseEnvRO = Env<NoWriteMap>;
 
 /// Opens up an existing database or creates a new one at the specified path.
 pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEnv> {
