@@ -739,8 +739,20 @@ impl From<(BlockHash, BlockNumber)> for BlockNumHash {
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=200)"
+        )
+    )]
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Header>(), 0..=2)"
+        )
+    )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Vec<Withdrawal>>,
