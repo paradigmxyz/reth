@@ -375,6 +375,14 @@ where
 
         loop {
             match ready!(this.request.poll(cx)) {
+                // This branch handles headers responses from peers - it first ensures that the
+                // starting hash and number of headers matches what we requested.
+                //
+                // If these don't match, we penalize the peer and retry the request.
+                // If they do match, we sort the headers by block number and start the request for
+                // the corresponding block bodies.
+                //
+                // The next result that should be yielded by `poll` is the bodies response.
                 RangeResponseResult::Header(res) => {
                     match res {
                         Ok(headers) => {
@@ -424,6 +432,13 @@ where
                         }));
                     }
                 }
+                // This branch handles block body responses from peers - it first checks that the
+                // number of bodies matches what we requested.
+                //
+                // If the number of bodies doesn't match, we penalize the peer and retry the
+                // request.
+                // If the number of bodies does match, we assemble the bodies with the headers
+                // received by a previous response, and return the result.
                 RangeResponseResult::Body(res) => {
                     match res {
                         Ok(bodies_resp) => {
@@ -436,7 +451,7 @@ where
                             }
                         }
                         Err(err) => {
-                            debug!(target: "downloaders", %err, ?this.hash, "Body download failed");
+                            debug!(target: "downloaders", %err, ?this.hash, "Body range download failed");
                         }
                     }
                     if this.bodies.is_none() {
@@ -450,7 +465,8 @@ where
                         //
                         // This is optimal because we can not send a bodies request without
                         // first completing the headers request. This way we can get rid of the
-                        // following `if let Some`.
+                        // following `if let Some`. A bodies request should never be sent before
+                        // the headers request completes, so this should always be `Some` anyways.
                         if let Some(hashes) = this.range_block_hashes() {
                             this.request.bodies = Some(this.client.get_block_bodies(hashes));
                         }
@@ -465,6 +481,9 @@ where
     }
 }
 
+/// A request for a range of full blocks. Polling this will poll the inner headers and bodies
+/// futures until they return responses. It will return either the header or body result, depending
+/// on which future successfully returned.
 struct FullBlockRangeRequest<Client>
 where
     Client: BodiesClient + HeadersClient,
@@ -496,6 +515,8 @@ where
     }
 }
 
+// The result of a request for headers or block bodies. This is yielded by the
+// `FullBlockRangeRequest` future.
 enum RangeResponseResult {
     Header(PeerRequestResult<Vec<Header>>),
     Body(PeerRequestResult<Vec<BlockBody>>),
