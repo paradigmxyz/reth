@@ -513,6 +513,15 @@ where
     blocks: Option<Vec<SealedBlock>>,
 }
 
+impl<Client> From<FetchFullBlockRangeFuture<Client>> for FullBlockRangeStream<Client>
+where
+    Client: BodiesClient + HeadersClient,
+{
+    fn from(inner: FetchFullBlockRangeFuture<Client>) -> Self {
+        Self { inner, blocks: None }
+    }
+}
+
 impl<Client> Stream for FullBlockRangeStream<Client>
 where
     Client: BodiesClient + HeadersClient + Unpin + 'static,
@@ -739,4 +748,7 @@ mod tests {
             assert_eq!(block.header.number, expected_number);
         }
     }
+
+    #[tokio::test]
+    async fn download_full_block_range_stream() {}
 }
