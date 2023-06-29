@@ -114,7 +114,7 @@ pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEnv> 
     }
     #[cfg(feature = "mdbx")]
     {
-        let db = Env::<WriteMap>::open(rpath, EnvKind::RW)?;
+        let db = DatabaseEnv::open(rpath, EnvKind::RW)?;
         db.create_tables()?;
         Ok(db)
     }
