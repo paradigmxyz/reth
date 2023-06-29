@@ -1,6 +1,6 @@
 //! Ethereum types for pub-sub
 
-use crate::{eth::Filter, Log, RichHeader};
+use crate::{eth::Filter, Log, RichHeader, Header};
 use reth_primitives::H256;
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -51,6 +51,24 @@ impl Serialize for SubscriptionResult {
             SubscriptionResult::TransactionHash(ref hash) => hash.serialize(serializer),
             SubscriptionResult::SyncState(ref sync) => sync.serialize(serializer),
         }
+    }
+}
+
+impl From<Header> for SubscriptionResult {
+    fn from(value: Header) -> Self {
+        Self::Header(Box::new(value.into()))
+    }
+}
+
+impl From<Log> for SubscriptionResult {
+    fn from(value: Log) -> Self {
+        Self::Log(Box::new(value))
+    }
+}
+
+impl From<H256> for SubscriptionResult {
+    fn from(value: H256) -> Self {
+        Self::TransactionHash(value)
     }
 }
 
