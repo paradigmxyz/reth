@@ -88,6 +88,9 @@ where
 }
 
 /// A future that downloads a full block from the network.
+///
+/// This will attempt to fetch both the header and body for the given block hash at the same time.
+/// When both requests succeed, the future will yield the full block.
 #[must_use = "futures do nothing unless polled"]
 pub struct FetchFullBlockFuture<Client>
 where
@@ -323,7 +326,8 @@ fn ensure_valid_body_response(
 /// This first fetches the headers for the given range using the inner `Client`. Once the request
 /// is complete, it will fetch the bodies for the headers it received.
 ///
-/// Once the bodies request completes, this assembles the [SealedBlock]s and returns them.
+/// Once the bodies request completes, the [SealedBlock]s will be assembled and the future will
+/// yield the full block range.
 #[must_use = "futures do nothing unless polled"]
 pub struct FetchFullBlockRangeFuture<Client>
 where
