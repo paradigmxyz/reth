@@ -292,10 +292,20 @@ impl ChainSpec {
 
         // handle all block forks before handling timestamp based forks. see: https://eips.ethereum.org/EIPS/eip-6122
         for (_, cond) in self.forks_iter() {
-            if let ForkCondition::Block(block) = cond {
-                if cond.active_at_head(head) && block != current_applied {
-                    forkhash += block;
-                    current_applied = block;
+            // handle block based forks and the sepolia merge netsplit block edge case (TTD
+            // ForkCondition with Some(block))
+            if let ForkCondition::Block(block) |
+            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            {
+                if cond.active_at_head(head) {
+                    if block != current_applied {
+                        forkhash += block;
+                        current_applied = block;
+                    }
+                } else {
+                    // we can return here because this block fork is not active, so we set the
+                    // `next` value
+                    return ForkId { hash: forkhash, next: block }
                 }
             }
         }
@@ -303,13 +313,15 @@ impl ChainSpec {
         // timestamp are ALWAYS applied after the merge.
         for (_, cond) in self.forks_iter() {
             if let ForkCondition::Timestamp(timestamp) = cond {
-                if cond.active_at_head(head) && timestamp != current_applied {
-                    forkhash += timestamp;
-                    current_applied = timestamp;
+                if cond.active_at_head(head) {
+                    if timestamp != current_applied {
+                        forkhash += timestamp;
+                        current_applied = timestamp;
+                    }
                 } else {
                     // can safely return here because we have already handled all block forks and
-                    // have handled all active timstamp forks, there should be
-                    // nothing else to handle
+                    // have handled all active timestamp forks, and set the next value to the
+                    // timestamp that is known but not active yet
                     return ForkId { hash: forkhash, next: timestamp }
                 }
             }
