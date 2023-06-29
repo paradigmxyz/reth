@@ -11,6 +11,7 @@ description = "reth metrics utilities"
 [dependencies]
 # reth 
 reth-metrics-derive = { path = "./metrics-derive" }
+reth-primitives = { workspace = true }
 
 # metrics
 metrics = "0.20.1"
