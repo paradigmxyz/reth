@@ -223,7 +223,7 @@ impl PostState {
     /// ```
     /// use reth_primitives::{Address, Account};
     /// use reth_provider::PostState;
-    /// use reth_db::{mdbx::{EnvKind, WriteMap}, test_utils::create_test_rw_db, database::Database};
+    /// use reth_db::{test_utils::create_test_rw_db, database::Database};
     ///
     /// // Initialize the database
     /// let db = create_test_rw_db();
