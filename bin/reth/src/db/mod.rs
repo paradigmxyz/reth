@@ -10,7 +10,7 @@ use eyre::WrapErr;
 use human_bytes::human_bytes;
 use reth_db::{
     database::Database,
-    open_db, open_readonly_db,
+    open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
     Tables,
 };
@@ -84,7 +84,7 @@ impl Command {
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
-                let db = open_readonly_db(&db_path)?;
+                let db = open_db_read_only(&db_path)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 let mut stats_table = ComfyTable::new();
                 stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
@@ -135,12 +135,12 @@ impl Command {
                 println!("{stats_table}");
             }
             Subcommands::List(command) => {
-                let db = open_readonly_db(&db_path)?;
+                let db = open_db_read_only(&db_path)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
-                let db = open_readonly_db(&db_path)?;
+                let db = open_db_read_only(&db_path)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }

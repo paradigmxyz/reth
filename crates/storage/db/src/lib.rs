@@ -132,7 +132,7 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<DatabaseEnv> {
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
-pub fn open_readonly_db(path: &Path) -> eyre::Result<DatabaseEnvRO> {
+pub fn open_db_read_only(path: &Path) -> eyre::Result<DatabaseEnvRO> {
     #[cfg(feature = "mdbx")]
     {
         Env::<NoWriteMap>::open(path, mdbx::EnvKind::RO)
@@ -192,7 +192,7 @@ pub mod test_utils {
         {
             init_db(path.as_path()).expect(ERROR_DB_CREATION);
         }
-        Arc::new(open_readonly_db(path.as_path()).expect(ERROR_DB_OPEN))
+        Arc::new(open_db_read_only(path.as_path()).expect(ERROR_DB_OPEN))
     }
 }
 
