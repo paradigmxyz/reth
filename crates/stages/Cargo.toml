@@ -34,6 +34,9 @@ pin-project = { workspace = true }
 # observability
 tracing = { workspace = true }
 
+# io
+serde = { workspace = true }
+
 # misc
 thiserror = { workspace = true }
 aquamarine = "0.3.0"
@@ -62,6 +65,9 @@ paste = "1.0"
 # Stage benchmarks
 pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion = { version = "0.4.0", features = ["async_futures"] }
+
+# io
+serde_json = { workspace = true }
 
 [features]
 test-utils = []
