@@ -431,7 +431,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
         };
 
+        // insert the chain into the tree
         self.insert_chain(chain);
+
         Ok(block_status)
     }
 
@@ -818,10 +820,24 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Attempts to re-insert the child blocks on top of tracked chains.
     ///
     /// This will return the outcome of the first reinsert attempt.
+    ///
+    /// Note: Performance depends on the number of active chains and then the number of buffered
+    /// blocks. Which is essentially the width of all active branches in the block tree, hence this
+    /// is only do a few iterations with a few lookups at worst.
+    /// The most expensive part is the _single_ re-insert of the block.
     pub fn append_buffered_block_one(&mut self) -> Option<Result<BlockNumHash, InsertBlockError>> {
+        let now = std::time::Instant::now();
+
         let (chain_id, num_hash) = self.find_appendable_buffered_block()?;
         let block = self.buffered_blocks.remove_block(&num_hash).expect("block is buffered");
         let res = self.try_insert_block_into_side_chain(block, chain_id).map(|_| num_hash);
+
+        // track how long it took to re-insert the block
+        self.buffered_blocks
+            .metrics
+            .re_insert_one_buffered_block_ms
+            .record(now.elapsed().as_millis() as f64);
+
         Some(res)
     }
 
@@ -836,6 +852,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
+    /// Find the first buffered block that can be appended to the given chain.
     fn find_appendable_buffered_block_for_chain_tip(
         &self,
         chain: &AppendableChain,
@@ -851,7 +868,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
         }
         // there is no appendable buffered blocks
-        return None
+        None
     }
 
     /// Split a sidechain at the given point, and return the canonical part of it.
@@ -1621,5 +1638,50 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::from([])))
             .with_buffered_blocks(BTreeMap::from([]))
             .assert(&tree);
+    }
+
+    #[tokio::test]
+    async fn test_append_buffered() {
+        let data = BlockChainTestData::default_with_numbers(11, 12);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
+        let genesis = data.genesis;
+
+        // test pops execution results from vector, so order is from last to first.
+        let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
+
+        // last finalized block would be number 9.
+        setup_genesis(externals.db.clone(), genesis);
+
+        // make tree
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
+        let (sender, _canon_notif) = tokio::sync::broadcast::channel(10);
+        let mut tree =
+            BlockchainTree::new(externals, sender, config).expect("failed to create tree");
+
+        // make genesis block 10 as finalized
+        tree.finalize_block(10);
+
+        // block 2 parent is not known, block2 is buffered.
+        assert_eq!(
+            tree.insert_block(block2.clone()).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                missing_parent: block2.parent_num_hash()
+            })
+        );
+
+        // insert block1 and buffered block2 is inserted
+        assert_eq!(
+            tree.insert_block(block1).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid)
+        );
+
+        assert_eq!(tree.buffered_blocks.blocks.len(), 1);
+
+        let appended = tree.append_buffered_block_one().unwrap().unwrap();
+        assert_eq!(appended, block2.num_hash());
+
+        let outcome = tree.make_canonical(&block2.hash).unwrap();
+        assert_eq!(outcome.into_header().num_hash(), block2.num_hash());
     }
 }

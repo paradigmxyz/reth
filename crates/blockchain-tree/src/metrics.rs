@@ -1,5 +1,5 @@
 use reth_metrics::{
-    metrics::{self, Gauge},
+    metrics::{self, Gauge, Histogram},
     Metrics,
 };
 
@@ -19,4 +19,6 @@ pub struct TreeMetrics {
 pub struct BlockBufferMetrics {
     /// Total blocks in the block buffer
     pub blocks: Gauge,
+    /// How long it takes to re-insert one buffered block in milliseconds.
+    pub re_insert_one_buffered_block_ms: Histogram,
 }
