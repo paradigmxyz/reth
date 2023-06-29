@@ -89,7 +89,7 @@ pub use tables::*;
 pub use utils::is_database_empty;
 
 #[cfg(feature = "mdbx")]
-use mdbx::{Env, EnvKind, WriteMap};
+use mdbx::{Env, EnvKind, NoWriteMap, WriteMap};
 
 #[cfg(feature = "mdbx")]
 /// Alias type for the database environment in use. Read/Write mode.
@@ -99,10 +99,13 @@ pub type DatabaseEnv = Env<WriteMap>;
 /// Alias type for the database engine in use. Read only mode.
 pub type DatabaseEnvRO = Env<NoWriteMap>;
 
-/// Opens up an existing database or creates a new one at the specified path.
-pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEnv> {
+use eyre::WrapErr;
+use std::path::Path;
+
+/// Opens up an existing database or creates a new one at the specified path. Creates tables if
+/// necessary. Read/Write mode.
+pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<DatabaseEnv> {
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
-    use eyre::WrapErr;
 
     let rpath = path.as_ref();
     if is_database_empty(rpath) {
@@ -121,6 +124,33 @@ pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEnv> 
         let db = Env::<WriteMap>::open(rpath, EnvKind::RW)?;
         db.create_tables()?;
         Ok(db)
+    }
+    #[cfg(not(feature = "mdbx"))]
+    {
+        unimplemented!();
+    }
+}
+
+/// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
+pub fn open_readonly_db(path: &Path) -> eyre::Result<DatabaseEnvRO> {
+    #[cfg(feature = "mdbx")]
+    {
+        Env::<NoWriteMap>::open(path, mdbx::EnvKind::RO)
+            .with_context(|| format!("Could not open database at path: {}", path.display()))
+    }
+    #[cfg(not(feature = "mdbx"))]
+    {
+        unimplemented!();
+    }
+}
+
+/// Opens up an existing database. Read/Write mode. It doesn't create it or create tables if
+/// missing.
+pub fn open_db(path: &Path) -> eyre::Result<DatabaseEnv> {
+    #[cfg(feature = "mdbx")]
+    {
+        Env::<WriteMap>::open(path, mdbx::EnvKind::RW)
+            .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
     {
