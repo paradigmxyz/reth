@@ -23,10 +23,10 @@ pub struct Pruner<St, Client> {
     /// Database interaction client.
     #[allow(dead_code)]
     client: Client,
-    /// Maximum reorg depth. Used to determine the pruning target for parts that are needed during
+    /// Maximum prune depth. Used to determine the pruning target for parts that are needed during
     /// the reorg, e.g. changesets.
     #[allow(dead_code)]
-    max_reorg_depth: u64,
+    max_prune_depth: u64,
     /// Last pruned block number. Used in conjunction with [MIN_PRUNE_BLOCK_INTERVAL] to determine
     /// when the pruning needs to be initiated.
     last_pruned_block_number: Option<BlockNumber>,
@@ -38,8 +38,8 @@ where
     Client: Send + Unpin + 'static,
 {
     /// Creates a new [Pruner].
-    pub fn new(canon_state_stream: St, client: Client, max_reorg_depth: u64) -> Self {
-        Self { canon_state_stream, client, max_reorg_depth, last_pruned_block_number: None }
+    pub fn new(canon_state_stream: St, client: Client, max_prune_depth: u64) -> Self {
+        Self { canon_state_stream, client, max_prune_depth, last_pruned_block_number: None }
     }
 }
 
