@@ -1,0 +1,56 @@
+version: '3.9'
+
+services:
+  reth:
+    restart: always
+    build:
+      context: ./reth
+      dockerfile: Dockerfile
+    volumes:
+      - rethdata:$HOME/.local/share/reth/db
+      - rethlogs:$HOME/rethlogs
+    command: >
+      /reth/target/release/reth node 
+      --metrics reth:9000 
+      --debug.tip ${RETH_TIP:-0x7d5a4369273c723454ac137f48a4f142b097aa2779464e6505f1b1c5e37b5382} 
+      --log.directory $HOME
+    ports:
+      - '9000:9000'
+
+  prometheus:
+    restart: always
+    image: prom/prometheus
+    user: root
+    depends_on:
+      - reth
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheusdata:/prometheusdata
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheusdata'
+
+  grafana:
+    restart: always
+    image: grafana/grafana
+    user: '472'
+    depends_on:
+      - reth
+      - prometheus
+    ports:
+      - 3000:3000
+    volumes:
+      - grafanadata:/var/lib/grafanadata
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+
+volumes:
+  rethdata:
+    driver: local
+  rethlogs:
+    driver: local
+  prometheusdata:
+    driver: local
+  grafanadata:
+    driver: local
