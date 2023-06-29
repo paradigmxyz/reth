@@ -830,6 +830,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let (chain_id, num_hash) = self.find_appendable_buffered_block()?;
         let block = self.buffered_blocks.remove_block(&num_hash).expect("block is buffered");
+
+        // This will either successfully insert or fail, but never buffer since the block can be
+        // attached to the chain.
         let res = self.try_insert_block_into_side_chain(block, chain_id).map(|_| num_hash);
 
         // track how long it took to re-insert the block
@@ -842,27 +845,34 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Find the first buffered block that can be appended to a chain.
+    ///
+    /// This loops over all chains and returns the first buffered block that can be appended to a
+    /// chain.
     fn find_appendable_buffered_block(&self) -> Option<(BlockChainId, BlockNumHash)> {
         let mut chains = self.chains.iter();
         loop {
             let (chain_id, chain) = chains.next()?;
-            if let Some(buffered) = self.find_appendable_buffered_block_for_chain_tip(chain) {
+            if let Some(buffered) = self.find_appendable_buffered_block_for_chain(chain) {
                 return Some((*chain_id, buffered))
             }
         }
     }
 
     /// Find the first buffered block that can be appended to the given chain.
-    fn find_appendable_buffered_block_for_chain_tip(
+    ///
+    /// Note: this does not guarantee that the block will extend the chain, instead it tries to find
+    /// a block that can be attached to _any_ block in the chain
+    fn find_appendable_buffered_block_for_chain(
         &self,
         chain: &AppendableChain,
     ) -> Option<BlockNumHash> {
-        // iterate over all blocks in chain
-        for (_, block) in chain.blocks.iter() {
+        // iterate over all blocks in the chain
+        // we iterate in reverse order, so we prioritize higher blocks
+        for block in chain.blocks.values().rev() {
             let children = self.buffered_blocks.child_blocks(&block.hash())?;
-            // if buffered blocks is find return its block num hash.
+            // if we have a buffered block that is a child of the block, return its hash
             if let Some(buffered) =
-                children.iter().find(|block| self.buffered_blocks.block(**block).is_some())
+                children.iter().find(|block| self.buffered_blocks.is_buffered(**block))
             {
                 return Some(*buffered)
             }

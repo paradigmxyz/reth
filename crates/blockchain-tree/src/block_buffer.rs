@@ -133,6 +133,11 @@ impl BlockBuffer {
         self.blocks.get(&block.number)?.get(&block.hash)
     }
 
+    /// Return reference to the requested block if it's buffered.
+    pub fn is_buffered(&self, block: BlockNumHash) -> bool {
+        self.block(block).is_some()
+    }
+
     /// Return reference to the asked block by hash.
     pub fn block_by_hash(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
         let num = self.hash_to_num.get(hash)?;
