@@ -52,6 +52,7 @@ jobs:
           cargo llvm-cov nextest --lcov --output-path lcov.info \
             --locked --workspace --all-features \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
+            --no-capture \
             -E 'kind(test)'
 
       - name: Upload coverage data to codecov

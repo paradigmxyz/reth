@@ -323,8 +323,9 @@ async fn test_incoming_node_id_blacklist() {
 
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let mut geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
+        let mut geth = Geth::new().data_dir(temp_dir).disable_discovery().spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
+        println!("Geth endpoint: {geth_endpoint}");
         let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
 
         // print geth stderr
