@@ -5,7 +5,7 @@ use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
-    full_block::{FetchFullBlockFuture, FullBlockClient},
+    full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
 use reth_primitives::{BlockNumber, SealedBlock, H256};
@@ -39,8 +39,10 @@ where
     pipeline_state: PipelineState<DB>,
     /// Pending target block for the pipeline to sync
     pending_pipeline_target: Option<H256>,
-    /// In requests in progress.
+    /// In-flight full block requests in progress.
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
+    /// In-flight full block _range_ requests in progress.
+    inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
     /// Buffered events until the manager is polled and the pipeline is idle.
     queued_events: VecDeque<EngineSyncEvent>,
     /// If enabled, the pipeline will be triggered continuously, as soon as it becomes idle
@@ -71,6 +73,7 @@ where
             pipeline_state: PipelineState::Idle(Some(pipeline)),
             pending_pipeline_target: None,
             inflight_full_block_requests: Vec::new(),
+            inflight_block_range_requests: Vec::new(),
             queued_events: VecDeque::new(),
             run_pipeline_continuously,
             max_block,
@@ -81,6 +84,7 @@ where
     /// Sets the metrics for the active downloads
     fn update_block_download_metrics(&self) {
         self.metrics.active_block_downloads.set(self.inflight_full_block_requests.len() as f64);
+        // TODO: full block range metrics
     }
 
     /// Sets the max block value for testing
@@ -128,8 +132,6 @@ where
     }
 
     /// Starts requesting a range of blocks from the network, in reverse from the given hash.
-    ///
-    /// TODO: should it return `true` if there is already a larger range with the given start hash?
     pub(crate) fn download_block_range(&mut self, hash: H256, count: u64) {
         trace!(
             target: "consensus::engine",
@@ -138,8 +140,8 @@ where
             "start downloading full block."
         );
 
-        // let request = self.block_client.get_block_range(hash, count);
-        // self.inflight_block_range_requests.push(request);
+        let request = self.full_block_client.get_full_block_range(hash, count);
+        self.inflight_block_range_requests.push(request);
 
         // // TODO: need more metrics for block ranges
         // self.update_block_download_metrics();
