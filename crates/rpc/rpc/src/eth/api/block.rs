@@ -124,7 +124,10 @@ where
             return Ok(self.provider().pending_block()?)
         }
 
-        let block_hash = match self.provider().block_hash_for_id(block_id)? {
+        let block_hash = match self.provider().block_hash_for_id(block_id).map_err(|err| {
+            dbg!("block hash for id failure: {:?}: {:?}", block_id, &err);
+            err
+        })? {
             Some(block_hash) => block_hash,
             None => return Ok(None),
         };
@@ -141,15 +144,26 @@ where
         block_id: impl Into<BlockId>,
         full: bool,
     ) -> EthResult<Option<RichBlock>> {
-        let block = match self.block(block_id).await? {
+        let block = match self.block(block_id).await.map_err(|err| {
+            dbg!("Failed to fetch block: {:?}", &err);
+            err
+        })? {
             Some(block) => block,
             None => return Ok(None),
         };
         let block_hash = block.hash;
         let total_difficulty = self
             .provider()
-            .header_td_by_number(block.number)?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+            .header_td_by_number(block.number)
+            .map_err(|err| {
+                dbg!("td by num failure: {}: {:?}", block.number, &err);
+                err
+            })?
+            .ok_or(EthApiError::UnknownBlockNumber)
+            .map_err(|err| {
+                dbg!("no td found for: {}: {:?}", block.number, &err);
+                err
+            })?;
         let block =
             Block::from_block(block.into(), total_difficulty, full.into(), Some(block_hash))?;
         Ok(Some(block.into()))
