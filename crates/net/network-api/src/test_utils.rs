@@ -3,7 +3,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
-use reth_primitives::{rpc::Chain::Mainnet, NodeRecord, PeerId};
+use reth_primitives::{Chain, NodeRecord, PeerId};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 
@@ -33,7 +33,7 @@ impl NetworkInfo for NoopNetwork {
     }
 
     fn chain_id(&self) -> u64 {
-        Mainnet.into()
+        Chain::mainnet().into()
     }
 
     fn is_syncing(&self) -> bool {

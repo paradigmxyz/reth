@@ -115,7 +115,6 @@ pub type StorageValue = U256;
 pub type Selector = [u8; 4];
 
 pub use ethers_core::{
-    types as rpc,
     types::{BigEndianHash, H128, H64, U64},
     utils as rpc_utils,
 };

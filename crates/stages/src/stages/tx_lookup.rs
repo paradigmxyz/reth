@@ -9,7 +9,7 @@ use reth_db::{
     DatabaseError,
 };
 use reth_primitives::{
-    rpc_utils::keccak256,
+    keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     TransactionSignedNoHash, TxNumber, H256,
 };
@@ -178,7 +178,7 @@ fn calculate_hash(
 ) -> Result<(H256, TxNumber), Box<StageError>> {
     let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
     tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-    Ok((H256(keccak256(rlp_buf)), tx_id))
+    Ok((keccak256(rlp_buf), tx_id))
 }
 
 fn stage_checkpoint<DB: Database>(
