@@ -39,11 +39,6 @@ Options:
       --auto-mine
           Automatically mine blocks for new transactions
 
-      --block_gas_limit
-          Configuring block gas limit
-
-          [default: 30 000 000]
-
   -h, --help
           Print help (see a summary with '-h')
 
