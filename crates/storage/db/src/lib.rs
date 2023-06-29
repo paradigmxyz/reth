@@ -158,6 +158,44 @@ pub fn open_db(path: &Path) -> eyre::Result<DatabaseEnv> {
     }
 }
 
+/// Collection of database test utilities
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils {
+    use super::*;
+    use std::sync::Arc;
+
+    /// Error during database open
+    pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
+    /// Error during database creation
+    pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
+    /// Error during table creation
+    pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
+    /// Error during tempdir creation
+    pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
+
+    /// Create read/write database for testing
+    pub fn create_test_rw_db() -> Arc<DatabaseEnv> {
+        Arc::new(
+            init_db(tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path())
+                .expect(ERROR_DB_CREATION),
+        )
+    }
+
+    /// Create read/write database for testing
+    pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<DatabaseEnv> {
+        Arc::new(init_db(path.as_ref()).expect(ERROR_DB_CREATION))
+    }
+
+    /// Create read only database for testing
+    pub fn create_test_ro_db() -> Arc<DatabaseEnvRO> {
+        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        {
+            init_db(path.as_path()).expect(ERROR_DB_CREATION);
+        }
+        Arc::new(open_readonly_db(path.as_path()).expect(ERROR_DB_OPEN))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{

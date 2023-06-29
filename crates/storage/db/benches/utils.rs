@@ -1,12 +1,12 @@
-use reth_db::DatabaseEnv;
 #[allow(unused_imports)]
 use reth_db::{
     database::Database,
-    mdbx::{test_utils::create_test_db_with_path, EnvKind, WriteMap},
     table::*,
+    test_utils::create_test_rw_db_with_path,
     transaction::{DbTx, DbTxMut},
+    DatabaseEnv,
 };
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.
 #[allow(unused)]
@@ -60,7 +60,7 @@ where
 {
     // Reset DB
     let _ = std::fs::remove_dir_all(bench_db_path);
-    let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
+    let db = Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap();
 
     {
         // Prepare data to be read

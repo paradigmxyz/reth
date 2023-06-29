@@ -480,7 +480,7 @@ mod tests {
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
-    use reth_db::mdbx::{self, test_utils, EnvKind};
+    use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{
         consensus,
         provider::ProviderError,
@@ -519,7 +519,7 @@ mod tests {
     /// Runs a simple pipeline.
     #[tokio::test]
     async fn run_pipeline() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -574,7 +574,7 @@ mod tests {
     /// Unwinds a simple pipeline.
     #[tokio::test]
     async fn unwind_pipeline() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -690,7 +690,7 @@ mod tests {
     /// Unwinds a pipeline with intermediate progress.
     #[tokio::test]
     async fn unwind_pipeline_with_intermediate_progress() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -777,7 +777,7 @@ mod tests {
     /// - The pipeline finishes
     #[tokio::test]
     async fn run_pipeline_with_unwind() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -871,7 +871,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_error_handling() {
         // Non-fatal
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
@@ -884,7 +884,7 @@ mod tests {
         assert_matches!(result, Ok(()));
 
         // Fatal
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let mut pipeline = Pipeline::builder()
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),

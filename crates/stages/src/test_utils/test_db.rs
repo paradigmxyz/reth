@@ -1,14 +1,11 @@
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    mdbx::{
-        test_utils::{create_test_db, create_test_db_with_path},
-        tx::Tx,
-        Env, EnvKind, WriteMap, RO, RW,
-    },
+    mdbx::{tx::Tx, Env, EnvKind, WriteMap, RO, RW},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
     tables,
+    test_utils::create_test_rw_db,
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
 };
@@ -43,14 +40,14 @@ pub struct TestTransaction {
 impl Default for TestTransaction {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        let tx = create_test_db::<WriteMap>(EnvKind::RW);
+        let tx = create_test_rw_db();
         Self { tx: tx.clone(), path: None, factory: ProviderFactory::new(tx, MAINNET.clone()) }
     }
 }
 
 impl TestTransaction {
     pub fn new(path: &Path) -> Self {
-        let tx = create_test_db::<WriteMap>(EnvKind::RW);
+        let tx = create_test_rw_db();
         Self {
             tx: tx.clone(),
             path: Some(path.to_path_buf()),

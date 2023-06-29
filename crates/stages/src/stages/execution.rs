@@ -417,10 +417,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestTransaction;
     use assert_matches::assert_matches;
-    use reth_db::{
-        mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
-        models::AccountBeforeTx,
-    };
+    use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
         ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
@@ -441,7 +438,7 @@ mod tests {
 
     #[test]
     fn execution_checkpoint_matches() {
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let state_db = create_test_rw_db();
         let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
@@ -466,7 +463,7 @@ mod tests {
 
     #[test]
     fn execution_checkpoint_precedes() {
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let state_db = create_test_rw_db();
         let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -502,7 +499,7 @@ mod tests {
 
     #[test]
     fn execution_checkpoint_recalculate_full_previous_some() {
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let state_db = create_test_rw_db();
         let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -538,7 +535,7 @@ mod tests {
 
     #[test]
     fn execution_checkpoint_recalculate_full_previous_none() {
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let state_db = create_test_rw_db();
         let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -568,7 +565,7 @@ mod tests {
     async fn sanity_execution_of_block() {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let state_db = create_test_rw_db();
         let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput {
@@ -678,7 +675,7 @@ mod tests {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
 
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
+        let state_db = create_test_rw_db();
         let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput {

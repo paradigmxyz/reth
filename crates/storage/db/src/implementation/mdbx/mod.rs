@@ -120,26 +120,25 @@ impl<E: EnvironmentKind> Deref for Env<E> {
     }
 }
 
-/// Collection of database test utilities
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_utils {
+#[cfg(test)]
+mod tests {
     use super::*;
-    use reth_libmdbx::WriteMap;
-    use std::sync::Arc;
+    use crate::{
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        database::Database,
+        models::{AccountBeforeTx, ShardedKey},
+        tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
+        test_utils::*,
+        transaction::{DbTx, DbTxMut},
+        AccountChangeSet, DatabaseError,
+    };
+    use reth_libmdbx::{NoWriteMap, WriteMap};
+    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H160, H256, U256};
+    use std::{path::Path, str::FromStr, sync::Arc};
+    use tempfile::TempDir;
 
-    /// Error during database creation
-    pub const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
-    /// Error during table creation
-    pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
-    /// Error during tempdir creation
-    pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
-
-    /// Create rw database for testing
-    pub fn create_test_rw_db() -> Arc<Env<WriteMap>> {
-        create_test_db(EnvKind::RW)
-    }
     /// Create database for testing
-    pub fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Arc<Env<E>> {
+    fn create_test_db<E: EnvironmentKind>(kind: EnvKind) -> Arc<Env<E>> {
         Arc::new(create_test_db_with_path(
             kind,
             &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
@@ -147,28 +146,11 @@ pub mod test_utils {
     }
 
     /// Create database for testing with specified path
-    pub fn create_test_db_with_path<E: EnvironmentKind>(kind: EnvKind, path: &Path) -> Env<E> {
+    fn create_test_db_with_path<E: EnvironmentKind>(kind: EnvKind, path: &Path) -> Env<E> {
         let env = Env::<E>::open(path, kind).expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{test_utils, Env, EnvKind};
-    use crate::{
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        database::Database,
-        models::{AccountBeforeTx, ShardedKey},
-        tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
-        transaction::{DbTx, DbTxMut},
-        AccountChangeSet, DatabaseError,
-    };
-    use reth_libmdbx::{NoWriteMap, WriteMap};
-    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H160, H256, U256};
-    use std::{str::FromStr, sync::Arc};
-    use tempfile::TempDir;
 
     const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
     const ERROR_PUT: &str = "Not able to insert value into table.";
@@ -182,12 +164,12 @@ mod tests {
 
     #[test]
     fn db_creation() {
-        test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        create_test_db::<NoWriteMap>(EnvKind::RW);
     }
 
     #[test]
     fn db_manual_put_get() {
-        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let env = create_test_db::<NoWriteMap>(EnvKind::RW);
 
         let value = Header::default();
         let key = 1u64;
@@ -206,7 +188,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk() {
-        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let env = create_test_db::<NoWriteMap>(EnvKind::RW);
 
         let value = Header::default();
         let key = 1u64;
@@ -231,7 +213,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk_range() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT (0, 0), (1, 0), (2, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -295,7 +277,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk_range_on_dup_table() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         let address0 = Address::zero();
         let address1 = Address::from_low_u64_be(1);
@@ -337,7 +319,7 @@ mod tests {
     #[allow(clippy::reversed_empty_ranges)]
     #[test]
     fn db_cursor_walk_range_invalid() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT (0, 0), (1, 0), (2, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -365,7 +347,7 @@ mod tests {
 
     #[test]
     fn db_walker() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -395,7 +377,7 @@ mod tests {
 
     #[test]
     fn db_reverse_walker() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -425,7 +407,7 @@ mod tests {
 
     #[test]
     fn db_walk_back() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -464,7 +446,7 @@ mod tests {
 
     #[test]
     fn db_cursor_seek_exact_or_previous_key() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -490,7 +472,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -524,7 +506,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert_dup() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
@@ -542,7 +524,7 @@ mod tests {
 
     #[test]
     fn db_cursor_delete_current_non_existent() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let key1 = Address::from_low_u64_be(1);
@@ -570,7 +552,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert_wherever_cursor_is() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         // PUT
@@ -603,7 +585,7 @@ mod tests {
 
     #[test]
     fn db_cursor_append() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -630,7 +612,7 @@ mod tests {
 
     #[test]
     fn db_cursor_append_failure() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -658,7 +640,7 @@ mod tests {
 
     #[test]
     fn db_cursor_upsert() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
@@ -693,7 +675,7 @@ mod tests {
 
     #[test]
     fn db_cursor_dupsort_append() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
 
         let transition_id = 2;
 
@@ -739,7 +721,7 @@ mod tests {
 
     #[test]
     fn db_closure_put_get() {
-        let path = TempDir::new().expect(test_utils::ERROR_TEMPDIR).into_path();
+        let path = TempDir::new().expect(ERROR_TEMPDIR).into_path();
 
         let value = Account {
             nonce: 18446744073709551615,
@@ -750,7 +732,7 @@ mod tests {
             .expect(ERROR_ETH_ADDRESS);
 
         {
-            let env = test_utils::create_test_db_with_path::<WriteMap>(EnvKind::RW, &path);
+            let env = create_test_db_with_path::<WriteMap>(EnvKind::RW, &path);
 
             // PUT
             let result = env.update(|tx| {
@@ -771,7 +753,7 @@ mod tests {
 
     #[test]
     fn db_dup_sort() {
-        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let env = create_test_db::<NoWriteMap>(EnvKind::RW);
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
 
@@ -815,7 +797,7 @@ mod tests {
 
     #[test]
     fn db_iterate_over_all_dup_values() {
-        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let env = create_test_db::<NoWriteMap>(EnvKind::RW);
         let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
             .expect(ERROR_ETH_ADDRESS);
         let key2 = Address::from_str("0x2222222222222222222222222222222222222222")
@@ -861,7 +843,7 @@ mod tests {
 
     #[test]
     fn dup_value_with_same_subkey() {
-        let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
+        let env = create_test_db::<NoWriteMap>(EnvKind::RW);
         let key1 = H160([0x11; 20]);
         let key2 = H160([0x22; 20]);
 
@@ -904,7 +886,7 @@ mod tests {
 
     #[test]
     fn db_sharded_key() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<Env<WriteMap>> = create_test_db(EnvKind::RW);
         let real_key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
 
         for i in 1..5 {
