@@ -384,8 +384,8 @@ impl CallFees {
     ) -> EthResult<CallFees> {
         match (call_gas_price, call_max_fee, call_priority_fee) {
             (gas_price, None, None) => {
-                // either legacy or no fee fields
-                // when none are specified, they are all set to zero
+                // either legacy transaction or no fee fields are specified
+                // when no fields are specified, set gas price to zero
                 let gas_price = gas_price.unwrap_or(U256::ZERO);
                 Ok(CallFees { gas_price, max_priority_fee_per_gas: None })
             }
