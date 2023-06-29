@@ -12,7 +12,7 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_primitives::PeerId;
-use reth_provider::BlockProvider;
+use reth_provider::BlockReader;
 use std::{
     io,
     net::SocketAddr,
@@ -77,7 +77,7 @@ pub(crate) struct Swarm<C> {
 
 impl<C> Swarm<C>
 where
-    C: BlockProvider,
+    C: BlockReader,
 {
     /// Configures a new swarm instance.
     pub(crate) fn new(
@@ -291,7 +291,7 @@ where
 
 impl<C> Stream for Swarm<C>
 where
-    C: BlockProvider + Unpin,
+    C: BlockReader + Unpin,
 {
     type Item = SwarmEvent;
 

@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs)]
 #![deny(
     unused_must_use,
@@ -16,6 +22,10 @@
 //!   - [PayloadJobGenerator]: a type that knows how to create new jobs for creating payloads based
 //!     on [PayloadAttributes](reth_rpc_types::engine::PayloadAttributes).
 //!   - [PayloadJob]: a type that can yields (better) payloads over time.
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 
 pub mod database;
 pub mod error;

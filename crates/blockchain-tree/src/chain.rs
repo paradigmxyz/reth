@@ -190,37 +190,6 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        if block_kind.extends_canonical_head() {
-            Self::validate_and_execute_canonical_head_descendant(
-                block,
-                parent_block,
-                post_state_data_provider,
-                externals,
-            )
-        } else {
-            Self::validate_and_execute_sidechain(
-                block,
-                parent_block,
-                post_state_data_provider,
-                externals,
-            )
-        }
-    }
-
-    /// Validate and execute the given block that _extends the canonical chain_, validating its
-    /// state root after execution.
-    fn validate_and_execute_canonical_head_descendant<PSDP, DB, C, EF>(
-        block: SealedBlockWithSenders,
-        parent_block: &SealedHeader,
-        post_state_data_provider: PSDP,
-        externals: &TreeExternals<DB, C, EF>,
-    ) -> Result<PostState, Error>
-    where
-        PSDP: PostStateDataProvider,
-        DB: Database,
-        C: Consensus,
-        EF: ExecutorFactory,
-    {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;
 
@@ -237,17 +206,43 @@ impl AppendableChain {
         let mut executor = externals.executor_factory.with_sp(&provider);
         let post_state = executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
 
-        // check state root
-        let state_root = provider.state_root(post_state.clone())?;
-        if block.state_root != state_root {
-            return Err(ConsensusError::BodyStateRootDiff {
-                got: state_root,
-                expected: block.state_root,
+        // check state root if the block extends the canonical chain.
+        if block_kind.extends_canonical_head() {
+            // check state root
+            let state_root = provider.state_root(post_state.clone())?;
+            if block.state_root != state_root {
+                return Err(ConsensusError::BodyStateRootDiff {
+                    got: state_root,
+                    expected: block.state_root,
+                }
+                .into())
             }
-            .into())
         }
 
         Ok(post_state)
+    }
+
+    /// Validate and execute the given block that _extends the canonical chain_, validating its
+    /// state root after execution.
+    fn validate_and_execute_canonical_head_descendant<PSDP, DB, C, EF>(
+        block: SealedBlockWithSenders,
+        parent_block: &SealedHeader,
+        post_state_data_provider: PSDP,
+        externals: &TreeExternals<DB, C, EF>,
+    ) -> Result<PostState, Error>
+    where
+        PSDP: PostStateDataProvider,
+        DB: Database,
+        C: Consensus,
+        EF: ExecutorFactory,
+    {
+        Self::validate_and_execute(
+            block,
+            parent_block,
+            post_state_data_provider,
+            externals,
+            BlockKind::ExtendsCanonicalHead,
+        )
     }
 
     /// Validate and execute the given sidechain block, skipping state root validation.
@@ -263,23 +258,13 @@ impl AppendableChain {
         C: Consensus,
         EF: ExecutorFactory,
     {
-        // ensure the block is a valid descendant of the parent, according to consensus rules
-        externals.consensus.validate_header_against_parent(&block, parent_block)?;
-
-        let (block, senders) = block.into_components();
-        let block = block.unseal();
-
-        // get the state provider.
-        let db = externals.database();
-        let canonical_fork = post_state_data_provider.canonical_fork();
-        let state_provider = db.history_by_block_number(canonical_fork.number)?;
-
-        let provider = PostStateProvider::new(state_provider, post_state_data_provider);
-
-        let mut executor = externals.executor_factory.with_sp(&provider);
-        let post_state = executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
-
-        Ok(post_state)
+        Self::validate_and_execute(
+            block,
+            parent_block,
+            post_state_data_provider,
+            externals,
+            BlockKind::ForksHistoricalBlock,
+        )
     }
 
     /// Validate and execute the given block, and append it to this chain.

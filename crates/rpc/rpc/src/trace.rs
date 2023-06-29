@@ -12,7 +12,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{BlockReader, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -77,7 +77,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
-    Provider: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the future on a new blocking task.
@@ -193,7 +193,9 @@ where
                 let mut results = Vec::with_capacity(calls.len());
                 let mut db = SubState::new(State::new(state));
 
-                for (call, trace_types) in calls {
+                let mut calls = calls.into_iter().peekable();
+
+                while let Some((call, trace_types)) = calls.next() {
                     let env = prepare_call_env(
                         cfg.clone(),
                         block_env.clone(),
@@ -204,12 +206,30 @@ where
                     let config = tracing_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
-                        res,
-                        &trace_types,
-                        &db,
-                    )?;
+                    let ResultAndState { result, state } = res;
+
+                    let mut trace_res =
+                        inspector.into_parity_builder().into_trace_results(result, &trace_types);
+
+                    // If statediffs were requested, populate them with the account balance and
+                    // nonce from pre-state
+                    if let Some(ref mut state_diff) = trace_res.state_diff {
+                        populate_account_balance_nonce_diffs(
+                            state_diff,
+                            &db,
+                            state.iter().map(|(addr, acc)| (*addr, acc.info.clone())),
+                        )?;
+                    }
+
                     results.push(trace_res);
+
+                    // need to apply the state changes of this call before executing the
+                    // next call
+                    if calls.peek().is_some() {
+                        // need to apply the state changes of this call before executing
+                        // the next call
+                        db.commit(state)
+                    }
                 }
 
                 Ok(results)
@@ -403,6 +423,9 @@ where
             move |tx_info, inspector, res, state, db| {
                 let mut full_trace =
                     inspector.into_parity_builder().into_trace_results(res, &trace_types);
+
+                // If statediffs were requested, populate them with the account balance and nonce
+                // from pre-state
                 if let Some(ref mut state_diff) = full_trace.state_diff {
                     populate_account_balance_nonce_diffs(
                         state_diff,
@@ -425,7 +448,7 @@ where
 #[async_trait]
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
-    Provider: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.

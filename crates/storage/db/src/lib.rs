@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 //! reth's database abstraction layer with concrete implementations.
 //!
 //! The database abstraction assumes that the underlying store is a KV store subdivided into tables.
@@ -68,6 +74,7 @@ pub mod abstraction;
 mod implementation;
 pub mod tables;
 mod utils;
+pub mod version;
 
 #[cfg(feature = "mdbx")]
 /// Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
@@ -79,3 +86,90 @@ pub mod mdbx {
 pub use abstraction::*;
 pub use reth_interfaces::db::DatabaseError;
 pub use tables::*;
+pub use utils::is_database_empty;
+
+#[cfg(feature = "mdbx")]
+use mdbx::{Env, EnvKind, WriteMap};
+
+#[cfg(feature = "mdbx")]
+/// Alias type for the database engine in use.
+pub type DatabaseEnv = Env<WriteMap>;
+
+/// Opens up an existing database or creates a new one at the specified path.
+pub fn init_db<P: AsRef<std::path::Path>>(path: P) -> eyre::Result<DatabaseEnv> {
+    use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
+    use eyre::WrapErr;
+
+    let rpath = path.as_ref();
+    if is_database_empty(rpath) {
+        std::fs::create_dir_all(rpath)
+            .wrap_err_with(|| format!("Could not create database directory {}", rpath.display()))?;
+        create_db_version_file(rpath)?;
+    } else {
+        match check_db_version_file(rpath) {
+            Ok(_) => (),
+            Err(DatabaseVersionError::MissingFile) => create_db_version_file(rpath)?,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    #[cfg(feature = "mdbx")]
+    {
+        let db = Env::<WriteMap>::open(rpath, EnvKind::RW)?;
+        db.create_tables()?;
+        Ok(db)
+    }
+    #[cfg(not(feature = "mdbx"))]
+    {
+        unimplemented!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        init_db,
+        version::{db_version_file_path, DatabaseVersionError},
+    };
+    use assert_matches::assert_matches;
+    use tempfile::tempdir;
+
+    #[test]
+    fn db_version() {
+        let path = tempdir().unwrap();
+
+        // Database is empty
+        {
+            let db = init_db(&path);
+            assert_matches!(db, Ok(_));
+        }
+
+        // Database is not empty, current version is the same as in the file
+        {
+            let db = init_db(&path);
+            assert_matches!(db, Ok(_));
+        }
+
+        // Database is not empty, version file is malformed
+        {
+            std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
+                .unwrap();
+            let db = init_db(&path);
+            assert!(db.is_err());
+            assert_matches!(
+                db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+                Some(DatabaseVersionError::MalformedFile)
+            )
+        }
+
+        // Database is not empty, version file contains not matching version
+        {
+            std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
+            let db = init_db(&path);
+            assert!(db.is_err());
+            assert_matches!(
+                db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+                Some(DatabaseVersionError::VersionMismatch { version: 0 })
+            )
+        }
+    }
+}

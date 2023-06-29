@@ -1,6 +1,6 @@
 [package]
 name = "ef-tests"
-version = "0.1.0"
+version.workspace = true
 description = "EF testing support for reth."
 edition.workspace = true
 rust-version.workspace = true
@@ -24,3 +24,4 @@ walkdir = "2.3.3"
 serde = "1.0.163"
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+serde_bytes = "0.11.9"

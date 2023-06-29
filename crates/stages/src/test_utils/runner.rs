@@ -1,6 +1,9 @@
 use super::TestTransaction;
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::mdbx::{Env, WriteMap};
+use reth_db::{
+    mdbx::{Env, WriteMap},
+    DatabaseEnv,
+};
 use reth_primitives::MAINNET;
 use reth_provider::ProviderFactory;
 use std::{borrow::Borrow, sync::Arc};
@@ -19,7 +22,7 @@ pub(crate) enum TestRunnerError {
 /// A generic test runner for stages.
 #[async_trait::async_trait]
 pub(crate) trait StageTestRunner {
-    type S: Stage<Env<WriteMap>> + 'static;
+    type S: Stage<DatabaseEnv> + 'static;
 
     /// Return a reference to the database.
     fn tx(&self) -> &TestTransaction;
@@ -48,9 +51,9 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
             let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
-            let mut provider = factory.provider_rw().unwrap();
+            let provider = factory.provider_rw().unwrap();
 
-            let result = stage.execute(&mut provider, input).await;
+            let result = stage.execute(&provider, input).await;
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send message")
         });
@@ -74,9 +77,9 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
             let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
-            let mut provider = factory.provider_rw().unwrap();
+            let provider = factory.provider_rw().unwrap();
 
-            let result = stage.unwind(&mut provider, input).await;
+            let result = stage.unwind(&provider, input).await;
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
         });

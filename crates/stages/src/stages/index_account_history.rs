@@ -1,7 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::{AccountExtReader, AccountWriter, DatabaseProviderRW};
+use reth_provider::{AccountExtReader, DatabaseProviderRW, HistoryWriter};
 use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in
@@ -37,7 +37,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -56,7 +56,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
@@ -141,8 +141,8 @@ mod tests {
         let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let mut provider = factory.provider_rw().unwrap();
-        let out = stage.execute(&mut provider, input).await.unwrap();
+        let provider = factory.provider_rw().unwrap();
+        let out = stage.execute(&provider, input).await.unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
         provider.commit().unwrap();
     }
@@ -155,8 +155,8 @@ mod tests {
         };
         let mut stage = IndexAccountHistoryStage::default();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let mut provider = factory.provider_rw().unwrap();
-        let out = stage.unwind(&mut provider, input).await.unwrap();
+        let provider = factory.provider_rw().unwrap();
+        let out = stage.unwind(&provider, input).await.unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
         provider.commit().unwrap();
     }

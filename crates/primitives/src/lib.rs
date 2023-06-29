@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -8,7 +14,11 @@
 //! Commonly used types in reth.
 //!
 //! This crate contains Ethereum primitive types and helper functions.
-
+//!
+//! ## Feature Flags
+//!
+//! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
+//! - `test-utils`: Export utilities for testing
 pub mod abi;
 mod account;
 pub mod basefee;
@@ -47,8 +57,8 @@ pub use block::{
 };
 pub use bloom::Bloom;
 pub use chain::{
-    AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
-    MAINNET, SEPOLIA,
+    AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, DisplayHardforks,
+    ForkCondition, ForkTimestamps, GOERLI, MAINNET, SEPOLIA,
 };
 pub use compression::*;
 pub use constants::{

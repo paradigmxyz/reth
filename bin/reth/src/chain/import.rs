@@ -7,17 +7,18 @@ use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
+use reth_provider::{ProviderFactory, StageCheckpointReader};
 
 use crate::args::utils::genesis_value_parser;
 use reth_config::Config;
-use reth_db::database::Database;
+use reth_db::{database::Database, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_primitives::{ChainSpec, H256};
-use reth_staged_sync::utils::init::{init_db, init_genesis};
+use reth_primitives::{stage::StageId, ChainSpec, H256};
+use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -105,13 +106,18 @@ impl ImportCommand {
         info!(target: "reth::cli", "Chain file imported");
 
         let (mut pipeline, events) =
-            self.build_import_pipeline(config, db, &consensus, file_client).await?;
+            self.build_import_pipeline(config, Arc::clone(&db), &consensus, file_client).await?;
 
         // override the tip
         pipeline.set_tip(tip);
         debug!(target: "reth::cli", ?tip, "Tip manually set");
 
-        tokio::spawn(handle_events(None, events));
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let provider = factory.provider().map_err(PipelineError::Interface)?;
+
+        let latest_block_number =
+            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+        tokio::spawn(handle_events(None, latest_block_number, events));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");

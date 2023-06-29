@@ -1,11 +1,10 @@
 use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
-    BlockHashProvider, BlockNumProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StageCheckpointReader, StateProviderBox, TransactionsProvider,
-    WithdrawalsProvider,
+    BlockHashReader, BlockNumReader, BlockReader, EvmEnvProvider, HeaderProvider, ProviderError,
+    StageCheckpointReader, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices};
+use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -34,14 +33,14 @@ pub struct ProviderFactory<DB> {
 impl<DB: Database> ProviderFactory<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
-    /// [`BlockHashProvider`]. This may fail if the inner read database transaction fails to open.
+    /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     pub fn provider(&self) -> Result<DatabaseProviderRO<'_, DB>> {
         Ok(DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone()))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
-    /// [`BlockHashProvider`].  This may fail if the inner read/write database transaction fails to
+    /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     pub fn provider_rw(&self) -> Result<DatabaseProviderRW<'_, DB>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone())))
@@ -52,6 +51,20 @@ impl<DB> ProviderFactory<DB> {
     /// create new database provider
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
         Self { db, chain_spec }
+    }
+}
+
+impl<DB: Database> ProviderFactory<DB> {
+    /// create new database provider by passing a path. [`ProviderFactory`] will own the database
+    /// instance.
+    pub fn new_with_database_path<P: AsRef<std::path::Path>>(
+        path: P,
+        chain_spec: Arc<ChainSpec>,
+    ) -> Result<ProviderFactory<DatabaseEnv>> {
+        Ok(ProviderFactory::<DatabaseEnv> {
+            db: init_db(path).map_err(|e| reth_interfaces::Error::Custom(e.to_string()))?,
+            chain_spec,
+        })
     }
 }
 
@@ -144,7 +157,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> BlockHashProvider for ProviderFactory<DB> {
+impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         self.provider()?.block_hash(number)
     }
@@ -154,7 +167,7 @@ impl<DB: Database> BlockHashProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> BlockNumProvider for ProviderFactory<DB> {
+impl<DB: Database> BlockNumReader for ProviderFactory<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
         self.provider()?.chain_info()
     }
@@ -172,7 +185,7 @@ impl<DB: Database> BlockNumProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> BlockProvider for ProviderFactory<DB> {
+impl<DB: Database> BlockReader for ProviderFactory<DB> {
     fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>> {
         self.provider()?.find_block_by_hash(hash, source)
     }
@@ -183,6 +196,10 @@ impl<DB: Database> BlockProvider for ProviderFactory<DB> {
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
         self.provider()?.pending_block()
+    }
+
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        self.provider()?.pending_block_and_receipts()
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>> {
@@ -329,8 +346,14 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;
-    use crate::{BlockHashProvider, BlockNumProvider};
-    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use crate::{BlockHashReader, BlockNumReader};
+    use reth_db::{
+        mdbx::{
+            test_utils::{create_test_db, ERROR_TEMPDIR},
+            EnvKind, WriteMap,
+        },
+        DatabaseEnv,
+    };
     use reth_primitives::{ChainSpecBuilder, H256};
     use std::sync::Arc;
 
@@ -359,6 +382,22 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let provider = factory.provider().unwrap();
+        provider.block_hash(0).unwrap();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.block_hash(0).unwrap();
+        provider.block_hash(0).unwrap();
+    }
+
+    #[test]
+    fn provider_factory_with_database_path() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
+            tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+            Arc::new(chain_spec),
+        )
+        .unwrap();
+
         let provider = factory.provider().unwrap();
         provider.block_hash(0).unwrap();
         let provider_rw = factory.provider_rw().unwrap();

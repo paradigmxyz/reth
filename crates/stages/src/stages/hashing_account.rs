@@ -16,7 +16,7 @@ use reth_primitives::{
         StageId,
     },
 };
-use reth_provider::{AccountExtReader, AccountWriter, DatabaseProviderRW};
+use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter};
 use std::{
     cmp::max,
     fmt::Debug,
@@ -79,22 +79,25 @@ impl AccountHashingStage {
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSet` table.
     pub fn seed<DB: Database>(
-        provider: &mut DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<'_, DB>,
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db::models::AccountBeforeTx;
-        use reth_interfaces::test_utils::generators::{
-            random_block_range, random_eoa_account_range,
+        use reth_interfaces::test_utils::{
+            generators,
+            generators::{random_block_range, random_eoa_account_range},
         };
         use reth_primitives::{Account, H256, U256};
-        use reth_provider::insert_canonical_block;
+        use reth_provider::BlockWriter;
 
-        let blocks = random_block_range(opts.blocks.clone(), H256::zero(), opts.txs);
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(&mut rng, opts.blocks.clone(), H256::zero(), opts.txs);
 
         for block in blocks {
-            insert_canonical_block(provider.tx_ref(), block, None).unwrap();
+            provider.insert_block(block, None).unwrap();
         }
-        let mut accounts = random_eoa_account_range(opts.accounts);
+        let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
         {
             // Account State generator
             let mut account_cursor =
@@ -132,7 +135,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -264,7 +267,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
@@ -532,9 +535,9 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let mut provider = self.tx.inner_rw();
+                let provider = self.tx.inner_rw();
                 let res = Ok(AccountHashingStage::seed(
-                    &mut provider,
+                    &provider,
                     SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },
                 )
                 .unwrap());

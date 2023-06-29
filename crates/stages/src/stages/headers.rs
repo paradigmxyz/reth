@@ -20,7 +20,6 @@ use reth_primitives::{
     BlockHashOrNumber, BlockNumber, SealedHeader, H256,
 };
 use reth_provider::DatabaseProviderRW;
-use std::ops::Deref;
 use tokio::sync::watch;
 use tracing::*;
 
@@ -196,14 +195,14 @@ where
     /// starting from the tip of the chain
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
         let current_checkpoint = input.checkpoint();
 
         // Lookup the head and tip of the sync range
-        let gap = self.get_sync_gap(provider.deref(), current_checkpoint.block_number).await?;
+        let gap = self.get_sync_gap(provider, current_checkpoint.block_number).await?;
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
@@ -326,7 +325,7 @@ where
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // TODO: handle bad block
@@ -388,7 +387,7 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::random_header;
+    use reth_interfaces::test_utils::{generators, generators::random_header};
     use reth_primitives::{stage::StageUnitCheckpoint, H256, MAINNET};
     use reth_provider::ProviderFactory;
     use test_runner::HeadersTestRunner;
@@ -400,10 +399,11 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_interfaces::test_utils::{
-            generators::random_header_range, TestConsensus, TestHeaderDownloader, TestHeadersClient,
+            generators, generators::random_header_range, TestConsensus, TestHeaderDownloader,
+            TestHeadersClient,
         };
         use reth_primitives::U256;
-        use reth_provider::{BlockHashProvider, BlockNumProvider, HeaderProvider};
+        use reth_provider::{BlockHashReader, BlockNumReader, HeaderProvider};
         use std::sync::Arc;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
@@ -452,8 +452,9 @@ mod tests {
             type Seed = Vec<SealedHeader>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+                let mut rng = generators::rng();
                 let start = input.checkpoint().block_number;
-                let head = random_header(start, None);
+                let head = random_header(&mut rng, start, None);
                 self.tx.insert_headers(std::iter::once(&head))?;
                 // patch td table for `update_head` call
                 self.tx.commit(|tx| tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into()))?;
@@ -465,7 +466,7 @@ mod tests {
                     return Ok(Vec::default())
                 }
 
-                let mut headers = random_header_range(start + 1..end, head.hash());
+                let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
                 headers.insert(0, head);
                 Ok(headers)
             }
@@ -505,7 +506,7 @@ mod tests {
                 let tip = if !headers.is_empty() {
                     headers.last().unwrap().hash()
                 } else {
-                    let tip = random_header(0, None);
+                    let tip = random_header(&mut generators::rng(), 0, None);
                     self.tx.insert_headers(std::iter::once(&tip))?;
                     tip.hash()
                 };
@@ -603,14 +604,16 @@ mod tests {
         let tx = provider.tx_ref();
         let mut stage = runner.stage();
 
+        let mut rng = generators::rng();
+
         let consensus_tip = H256::random();
         runner.send_tip(consensus_tip);
 
         // Genesis
         let checkpoint = 0;
-        let head = random_header(0, None);
-        let gap_fill = random_header(1, Some(head.hash()));
-        let gap_tip = random_header(2, Some(gap_fill.hash()));
+        let head = random_header(&mut rng, 0, None);
+        let gap_fill = random_header(&mut rng, 1, Some(head.hash()));
+        let gap_tip = random_header(&mut rng, 2, Some(gap_fill.hash()));
 
         // Empty database
         assert_matches!(

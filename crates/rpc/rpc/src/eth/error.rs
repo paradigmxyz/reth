@@ -65,8 +65,8 @@ pub enum EthApiError {
     #[error("invalid tracer config")]
     InvalidTracerConfig,
     /// Percentile array is invalid
-    #[error("invalid reward percentile")]
-    InvalidRewardPercentile(f64),
+    #[error("invalid reward percentiles")]
+    InvalidRewardPercentiles,
     /// Error thrown when a spawned tracing task failed to deliver an anticipated response.
     #[error("internal error while tracing")]
     InternalTracingError,
@@ -101,7 +101,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
-            EthApiError::InvalidRewardPercentile(msg) => internal_rpc_err(msg.to_string()),
+            EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
             err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
         }

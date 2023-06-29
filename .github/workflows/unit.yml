@@ -1,13 +1,11 @@
 on:
-  push:
-    branches:
-      - main
   pull_request:
   merge_group:
 
 env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
+  SEED: rustethereumethereumrust
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}

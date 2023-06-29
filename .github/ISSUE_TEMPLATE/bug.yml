@@ -58,7 +58,20 @@ body:
   - type: input
     attributes:
       label: What version/commit are you on?
-      description: This can be obtained with e.g. `git rev-parse HEAD`
+      description: This can be obtained with `reth --version` or `git rev-parse HEAD` if you've built Reth from source
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: What database version are you on?
+      description: This can be obtained with `reth db version`
+    validations:
+      required: false
+  - type: input
+    attributes:
+      label: If you've built Reth from source, provide the full command you used
+    validations:
+      required: false
   - type: checkboxes
     id: terms
     attributes:

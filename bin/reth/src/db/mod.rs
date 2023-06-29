@@ -8,12 +8,17 @@ use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
-use reth_db::{database::Database, tables};
+use reth_db::{
+    database::Database,
+    mdbx::{Env, NoWriteMap, WriteMap},
+    version::{get_db_version, DatabaseVersionError, DB_VERSION},
+    DatabaseEnv, Tables,
+};
 use reth_primitives::ChainSpec;
-use std::sync::Arc;
-use tracing::error;
+use std::{path::Path, sync::Arc};
 
 mod get;
+mod list;
 /// DB List TUI
 mod tui;
 
@@ -52,38 +57,21 @@ pub struct Command {
     command: Subcommands,
 }
 
-const DEFAULT_NUM_ITEMS: &str = "5";
-
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
 pub enum Subcommands {
     /// Lists all the tables, their entry count and their size
     Stats,
     /// Lists the contents of a table
-    List(ListArgs),
+    List(list::Command),
     /// Gets the content of a table for the given key
     Get(get::Command),
     /// Deletes all database entries
     Drop,
-}
-
-#[derive(Parser, Debug)]
-/// The arguments for the `reth db list` command
-pub struct ListArgs {
-    /// The table name
-    table: String, // TODO: Convert to enum
-    /// Skip first N entries
-    #[arg(long, short, default_value = "0")]
-    skip: usize,
-    /// Reverse the order of the entries. If enabled last table entries are read.
-    #[arg(long, short, default_value = "false")]
-    reverse: bool,
-    /// How many items to take from the walker
-    #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
-    len: usize,
-    /// Dump as JSON instead of using TUI.
-    #[arg(long, short)]
-    json: bool,
+    /// Lists current and local database versions
+    Version,
+    /// Returns the full database path
+    Path,
 }
 
 impl Command {
@@ -92,19 +80,12 @@ impl Command {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
-        std::fs::create_dir_all(&db_path)?;
-
-        // TODO: Auto-impl for Database trait
-        let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            db_path.as_ref(),
-            reth_db::mdbx::EnvKind::RW,
-        )?;
-
-        let mut tool = DbTool::new(&db, self.chain.clone())?;
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
+                let db = read_only_db(&db_path)?;
+                let tool = DbTool::new(&db, self.chain.clone())?;
                 let mut stats_table = ComfyTable::new();
                 stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
                 stats_table.set_header([
@@ -118,7 +99,7 @@ impl Command {
 
                 tool.db.view(|tx| {
                     let mut tables =
-                        tables::TABLES.iter().map(|(_, name)| name).collect::<Vec<_>>();
+                        Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
                     tables.sort();
                     for table in tables {
                         let table_db =
@@ -153,83 +134,53 @@ impl Command {
 
                 println!("{stats_table}");
             }
-            Subcommands::List(args) => {
-                macro_rules! table_tui {
-                    ($arg:expr, $start:expr, $len:expr => [$($table:ident),*]) => {
-                        match $arg {
-                            $(stringify!($table) => {
-                                tool.db.view(|tx| {
-                                    let table_db = tx.inner.open_db(Some(stringify!($table))).wrap_err("Could not open db.")?;
-                                    let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
-                                    let total_entries = stats.entries();
-                                    if $start > total_entries - 1 {
-                                        error!(
-                                            target: "reth::cli",
-                                            "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
-                                            start = $start,
-                                            final_entry_idx = total_entries - 1,
-                                            table = stringify!($table)
-                                        );
-                                        return Ok(());
-                                    }
-
-                                    if args.json {
-                                        let list_result = tool.list::<tables::$table>(args.skip, args.len,args.reverse)?.into_iter().collect::<Vec<_>>();
-                                        println!("{}", serde_json::to_string_pretty(&list_result)?);
-                                        Ok(())
-                                    } else {
-                                        tui::DbListTUI::<_, tables::$table>::new(|skip, count| {
-                                            tool.list::<tables::$table>(skip, count, args.reverse).unwrap()
-                                        }, $start, $len, total_entries).run()
-                                    }
-                                })??
-                            },)*
-                            _ => {
-                                error!(target: "reth::cli", "Unknown table.");
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-
-                table_tui!(args.table.as_str(), args.skip, args.len => [
-                    CanonicalHeaders,
-                    HeaderTD,
-                    HeaderNumbers,
-                    Headers,
-                    BlockBodyIndices,
-                    BlockOmmers,
-                    BlockWithdrawals,
-                    TransactionBlock,
-                    Transactions,
-                    TxHashNumber,
-                    Receipts,
-                    PlainStorageState,
-                    PlainAccountState,
-                    Bytecodes,
-                    AccountHistory,
-                    StorageHistory,
-                    AccountChangeSet,
-                    StorageChangeSet,
-                    HashedAccount,
-                    HashedStorage,
-                    AccountsTrie,
-                    StoragesTrie,
-                    TxSenders,
-                    SyncStage,
-                    SyncStageProgress
-                ]);
+            Subcommands::List(command) => {
+                let db = read_only_db(&db_path)?;
+                let tool = DbTool::new(&db, self.chain.clone())?;
+                command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
-                command.execute(tool)?;
+                let db = read_only_db(&db_path)?;
+                let tool = DbTool::new(&db, self.chain.clone())?;
+                command.execute(&tool)?;
             }
             Subcommands::Drop => {
+                let db = read_write_db(&db_path)?;
+                let mut tool = DbTool::new(&db, self.chain.clone())?;
                 tool.drop(db_path)?;
+            }
+            Subcommands::Version => {
+                let local_db_version = match get_db_version(&db_path) {
+                    Ok(version) => Some(version),
+                    Err(DatabaseVersionError::MissingFile) => None,
+                    Err(err) => return Err(err.into()),
+                };
+
+                println!("Current database version: {DB_VERSION}");
+
+                if let Some(version) = local_db_version {
+                    println!("Local database version: {version}");
+                } else {
+                    println!("Local database is uninitialized");
+                }
+            }
+            Subcommands::Path => {
+                println!("{}", db_path.display());
             }
         }
 
         Ok(())
     }
+}
+
+fn read_only_db(path: &Path) -> eyre::Result<Env<NoWriteMap>> {
+    Env::<NoWriteMap>::open(path, reth_db::mdbx::EnvKind::RO)
+        .with_context(|| format!("Could not open database at path: {}", path.display()))
+}
+
+fn read_write_db(path: &Path) -> eyre::Result<DatabaseEnv> {
+    Env::<WriteMap>::open(path, reth_db::mdbx::EnvKind::RW)
+        .with_context(|| format!("Could not open database at path: {}", path.display()))
 }
 
 #[cfg(test)]

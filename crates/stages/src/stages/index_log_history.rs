@@ -31,7 +31,7 @@ impl<DB: Database> Stage<DB> for IndexLogHistoryStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -51,7 +51,7 @@ impl<DB: Database> Stage<DB> for IndexLogHistoryStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
@@ -174,21 +174,25 @@ mod tests {
         type Seed = (Vec<SealedBlock>, Vec<Receipt>);
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let mut rng = rand::thread_rng();
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
 
             let tx_offset = None;
 
-            let blocks = random_block_range(stage_progress + 1..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(&mut rng, stage_progress + 1..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), tx_offset)?;
 
             let logs_per_receipt = 3;
-            let receipts = blocks
-                .iter()
-                .flat_map(|block| {
-                    block.body.iter().map(|tx| random_receipt(tx, Some(logs_per_receipt)))
-                })
-                .collect::<Vec<_>>();
+            let mut receipts = Vec::new();
+            for block in &blocks {
+                receipts.extend(
+                    block
+                        .body
+                        .iter()
+                        .map(|tx| random_receipt(&mut rng, tx, Some(logs_per_receipt))),
+                );
+            }
             self.tx.insert_receipts(receipts.iter(), tx_offset)?;
 
             Ok((blocks, receipts))

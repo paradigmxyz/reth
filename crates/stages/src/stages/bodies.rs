@@ -67,7 +67,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// header, limited by the stage's batch size.
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -163,7 +163,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -456,10 +456,10 @@ mod tests {
         use reth_db::{
             cursor::DbCursorRO,
             database::Database,
-            mdbx::{Env, WriteMap},
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
+            DatabaseEnv,
         };
         use reth_interfaces::{
             p2p::{
@@ -473,6 +473,7 @@ mod tests {
                 priority::Priority,
             },
             test_utils::{
+                generators,
                 generators::{random_block_range, random_signed_tx},
                 TestConsensus,
             },
@@ -556,7 +557,8 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.checkpoint().block_number;
                 let end = input.target();
-                let blocks = random_block_range(start..=end, GENESIS_HASH, 0..2);
+                let mut rng = generators::rng();
+                let blocks = random_block_range(&mut rng, start..=end, GENESIS_HASH, 0..2);
                 self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
@@ -566,7 +568,7 @@ mod tests {
                             tx_count: progress.body.len() as u64,
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
-                            let transaction = random_signed_tx();
+                            let transaction = random_signed_tx(&mut rng);
                             tx.put::<tables::Transactions>(tx_num, transaction.into())
                         })?;
 
@@ -738,7 +740,7 @@ mod tests {
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
-            db: Arc<Env<WriteMap>>,
+            db: Arc<DatabaseEnv>,
             responses: HashMap<H256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
@@ -746,7 +748,7 @@ mod tests {
 
         impl TestBodyDownloader {
             pub(crate) fn new(
-                db: Arc<Env<WriteMap>>,
+                db: Arc<DatabaseEnv>,
                 responses: HashMap<H256, BlockBody>,
                 batch_size: u64,
             ) -> Self {

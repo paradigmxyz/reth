@@ -329,8 +329,15 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn effective_gas_price(&self) -> u128 {
-        self.get_gas_price()
+    fn gas_cost(&self) -> U256 {
+        match self {
+            MockTransaction::Legacy { gas_price, gas_limit, .. } => {
+                U256::from(*gas_limit) * U256::from(*gas_price)
+            }
+            MockTransaction::Eip1559 { max_fee_per_gas, gas_limit, .. } => {
+                U256::from(*gas_limit) * U256::from(*max_fee_per_gas)
+            }
+        }
     }
 
     fn gas_limit(&self) -> u64 {
@@ -485,7 +492,6 @@ impl MockTransactionFactory {
         MockValidTx {
             propagate: false,
             transaction_id,
-            cost: transaction.cost(),
             transaction,
             timestamp: Instant::now(),
             origin,
@@ -511,7 +517,7 @@ impl TransactionOrdering for MockOrdering {
     type Transaction = MockTransaction;
 
     fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
-        transaction.cost()
+        transaction.gas_cost()
     }
 }
 
@@ -551,7 +557,7 @@ impl MockTransactionDistribution {
 #[test]
 fn test_mock_priority() {
     let o = MockOrdering;
-    let lo = MockTransaction::eip1559();
-    let hi = lo.next().inc_value();
+    let lo = MockTransaction::eip1559().with_gas_limit(100_000);
+    let hi = lo.next().inc_price();
     assert!(o.priority(&hi) > o.priority(&lo));
 }

@@ -53,6 +53,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
+version = "0.1.0-alpha.1"
 edition = "2021"
 rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
@@ -99,7 +100,8 @@ ethers-signers = { version = "2.0.7", default-features = false }
 ethers-middleware = { version = "2.0.7", default-features = false }
 
 ## misc
-tracing = "^0.1.0"
+bytes = "1.4"
+tracing = "0.1.0"
 thiserror = "1.0.37"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
@@ -112,7 +114,7 @@ tokio = { version = "1.21", default-features = false }
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
 ## async
-async-trait = "0.1.58"
+async-trait = "0.1.68"
 futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"

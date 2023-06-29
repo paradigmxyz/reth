@@ -8,7 +8,7 @@ use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{capability::Capability, DisconnectReason, HelloBuilder};
 use reth_primitives::PeerId;
-use reth_provider::{test_utils::NoopProvider, BlockProvider, HeaderProvider};
+use reth_provider::{test_utils::NoopProvider, BlockReader, HeaderProvider};
 use secp256k1::SecretKey;
 use std::{
     fmt,
@@ -34,7 +34,7 @@ pub struct Testnet<C> {
 
 impl<C> Testnet<C>
 where
-    C: BlockProvider + HeaderProvider + Clone,
+    C: BlockReader + HeaderProvider + Clone,
 {
     /// Same as [`Self::try_create_with`] but panics on error
     pub async fn create_with(num_peers: usize, provider: C) -> Self {
@@ -122,7 +122,7 @@ where
 
 impl<C> Testnet<C>
 where
-    C: BlockProvider + HeaderProvider + Unpin + 'static,
+    C: BlockReader + HeaderProvider + Unpin + 'static,
 {
     /// Spawns the testnet to a separate task
     pub fn spawn(self) -> TestnetHandle<C> {
@@ -176,7 +176,7 @@ impl<C> fmt::Debug for Testnet<C> {
 
 impl<C> Future for Testnet<C>
 where
-    C: BlockProvider + HeaderProvider + Unpin,
+    C: BlockReader + HeaderProvider + Unpin,
 {
     type Output = ();
 
@@ -220,7 +220,7 @@ pub struct Peer<C> {
 
 impl<C> Peer<C>
 where
-    C: BlockProvider + HeaderProvider + Clone,
+    C: BlockReader + HeaderProvider + Clone,
 {
     /// Returns the number of connected peers.
     pub fn num_peers(&self) -> usize {
@@ -249,7 +249,7 @@ where
 
 impl<C> Future for Peer<C>
 where
-    C: BlockProvider + HeaderProvider + Unpin,
+    C: BlockReader + HeaderProvider + Unpin,
 {
     type Output = ();
 
@@ -275,7 +275,7 @@ pub struct PeerConfig<C = NoopProvider> {
 
 impl<C> PeerConfig<C>
 where
-    C: BlockProvider + HeaderProvider + Clone,
+    C: BlockReader + HeaderProvider + Clone,
 {
     /// Launches the network and returns the [Peer] that manages it
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
