@@ -1,4 +1,4 @@
-use crate::routine::MetricsListener;
+use crate::listener::MetricsListener;
 use metrics::Gauge;
 use reth_metrics_derive::Metrics;
 use reth_primitives::{
