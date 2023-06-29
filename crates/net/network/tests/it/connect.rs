@@ -309,6 +309,7 @@ async fn test_connect_to_trusted_peer() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_node_id_blacklist() {
     reth_tracing::init_test_tracing();
