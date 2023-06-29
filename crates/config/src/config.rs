@@ -5,6 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
+use reth_primitives::PruneMode;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -16,6 +17,9 @@ pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
+    /// Configuration for pruning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prune: Option<PruneConfig>,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
@@ -274,6 +278,43 @@ impl Default for IndexHistoryConfig {
     fn default() -> Self {
         Self { commit_threshold: 100_000 }
     }
+}
+
+/// Pruning configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct PruneConfig {
+    /// Minimum pruning interval measured in blocks.
+    pub block_interval: u64,
+    /// Pruning configuration for every part of the data that can be pruned.
+    pub parts: PruneParts,
+}
+
+impl Default for PruneConfig {
+    fn default() -> Self {
+        Self { block_interval: 10, parts: PruneParts::default() }
+    }
+}
+
+/// Pruning configuration for every part of the data that can be pruned.
+#[derive(Debug, Clone, Default, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct PruneParts {
+    /// Sender Recovery pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_recovery: Option<PruneMode>,
+    /// Transaction Lookup pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_lookup: Option<PruneMode>,
+    /// Receipts pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipts: Option<PruneMode>,
+    /// Account History pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_history: Option<PruneMode>,
+    /// Storage History pruning configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_history: Option<PruneMode>,
 }
 
 #[cfg(test)]
