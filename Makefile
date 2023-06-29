@@ -1,4 +1,5 @@
 # Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
+.DEFAULT_GOAL := help
 
 GIT_TAG ?= $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
@@ -31,10 +32,16 @@ EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
 # The docker image name
 DOCKER_IMAGE_NAME ?= ghcr.io/paradigmxyz/reth
 
-# Builds and installs the reth binary.
-#
-# The binary will most likely be in `~/.cargo/bin`
-install:
+##@ Help
+
+.PHONY: help
+help: ## Display this help.
+	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Build
+
+.PHONY: install
+install: ## Build and install the reth binary under `~/.cargo/bin`.
 	cargo install --path bin/reth --bin reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
@@ -82,14 +89,12 @@ define tarball_release_binary
 		rm $(2)
 endef
 
-# Create a series of `.tar.gz` files in the BIN_DIR directory, each containing
-# a `reth` binary for a different target.
-#
 # The current git tag will be used as the version in the output file names. You
 # will likely need to use `git tag` and create a semver tag (e.g., `v0.2.3`).
 #
 # Note: This excludes macOS tarballs because of SDK licensing issues.
-build-release-tarballs:
+.PHONY: build-release-tarballs
+build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR directory, each containing a `reth` binary for a different target.
 	[ -d $(BIN_DIR) ] || mkdir -p $(BIN_DIR)
 	$(MAKE) build-x86_64-unknown-linux-gnu
 	$(call tarball_release_binary,"x86_64-unknown-linux-gnu","reth","")
@@ -97,6 +102,8 @@ build-release-tarballs:
 	$(call tarball_release_binary,"aarch64-unknown-linux-gnu","reth","")
 	$(MAKE) build-x86_64-pc-windows-gnu
 	$(call tarball_release_binary,"x86_64-pc-windows-gnu","reth.exe","")
+
+##@ Test
 
 # Downloads and unpacks Ethereum Foundation tests in the `$(EF_TESTS_DIR)` directory.
 #
@@ -107,26 +114,26 @@ $(EF_TESTS_DIR):
 	tar -xzf ethereum-tests.tar.gz --strip-components=1 -C $(EF_TESTS_DIR)
 	rm ethereum-tests.tar.gz
 
-# Runs Ethereum Foundation tests
-ef-tests: $(EF_TESTS_DIR)
+.PHONY: ef-tests
+ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
 	cargo nextest run -p ef-tests --features ef-tests
 
-# Builds and pushes a cross-arch Docker image tagged with the latest git tag and `latest`
-#
+##@ Docker
+
 # Note: This requires a buildx builder with emulation support. For example:
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
-docker-build-latest:
+.PHONY: docker-build-latest
+docker-build-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
 	$(call build_docker_image,$(GIT_TAG),latest)
 
-# Builds and pushes cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`
-#
 # Note: This requires a buildx builder with emulation support. For example:
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --name cross-builder`
-docker-build-nightly:
+.PHONY: docker-build-nightly
+docker-build-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
 	$(call build_docker_image,$(GIT_TAG)-nightly,latest-nightly)
 
 # Create a cross-arch Docker image with the given tags and push it
@@ -147,15 +154,16 @@ define build_docker_image
 		--push
 endef
 
-# Performs a `cargo` clean and removes the binary and test vectors directories
-clean:
+##@ Other
+
+.PHONY: clean
+clean: ## Perform a `cargo` clean and remove the binary and test vectors directories.
 	cargo clean
 	rm -rf $(BIN_DIR)
 	rm -rf $(EF_TESTS_DIR)
 
-# Compile MDBX debugging tools
 .PHONY: db-tools
-db-tools:
+db-tools: ## Compile MDBX debugging tools.
 	@echo "Building MDBX debugging tools..."
     # `IOARENA=1` silences benchmarking info message that is printed to stderr
 	@$(MAKE) -C $(MDBX_PATH) IOARENA=1 tools > /dev/null

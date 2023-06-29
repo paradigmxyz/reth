@@ -1,7 +1,6 @@
 use crate::{
-    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256,
+    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64,
 };
-use ethers_core::types::{BlockNumber as EthersBlockNumber, U64};
 use fixed_hash::rustc_hex::FromHexError;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
@@ -561,19 +560,6 @@ impl BlockNumberOrTag {
 impl From<u64> for BlockNumberOrTag {
     fn from(num: u64) -> Self {
         BlockNumberOrTag::Number(num)
-    }
-}
-
-impl From<EthersBlockNumber> for BlockNumberOrTag {
-    fn from(value: EthersBlockNumber) -> Self {
-        match value {
-            EthersBlockNumber::Latest => BlockNumberOrTag::Latest,
-            EthersBlockNumber::Finalized => BlockNumberOrTag::Finalized,
-            EthersBlockNumber::Safe => BlockNumberOrTag::Safe,
-            EthersBlockNumber::Earliest => BlockNumberOrTag::Earliest,
-            EthersBlockNumber::Pending => BlockNumberOrTag::Pending,
-            EthersBlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
-        }
     }
 }
 

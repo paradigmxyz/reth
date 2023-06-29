@@ -39,6 +39,7 @@ reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-rlp = { workspace = true }
 reth-trie = { path = "../../trie", features = ["test-utils"] }
 parking_lot = "0.12"
+tempfile = "3.3"
 
 [features]
 test-utils = ["reth-rlp"]

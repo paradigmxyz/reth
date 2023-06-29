@@ -18,7 +18,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
 
     async fn execute(
         &mut self,
-        _provider: &mut DatabaseProviderRW<'_, &DB>,
+        _provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
@@ -26,7 +26,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
 
     async fn unwind(
         &mut self,
-        _provider: &mut DatabaseProviderRW<'_, &DB>,
+        _provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })

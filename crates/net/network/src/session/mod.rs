@@ -441,7 +441,7 @@ impl SessionManager {
                     remote_capabilities: Arc::clone(&capabilities),
                     session_id,
                     commands_rx: ReceiverStream::new(commands_rx),
-                    to_session: self.active_session_tx.clone(),
+                    to_session_manager: self.active_session_tx.clone(),
                     pending_message_to_session: None,
                     internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),

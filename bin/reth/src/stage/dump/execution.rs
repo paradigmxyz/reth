@@ -95,13 +95,13 @@ async fn unwind_and_copy<DB: Database>(
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
     let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
-    let mut provider = factory.provider_rw()?;
+    let provider = factory.provider_rw()?;
 
     let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(db_tool.chain.clone()));
 
     exec_stage
         .unwind(
-            &mut provider,
+            &provider,
             UnwindInput {
                 unwind_to: from,
                 checkpoint: StageCheckpoint::new(tip_block_number),
@@ -130,12 +130,12 @@ async fn dry_run<DB: Database>(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let factory = ProviderFactory::new(&output_db, chain.clone());
-    let mut provider = factory.provider_rw()?;
+    let provider = factory.provider_rw()?;
     let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(chain.clone()));
 
     exec_stage
         .execute(
-            &mut provider,
+            &provider,
             reth_stages::ExecInput {
                 target: Some(to),
                 checkpoint: Some(StageCheckpoint::new(from)),
