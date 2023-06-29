@@ -6,7 +6,8 @@ use crate::{
         headers::client::{HeadersClient, SingleHeaderRequest},
     },
 };
-use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader, H256, HeadersDirection, WithPeerId};
+use futures::Stream;
+use reth_primitives::{BlockBody, Header, HeadersDirection, SealedBlock, SealedHeader, H256, WithPeerId};
 use std::{
     cmp::Reverse,
     fmt::Debug,
@@ -495,6 +496,62 @@ where
                 return Poll::Ready(res)
             }
         }
+    }
+}
+
+/// A type that buffers the result of a range request so we can return it as a `Stream`.
+struct FullBlockRangeStream<Client>
+where
+    Client: BodiesClient + HeadersClient,
+{
+    /// The inner [FetchFullBlockRangeFuture] that is polled.
+    inner: FetchFullBlockRangeFuture<Client>,
+    /// The blocks that have been received so far.
+    ///
+    /// If this is `None` then the request is still in progress. If the vec is empty, then all of
+    /// the response values have been consumed.
+    blocks: Option<Vec<SealedBlock>>,
+}
+
+impl<Client> Stream for FullBlockRangeStream<Client>
+where
+    Client: BodiesClient + HeadersClient + Unpin + 'static,
+{
+    type Item = SealedBlock;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        // If all blocks have been consumed, then return `None`.
+        if let Some(blocks) = &mut this.blocks {
+            if blocks.is_empty() {
+                // Stream is finished
+                return Poll::Ready(None)
+            }
+
+            // return the next block if it's ready
+            //
+            // pop the first block
+            // TODO: make sure this is the right order
+            return Poll::Ready(blocks.pop())
+        }
+
+        // poll the inner future if the blocks are not yet ready
+        let mut blocks = ready!(Pin::new(&mut this.inner).poll(cx));
+
+        // the blocks are returned in descending order, reverse so we can just start
+        // popping
+        // TODO: make sure this is the right order
+        blocks.reverse();
+
+        // pop the first block
+        let first_result = blocks.pop();
+
+        // if the inner future is ready, then we can return the blocks
+        this.blocks = Some(blocks);
+
+        // return the first block
+        Poll::Ready(first_result)
     }
 }
 
