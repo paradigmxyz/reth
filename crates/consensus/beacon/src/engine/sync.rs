@@ -270,7 +270,7 @@ where
                 }
             }
 
-            // advance all requests
+            // advance all full block requests
             for idx in (0..self.inflight_full_block_requests.len()).rev() {
                 let mut request = self.inflight_full_block_requests.swap_remove(idx);
                 if let Poll::Ready(block) = request.poll_unpin(cx) {
@@ -278,6 +278,17 @@ where
                 } else {
                     // still pending
                     self.inflight_full_block_requests.push(request);
+                }
+            }
+
+            // advance all full block range requests
+            for idx in (0..self.inflight_block_range_requests.len()).rev() {
+                let mut request = self.inflight_block_range_requests.swap_remove(idx);
+                if let Poll::Ready(blocks) = request.poll_unpin(cx) {
+                    self.queued_events.push_back(EngineSyncEvent::FetchedBlocks(blocks));
+                } else {
+                    // still pending
+                    self.inflight_block_range_requests.push(request);
                 }
             }
 
@@ -296,6 +307,10 @@ where
 pub(crate) enum EngineSyncEvent {
     /// A full block has been downloaded from the network.
     FetchedFullBlock(SealedBlock),
+    /// A range of blocks has been downloaded from the network.
+    /// TODO: dedup with FetchedFullBlock? we may not need it since we can request now with
+    /// count=1, and it will _also_ send both the headers and bodies response right away.
+    FetchedBlocks(Vec<SealedBlock>),
     /// Pipeline started syncing
     ///
     /// This is none if the pipeline is triggered without a specific target.

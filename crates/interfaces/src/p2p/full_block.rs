@@ -69,6 +69,11 @@ where
     ) -> FetchFullBlockRangeFuture<Client> {
         let client = self.client.clone();
 
+        // Optimization: if we only want one block, we don't need to wait for the headers request
+        // to complete, and can send the block bodies request right away.
+        let bodies_request =
+            if count == 1 { None } else { Some(client.get_block_bodies(vec![hash])) };
+
         FetchFullBlockRangeFuture {
             hash,
             count,
@@ -78,7 +83,7 @@ where
                     limit: count,
                     direction: HeadersDirection::Falling,
                 })),
-                bodies: None,
+                bodies: bodies_request,
             },
             client,
             headers: None,
@@ -366,6 +371,12 @@ where
                 .collect::<Vec<_>>(),
         )
     }
+
+    /// Returns whether or not a bodies request has been started, by making sure there is no
+    /// pending request, and that there is no buffered response.
+    fn has_bodies_request_started(&self) -> bool {
+        self.request.bodies.is_none() && self.bodies.is_none()
+    }
 }
 
 impl<Client> Future for FetchFullBlockRangeFuture<Client>
@@ -413,9 +424,11 @@ where
                                     let hashes =
                                         headers.iter().map(|h| h.hash()).collect::<Vec<_>>();
 
-                                    // set the actual request
-                                    this.request.bodies =
-                                        Some(this.client.get_block_bodies(hashes));
+                                    // set the actual request if it hasn't been started yet
+                                    if !this.has_bodies_request_started() {
+                                        this.request.bodies =
+                                            Some(this.client.get_block_bodies(hashes));
+                                    }
 
                                     // set the headers response
                                     this.headers = Some(headers);
