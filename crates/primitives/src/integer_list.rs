@@ -3,7 +3,7 @@ use serde::{
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{fmt, ops::Deref};
+use std::{cmp::Ordering, fmt, ops::Deref};
 use sucds::{EliasFano, Searial};
 
 /// Uses EliasFano to hold a list of integers. It provides really good compression with the
@@ -68,6 +68,37 @@ impl IntegerList {
     /// Deserializes a sequence of bytes into a proper [`IntegerList`].
     pub fn from_bytes(data: &[u8]) -> Result<Self, EliasFanoError> {
         Ok(Self(EliasFano::deserialize_from(data).map_err(|_| EliasFanoError::FailedDeserialize)?))
+    }
+
+    /// Iterates over two lists of integers and creates an intersection.
+    ///
+    /// Returns `None` if the resulting list is empty.
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        let mut result = Vec::with_capacity(self.len().min(other.len()));
+
+        let (mut this_iter, mut other_iter) = (self.iter(0), other.iter(0));
+        let (mut maybe_this_int, mut maybe_other_int) = (this_iter.next(), other_iter.next());
+        while let (Some(this_int), Some(other_int)) = (maybe_this_int, maybe_other_int) {
+            match this_int.cmp(&other_int) {
+                Ordering::Equal => {
+                    result.push(this_int);
+                    maybe_this_int = this_iter.next();
+                    maybe_other_int = other_iter.next();
+                }
+                Ordering::Less => {
+                    maybe_this_int = this_iter.next();
+                }
+                Ordering::Greater => {
+                    maybe_other_int = other_iter.next();
+                }
+            };
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            Some(Self::new_pre_sorted(result))
+        }
     }
 }
 
@@ -171,6 +202,27 @@ mod test {
 
         let blist = ef_list.to_bytes();
         assert_eq!(IntegerList::from_bytes(&blist).unwrap(), ef_list)
+    }
+
+    #[test]
+    fn test_integer_list_intersection() {
+        // Empty intersection of non-empty lists
+        let a = IntegerList::new([1, 2, 3]).unwrap();
+        let b = IntegerList::new([4, 5, 6]).unwrap();
+        assert_eq!(a.intersection(&b), None);
+
+        let a = IntegerList::new([1]).unwrap();
+        let b = IntegerList::new([1]).unwrap();
+        assert_eq!(a.intersection(&b), Some(a));
+
+        let a = IntegerList::new([2, 3, 4]).unwrap();
+        let b = IntegerList::new([3, 4, 5]).unwrap();
+        assert_eq!(a.intersection(&b), Some(IntegerList::new([3, 4]).unwrap()));
+
+        // Intersection of even numbers
+        let a = IntegerList::new((1..=50).map(|num| num * 2).collect::<Vec<usize>>()).unwrap();
+        let b = IntegerList::new((0..=100).collect::<Vec<usize>>()).unwrap();
+        assert_eq!(a.intersection(&b), Some(a));
     }
 
     #[test]

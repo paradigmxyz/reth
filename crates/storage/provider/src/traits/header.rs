@@ -34,6 +34,11 @@ pub trait HeaderProvider: Send + Sync {
     /// Get headers in range of block numbers
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>>;
 
+    /// Get headers by the list of block numbers.
+    ///
+    /// NOTE: This method is more performant with sorted block numbers provided as an input.
+    fn headers(&self, numbers: &[BlockNumber]) -> Result<Vec<Option<Header>>>;
+
     /// Get headers in range of block numbers
     fn sealed_headers_range(
         &self,

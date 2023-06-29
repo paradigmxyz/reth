@@ -475,6 +475,10 @@ mod tests {
             Ok(vec![])
         }
 
+        fn headers(&self, _numbers: &[BlockNumber]) -> Result<Vec<Option<Header>>> {
+            Ok(vec![])
+        }
+
         fn sealed_headers_range(
             &self,
             _range: impl RangeBounds<BlockNumber>,

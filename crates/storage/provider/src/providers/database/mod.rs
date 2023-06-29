@@ -145,6 +145,10 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         self.provider()?.headers_range(range)
     }
 
+    fn headers(&self, numbers: &[BlockNumber]) -> Result<Vec<Option<Header>>> {
+        self.provider()?.headers(numbers)
+    }
+
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,

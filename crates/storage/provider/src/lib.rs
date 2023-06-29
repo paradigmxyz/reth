@@ -25,10 +25,10 @@ pub use traits::{
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
-    ExecutorFactory, HashingWriter, HeaderProvider, HistoryWriter, PostStateDataProvider,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StageCheckpointWriter,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageReader,
-    TransactionsProvider, WithdrawalsProvider,
+    ExecutorFactory, HashingWriter, HeaderProvider, HistoryWriter, LogIndexProvider,
+    PostStateDataProvider, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StageCheckpointWriter, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, StorageReader, TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.

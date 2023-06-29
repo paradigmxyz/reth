@@ -1,20 +1,20 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    EvmEnvProvider, HeaderProvider, PostState, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionsProvider,
-    WithdrawalsProvider,
+    EvmEnvProvider, HeaderProvider, LogIndexProvider, PostState, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
-    ChainInfo, Header, Receipt, SealedBlock, SealedHeader, StorageKey, StorageValue,
+    ChainInfo, Header, IntegerList, Receipt, SealedBlock, SealedHeader, StorageKey, StorageValue,
     TransactionMeta, TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY, U256,
 };
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
-use std::ops::RangeBounds;
+use std::ops::{RangeBounds, RangeInclusive};
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug, Clone, Default, Copy)]
@@ -185,6 +185,24 @@ impl ReceiptProvider for NoopProvider {
 
 impl ReceiptProviderIdExt for NoopProvider {}
 
+impl LogIndexProvider for NoopProvider {
+    fn log_address_indices(
+        &self,
+        _address: Address,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> Result<Option<IntegerList>> {
+        Ok(None)
+    }
+
+    fn log_topic_indices(
+        &self,
+        _topic: H256,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> Result<Option<IntegerList>> {
+        Ok(None)
+    }
+}
+
 impl HeaderProvider for NoopProvider {
     fn header(&self, _block_hash: &BlockHash) -> Result<Option<Header>> {
         Ok(None)
@@ -203,6 +221,10 @@ impl HeaderProvider for NoopProvider {
     }
 
     fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+        Ok(vec![])
+    }
+
+    fn headers(&self, _numbers: &[BlockNumber]) -> Result<Vec<Option<Header>>> {
         Ok(vec![])
     }
 
