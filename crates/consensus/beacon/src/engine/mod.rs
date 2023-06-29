@@ -824,6 +824,7 @@ where
             Err(status) => return Ok(status),
         };
         let block_hash = block.hash();
+        let block_num_hash = block.num_hash();
 
         // now check the block itself
         if let Some(status) = self.check_invalid_ancestor_with_head(block.parent_hash, block.hash) {
@@ -841,6 +842,11 @@ where
         let status = match res {
             Ok(status) => {
                 if status.is_valid() {
+                    if let Some(target) = self.forkchoice_state_tracker.sync_target_state() {
+                        if block_hash == target.head_block_hash {
+                            self.try_make_sync_target_canonical(block_num_hash);
+                        }
+                    }
                     // block was successfully inserted, so we can cancel the full block request, if
                     // any exists
                     self.sync.cancel_full_block_request(block_hash);
