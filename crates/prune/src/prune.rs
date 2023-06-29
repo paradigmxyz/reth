@@ -10,11 +10,6 @@ use std::{
 };
 use tracing::debug;
 
-// TODO(alexey): use config field from https://github.com/paradigmxyz/reth/pull/3341
-/// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed, pruned,
-/// when the chain advances by the specified number of blocks.
-pub const MIN_PRUNE_BLOCK_INTERVAL: u64 = 5;
-
 /// Pruning routine. Implements [Future] where the pruning logic happens.
 pub struct Pruner<St, Client> {
     /// Stream of canonical state notifications. Pruning is triggered by new incoming
@@ -23,11 +18,14 @@ pub struct Pruner<St, Client> {
     /// Database interaction client.
     #[allow(dead_code)]
     client: Client,
+    /// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed,
+    /// pruned, when the chain advances by the specified number of blocks.
+    min_block_interval: u64,
     /// Maximum prune depth. Used to determine the pruning target for parts that are needed during
     /// the reorg, e.g. changesets.
     #[allow(dead_code)]
     max_prune_depth: u64,
-    /// Last pruned block number. Used in conjunction with [MIN_PRUNE_BLOCK_INTERVAL] to determine
+    /// Last pruned block number. Used in conjunction with `min_block_interval` to determine
     /// when the pruning needs to be initiated.
     last_pruned_block_number: Option<BlockNumber>,
 }
@@ -38,14 +36,25 @@ where
     Client: Send + Unpin + 'static,
 {
     /// Creates a new [Pruner].
-    pub fn new(canon_state_stream: St, client: Client, max_prune_depth: u64) -> Self {
-        Self { canon_state_stream, client, max_prune_depth, last_pruned_block_number: None }
+    pub fn new(
+        canon_state_stream: St,
+        client: Client,
+        min_block_interval: u64,
+        max_prune_depth: u64,
+    ) -> Self {
+        Self {
+            canon_state_stream,
+            client,
+            min_block_interval,
+            max_prune_depth,
+            last_pruned_block_number: None,
+        }
     }
 }
 
 /// Pruning logic. The behaviour is following:
 /// 1. Listen to new blocks via [CanonStateNotification].
-/// 2. Check new block height according to [MIN_PRUNE_BLOCK_INTERVAL].
+/// 2. Check new block height according to `min_block_interval`.
 /// 3. Prune.
 impl<St, Client> Future for Pruner<St, Client>
 where
@@ -70,7 +79,7 @@ where
         // block number. If that's the case, no pruning is needed as outdated data is also
         // reverted.
         if this.last_pruned_block_number.map_or(true, |last_pruned_block_number| {
-            tip.number.saturating_sub(last_pruned_block_number) >= MIN_PRUNE_BLOCK_INTERVAL
+            tip.number.saturating_sub(last_pruned_block_number) >= this.min_block_interval
         }) {
             debug!(
                 target: "prune",
@@ -89,7 +98,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{prune::MIN_PRUNE_BLOCK_INTERVAL, Pruner};
+    use crate::Pruner;
     use futures_util::FutureExt;
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{
@@ -102,7 +111,7 @@ mod tests {
     async fn pruner_respects_last_pruned_block_number() {
         let mut canon_state_stream = TestCanonStateSubscriptions::default();
         let mut pruner =
-            Pruner::new(canon_state_stream.canonical_state_stream(), NoopProvider::default(), 0);
+            Pruner::new(canon_state_stream.canonical_state_stream(), NoopProvider::default(), 5, 0);
 
         // Last pruned block number is empty on initialization
         assert_eq!(pruner.last_pruned_block_number, None);
@@ -125,7 +134,7 @@ mod tests {
         assert_eq!(pruner.last_pruned_block_number, Some(first_block_number));
 
         let mut second_block = SealedBlockWithSenders::default();
-        second_block.block.header.number = first_block_number + MIN_PRUNE_BLOCK_INTERVAL;
+        second_block.block.header.number = first_block_number + pruner.min_block_interval;
         let second_block_number = second_block.number;
         chain.blocks.insert(second_block_number, second_block);
         canon_state_stream.add_next_commit(Arc::new(chain.clone()));
@@ -137,7 +146,7 @@ mod tests {
         .await;
 
         // Last pruned block number is updated because delta is larger than
-        // `MIN_PRUNE_BLOCK_INTERVAL`
+        // min block interval
         assert_eq!(pruner.last_pruned_block_number, Some(second_block_number));
 
         let mut third_block = SealedBlockWithSenders::default();
@@ -152,7 +161,7 @@ mod tests {
         .await;
 
         // Last pruned block number is not updated because delta is smaller than
-        // `MIN_PRUNE_BLOCK_INTERVAL`
+        // min block interval
         assert_eq!(pruner.last_pruned_block_number, Some(second_block_number));
     }
 }
