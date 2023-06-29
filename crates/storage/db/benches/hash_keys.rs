@@ -12,7 +12,6 @@ use proptest::{
 };
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    mdbx::Env,
     TxHashNumber,
 };
 use std::{collections::HashSet, time::Instant};

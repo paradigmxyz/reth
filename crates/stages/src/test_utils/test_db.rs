@@ -1,7 +1,6 @@
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    mdbx::{tx::Tx, Env, EnvKind, WriteMap, RO, RW},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
     tables,
@@ -71,9 +70,9 @@ impl TestTransaction {
     }
 
     /// Invoke a callback with transaction committing it afterwards
-    pub fn commit<F>(&self, f: F) -> Result<(), DbError>
+    pub fn commit<'a, TX: DbTxMut<'a> + DbTx<'a>, F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
+        F: FnOnce(&'a TX) -> Result<(), DbError>,
     {
         let mut tx = self.inner_rw();
         f(tx.tx_ref())?;
@@ -82,9 +81,9 @@ impl TestTransaction {
     }
 
     /// Invoke a callback with a read transaction
-    pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
+    pub fn query<'a, TX: DbTx<'a>, F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&Tx<'_, RO, WriteMap>) -> Result<R, DbError>,
+        F: FnOnce(&'a TX) -> Result<R, DbError>,
     {
         f(self.inner().tx_ref())
     }
@@ -197,7 +196,10 @@ impl TestTransaction {
     }
 
     /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
-    fn insert_header(tx: &Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
+    fn insert_header<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+        tx: &'a TX,
+        header: &SealedHeader,
+    ) -> Result<(), DbError> {
         tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
         tx.put::<tables::Headers>(header.number, header.clone().unseal())
