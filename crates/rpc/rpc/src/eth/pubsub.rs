@@ -4,7 +4,7 @@ use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
 use reth_primitives::TxHash;
-use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider};
+use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::FilteredParams;
 
@@ -67,7 +67,7 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
 impl<Provider, Pool, Events, Network> EthPubSubApiServer
     for EthPubSub<Provider, Pool, Events, Network>
 where
-    Provider: BlockProvider + EvmEnvProvider + Clone + 'static,
+    Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
@@ -97,7 +97,7 @@ async fn handle_accepted<Provider, Pool, Events, Network>(
     params: Option<Params>,
 ) -> Result<(), jsonrpsee::core::Error>
 where
-    Provider: BlockProvider + EvmEnvProvider + Clone + 'static,
+    Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
@@ -217,7 +217,7 @@ struct EthPubSubInner<Provider, Pool, Events, Network> {
 
 impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
 where
-    Provider: BlockProvider + 'static,
+    Provider: BlockReader + 'static,
 {
     /// Returns the current sync status for the `syncing` subscription
     async fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
@@ -248,7 +248,7 @@ where
 
 impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Network>
 where
-    Provider: BlockProvider + EvmEnvProvider + 'static,
+    Provider: BlockReader + EvmEnvProvider + 'static,
     Events: CanonStateSubscriptions + 'static,
     Network: NetworkInfo + 'static,
     Pool: 'static,

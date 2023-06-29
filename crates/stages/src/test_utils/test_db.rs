@@ -10,7 +10,7 @@ use reth_db::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    DatabaseError as DbError,
+    DatabaseEnv, DatabaseError as DbError,
 };
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256,
@@ -35,9 +35,9 @@ use std::{
 #[derive(Debug)]
 pub struct TestTransaction {
     /// WriteMap DB
-    pub tx: Arc<Env<WriteMap>>,
+    pub tx: Arc<DatabaseEnv>,
     pub path: Option<PathBuf>,
-    pub factory: ProviderFactory<Arc<Env<WriteMap>>>,
+    pub factory: ProviderFactory<Arc<DatabaseEnv>>,
 }
 
 impl Default for TestTransaction {
@@ -59,27 +59,27 @@ impl TestTransaction {
     }
 
     /// Return a database wrapped in [DatabaseProviderRW].
-    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<Env<WriteMap>>> {
+    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<DatabaseEnv>> {
         self.factory.provider_rw().expect("failed to create db container")
     }
 
     /// Return a database wrapped in [DatabaseProviderRO].
-    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<Env<WriteMap>>> {
+    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<DatabaseEnv>> {
         self.factory.provider().expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
-    pub fn inner_raw(&self) -> Arc<Env<WriteMap>> {
+    pub fn inner_raw(&self) -> Arc<DatabaseEnv> {
         self.tx.clone()
     }
 
     /// Invoke a callback with transaction committing it afterwards
     pub fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
+        F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
         let mut tx = self.inner_rw();
-        f(tx.tx_mut())?;
+        f(tx.tx_ref())?;
         tx.commit().expect("failed to commit");
         Ok(())
     }
@@ -200,7 +200,7 @@ impl TestTransaction {
     }
 
     /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
-    fn insert_header(tx: &mut Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
+    fn insert_header(tx: &Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
         tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
         tx.put::<tables::Headers>(header.number, header.clone().unseal())

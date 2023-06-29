@@ -19,9 +19,11 @@ pub fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
     let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
-    if let Some((layer, _guard)) = opt.logs.layer()? {
+    let _guard = opt.logs.layer()?.map(|(layer, guard)| {
         layers.push(layer);
-    }
+        guard
+    });
+
     reth_tracing::init(layers);
 
     let runner = CliRunner::default();

@@ -10,10 +10,10 @@ use crate::{
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
+use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader};
-use reth_staged_sync::utils::init::init_db;
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
@@ -127,7 +127,12 @@ impl Command {
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::initialize_with_db_metrics(listen_addr, Arc::clone(&db)).await?;
+            prometheus_exporter::initialize(
+                listen_addr,
+                Arc::clone(&db),
+                metrics_process::Collector::default(),
+            )
+            .await?;
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
@@ -229,7 +234,7 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&mut provider_rw, unwind).await?;
+                let unwind_output = unwind_stage.unwind(&provider_rw, unwind).await?;
                 unwind.checkpoint = unwind_output.checkpoint;
 
                 if self.commit {
@@ -245,7 +250,7 @@ impl Command {
         };
 
         while let ExecOutput { checkpoint: stage_progress, done: false } =
-            exec_stage.execute(&mut provider_rw, input).await?
+            exec_stage.execute(&provider_rw, input).await?
         {
             input.checkpoint = Some(stage_progress);
 

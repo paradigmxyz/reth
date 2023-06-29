@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs)]
 #![deny(
     unused_must_use,
@@ -91,11 +97,12 @@ use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
+use traits::TransactionPoolExt;
 
 pub use crate::{
     config::PoolConfig,
     error::PoolResult,
-    ordering::{CostOrdering, TransactionOrdering},
+    ordering::{GasCostOrdering, TransactionOrdering},
     pool::TransactionEvents,
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
@@ -172,13 +179,6 @@ where
         self.inner().config()
     }
 
-    /// Sets the current block info for the pool.
-    #[instrument(skip(self), target = "txpool")]
-    pub fn set_block_info(&self, info: BlockInfo) {
-        trace!(target: "txpool", "updating pool block info");
-        self.pool.set_block_info(info)
-    }
-
     /// Returns future that validates all transaction in the given iterator.
     async fn validate_all(
         &self,
@@ -220,17 +220,17 @@ where
 }
 
 impl<Client>
-    Pool<EthTransactionValidator<Client, PooledTransaction>, CostOrdering<PooledTransaction>>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, GasCostOrdering<PooledTransaction>>
 where
     Client: StateProviderFactory + Clone + 'static,
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
-    /// [PooledTransaction]s and ords via [CostOrdering]
+    /// [PooledTransaction]s and ords via [GasCostOrdering]
     pub fn eth_pool(
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, CostOrdering::default(), config)
+        Self::new(validator, GasCostOrdering::default(), config)
     }
 }
 
@@ -249,10 +249,6 @@ where
 
     fn block_info(&self) -> BlockInfo {
         self.pool.block_info()
-    }
-
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
-        self.pool.on_canonical_state_change(update);
     }
 
     async fn add_transaction_and_subscribe(
@@ -360,6 +356,22 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+}
+
+impl<V: TransactionValidator, T: TransactionOrdering> TransactionPoolExt for Pool<V, T>
+where
+    V: TransactionValidator,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+{
+    #[instrument(skip(self), target = "txpool")]
+    fn set_block_info(&self, info: BlockInfo) {
+        trace!(target: "txpool", "updating pool block info");
+        self.pool.set_block_info(info)
+    }
+
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate) {
+        self.pool.on_canonical_state_change(update);
     }
 }
 

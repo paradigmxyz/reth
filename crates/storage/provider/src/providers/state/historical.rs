@@ -1,5 +1,5 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashProvider, PostState,
+    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, PostState,
     ProviderError, StateProvider, StateRootProvider,
 };
 use reth_db::{
@@ -122,7 +122,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for HistoricalStateProviderRef<'a, 'b, TX> {
+impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)

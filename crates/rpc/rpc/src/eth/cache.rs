@@ -3,7 +3,7 @@
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, H256};
-use reth_provider::{BlockProvider, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
 use schnellru::{ByMemoryUsage, Limiter, LruMap};
@@ -121,7 +121,7 @@ impl EthStateCache {
     /// See also [Self::spawn_with]
     pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
     where
-        Provider: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default())
     }
@@ -136,7 +136,7 @@ impl EthStateCache {
         executor: Tasks,
     ) -> Self
     where
-        Provider: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+        Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
         let EthStateCacheConfig { max_block_bytes, max_receipt_bytes, max_env_bytes } = config;
@@ -179,6 +179,19 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
+    /// Fetches both transactions and receipts for the given block hash.
+    pub(crate) async fn get_transactions_and_receipts(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<(Vec<TransactionSigned>, Vec<Receipt>)>> {
+        let transactions = self.get_block_transactions(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (transactions, receipts) = futures::try_join!(transactions, receipts)?;
+
+        Ok(transactions.zip(receipts))
+    }
+
     /// Requests the [Receipt] for the block hash
     ///
     /// Returns `None` if the block was not found.
@@ -186,6 +199,19 @@ impl EthStateCache {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
+
+    /// Fetches both receipts and block for the given block hash.
+    pub(crate) async fn get_block_and_receipts(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<(SealedBlock, Vec<Receipt>)>> {
+        let block = self.get_sealed_block(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (block, receipts) = futures::try_join!(block, receipts)?;
+
+        Ok(block.zip(receipts))
     }
 
     /// Requests the evm env config for the block hash.
@@ -244,7 +270,7 @@ pub(crate) struct EthStateCacheService<
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     fn on_new_block(&mut self, block_hash: H256, res: Result<Option<Block>>) {
@@ -287,7 +313,7 @@ where
 
 impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     type Output = ();

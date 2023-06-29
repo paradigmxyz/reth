@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 #![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
@@ -20,7 +26,7 @@ use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Header, SealedBlock,
     SealedHeader, H256, U256,
 };
-use reth_provider::{BlockProviderIdExt, CanonStateNotificationSender};
+use reth_provider::{BlockReaderIdExt, CanonStateNotificationSender};
 use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -90,7 +96,7 @@ pub struct AutoSealBuilder<Client, Pool> {
 
 impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool>
 where
-    Client: BlockProviderIdExt,
+    Client: BlockReaderIdExt,
 {
     /// Creates a new builder instance to configure all parts.
     pub fn new(

@@ -1,9 +1,9 @@
 use itertools::concat;
 use reth_db::{
     cursor::DbCursorRO,
-    mdbx::{Env, WriteMap},
     tables,
     transaction::{DbTx, DbTxMut},
+    DatabaseEnv,
 };
 use reth_interfaces::test_utils::{
     generators,
@@ -32,7 +32,7 @@ pub use account_hashing::*;
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
-pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
+pub(crate) fn stage_unwind<S: Clone + Stage<DatabaseEnv>>(
     stage: S,
     tx: &TestTransaction,
     range: StageRange,
@@ -42,11 +42,11 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
 
         // Clear previous run
         stage
-            .unwind(&mut provider, unwind)
+            .unwind(&provider, unwind)
             .await
             .map_err(|e| {
                 format!(
@@ -60,7 +60,7 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
     });
 }
 
-pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
+pub(crate) fn unwind_hashes<S: Clone + Stage<DatabaseEnv>>(
     stage: S,
     tx: &TestTransaction,
     range: StageRange,
@@ -70,16 +70,16 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
 
-        StorageHashingStage::default().unwind(&mut provider, unwind).await.unwrap();
-        AccountHashingStage::default().unwind(&mut provider, unwind).await.unwrap();
+        StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
+        AccountHashingStage::default().unwind(&provider, unwind).await.unwrap();
 
         // Clear previous run
-        stage.unwind(&mut provider, unwind).await.unwrap();
+        stage.unwind(&provider, unwind).await.unwrap();
 
-        AccountHashingStage::default().execute(&mut provider, input).await.unwrap();
-        StorageHashingStage::default().execute(&mut provider, input).await.unwrap();
+        AccountHashingStage::default().execute(&provider, input).await.unwrap();
+        StorageHashingStage::default().execute(&provider, input).await.unwrap();
 
         provider.commit().unwrap();
     });

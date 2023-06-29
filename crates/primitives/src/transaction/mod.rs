@@ -419,13 +419,11 @@ impl Transaction {
     ///
     /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
     pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        let dynamic_tx = match self {
-            Transaction::Legacy(tx) => return tx.gas_price,
-            Transaction::Eip2930(tx) => return tx.gas_price,
-            Transaction::Eip1559(dynamic_tx) => dynamic_tx,
-        };
-
-        dynamic_tx.effective_gas_price(base_fee)
+        match self {
+            Transaction::Legacy(tx) => tx.gas_price,
+            Transaction::Eip2930(tx) => tx.gas_price,
+            Transaction::Eip1559(dynamic_tx) => dynamic_tx.effective_gas_price(base_fee),
+        }
     }
 
     // TODO: dedup with effective_tip_per_gas
@@ -437,6 +435,7 @@ impl Transaction {
     pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
         if let Some(base_fee) = base_fee {
             let max_fee_per_gas = self.max_fee_per_gas();
+
             if max_fee_per_gas < base_fee as u128 {
                 None
             } else {

@@ -5,9 +5,7 @@ use std::fmt::Debug;
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        insert_canonical_block, test_utils::blocks::*, ProviderFactory, TransactionsProvider,
-    };
+    use crate::{test_utils::blocks::*, ProviderFactory, TransactionsProvider};
     use reth_db::{
         mdbx::test_utils::create_test_rw_db,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -28,7 +26,7 @@ mod test {
             .build();
 
         let factory = ProviderFactory::new(db.as_ref(), Arc::new(chain_spec.clone()));
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
 
         let data = BlockChainTestData::default();
         let genesis = data.genesis.clone();
@@ -40,7 +38,7 @@ mod test {
         let storage1_shard_key =
             StorageShardedKey::new(H160([0x60; 20]), U256::from(5).into(), u64::MAX);
 
-        insert_canonical_block(provider.tx_ref(), data.genesis.clone(), None).unwrap();
+        provider.insert_block(data.genesis.clone(), None).unwrap();
 
         assert_genesis_block(&provider, data.genesis);
 
@@ -146,14 +144,14 @@ mod test {
         );
 
         let factory = ProviderFactory::new(db.as_ref(), chain_spec.clone());
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
 
         let data = BlockChainTestData::default();
         let genesis = data.genesis.clone();
         let (block1, exec_res1) = data.blocks[0].clone();
         let (block2, exec_res2) = data.blocks[1].clone();
 
-        insert_canonical_block(provider.tx_mut(), data.genesis.clone(), None).unwrap();
+        provider.insert_block(data.genesis.clone(), None).unwrap();
 
         assert_genesis_block(&provider, data.genesis);
 

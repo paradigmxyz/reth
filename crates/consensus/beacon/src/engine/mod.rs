@@ -18,10 +18,10 @@ use reth_interfaces::{
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
     listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    H256, U256,
+    SealedHeader, H256, U256,
 };
 use reth_provider::{
-    BlockProvider, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
+    BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
@@ -217,7 +217,7 @@ pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
-    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointReader,
+    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -257,7 +257,7 @@ where
 impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine + BlockProvider + CanonChainTracker + StageCheckpointReader + 'static,
+    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -397,6 +397,12 @@ where
         self.handle.clone()
     }
 
+    /// Returns true if the distance from the local tip to the block is greater than the configured
+    /// threshold
+    fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
+        block > local_tip && block - local_tip > self.pipeline_run_threshold
+    }
+
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
@@ -466,7 +472,7 @@ where
         head: H256,
     ) -> Option<PayloadStatus> {
         // check if the check hash was previously marked as invalid
-        let header = { self.invalid_headers.get(&check)?.clone() };
+        let header = self.invalid_headers.get(&check)?;
 
         // populate the latest valid hash field
         let status = self.prepare_invalid_response(header.parent_hash);
@@ -575,7 +581,7 @@ where
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
 
                     // new VALID update that moved the canonical chain forward
-                    let _ = self.update_canon_chain(&state);
+                    let _ = self.update_canon_chain(outcome.header().clone(), &state);
                 } else {
                     debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
                 }
@@ -610,11 +616,30 @@ where
         Ok(OnForkChoiceUpdated::valid(status))
     }
 
-    /// Sets the state of the canon chain tracker based on the given forkchoice update.
+    /// Sets the state of the canon chain tracker based to the given head.
+    ///
+    /// This expects the given head to be the new canonical head.
+    ///
     /// Additionally, updates the head used for p2p handshakes.
     ///
     /// This should be called before issuing a VALID forkchoice update.
-    fn update_canon_chain(&self, update: &ForkchoiceState) -> Result<(), reth_interfaces::Error> {
+    fn update_canon_chain(
+        &self,
+        head: SealedHeader,
+        update: &ForkchoiceState,
+    ) -> Result<(), reth_interfaces::Error> {
+        let mut head_block = Head {
+            number: head.number,
+            hash: head.hash,
+            difficulty: head.difficulty,
+            timestamp: head.timestamp,
+            // NOTE: this will be set later
+            total_difficulty: Default::default(),
+        };
+
+        // we update the the tracked header first
+        self.blockchain.set_canonical_head(head);
+
         if !update.finalized_block_hash.is_zero() {
             let finalized = self
                 .blockchain
@@ -635,26 +660,14 @@ where
             self.blockchain.set_safe(safe.header.seal(update.safe_block_hash));
         }
 
-        // the consensus engine should ensure the head is not zero so we always update the head
-        let head = self
-            .blockchain
-            .find_block_by_hash(update.head_block_hash, BlockSource::Any)?
-            .ok_or_else(|| {
-                Error::Provider(ProviderError::UnknownBlockHash(update.head_block_hash))
+        head_block.total_difficulty =
+            self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
+                Error::Provider(ProviderError::TotalDifficultyNotFound {
+                    number: head_block.number,
+                })
             })?;
-        let head = head.header.seal(update.head_block_hash);
-        let head_td = self.blockchain.header_td_by_number(head.number)?.ok_or_else(|| {
-            Error::Provider(ProviderError::TotalDifficultyNotFound { number: head.number })
-        })?;
+        self.sync_state_updater.update_status(head_block);
 
-        self.sync_state_updater.update_status(Head {
-            number: head.number,
-            hash: head.hash,
-            difficulty: head.difficulty,
-            timestamp: head.timestamp,
-            total_difficulty: head_td,
-        });
-        self.blockchain.set_canonical_head(head);
         Ok(())
     }
 
@@ -956,26 +969,20 @@ where
         err: InsertBlockError,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (block, error) = err.split();
-        match error {
-            InsertBlockErrorKind::Internal(err) => {
-                // this is an internal error that is unrelated to the payload
-                Err(BeaconOnNewPayloadError::Internal(err))
-            }
-            InsertBlockErrorKind::SenderRecovery |
-            InsertBlockErrorKind::Consensus(_) |
-            InsertBlockErrorKind::Execution(_) |
-            InsertBlockErrorKind::Tree(_) => {
-                // all of these occurred if the payload is invalid
-                let parent_hash = block.parent_hash;
 
-                // keep track of the invalid header
-                self.invalid_headers.insert(block.header);
+        if error.is_invalid_block() {
+            // all of these occurred if the payload is invalid
+            let parent_hash = block.parent_hash;
 
-                let latest_valid_hash =
-                    self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-                let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
-                Ok(PayloadStatus::new(status, latest_valid_hash))
-            }
+            // keep track of the invalid header
+            self.invalid_headers.insert(block.header);
+
+            let latest_valid_hash =
+                self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
+            let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+            Ok(PayloadStatus::new(status, latest_valid_hash))
+        } else {
+            Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
         }
     }
 
@@ -1030,7 +1037,7 @@ where
     /// chain is invalid, which means the FCU that triggered the download is invalid. Here we can
     /// stop because there's nothing to do here and the engine needs to wait for another FCU.
     fn on_downloaded_block(&mut self, block: SealedBlock) {
-        let num_hash = block.num_hash();
+        let downloaded_num_hash = block.num_hash();
         trace!(target: "consensus::engine", hash=?block.hash, number=%block.number, "Downloaded full block");
         // check if the block's parent is already marked as invalid
         if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash).is_some() {
@@ -1043,23 +1050,37 @@ where
                 match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                         // block is connected to the current canonical head and is valid.
-                        self.try_make_sync_target_canonical(num_hash);
+                        self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Accepted) => {
                         // block is connected to the canonical chain, but not the current head
-                        self.try_make_sync_target_canonical(num_hash);
+                        self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
                         // compare the missing parent with the canonical tip
                         let canonical_tip_num = self.blockchain.canonical_tip().number;
+                        let sync_target_state = self.forkchoice_state_tracker.sync_target_state();
+
+                        let mut requires_pipeline = self.exceeds_pipeline_run_threshold(
+                            canonical_tip_num,
+                            missing_parent.number,
+                        );
+
+                        // check if the downloaded block is the tracked finalized block
+                        if let Some(ref state) = sync_target_state {
+                            if downloaded_num_hash.hash == state.finalized_block_hash {
+                                // we downloaded the finalized block
+                                requires_pipeline = self.exceeds_pipeline_run_threshold(
+                                    canonical_tip_num,
+                                    downloaded_num_hash.number,
+                                );
+                            }
+                        }
 
                         // if the number of missing blocks is greater than the max, run the
                         // pipeline
-                        if missing_parent.number >= canonical_tip_num &&
-                            missing_parent.number - canonical_tip_num >
-                                self.pipeline_run_threshold
-                        {
-                            if let Some(state) = self.forkchoice_state_tracker.sync_target_state() {
+                        if requires_pipeline {
+                            if let Some(state) = sync_target_state {
                                 // if we have already canonicalized the finalized block, we should
                                 // skip the pipeline run
                                 if Ok(None) ==
@@ -1089,8 +1110,7 @@ where
             }
             Err(err) => {
                 warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
-                if !matches!(err.kind(), InsertBlockErrorKind::Internal(_)) {
-                    // non-internal error kinds occur if the payload is invalid
+                if err.kind().is_invalid_block() {
                     self.invalid_headers.insert(err.into_block().header);
                 }
             }
@@ -1115,13 +1135,14 @@ where
                     let new_head = outcome.into_header();
                     debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
 
+                    // we can update the FCU blocks
+                    let _ = self.update_canon_chain(new_head, &target);
+
                     // we're no longer syncing
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
+
                     // clear any active block requests
                     self.sync.clear_full_block_requests();
-
-                    // we can update the FCU blocks
-                    let _ = self.update_canon_chain(&target);
                 }
                 Err(err) => {
                     // if we failed to make the FCU's head canonical, because we don't have that
@@ -1288,7 +1309,7 @@ where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     BT: BlockchainTreeEngine
-        + BlockProvider
+        + BlockReader
         + CanonChainTracker
         + StageCheckpointReader
         + Unpin
@@ -1360,7 +1381,7 @@ mod tests {
         config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState,
         BlockchainTree, ShareableBlockchainTree,
     };
-    use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
+    use reth_db::{mdbx::test_utils::create_test_rw_db, DatabaseEnv};
     use reth_interfaces::{
         sync::NoopSyncStateUpdater,
         test_utils::{NoopFullBlockClient, TestConsensus},
@@ -1368,7 +1389,8 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::TestExecutorFactory, ProviderFactory,
+        providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockWriter,
+        ProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
@@ -1379,10 +1401,10 @@ mod tests {
     };
 
     type TestBeaconConsensusEngine = BeaconConsensusEngine<
-        Arc<Env<WriteMap>>,
+        Arc<DatabaseEnv>,
         BlockchainProvider<
-            Arc<Env<WriteMap>>,
-            ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
+            Arc<DatabaseEnv>,
+            ShareableBlockchainTree<Arc<DatabaseEnv>, TestConsensus, TestExecutorFactory>,
         >,
         NoopFullBlockClient,
     >;
@@ -1496,7 +1518,7 @@ mod tests {
         }
 
         /// Builds the test consensus engine into a `TestConsensusEngine` and `TestEnv`.
-        fn build(self) -> (TestBeaconConsensusEngine, TestEnv<Arc<Env<WriteMap>>>) {
+        fn build(self) -> (TestBeaconConsensusEngine, TestEnv<Arc<DatabaseEnv>>) {
             reth_tracing::init_test_tracing();
             let db = create_test_rw_db();
             let consensus = TestConsensus::default();
@@ -1711,8 +1733,10 @@ mod tests {
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
         let factory = ProviderFactory::new(db, chain);
-        let mut provider = factory.provider_rw().unwrap();
-        blocks.try_for_each(|b| provider.insert_block(b.clone(), None)).expect("failed to insert");
+        let provider = factory.provider_rw().unwrap();
+        blocks
+            .try_for_each(|b| provider.insert_block(b.clone(), None).map(|_| ()))
+            .expect("failed to insert");
         provider.commit().unwrap();
     }
 

@@ -51,7 +51,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Write total difficulty entries
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
@@ -98,7 +98,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
