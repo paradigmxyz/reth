@@ -812,6 +812,7 @@ where
         } else {
             // trigger a full block download for missing hash, or the parent of its lowest buffered
             // ancestor
+            // TODO: use a range request
             self.sync.download_full_block(target);
         }
 
