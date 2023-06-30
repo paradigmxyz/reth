@@ -106,12 +106,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     }
 
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
-        trace!(target: "blockchain_tree", ?hash, "Returning header by hash");
         self.tree.read().block_by_hash(hash).map(|b| b.header.clone())
     }
 
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
-        trace!(target: "blockchain_tree", ?block_hash, "Returning block by hash");
         self.tree.read().block_by_hash(block_hash).cloned()
     }
 
