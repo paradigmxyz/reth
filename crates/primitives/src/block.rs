@@ -755,6 +755,12 @@ pub struct BlockBody {
     )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::option::of(proptest::collection::vec(proptest::arbitrary::any::<Withdrawal>(), 0..=16))"
+        )
+    )]
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
