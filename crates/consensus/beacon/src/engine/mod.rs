@@ -1350,6 +1350,7 @@ where
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
             let mut is_pending = false;
+            dbg!("polling");
 
             // handle next engine message
             match this.engine_message_rx.poll_next_unpin(cx) {
@@ -1380,6 +1381,8 @@ where
                 }
             }
 
+            let now = std::time::Instant::now();
+
             // process sync events if any
             match this.sync.poll(cx) {
                 Poll::Ready(sync_event) => {
@@ -1393,10 +1396,15 @@ where
                 }
             }
 
+            dbg!("Sync: {:?}", now.elapsed());
+
             // try to append one buffered block to the blockchain tree
+            let now = std::time::Instant::now();
             if this.poll_append_buffered_block().is_ready() {
+                dbg!("Buffer: {:?}", now.elapsed());
                 continue
             }
+            dbg!("Buffer: {:?}",now.elapsed());
 
             if is_pending {
                 return Poll::Pending
