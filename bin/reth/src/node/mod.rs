@@ -51,6 +51,7 @@ use reth_stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
         TotalDifficultyStage,
     },
+    MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
@@ -275,6 +276,11 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
+        debug!(target: "reth::cli", "Spawning metrics listener task");
+        let (metrics_tx, metrics_rx) = unbounded_channel();
+        let metrics_listener = MetricsListener::new(metrics_rx);
+        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
+
         // Configure the pipeline
         let (mut pipeline, client) = if self.auto_mine {
             let (_, client, mut task) = AutoSealBuilder::new(
@@ -293,6 +299,7 @@ impl Command {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
+                    metrics_tx,
                 )
                 .await?;
 
@@ -310,6 +317,7 @@ impl Command {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
+                    metrics_tx,
                 )
                 .await?;
 
@@ -421,6 +429,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
+        metrics_tx: MetricEventsSender,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -452,6 +461,7 @@ impl Command {
                 consensus,
                 max_block,
                 self.debug.continuous,
+                metrics_tx,
             )
             .await?;
 
@@ -632,6 +642,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
+        metrics_tx: MetricEventsSender,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Clone + 'static,
@@ -670,6 +681,7 @@ impl Command {
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
             .with_tip_sender(tip_tx)
+            .with_metric_events(metrics_tx)
             .add_stages(
                 DefaultStages::new(
                     header_mode,
