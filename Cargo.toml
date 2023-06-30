@@ -107,6 +107,9 @@ serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
 
+### proc-macros
+proc-macro2 = "1.0"
+quote = "1.0"
 
 ## tokio
 tokio-stream = "0.1.11"
