@@ -53,3 +53,9 @@ A stable and dependable internet connection is crucial for both syncing a node f
 Note that due to Reth's staged sync, you only need an internet connection for the Headers and Bodies stages. This means that the first 1-3 hours (depending on your internet connection) will be online, downloading all necessary data, and the rest will be done offline and does not require an internet connection. 
 
 Once you're synced to the tip you will need a reliable connection, especially if you're operating a validator. A 24Mbps connection is recommended, but you can probably get away with less. Make sure your ISP does not cap your bandwidth.
+
+## What hardware can I get?
+
+If you are buying your own NVMe SSD, please consult [this hardware comparison](https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038) which is being actively maintained. We recommend against buying DRAM-less or QLC devices as these are noticeably slower.
+
+All our benchmarks have been produced on [Latitude](https://www.latitude.sh/), a bare metal provider. We use `c3.large.x86` boxes. So far our experience has been smooth with some users reporting that the NVMEs there outperform AWS NVMEs by 3x or more. We're excited for more Reth nodes on Latitude, so we are for a limited time you can use `RETH200` for a $200 discount. [Run a node now!](https://metal.new/reth)
