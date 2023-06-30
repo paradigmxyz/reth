@@ -591,6 +591,10 @@ pub struct PoolSize {
     pub queued: usize,
     /// Reported size of transactions in the _queued_ sub-pool.
     pub queued_size: usize,
+    /// Number of all transactions of all sub-pools
+    ///
+    /// Note: this is the sum of ```pending + basefee + queued```
+    pub total: usize,
 }
 
 /// Represents the current status of the pool.
