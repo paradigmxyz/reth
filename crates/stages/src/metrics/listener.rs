@@ -50,16 +50,13 @@ impl MetricsListener {
     fn handle_event(&mut self, event: MetricEvent) {
         match event {
             MetricEvent::SyncHeight { height } => {
-                // TODO(alexey): `self.sync_metrics.stages` may not contain any stages
-                self.sync_metrics
-                    .stages
-                    .iter()
-                    .for_each(|(_, metrics)| metrics.checkpoint.set(height as f64))
+                for stage_id in StageId::ALL {
+                    let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
+                    stage_metrics.checkpoint.set(height as f64);
+                }
             }
             MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number } => {
-                let stage_metrics = self.sync_metrics.stages.entry(stage_id).or_insert_with(|| {
-                    StageMetrics::new_with_labels(&[("stage", stage_id.to_string())])
-                });
+                let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
 
                 stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
