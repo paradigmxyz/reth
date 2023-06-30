@@ -1386,6 +1386,7 @@ where
                     if let Some(res) = this.on_sync_event(sync_event) {
                         return Poll::Ready(res)
                     }
+                    is_pending = false;
                 }
                 Poll::Pending => {
                     is_pending &= true;

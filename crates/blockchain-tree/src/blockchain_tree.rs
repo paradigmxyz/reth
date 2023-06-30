@@ -841,6 +841,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .re_insert_one_buffered_block_ms
             .record(now.elapsed().as_millis() as f64);
 
+        trace!(target: "blockchain_tree", ?res, time=?now.elapsed(), "Appended buffered block");
+
         Some(res)
     }
 
