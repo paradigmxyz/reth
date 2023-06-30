@@ -90,11 +90,7 @@ The default [docker-compose.yml](/docker-compose.yml) file will create three con
 - Prometheus
 - Grafana
 
-Grafana will be exposed on `localhost:3000` and accessible via default credentials:
-```
-username: admin
-password: admin
-```
+Grafana will be exposed on `localhost:3000` and accessible via default credentials (username and password = `admin`)
 
 ## Interacting with Reth inside Docker
 
