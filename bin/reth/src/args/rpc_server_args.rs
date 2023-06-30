@@ -159,17 +159,17 @@ impl RpcServerArgs {
         self.rpc_max_response_size * 1024 * 1024
     }
 
-    /// Returns the max number of bytes for cached block data
+    /// Returns the max length for cached block data
     pub fn block_cache_max_len(&self) -> u32 {
         self.block_cache_max_len
     }
 
-    /// Returns the max number of bytes for cached receipt data
+    /// Returns the max length cached receipt data
     pub fn receipt_cache_max_len(&self) -> u32 {
         self.receipt_cache_max_len
     }
 
-    /// Returns the max number of bytes for cached evm env data
+    /// Returns the max length for cached evm env data
     pub fn env_cache_max_len(&self) -> u32 {
         self.env_cache_max_len
     }
