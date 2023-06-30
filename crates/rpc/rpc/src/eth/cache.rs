@@ -37,14 +37,14 @@ pub const DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB: usize = 500;
 /// Default cache size for the env cache: 1MB
 pub const DEFAULT_ENV_CACHE_SIZE_BYTES_MB: usize = 1;
 
-/// Default cache size for the block cache: 10000 blocks.
-pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 10000;
+/// Default cache size for the block cache: 5000 blocks.
+pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 5000;
 
-/// Default cache size for the receipts cache: 50000 receipts.
-pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 50000;
+/// Default cache size for the receipts cache: 2000 receipts.
+pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
 
 /// Default cache size for the env cache: 1000 envs.
-pub const DEFAULT_ENV_CACHE_MAX_LEM: u32 = 10000;
+pub const DEFAULT_ENV_CACHE_MAX_LEM: u32 = 1000;
 
 /// The type that can send the response to a requested [Block]
 type BlockResponseSender = oneshot::Sender<Result<Option<Block>>>;
@@ -75,15 +75,15 @@ type EnvLruCache<L> = MultiConsumerLruCache<H256, (CfgEnv, BlockEnv), L, EnvResp
 pub struct EthStateCacheConfig {
     /// Max number of blocks in cache.
     ///
-    /// Default is 10000.
+    /// Default is 5000.
     pub max_blocks: u32,
     /// Max number receipts in cache.
     ///
-    /// Default is 50000.
+    /// Default is 2000.
     pub max_receipts: u32,
     /// Max number of bytes for cached env data.
     ///
-    /// Default is 10000.
+    /// Default is 1000.
     pub max_envs: u32,
 }
 
