@@ -58,4 +58,4 @@ Once you're synced to the tip you will need a reliable connection, especially if
 
 If you are buying your own NVMe SSD, please consult [this hardware comparison](https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038) which is being actively maintained. We recommend against buying DRAM-less or QLC devices as these are noticeably slower.
 
-All our benchmarks have been produced on [Latitude](https://www.latitude.sh/), a bare metal provider. We use `c3.large.x86` boxes. So far our experience has been smooth with some users reporting that the NVMEs there outperform AWS NVMEs by 3x or more. We're excited for more Reth nodes on Latitude, so for a limited time you can use `RETH200` for a $200 discount. [Run a node now!](https://metal.new/reth)
+All our benchmarks have been produced on [Latitude.sh](https://www.latitude.sh/), a bare metal provider. We use `c3.large.x86` boxes. So far our experience has been smooth with some users reporting that the NVMEs there outperform AWS NVMEs by 3x or more. We're excited for more Reth nodes on Latitude.sh, so for a limited time you can use `RETH200` for a $200 discount. [Run a node now!](https://metal.new/reth)
