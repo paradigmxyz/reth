@@ -218,6 +218,7 @@ pub trait EthTransactions: Send + Sync {
             + Send;
 }
 
+// todo: add header td call
 #[async_trait]
 impl<Provider, Pool, Network> EthTransactions for EthApi<Provider, Pool, Network>
 where

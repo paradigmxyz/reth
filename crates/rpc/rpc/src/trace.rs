@@ -12,8 +12,10 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, ChainSpec, SealedHeader, H256, U256};
-use reth_provider::{BlockReader, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
+use reth_provider::{
+    BlockReader, ChainSpecReader, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -78,7 +80,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecReader + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the future on a new blocking task.
@@ -416,7 +418,7 @@ where
             (self.inner.eth_api.block_by_id(block_id).await?, traces.as_mut())
         {
             if let Some(base_block_reward) = base_block_reward(
-                &ChainSpec::builder().build(), // TODO: Get chainspec
+                self.provider().spec().as_ref(),
                 block.header.number,
                 block.header.difficulty,
                 block.header.difficulty, // TODO: Total difficulty
@@ -484,7 +486,7 @@ where
 #[async_trait]
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecReader + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
