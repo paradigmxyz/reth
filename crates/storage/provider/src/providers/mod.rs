@@ -608,6 +608,14 @@ where
         self.tree.block_by_hash(block_hash)
     }
 
+    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
+        self.tree.buffered_block_by_hash(block_hash)
+    }
+
+    fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
+        self.tree.buffered_header_by_hash(block_hash)
+    }
+
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
         self.tree.canonical_blocks()
     }

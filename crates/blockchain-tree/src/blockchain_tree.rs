@@ -592,7 +592,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Checks the block buffer for the given block.
-    pub fn get_buffered_block(&mut self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
+    pub fn get_buffered_block(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
         self.buffered_blocks.block_by_hash(hash)
     }
 
