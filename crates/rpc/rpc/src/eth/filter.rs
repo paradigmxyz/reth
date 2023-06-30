@@ -375,7 +375,7 @@ where
                     FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
                     if let Some((transactions, receipts)) =
-                        self.eth_cache.get_transactions_and_receipts(block_hash.into()).await?
+                        self.eth_cache.get_transactions_and_receipts(block_hash).await?
                     {
                         logs_utils::append_matching_block_logs(
                             &mut all_logs,
