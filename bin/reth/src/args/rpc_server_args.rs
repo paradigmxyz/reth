@@ -13,8 +13,7 @@ use reth_provider::{
 use reth_rpc::{
     eth::{
         cache::{
-            DEFAULT_BLOCK_CACHE_SIZE_BYTES_MB, DEFAULT_ENV_CACHE_SIZE_BYTES_MB,
-            DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB,
+            DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_ENV_CACHE_MAX_LEN, DEFAULT_RECEIPT_CACHE_MAX_LEN,
         },
         gas_oracle::GasPriceOracleConfig,
     },
@@ -136,17 +135,17 @@ pub struct RpcServerArgs {
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
 
-    /// Max size for cached block data in megabytes.
-    #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_SIZE_BYTES_MB)]
-    pub block_cache_size: usize,
+    /// Max size for cached block data.
+    #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_MAX_LEN)]
+    pub block_cache_max_len: u32,
 
-    /// Max size for cached receipt data in megabytes.
-    #[arg(long, default_value_t = DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB)]
-    pub receipt_cache_size: usize,
+    /// Max size for cached receipt data.
+    #[arg(long, default_value_t = DEFAULT_RECEIPT_CACHE_MAX_LEN)]
+    pub receipt_cache_max_len: u32,
 
-    /// Max size for cached evm env data in megabytes.
-    #[arg(long, default_value_t = DEFAULT_ENV_CACHE_SIZE_BYTES_MB)]
-    pub env_cache_size: usize,
+    /// Max size for cached evm env data.
+    #[arg(long, default_value_t = DEFAULT_ENV_CACHE_MAX_LEN)]
+    pub env_cache_max_len: u32,
 }
 
 impl RpcServerArgs {
@@ -160,19 +159,19 @@ impl RpcServerArgs {
         self.rpc_max_response_size * 1024 * 1024
     }
 
-    /// Returns the max number of bytes for cached block data in bytes
-    pub fn block_cache_size_bytes(&self) -> usize {
-        self.block_cache_size * 1024 * 1024
+    /// Returns the max number of bytes for cached block data
+    pub fn block_cache_max_len(&self) -> u32 {
+        self.block_cache_max_len
     }
 
-    /// Returns the max number of bytes for cached receipt data in bytes
-    pub fn receipt_cache_size_bytes(&self) -> usize {
-        self.receipt_cache_size * 1024 * 1024
+    /// Returns the max number of bytes for cached receipt data
+    pub fn receipt_cache_max_len(&self) -> u32 {
+        self.receipt_cache_max_len
     }
 
-    /// Returns the max number of bytes for cached evm env data in bytes
-    pub fn env_cache_size_bytes(&self) -> usize {
-        self.env_cache_size * 1024 * 1024
+    /// Returns the max number of bytes for cached evm env data
+    pub fn env_cache_max_len(&self) -> u32 {
+        self.env_cache_max_len
     }
 
     /// Extracts the gas price oracle config from the args.

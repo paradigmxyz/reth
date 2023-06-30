@@ -44,7 +44,7 @@ pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 5000;
 pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
 
 /// Default cache size for the env cache: 1000 envs.
-pub const DEFAULT_ENV_CACHE_MAX_LEM: u32 = 1000;
+pub const DEFAULT_ENV_CACHE_MAX_LEN: u32 = 1000;
 
 /// The type that can send the response to a requested [Block]
 type BlockResponseSender = oneshot::Sender<Result<Option<Block>>>;
@@ -92,7 +92,7 @@ impl Default for EthStateCacheConfig {
         Self {
             max_blocks: DEFAULT_BLOCK_CACHE_MAX_LEN,
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
-            max_envs: DEFAULT_ENV_CACHE_MAX_LEM,
+            max_envs: DEFAULT_ENV_CACHE_MAX_LEN,
         }
     }
 }
