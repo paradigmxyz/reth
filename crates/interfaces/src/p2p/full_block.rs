@@ -373,10 +373,10 @@ where
         )
     }
 
-    /// Returns whether or not a bodies request has been started, by making sure there is no
-    /// pending request, and that there is no buffered response.
+    /// Returns whether or not a bodies request has been started, returning false if there is no
+    /// pending request, and if there is no buffered response.
     fn has_bodies_request_started(&self) -> bool {
-        self.request.bodies.is_none() && self.bodies.is_none()
+        self.request.bodies.is_some() && self.bodies.is_some()
     }
 }
 
@@ -538,22 +538,20 @@ where
                 return Poll::Ready(None)
             }
 
-            // return the next block if it's ready
-            //
-            // pop the first block
-            // TODO: make sure this is the right order
+            // return the next block if it's ready - the vec should be in ascending order since it
+            // is reversed right after it is received from the future, so we can just pop() the
+            // elements to return them from the stream in descending order
             return Poll::Ready(blocks.pop())
         }
 
         // poll the inner future if the blocks are not yet ready
         let mut blocks = ready!(Pin::new(&mut this.inner).poll(cx));
 
-        // the blocks are returned in descending order, reverse so we can just start
-        // popping
-        // TODO: make sure this is the right order
+        // the blocks are returned in descending order, reverse the list so we can just pop() the
+        // vec to yield the next block in the stream
         blocks.reverse();
 
-        // pop the first block
+        // pop the first block from the vec as the first stream element and store the rest
         let first_result = blocks.pop();
 
         // if the inner future is ready, then we can return the blocks
@@ -611,6 +609,7 @@ mod tests {
     use crate::p2p::{
         download::DownloadClient, headers::client::HeadersRequest, priority::Priority,
     };
+    use futures::StreamExt;
     use parking_lot::Mutex;
     use reth_primitives::{BlockHashOrNumber, BlockNumHash, PeerId, WithPeerId};
     use std::{collections::HashMap, sync::Arc};
@@ -750,5 +749,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_full_block_range_stream() {}
+    async fn download_full_block_range_stream() {
+        let client = TestFullBlockClient::default();
+        let mut header = SealedHeader::default();
+        let body = BlockBody::default();
+        client.insert(header.clone(), body.clone());
+        for _ in 0..10 {
+            header.parent_hash = header.hash_slow();
+            header.number += 1;
+            header = header.header.seal_slow();
+            client.insert(header.clone(), body.clone());
+        }
+        let client = FullBlockClient::new(client);
+
+        let future = client.get_full_block_range(header.hash(), 1);
+        let mut stream = FullBlockRangeStream::from(future);
+
+        // ensure only block in the stream is the one we requested
+        let received = stream.next().await.expect("response should not be None");
+        assert_eq!(received, SealedBlock::new(header.clone(), body.clone()));
+
+        // stream should be done now
+        assert_eq!(stream.next().await, None);
+
+        // there are 11 total blocks
+        let future = client.get_full_block_range(header.hash(), 11);
+        let mut stream = FullBlockRangeStream::from(future);
+
+        // check first header
+        let received = stream.next().await.expect("response should not be None");
+        let mut curr_number = received.number;
+        assert_eq!(received, SealedBlock::new(header.clone(), body.clone()));
+
+        // check the rest of the headers
+        for _ in 0..10 {
+            let received = stream.next().await.expect("response should not be None");
+            assert_eq!(received.number, curr_number - 1);
+            curr_number = received.number;
+        }
+
+        // ensure stream is done
+        let received = stream.next().await;
+        assert!(received.is_none());
+    }
 }
