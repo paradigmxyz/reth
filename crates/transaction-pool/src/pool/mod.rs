@@ -204,6 +204,20 @@ where
         rx
     }
 
+    /// If the pool contains the transaction, this adds a new listener that gets notified about
+    /// transaction events.
+    pub(crate) fn add_transaction_event_listener(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<TransactionEvents> {
+        let pool = self.pool.read();
+        if pool.contains(&tx_hash) {
+            Some(self.event_listener.write().subscribe(tx_hash))
+        } else {
+            None
+        }
+    }
+
     /// Returns hashes of _all_ transactions in the pool.
     pub(crate) fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
         let pool = self.pool.read();
