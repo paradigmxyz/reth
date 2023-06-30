@@ -11,7 +11,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256};
+use reth_consensus_common::calc::{base_block_reward, block_reward};
+use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, ChainSpec, SealedHeader, H256, U256};
 use reth_provider::{BlockReader, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
@@ -396,7 +397,7 @@ where
         &self,
         block_id: BlockId,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let mut traces = self
+        let mut traces: Option<Vec<LocalizedTransactionTrace>> = self
             .trace_block_with(
                 block_id,
                 TracingInspectorConfig::default_parity(),
@@ -411,11 +412,11 @@ where
 
         // Add block reward traces
         // TODO: We only really need the header and ommers here to determine the reward
-        if let (Some(block), Some(&mut traces)) =
+        if let (Some(block), Some(traces)) =
             (self.inner.eth_api.block_by_id(block_id).await?, traces.as_mut())
         {
             if let Some(base_block_reward) = base_block_reward(
-                &self.spec, // TODO: Get chainspec
+                &ChainSpec::builder().build(), // TODO: Get chainspec
                 block.header.number,
                 block.header.difficulty,
                 block.header.difficulty, // TODO: Total difficulty
@@ -425,7 +426,7 @@ where
                     RewardAction {
                         author: block.header.beneficiary,
                         reward_type: RewardType::Block,
-                        value: base_block_reward,
+                        value: U256::from(base_block_reward),
                     },
                 ));
 
@@ -435,8 +436,8 @@ where
                         RewardAction {
                             author: block.header.beneficiary,
                             reward_type: RewardType::Uncle,
-                            value: base_block_reward(base_block_reward, block.ommers.len()) -
-                                base_block_reward,
+                            value: block_reward(base_block_reward, block.ommers.len()) -
+                                U256::from(base_block_reward),
                         },
                     ));
                 }
