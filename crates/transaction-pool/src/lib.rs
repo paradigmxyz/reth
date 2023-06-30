@@ -280,6 +280,10 @@ where
         Ok(transactions)
     }
 
+    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
+        self.pool.add_transaction_event_listener(tx_hash)
+    }
+
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
         self.pool.add_pending_listener()
     }

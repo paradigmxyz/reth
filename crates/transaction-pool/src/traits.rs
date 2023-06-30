@@ -89,6 +89,11 @@ pub trait TransactionPool: Send + Sync + Clone {
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
+    /// Returns a new transaction change event stream for the given transaction.
+    ///
+    /// Returns `None` if the transaction is not in the pool.
+    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
+
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
