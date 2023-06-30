@@ -109,15 +109,6 @@ We recommend using [`cargo nextest`](https://nexte.st/) to speed up testing. Wit
 > 
 > Some tests use random number generators to generate test data. If you want to use a deterministic seed, you can set the `SEED` environment variable.
 
-### Running from docker compose
-
-1. Install Docker and Docker Compose
-2. Clone this repository `git clone https://github.com/paradigmxyz/reth.git`
-3. `cd reth`
-4. Run `docker-compose up -d`
-5. Verify the node has started up by running `docker-compose logs -f reth`
-6. Open "http://localhost:3000" in your browser to view the "Reth Overview" & "Lighthouse Overview" dashboards
-
 ## Getting Help
 
 If you have any questions, first see if the answer to your question can be found in the [book][book].
