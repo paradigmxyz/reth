@@ -85,7 +85,7 @@ To check if Reth is running correctly, run:
 docker compose logs -f reth
 ```
 
-The default [docker-compose.yml](/docker-compose.yml) file will create three containers:
+The default `docker-compose.yml` file will create three containers:
 - Reth
 - Prometheus
 - Grafana
