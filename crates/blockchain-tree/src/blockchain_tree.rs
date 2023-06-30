@@ -91,7 +91,8 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     canon_state_notification_sender: CanonStateNotificationSender,
     /// Metrics for the blockchain tree.
     metrics: TreeMetrics,
-    metrics_tx: Option<MetricEventsSender>,
+    /// Metrics for sync stages.
+    sync_metrics_tx: Option<MetricEventsSender>,
 }
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
@@ -143,12 +144,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             config,
             canon_state_notification_sender,
             metrics: Default::default(),
-            metrics_tx: None,
+            sync_metrics_tx: None,
         })
     }
 
     pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
-        self.metrics_tx = Some(metrics_tx);
+        self.sync_metrics_tx = Some(metrics_tx);
         self
     }
 
@@ -1086,14 +1087,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub(crate) fn update_metrics(&mut self) {
         let height = self.canonical_chain().tip().number;
 
-        let provider = DatabaseProvider::new_rw(
-            self.externals.db.tx_mut()?,
-            self.externals.chain_spec.clone(),
-        );
-
         self.metrics.sidechains.set(self.chains.len() as f64);
         self.metrics.canonical_chain_height.set(height as f64);
-        if let Some(metrics_tx) = self.metrics_tx.as_mut() {
+        if let Some(metrics_tx) = self.sync_metrics_tx.as_mut() {
             let _ = metrics_tx.send(MetricEvent::SyncHeight { height });
         }
     }
