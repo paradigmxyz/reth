@@ -18,7 +18,7 @@ use reth_rpc::{
         },
         gas_oracle::GasPriceOracleConfig,
     },
-    JwtSecret,
+    JwtError, JwtSecret,
 };
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
@@ -212,7 +212,7 @@ impl RpcServerArgs {
     ///
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
     /// jwt secret in case the `auth_jwtsecret` argument is not provided.
-    pub(crate) fn jwt_secret(&self, default_jwt_path: PathBuf) -> eyre::Result<JwtSecret> {
+    pub(crate) fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
         match self.auth_jwtsecret.as_ref() {
             Some(fpath) => {
                 debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");

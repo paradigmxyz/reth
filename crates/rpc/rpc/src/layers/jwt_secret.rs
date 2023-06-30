@@ -1,7 +1,7 @@
 use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
-use reth_primitives::fs;
+use reth_primitives::{fs, fs::FsPathError};
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
@@ -27,6 +27,8 @@ pub enum JwtError {
     MissingOrInvalidAuthorizationHeader,
     #[error("JWT decoding error {0}")]
     JwtDecodingError(String),
+    #[error(transparent)]
+    JwtFsPathError(#[from] FsPathError),
     #[error("An I/O error occurred: {0}")]
     IOError(#[from] std::io::Error),
 }
@@ -76,7 +78,7 @@ impl JwtSecret {
     /// Tries to load a [`JwtSecret`] from the specified file path.
     /// I/O or secret validation errors might occur during read operations in the form of
     /// a [`JwtError`].
-    pub fn from_file(fpath: &Path) -> eyre::Result<Self> {
+    pub fn from_file(fpath: &Path) -> Result<Self, JwtError> {
         let hex = fs::read_to_string(fpath)?;
         let secret = JwtSecret::from_hex(hex)?;
         Ok(secret)
@@ -84,7 +86,7 @@ impl JwtSecret {
 
     /// Creates a random [`JwtSecret`] and tries to store it at the specified path. I/O errors might
     /// occur during write operations in the form of a [`JwtError`]
-    pub fn try_create(fpath: &Path) -> eyre::Result<Self> {
+    pub fn try_create(fpath: &Path) -> Result<Self, JwtError> {
         if let Some(dir) = fpath.parent() {
             // Create parent directory
             fs::create_dir_all(dir)?
