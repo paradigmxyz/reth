@@ -1,4 +1,4 @@
-use crate::metrics::{StageMetrics, SyncMetrics};
+use crate::metrics::SyncMetrics;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber,

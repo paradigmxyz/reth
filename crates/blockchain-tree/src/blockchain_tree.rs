@@ -148,7 +148,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         })
     }
 
-    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
+    /// Set the sync metric events sender.
+    pub fn with_sync_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
         self.sync_metrics_tx = Some(metrics_tx);
         self
     }

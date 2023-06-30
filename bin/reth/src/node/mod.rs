@@ -206,7 +206,7 @@ impl Command {
                 canon_state_notification_sender.clone(),
                 tree_config,
             )?
-            .with_metrics_tx(metrics_tx.clone()),
+            .with_sync_metrics_tx(metrics_tx.clone()),
         );
 
         // setup the blockchain provider
@@ -694,7 +694,7 @@ impl Command {
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
             .with_tip_sender(tip_tx)
-            .with_metric_events(metrics_tx)
+            .with_metrics_tx(metrics_tx)
             .add_stages(
                 DefaultStages::new(
                     header_mode,
