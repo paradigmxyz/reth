@@ -1,7 +1,7 @@
 use crate::{
     constants,
     error::{RpcError, ServerKind},
-    eth::DEFAULT_MAX_LOGS_IN_RESPONSE,
+    eth::DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
@@ -67,7 +67,7 @@ where
         provider,
         pool,
         eth_cache.clone(),
-        DEFAULT_MAX_LOGS_IN_RESPONSE,
+        DEFAULT_MAX_LOGS_PER_RESPONSE,
         Box::new(executor.clone()),
     );
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
