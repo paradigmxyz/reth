@@ -2,48 +2,56 @@ version: '3.9'
 
 services:
   reth:
-    restart: always
+    restart: unless-stopped
     build:
-      context: ./reth
+      context: .
       dockerfile: Dockerfile
+    image: reth:local
+    ports:
+      - '9000:9000'
     volumes:
       - rethdata:$HOME/.local/share/reth/db
       - rethlogs:$HOME/rethlogs
     command: >
-      /reth/target/release/reth node 
-      --metrics reth:9000 
-      --debug.tip ${RETH_TIP:-0x7d5a4369273c723454ac137f48a4f142b097aa2779464e6505f1b1c5e37b5382} 
+      node
+      --metrics reth:9000
       --log.directory $HOME
-    ports:
-      - '9000:9000'
 
   prometheus:
-    restart: always
+    restart: unless-stopped
     image: prom/prometheus
-    user: root
     depends_on:
       - reth
     ports:
       - 9090:9090
     volumes:
-      - ./prometheus/:/etc/prometheus/
-      - prometheusdata:/prometheusdata
+      - ./etc/prometheus/:/etc/prometheus/
+      - prometheusdata:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheusdata'
+      - --config.file=/etc/prometheus/prometheus-docker.yml
+      - --storage.tsdb.path=/prometheus
 
   grafana:
-    restart: always
+    restart: unless-stopped
     image: grafana/grafana
-    user: '472'
     depends_on:
       - reth
       - prometheus
     ports:
       - 3000:3000
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
     volumes:
-      - grafanadata:/var/lib/grafanadata
-      - ./grafana/provisioning/:/etc/grafana/provisioning/
+      - grafanadata:/var/lib/grafana
+      - ./etc/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./etc/grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
+    # 1. Copy dashboards from temp directory to prevent modifying original host files
+    # 2. Replace Prometheus datasource placeholder with the actual name
+    # 3. Run Grafana
+    entrypoint: >
+      sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
+             find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
+             /run.sh"
 
 volumes:
   rethdata:

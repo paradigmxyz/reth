@@ -49,34 +49,71 @@ docker run reth:local --version
 ## Using the Docker image
 
 There are two ways to use the Docker image:
-1. [Plain Docker](#using-plain-docker)
-2. [Using Docker compose](#using-docker-compose)
+1. [Using Docker](#using-plain-docker)
+2. [Using Docker Compose](#using-docker-compose)
 
 ### Using Plain Docker
 
-To run reth with Docker, run:
+To run Reth with Docker, run:
 
 ```bash
 docker run \
-    -v rethdata:$HOME/.local/share/reth/db \
-    -v rethlogs:$HOME/.local/share/reth/db \
-    -dp 9000:9000 \
+    -v rethdata:/root/.local/share/reth/db \
+    -d \
+    -p 9000:9000 \
     --name reth \
     reth:local \
-    /reth/target/release/reth node \
-    --metrics reth:9000 \
-    --debug.tip ${RETH_TIP:-0x7d5a4369273c723454ac137f48a4f142b097aa2779464e6505f1b1c5e37b5382} \
-    --log.directory $HOME
+    node \
+    --metrics 0.0.0.0:9000
 ```
 
-The above command will create a container named `reth` and two named volumes `rethdata` and `rethlogs` for data persistence. 
+The above command will create a container named `reth` and a named volume called `rethdata` for data persistence.
 
-It will use the local image `reth:local`. If you want to use a remote image, use `ghcr.io/paradigmxyz/reth` with your preferred tag.
+It will use the local image `reth:local`. If you want to use the GitHub Container Registry remote image, use `ghcr.io/paradigmxyz/reth` with your preferred tag.
 
 ### Using Docker Compose
 
-TODO
+To run Reth with Docker Compose, run the following command from a shell inside the root directory of this repository:
+
+```bash
+docker compose up -d
+```
+
+To check if Reth is running correctly, run:
+
+```bash
+docker compose logs -f reth
+```
+
+The default [docker-compose.yml](/docker-compose.yml) file will create three containers:
+- Reth
+- Prometheus
+- Grafana
+
+Grafana will be exposed on `localhost:3000` and accessible via default credentials:
+```
+username: admin
+password: admin
+```
 
 ## Interacting with Reth inside Docker
 
-TODO
+To interact with Reth you must first open a shell inside the Reth container by running:
+
+```bash
+docker exec -it reth bash
+```
+
+**If Reth is running with Docker Compose, replace `reth` with `reth-reth-1` in the above command**
+
+### Listing the tables
+
+```bash
+reth db stats
+```
+
+### Viewing some records
+
+```bash
+reth db list --start=1 --len=2 Headers
+```
