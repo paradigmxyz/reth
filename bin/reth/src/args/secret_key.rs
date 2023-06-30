@@ -14,8 +14,6 @@ use thiserror::Error;
 pub enum SecretKeyError {
     #[error(transparent)]
     SecretKeyDecodeError(#[from] SecretKeyBaseError),
-    #[error("Failed to create parent directory {dir:?} for secret key: {error}")]
-    FailedToCreateSecretParentDir { error: io::Error, dir: PathBuf },
     #[error(transparent)]
     SecretKeyFsPathError(#[from] FsPathError),
     #[error("Failed to access key file {secret_file:?}: {error}")]
