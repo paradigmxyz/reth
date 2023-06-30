@@ -64,6 +64,7 @@
 //!
 //! - `test-utils`: Export utilities for testing
 mod error;
+mod metrics;
 mod pipeline;
 mod stage;
 mod util;
@@ -80,9 +81,7 @@ pub mod stages;
 
 pub mod sets;
 
-/// Metrics listener and supporting types.
-pub mod metrics;
-
 pub use error::*;
+pub use metrics::*;
 pub use pipeline::*;
 pub use stage::*;

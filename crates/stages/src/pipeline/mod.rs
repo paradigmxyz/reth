@@ -1,4 +1,7 @@
-use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
+use crate::{
+    error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
+    UnwindInput,
+};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
@@ -18,7 +21,6 @@ mod event;
 mod progress;
 mod set;
 
-use crate::metrics::{MetricEvent, MetricEventsSender};
 pub use crate::pipeline::ctrl::ControlFlow;
 pub use builder::*;
 pub use event::*;

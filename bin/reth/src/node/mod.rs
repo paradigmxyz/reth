@@ -51,6 +51,7 @@ use reth_stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
         TotalDifficultyStage,
     },
+    MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
@@ -75,12 +76,9 @@ use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::DisplayHardforks;
 use reth_provider::providers::BlockchainProvider;
-use reth_stages::{
-    metrics::{MetricEventsSender, MetricsListener},
-    stages::{
-        AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-        StorageHashingStage, TransactionLookupStage,
-    },
+use reth_stages::stages::{
+    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
+    StorageHashingStage, TransactionLookupStage,
 };
 
 pub mod cl_events;
