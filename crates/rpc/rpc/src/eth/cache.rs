@@ -10,7 +10,7 @@ use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, H256};
 use reth_provider::{BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
-use schnellru::{ByMemoryUsage, Limiter, LruMap};
+use schnellru::{ByLength, ByMemoryUsage, Limiter, LruMap};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -248,9 +248,9 @@ impl EthStateCache {
 pub(crate) struct EthStateCacheService<
     Provider,
     Tasks,
-    LimitBlocks = ByMemoryUsage,
-    LimitReceipts = ByMemoryUsage,
-    LimitEnvs = ByMemoryUsage,
+    LimitBlocks = ByLength,
+    LimitReceipts = ByLength,
+    LimitEnvs = ByLength,
 > where
     LimitBlocks: Limiter<H256, Block>,
     LimitReceipts: Limiter<H256, Vec<Receipt>>,
@@ -512,7 +512,7 @@ where
     }
 }
 
-impl<K, V, S> MultiConsumerLruCache<K, V, ByMemoryUsage, S>
+impl<K, V, S> MultiConsumerLruCache<K, V, ByLength, S>
 where
     K: Hash + Eq,
 {
@@ -521,7 +521,7 @@ where
     /// See also [LruMap::with_memory_budget]
     fn new(memory_budget: usize, cache_id: &str) -> Self {
         Self {
-            cache: LruMap::with_memory_budget(memory_budget),
+            cache: LruMap::new(ByLength::new(5_000)),
             queued: Default::default(),
             metrics: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
         }
