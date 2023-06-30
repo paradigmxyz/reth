@@ -372,7 +372,7 @@ where
 mod tests {
     use super::*;
     use proptest::prelude::*;
-    use reth_db::{database::Database, mdbx::test_utils::create_test_rw_db, transaction::DbTxMut};
+    use reth_db::{database::Database, test_utils::create_test_rw_db, transaction::DbTxMut};
 
     fn assert_account_cursor_order<'a, 'b>(
         factory: &'a impl HashedCursorFactory<'b>,

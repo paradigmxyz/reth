@@ -1,12 +1,6 @@
 #![allow(unused)]
 //! Test helper impls for generating bodies
-use reth_db::{
-    database::Database,
-    mdbx::{Env, WriteMap},
-    tables,
-    transaction::DbTxMut,
-    DatabaseEnv,
-};
+use reth_db::{database::Database, tables, transaction::DbTxMut, DatabaseEnv};
 use reth_interfaces::{db, p2p::bodies::response::BlockResponse};
 use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, H256};
 use std::collections::HashMap;

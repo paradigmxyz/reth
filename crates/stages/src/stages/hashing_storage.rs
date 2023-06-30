@@ -233,7 +233,6 @@ mod tests {
     use rand::Rng;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
-        mdbx::{tx::Tx, WriteMap, RW},
         models::{BlockNumberAddress, StoredBlockBodyIndices},
     };
     use reth_interfaces::test_utils::{
@@ -621,9 +620,9 @@ mod tests {
                 .map_err(|e| e.into())
         }
 
-        fn insert_storage_entry(
+        fn insert_storage_entry<'a, TX: DbTxMut<'a>>(
             &self,
-            tx: &Tx<'_, RW, WriteMap>,
+            tx: &'a TX,
             tid_address: BlockNumberAddress,
             entry: StorageEntry,
             hash: bool,

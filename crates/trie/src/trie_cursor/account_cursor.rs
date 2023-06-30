@@ -42,8 +42,8 @@ mod tests {
     use super::*;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
-        mdbx::test_utils::create_test_rw_db,
         tables,
+        test_utils::create_test_rw_db,
         transaction::DbTxMut,
     };
     use reth_primitives::{hex_literal::hex, MAINNET};

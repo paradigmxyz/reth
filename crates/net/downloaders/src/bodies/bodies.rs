@@ -595,7 +595,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
-    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, H256};
     use std::{collections::HashMap, sync::Arc};
@@ -605,7 +605,7 @@ mod tests {
     #[tokio::test]
     async fn streams_bodies_in_order() {
         // Generate some random blocks
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(&db, &headers);
@@ -632,7 +632,7 @@ mod tests {
     #[tokio::test]
     async fn requests_correct_number_of_times() {
         // Generate some random blocks
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let mut rng = generators::rng();
         let blocks = random_block_range(&mut rng, 0..=199, H256::zero(), 1..2);
 
@@ -665,7 +665,7 @@ mod tests {
     #[tokio::test]
     async fn streams_bodies_in_order_after_range_reset() {
         // Generate some random blocks
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=99);
 
         insert_headers(&db, &headers);
@@ -698,7 +698,7 @@ mod tests {
     #[tokio::test]
     async fn can_download_new_range_after_termination() {
         // Generate some random blocks
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=199);
 
         insert_headers(&db, &headers);
