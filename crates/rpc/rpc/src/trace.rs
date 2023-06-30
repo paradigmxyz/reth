@@ -412,14 +412,15 @@ where
 
         // Add block reward traces
         // TODO: We only really need the header and ommers here to determine the reward
-        if let Some(block) = self.inner.eth_api.block_by_id(block_id).await? {
-            traces = traces.map(|mut traces| {
-                let base_block_reward = base_block_reward(
-                    &self.spec, // TODO: Get chainspec
-                    block.header.number,
-                    block.header.difficulty,
-                    block.header.difficulty, // TODO: Total difficulty
-                );
+        if let (Some(block), Some(&mut traces)) =
+            (self.inner.eth_api.block_by_id(block_id).await?, traces.as_mut())
+        {
+            if let Some(base_block_reward) = base_block_reward(
+                &self.spec, // TODO: Get chainspec
+                block.header.number,
+                block.header.difficulty,
+                block.header.difficulty, // TODO: Total difficulty
+            ) {
                 traces.push(reward_trace(
                     &block.header,
                     RewardAction {
@@ -440,9 +441,7 @@ where
                         },
                     ));
                 }
-
-                traces
-            });
+            }
         }
 
         Ok(traces)
