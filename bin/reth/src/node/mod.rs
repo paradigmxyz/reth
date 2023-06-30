@@ -434,6 +434,7 @@ impl Command {
     }
 
     /// Constructs a [Pipeline] that's wired to the network
+    #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
         config: &mut Config,
