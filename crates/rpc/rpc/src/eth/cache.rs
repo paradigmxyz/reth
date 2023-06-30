@@ -315,9 +315,9 @@ where
     }
 
     fn update_cached_metrics(&self) {
-        self.full_block_cache.update_cached_count();
-        self.receipts_cache.update_cached_count();
-        self.evm_env_cache.update_cached_count();
+        self.full_block_cache.update_cached_metrics();
+        self.receipts_cache.update_cached_metrics();
+        self.evm_env_cache.update_cached_metrics();
     }
 }
 
@@ -507,8 +507,9 @@ where
         }
     }
 
-    fn update_cached_count(&self) {
+    fn update_cached_metrics(&self) {
         self.metrics.cached_count.set(self.cache.len() as f64);
+        self.metrics.cached_bytes.set(self.cache.memory_usage() as f64);
     }
 }
 
@@ -580,6 +581,8 @@ where
 struct CacheMetrics {
     /// The number of entities in the cache.
     cached_count: Gauge,
+    /// The memory usage of the cache in bytes.
+    cached_bytes: Gauge,
     /// The number of queued consumers.
     queued_consumers_count: Gauge,
 }
