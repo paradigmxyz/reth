@@ -1,4 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{
+    ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput,
+    UnwindOutput,
+};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -24,14 +27,6 @@ use reth_provider::{
 };
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
-
-/// Execution stage metrics.
-#[derive(Metrics)]
-#[metrics(scope = "sync.execution")]
-pub struct ExecutionStageMetrics {
-    /// The total amount of gas processed (in millions)
-    mgas_processed_total: Gauge,
-}
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -64,7 +59,7 @@ pub struct ExecutionStageMetrics {
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<EF: ExecutorFactory> {
-    metrics: ExecutionStageMetrics,
+    metrics_tx: Option<MetricEventsSender>,
     /// The stage's internal executor
     executor_factory: EF,
     /// The commit thresholds of the execution stage.
@@ -74,7 +69,7 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
     pub fn new(executor_factory: EF, thresholds: ExecutionStageThresholds) -> Self {
-        Self { metrics: ExecutionStageMetrics::default(), executor_factory, thresholds }
+        Self { metrics_tx: None, executor_factory, thresholds }
     }
 
     /// Create an execution stage with the provided  executor factory.
@@ -84,9 +79,14 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         Self::new(executor_factory, ExecutionStageThresholds::default())
     }
 
+    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
+        self.metrics_tx = Some(metrics_tx);
+        self
+    }
+
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
-        &self,
+        &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
@@ -129,9 +129,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 })?;
 
             // Gas metrics
-            self.metrics
-                .mgas_processed_total
-                .increment(block.header.gas_used as f64 / MGAS_TO_GAS as f64);
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ =
+                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
+            }
 
             // Merge state changes
             state.extend(block_state);

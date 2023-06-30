@@ -1,5 +1,6 @@
 use crate::metrics::{StageMetrics, SyncMetrics};
 use reth_primitives::{
+    constants::MGAS_TO_GAS,
     stage::{StageCheckpoint, StageId},
     BlockNumber,
 };
@@ -25,6 +26,11 @@ pub enum MetricEvent {
         /// Maximum known block number reachable by this stage.
         /// If specified, `entities_total` metric is updated.
         max_block_number: Option<BlockNumber>,
+    },
+    /// Execution stage processed some amount of gas.
+    ExecutionStageGas {
+        /// Gas processed.
+        gas: u64,
     },
 }
 
@@ -62,6 +68,11 @@ impl MetricsListener {
                     stage_metrics.entities_total.set(total as f64);
                 }
             }
+            MetricEvent::ExecutionStageGas { gas } => self
+                .sync_metrics
+                .execution_stage
+                .mgas_processed_total
+                .increment(gas as f64 / MGAS_TO_GAS as f64),
         }
     }
 }
