@@ -843,6 +843,8 @@ where
             Ok(status) => {
                 if status.is_valid() {
                     if let Some(target) = self.forkchoice_state_tracker.sync_target_state() {
+                        // if we're currently syncing and the inserted block is the targeted FCU
+                        // head block, we can try to make it canonical.
                         if block_hash == target.head_block_hash {
                             self.try_make_sync_target_canonical(block_num_hash);
                         }
