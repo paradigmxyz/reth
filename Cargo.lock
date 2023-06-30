@@ -5069,6 +5069,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-stages",
  "tokio",
  "tracing",
 ]

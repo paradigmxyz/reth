@@ -16,6 +16,11 @@ pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 /// Collection of metric events.
 #[derive(Clone, Copy, Debug)]
 pub enum MetricEvent {
+    /// Sync reached new height. All stage checkpoints are updated.
+    SyncHeight {
+        /// Maximum height measured in block number that sync reached.
+        height: BlockNumber,
+    },
     /// Stage reached new checkpoint.
     StageCheckpoint {
         /// Stage ID.
@@ -44,6 +49,13 @@ impl MetricsListener {
 
     fn handle_event(&mut self, event: MetricEvent) {
         match event {
+            MetricEvent::SyncHeight { height } => {
+                // TODO(alexey): `self.sync_metrics.stages` may not contain any stages
+                self.sync_metrics
+                    .stages
+                    .iter()
+                    .for_each(|(_, metrics)| metrics.checkpoint.set(height as f64))
+            }
             MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number } => {
                 let stage_metrics = self.sync_metrics.stages.entry(stage_id).or_insert_with(|| {
                     StageMetrics::new_with_labels(&[("stage", stage_id.to_string())])

@@ -26,6 +26,7 @@ use reth_provider::{
     CanonStateNotificationSender, CanonStateNotifications, Chain, DatabaseProvider,
     DisplayBlocksChain, ExecutorFactory, HeaderProvider,
 };
+use reth_stages::{MetricEvent, MetricEventsSender};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -90,6 +91,7 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     canon_state_notification_sender: CanonStateNotificationSender,
     /// Metrics for the blockchain tree.
     metrics: TreeMetrics,
+    metrics_tx: Option<MetricEventsSender>,
 }
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
@@ -141,7 +143,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             config,
             canon_state_notification_sender,
             metrics: Default::default(),
+            metrics_tx: None,
         })
+    }
+
+    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
+        self.metrics_tx = Some(metrics_tx);
+        self
     }
 
     /// Check if then block is known to blockchain tree or database and return its status.
@@ -1074,10 +1082,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Update blockchain tree metrics
-    pub(crate) fn update_tree_metrics(&self) {
+    /// Update blockchain tree and sync metrics
+    pub(crate) fn update_metrics(&mut self) {
+        let height = self.canonical_chain().tip().number;
+
+        let provider = DatabaseProvider::new_rw(
+            self.externals.db.tx_mut()?,
+            self.externals.chain_spec.clone(),
+        );
+
         self.metrics.sidechains.set(self.chains.len() as f64);
-        self.metrics.canonical_chain_height.set(self.canonical_chain().tip().number as f64);
+        self.metrics.canonical_chain_height.set(height as f64);
+        if let Some(metrics_tx) = self.metrics_tx.as_mut() {
+            let _ = metrics_tx.send(MetricEvent::SyncHeight { height });
+        }
     }
 }
 
