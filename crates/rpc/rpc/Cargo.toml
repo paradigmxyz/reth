@@ -59,7 +59,6 @@ tracing = { workspace = true }
 tracing-futures = "0.2"
 schnellru = "0.2"
 futures = { workspace = true }
-eyre = "0.6.8"
 
 [dev-dependencies]
 jsonrpsee = { version = "0.18", features = ["client"] }
