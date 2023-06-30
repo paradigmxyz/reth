@@ -354,7 +354,6 @@ where
                 .with_state_at_block(state_at.into(), move |state| {
                     let mut results = Vec::with_capacity(transactions.len());
                     let mut db = SubState::new(State::new(state));
-                    //
 
                     let mut transactions = transactions.into_iter().enumerate().peekable();
 
