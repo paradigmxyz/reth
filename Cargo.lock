@@ -5651,6 +5651,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "reth-interfaces",
+ "reth-metrics",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
