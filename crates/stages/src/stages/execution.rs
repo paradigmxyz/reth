@@ -10,12 +10,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::db::DatabaseError;
-use reth_metrics::{
-    metrics::{self, Gauge},
-    Metrics,
-};
 use reth_primitives::{
-    constants::MGAS_TO_GAS,
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
@@ -79,6 +74,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         Self::new(executor_factory, ExecutionStageThresholds::default())
     }
 
+    /// Set the metric events sender.
     pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
         self.metrics_tx = Some(metrics_tx);
         self
