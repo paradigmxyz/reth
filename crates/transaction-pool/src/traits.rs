@@ -89,6 +89,11 @@ pub trait TransactionPool: Send + Sync + Clone {
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
+    /// Returns a new transaction change event stream for the given transaction.
+    ///
+    /// Returns `None` if the transaction is not in the pool.
+    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
+
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
@@ -586,6 +591,10 @@ pub struct PoolSize {
     pub queued: usize,
     /// Reported size of transactions in the _queued_ sub-pool.
     pub queued_size: usize,
+    /// Number of all transactions of all sub-pools
+    ///
+    /// Note: this is the sum of ```pending + basefee + queued```
+    pub total: usize,
 }
 
 /// Represents the current status of the pool.

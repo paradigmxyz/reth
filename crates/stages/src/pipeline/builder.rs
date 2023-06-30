@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{pipeline::BoxedStage, Pipeline, Stage, StageSet};
+use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageSet};
 use reth_db::database::Database;
 use reth_primitives::{stage::StageId, BlockNumber, ChainSpec, H256};
 use tokio::sync::watch;
@@ -17,6 +17,7 @@ where
     max_block: Option<BlockNumber>,
     /// A receiver for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<H256>>,
+    metrics_tx: Option<MetricEventsSender>,
 }
 
 impl<DB> PipelineBuilder<DB>
@@ -60,11 +61,17 @@ where
         self
     }
 
+    /// Set the metric events sender.
+    pub fn with_metric_events(mut self, metrics_tx: MetricEventsSender) -> Self {
+        self.metrics_tx = Some(metrics_tx);
+        self
+    }
+
     /// Builds the final [`Pipeline`] using the given database.
     ///
     /// Note: it's expected that this is either an [Arc](std::sync::Arc) or an Arc wrapper type.
     pub fn build(self, db: DB, chain_spec: Arc<ChainSpec>) -> Pipeline<DB> {
-        let Self { stages, max_block, tip_tx } = self;
+        let Self { stages, max_block, tip_tx, metrics_tx } = self;
         Pipeline {
             db,
             chain_spec,
@@ -73,14 +80,14 @@ where
             tip_tx,
             listeners: Default::default(),
             progress: Default::default(),
-            metrics: Default::default(),
+            metrics_tx,
         }
     }
 }
 
 impl<DB: Database> Default for PipelineBuilder<DB> {
     fn default() -> Self {
-        Self { stages: Vec::new(), max_block: None, tip_tx: None }
+        Self { stages: Vec::new(), max_block: None, tip_tx: None, metrics_tx: None }
     }
 }
 
