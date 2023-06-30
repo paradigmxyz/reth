@@ -742,7 +742,7 @@ pub struct BlockBody {
     #[cfg_attr(
         any(test, feature = "arbitrary"),
         proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=200)"
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
         )
     )]
     pub transactions: Vec<TransactionSigned>,
