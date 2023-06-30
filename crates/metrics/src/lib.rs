@@ -27,7 +27,3 @@ pub mod common;
 
 /// Re-export core metrics crate.
 pub use metrics;
-
-/// Metric events listener
-mod listener;
-pub use listener::*;

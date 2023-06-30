@@ -18,11 +18,11 @@ mod event;
 mod progress;
 mod set;
 
+use crate::metrics::{MetricEvent, MetricEventsSender};
 pub use crate::pipeline::ctrl::ControlFlow;
 pub use builder::*;
 pub use event::*;
 use progress::*;
-use reth_metrics::{events::SyncMetricEvent, MetricEvent, MetricEventsSender};
 pub use set::*;
 
 /// A container for a queued stage.
@@ -143,11 +143,11 @@ where
 
         for stage in &self.stages {
             let stage_id = stage.id();
-            let _ = metrics_tx.send(MetricEvent::Sync(SyncMetricEvent::StageCheckpoint {
+            let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
                 stage_id,
                 checkpoint: provider.get_stage_checkpoint(stage_id)?.unwrap_or_default(),
                 max_block_number: None,
-            }));
+            });
         }
         Ok(())
     }
@@ -289,15 +289,13 @@ where
                             "Stage unwound"
                         );
                         if let Some(metrics_tx) = &mut self.metrics_tx {
-                            let _ = metrics_tx.send(MetricEvent::Sync(
-                                SyncMetricEvent::StageCheckpoint {
-                                    stage_id,
-                                    checkpoint,
-                                    // We assume it was set in the previous execute iteration, so it
-                                    // doesn't change when we unwind.
-                                    max_block_number: None,
-                                },
-                            ));
+                            let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
+                                stage_id,
+                                checkpoint,
+                                // We assume it was set in the previous execute iteration, so it
+                                // doesn't change when we unwind.
+                                max_block_number: None,
+                            });
                         }
                         provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
@@ -378,12 +376,11 @@ where
                         "Stage committed progress"
                     );
                     if let Some(metrics_tx) = &mut self.metrics_tx {
-                        let _ =
-                            metrics_tx.send(MetricEvent::Sync(SyncMetricEvent::StageCheckpoint {
-                                stage_id,
-                                checkpoint,
-                                max_block_number: target,
-                            }));
+                        let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
+                            stage_id,
+                            checkpoint,
+                            max_block_number: target,
+                        });
                     }
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 

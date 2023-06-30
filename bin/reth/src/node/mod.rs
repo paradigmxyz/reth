@@ -72,13 +72,15 @@ use crate::{
     node::cl_events::ConsensusLayerHealthEvents,
 };
 use reth_interfaces::p2p::headers::client::HeadersClient;
-use reth_metrics::MetricEventsSender;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::DisplayHardforks;
 use reth_provider::providers::BlockchainProvider;
-use reth_stages::stages::{
-    AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-    StorageHashingStage, TransactionLookupStage,
+use reth_stages::{
+    metrics::{MetricEventsSender, MetricsListener},
+    stages::{
+        AccountHashingStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
+        StorageHashingStage, TransactionLookupStage,
+    },
 };
 
 pub mod cl_events;
@@ -278,7 +280,7 @@ impl Command {
 
         debug!(target: "reth::cli", "Spawning metrics listener task");
         let (metrics_tx, metrics_rx) = unbounded_channel();
-        let metrics_listener = reth_metrics::MetricsListener::new(metrics_rx);
+        let metrics_listener = MetricsListener::new(metrics_rx);
         ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
 
         // Configure the pipeline

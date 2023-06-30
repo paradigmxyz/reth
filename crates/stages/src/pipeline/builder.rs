@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use crate::{pipeline::BoxedStage, Pipeline, Stage, StageSet};
+use crate::{metrics::MetricEventsSender, pipeline::BoxedStage, Pipeline, Stage, StageSet};
 use reth_db::database::Database;
-use reth_metrics::MetricEventsSender;
 use reth_primitives::{stage::StageId, BlockNumber, ChainSpec, H256};
 use tokio::sync::watch;
 

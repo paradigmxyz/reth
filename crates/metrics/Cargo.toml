@@ -9,16 +9,15 @@ repository.workspace = true
 description = "reth metrics utilities"
 
 [dependencies]
-# reth 
+# reth
 reth-metrics-derive = { path = "./metrics-derive" }
-reth-primitives = { workspace = true }
 
 # metrics
 metrics = "0.20.1"
 
 # async
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["full"], optional = true }
 futures = { workspace = true, optional = true }
 
 [features]
-common = ["tokio/full", "futures"]
+common = ["tokio", "futures"]

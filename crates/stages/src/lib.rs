@@ -80,6 +80,9 @@ pub mod stages;
 
 pub mod sets;
 
+/// Metrics listener and supporting types.
+pub mod metrics;
+
 pub use error::*;
 pub use pipeline::*;
 pub use stage::*;
