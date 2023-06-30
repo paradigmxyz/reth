@@ -135,17 +135,17 @@ pub struct RpcServerArgs {
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
 
-    /// Max size for cached block data.
+    /// Maximum number of block cache entries.
     #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_MAX_LEN)]
-    pub block_cache_max_len: u32,
+    pub block_cache_len: u32,
 
-    /// Max size for cached receipt data.
+    /// Maximum number of receipt cache entries.
     #[arg(long, default_value_t = DEFAULT_RECEIPT_CACHE_MAX_LEN)]
-    pub receipt_cache_max_len: u32,
+    pub receipt_cache_len: u32,
 
-    /// Max size for cached evm env data.
+    /// Maximum number of env cache entries.
     #[arg(long, default_value_t = DEFAULT_ENV_CACHE_MAX_LEN)]
-    pub env_cache_max_len: u32,
+    pub env_cache_len: u32,
 }
 
 impl RpcServerArgs {
@@ -157,21 +157,6 @@ impl RpcServerArgs {
     /// Returns the max response size in bytes.
     pub fn rpc_max_response_size_bytes(&self) -> u32 {
         self.rpc_max_response_size * 1024 * 1024
-    }
-
-    /// Returns the max length for cached block data
-    pub fn block_cache_max_len(&self) -> u32 {
-        self.block_cache_max_len
-    }
-
-    /// Returns the max length cached receipt data
-    pub fn receipt_cache_max_len(&self) -> u32 {
-        self.receipt_cache_max_len
-    }
-
-    /// Returns the max length for cached evm env data
-    pub fn env_cache_max_len(&self) -> u32 {
-        self.env_cache_max_len
     }
 
     /// Extracts the gas price oracle config from the args.
