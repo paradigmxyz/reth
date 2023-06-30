@@ -85,7 +85,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor over the transactions
         let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
         // Walk the transactions from start to end index (inclusive)
-        let raw_tx_range = RawKey::new(*tx_range.start())..=RawKey::new(*tx_range.end());
+        let raw_tx_range = RawKey::new(tx_range.start)..RawKey::new(tx_range.end);
         let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
 
         // Iterate over transactions in chunks

@@ -246,13 +246,19 @@ impl TestTransaction {
             blocks.into_iter().try_for_each(|block| {
                 Self::insert_header(tx, &block.header)?;
                 // Insert into body tables.
-                tx.put::<tables::BlockBodyIndices>(
-                    block.number,
-                    StoredBlockBodyIndices {
-                        first_tx_num: next_tx_num,
-                        tx_count: block.body.len() as u64,
-                    },
-                )?;
+                let block_body_indices = StoredBlockBodyIndices {
+                    first_tx_num: next_tx_num,
+                    tx_count: block.body.len() as u64,
+                };
+
+                if !block.body.is_empty() {
+                    tx.put::<tables::TransactionBlock>(
+                        block_body_indices.last_tx_num(),
+                        block.number,
+                    )?;
+                }
+                tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
+
                 block.body.iter().try_for_each(|body_tx| {
                     tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
                     next_tx_num += 1;
