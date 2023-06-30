@@ -417,31 +417,33 @@ where
         if let (Some(block), Some(traces)) =
             (self.inner.eth_api.block_by_id(block_id).await?, traces.as_mut())
         {
-            if let Some(base_block_reward) = base_block_reward(
-                self.provider().spec().as_ref(),
-                block.header.number,
-                block.header.difficulty,
-                block.header.difficulty, // TODO: Total difficulty
-            ) {
-                traces.push(reward_trace(
-                    &block.header,
-                    RewardAction {
-                        author: block.header.beneficiary,
-                        reward_type: RewardType::Block,
-                        value: U256::from(base_block_reward),
-                    },
-                ));
-
-                if !block.ommers.is_empty() {
+            if let Some(header_td) = self.provider().header_td(&block.header.hash)? {
+                if let Some(base_block_reward) = base_block_reward(
+                    self.provider().spec().as_ref(),
+                    block.header.number,
+                    block.header.difficulty,
+                    header_td,
+                ) {
                     traces.push(reward_trace(
                         &block.header,
                         RewardAction {
                             author: block.header.beneficiary,
-                            reward_type: RewardType::Uncle,
-                            value: block_reward(base_block_reward, block.ommers.len()) -
-                                U256::from(base_block_reward),
+                            reward_type: RewardType::Block,
+                            value: U256::from(base_block_reward),
                         },
                     ));
+
+                    if !block.ommers.is_empty() {
+                        traces.push(reward_trace(
+                            &block.header,
+                            RewardAction {
+                                author: block.header.beneficiary,
+                                reward_type: RewardType::Uncle,
+                                value: block_reward(base_block_reward, block.ommers.len()) -
+                                    U256::from(base_block_reward),
+                            },
+                        ));
+                    }
                 }
             }
         }
