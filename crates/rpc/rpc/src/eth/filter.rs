@@ -1,15 +1,11 @@
 use super::cache::EthStateCache;
 use crate::{
-    eth::{
-        error::{EthApiError, EthResult},
-        logs_utils,
-    },
+    eth::{error::EthApiError, logs_utils},
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
@@ -334,19 +330,6 @@ where
         Ok(id)
     }
 
-    /// Fetches both receipts and block for the given block number.
-    async fn block_and_receipts_by_number(
-        &self,
-        hash_or_number: BlockHashOrNumber,
-    ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
-            Some(hash) => hash,
-            None => return Ok(None),
-        };
-
-        Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
-    }
-
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
     /// Returns an error if:
@@ -379,25 +362,26 @@ where
             for (idx, header) in headers.iter().enumerate() {
                 // these are consecutive headers, so we can use the parent hash of the next block to
                 // get the current header's hash
-                let num_hash: BlockHashOrNumber = headers
-                    .get(idx + 1)
-                    .map(|h| h.parent_hash.into())
-                    .unwrap_or_else(|| header.number.into());
+                let block_hash = if let Some(next_header) = headers.get(idx + 1) {
+                    next_header.parent_hash
+                } else if let Some(hash) = self.provider.convert_block_hash(header.number.into())? {
+                    hash
+                } else {
+                    continue
+                };
 
                 // only if filter matches
                 if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
                     FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
-                    if let Some((block, receipts)) =
-                        self.block_and_receipts_by_number(num_hash).await?
+                    if let Some((transactions, receipts)) =
+                        self.eth_cache.get_transactions_and_receipts(block_hash.into()).await?
                     {
-                        let block_hash = block.hash;
-
                         logs_utils::append_matching_block_logs(
                             &mut all_logs,
                             &filter_params,
-                            (block.number, block_hash).into(),
-                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
+                            (header.number, block_hash).into(),
+                            transactions.into_iter().map(|tx| tx.hash()).zip(receipts),
                             false,
                         );
 
