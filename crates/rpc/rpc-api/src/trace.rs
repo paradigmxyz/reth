@@ -1,11 +1,11 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{BlockId, Bytes, H256};
+use reth_primitives::{Address, BlockId, Bytes, H256, U256};
 use reth_rpc_types::{
     state::StateOverride,
     trace::{filter::TraceFilter, parity::*},
     BlockOverrides, CallRequest, Index,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Ethereum trace API
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]
@@ -84,4 +84,11 @@ pub trait TraceApi {
         &self,
         hash: H256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
+
+    /// Returns all ETH balance changes in a block
+    #[method(name = "getBalancesChangesInBlock")]
+    async fn trace_get_balance_changes_in_block(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<HashMap<Address, U256>>>;
 }

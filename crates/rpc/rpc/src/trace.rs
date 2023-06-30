@@ -10,8 +10,8 @@ use crate::{
     TracingCallGuard,
 };
 use async_trait::async_trait;
-use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
+use jsonrpsee::core::{RpcResult as Result, RpcResult};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, H256, U256};
 use reth_provider::{BlockReader, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
@@ -29,7 +29,11 @@ use reth_rpc_types::{
 use reth_tasks::TaskSpawner;
 use revm::{db::CacheDB, primitives::Env};
 use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
-use std::{collections::HashSet, future::Future, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    sync::Arc,
+};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
@@ -443,6 +447,31 @@ where
         )
         .await
     }
+
+    /// Returns all ETH balance changes in a block
+    pub async fn get_balances_changes_in_block(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<HashMap<Address, U256>>> {
+        let traced: EthResult<Option<Vec<Vec<(Address, U256)>>>> = self
+            .trace_block_with(
+                block_id,
+                TracingInspectorConfig::default_parity(),
+                |_, _, _, state, _| {
+                    Ok(state
+                        .iter()
+                        .map(|(address, account)| (*address, account.info.balance))
+                        .collect())
+                },
+            )
+            .await;
+        return if let Ok(Some(v)) = traced {
+            let accounts: HashMap<Address, U256> = v.into_iter().flatten().collect();
+            Ok(Some(accounts))
+        } else {
+            Ok(None)
+        };
+    }
 }
 
 #[async_trait]
@@ -547,6 +576,14 @@ where
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(TraceApi::trace_transaction(self, hash).await?)
+    }
+
+    /// Handler for `trace_getBalancesChangesInBlock`
+    async fn trace_get_balance_changes_in_block(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<HashMap<Address, U256>>> {
+        Ok(TraceApi::get_balances_changes_in_block(self, block_id).await?)
     }
 }
 
