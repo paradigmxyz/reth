@@ -114,7 +114,6 @@ test-unit: ## Run unit tests.
 
 .PHONY: cov-unit
 cov-unit: ## Run unit tests with coverage.
-	cargo llvm-cov clean --workspace
 	rm -f $(COV_FILE)
 	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS)
 
