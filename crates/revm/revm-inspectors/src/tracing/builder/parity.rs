@@ -279,7 +279,7 @@ fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstr
 
     VmInstruction {
         pc: step.pc,
-        cost: 0, // todo
+        cost: 0, // todo::n
         ex: Some(VmExecutedOperation {
             used: step.gas_cost,
             push: match step.new_stack {
