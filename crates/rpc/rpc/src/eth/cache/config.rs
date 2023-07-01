@@ -21,7 +21,7 @@ pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
 /// Default cache size for the env cache: 1000 envs.
 pub const DEFAULT_ENV_CACHE_MAX_LEN: u32 = 1000;
 
-/// Settings for the [EthStateCache]
+/// Settings for the [EthStateCache](crate::eth::cache::EthStateCache).
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EthStateCacheConfig {
