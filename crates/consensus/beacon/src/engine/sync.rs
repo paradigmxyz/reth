@@ -12,7 +12,8 @@ use reth_primitives::{BlockNumber, SealedBlock, H256};
 use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
-    collections::VecDeque,
+    cmp::{Ordering, Reverse},
+    collections::{BinaryHeap, VecDeque},
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -43,6 +44,9 @@ where
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
+    /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
+    /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
+    range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
     /// Buffered events until the manager is polled and the pipeline is idle.
     queued_events: VecDeque<EngineSyncEvent>,
     /// If enabled, the pipeline will be triggered continuously, as soon as it becomes idle
@@ -74,6 +78,7 @@ where
             pending_pipeline_target: None,
             inflight_full_block_requests: Vec::new(),
             inflight_block_range_requests: Vec::new(),
+            range_buffered_blocks: BinaryHeap::new(),
             queued_events: VecDeque::new(),
             run_pipeline_continuously,
             max_block,
@@ -137,7 +142,7 @@ where
             target: "consensus::engine",
             ?hash,
             ?count,
-            "start downloading full block."
+            "start downloading full block range."
         );
 
         let request = self.full_block_client.get_full_block_range(hash, count);
@@ -270,6 +275,11 @@ where
                 }
             }
 
+            // drain an element of the block buffer
+            if let Some(block) = self.range_buffered_blocks.pop() {
+                return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
+            }
+
             // advance all full block requests
             for idx in (0..self.inflight_full_block_requests.len()).rev() {
                 let mut request = self.inflight_full_block_requests.swap_remove(idx);
@@ -285,7 +295,8 @@ where
             for idx in (0..self.inflight_block_range_requests.len()).rev() {
                 let mut request = self.inflight_block_range_requests.swap_remove(idx);
                 if let Poll::Ready(blocks) = request.poll_unpin(cx) {
-                    self.queued_events.push_back(EngineSyncEvent::FetchedBlocks(blocks));
+                    self.range_buffered_blocks
+                        .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
                 } else {
                     // still pending
                     self.inflight_block_range_requests.push(request);
@@ -302,15 +313,27 @@ where
     }
 }
 
+/// A wrapper type around [SealedBlock] that implements the [Ord] trait by block number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OrderedSealedBlock(SealedBlock);
+
+impl PartialOrd for OrderedSealedBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.0.number.partial_cmp(&other.0.number)
+    }
+}
+
+impl Ord for OrderedSealedBlock {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.number.cmp(&other.0.number)
+    }
+}
+
 /// The event type emitted by the [EngineSyncController].
 #[derive(Debug)]
 pub(crate) enum EngineSyncEvent {
     /// A full block has been downloaded from the network.
     FetchedFullBlock(SealedBlock),
-    /// A range of blocks has been downloaded from the network.
-    /// TODO: dedup with FetchedFullBlock? we may not need it since we can request now with
-    /// count=1, and it will _also_ send both the headers and bodies response right away.
-    FetchedBlocks(Vec<SealedBlock>),
     /// Pipeline started syncing
     ///
     /// This is none if the pipeline is triggered without a specific target.

@@ -472,6 +472,16 @@ where
         None
     }
 
+    /// Returns how far the local tip is from the given block. If the local tip is at the same
+    /// height or its block number is greater than the given block, this returns None.
+    fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
+        if block > local_tip {
+            Some(block - local_tip)
+        } else {
+            None
+        }
+    }
+
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
@@ -1259,11 +1269,6 @@ where
         ev: EngineSyncEvent,
     ) -> Option<Result<(), BeaconConsensusEngineError>> {
         match ev {
-            EngineSyncEvent::FetchedBlocks(blocks) => {
-                // TODO: this method is just todo! for now, so it will panic if we send any block
-                // range requests
-                self.on_downloaded_block_range(blocks);
-            }
             EngineSyncEvent::FetchedFullBlock(block) => {
                 self.on_downloaded_block(block);
             }
