@@ -252,8 +252,8 @@ fn make_trace(nodes: &[CallTraceNode], idx: usize) -> VmTrace {
             | opcode::STATICCALL
             | opcode::CREATE
             | opcode::CREATE2 => {
-                next_child_idx = next_child_idx + 1;
-                Some(make_trace(nodes, nodes[idx].children[next_child_idx]))
+                next_child_idx += 1;
+                Some(make_trace(nodes, nodes[idx].children[next_child_idx - 1]))
             }
             _ => None,
         };
