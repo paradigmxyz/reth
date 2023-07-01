@@ -85,6 +85,12 @@ impl TracingInspector {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
 
+    /// Returns true if we're no longer in the context of the root call.
+    fn is_deep(&self) -> bool {
+        // the root call will always be the first entry in the trace stack
+        !self.trace_stack.is_empty()
+    }
+
     /// Returns true if this a call to a precompile contract.
     ///
     /// Returns true if the `to` address is a precompile contract and the value is zero.
@@ -97,7 +103,7 @@ impl TracingInspector {
     ) -> bool {
         if data.precompiles.contains(to) {
             // only if this is _not_ the root call
-            return !self.trace_stack.is_empty() && value == U256::ZERO
+            return self.is_deep() && value == U256::ZERO
         }
         false
     }
