@@ -1,6 +1,6 @@
 //! Common CLI utility functions.
 
-use eyre::{Result, WrapErr};
+use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
@@ -11,7 +11,7 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, ChainSpec, HeadersDirection, SealedHeader};
+use reth_primitives::{fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedHeader};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
@@ -98,7 +98,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     pub fn drop(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         info!(target: "reth::cli", "Dropping database at {:?}", path);
-        std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
+        fs::remove_dir_all(path)?;
         Ok(())
     }
 
