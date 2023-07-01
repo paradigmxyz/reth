@@ -114,7 +114,7 @@ test-unit: ## Run unit tests.
 .PHONY: cov-unit
 cov-unit: ## Run unit tests with coverage.
 	cargo llvm-cov clean --workspace
-	cargo llvm-cov nextest $(UNIT_TEST_ARGS)
+	cargo llvm-cov nextest --html $(UNIT_TEST_ARGS)
 
 .PHONY: cov-report-html
 cov-report-html: cov-unit ## Generate a HTML coverage report and open it in the browser.
