@@ -1,6 +1,8 @@
 //! Clap parser utilities
 
-use reth_primitives::{AllGenesisFormats, BlockHashOrNumber, ChainSpec, GOERLI, MAINNET, SEPOLIA};
+use reth_primitives::{
+    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, GOERLI, MAINNET, SEPOLIA,
+};
 use reth_revm::primitives::B256 as H256;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
@@ -24,7 +26,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
         _ => {
-            let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
+            let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
         }
     })
@@ -38,7 +40,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
         _ => {
-            let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
+            let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
             Arc::new(genesis.into())
         }
