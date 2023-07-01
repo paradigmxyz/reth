@@ -106,6 +106,7 @@ build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR dir
 ##@ Test
 
 UNIT_TEST_ARGS := --locked --workspace --all-features -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+COV_FILE := lcov.info
 
 .PHONY: test-unit
 test-unit: ## Run unit tests.
@@ -114,7 +115,8 @@ test-unit: ## Run unit tests.
 .PHONY: cov-unit
 cov-unit: ## Run unit tests with coverage.
 	cargo llvm-cov clean --workspace
-	cargo llvm-cov nextest $(UNIT_TEST_ARGS)
+	rm -f $(COV_FILE)
+	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS)
 
 .PHONY: cov-report-html
 cov-report-html: cov-unit ## Generate a HTML coverage report and open it in the browser.
