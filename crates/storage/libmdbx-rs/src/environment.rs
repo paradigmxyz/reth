@@ -2,6 +2,7 @@ use crate::{
     database::Database,
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
+    log_level::LogLevel,
     transaction::{RO, RW},
     Mode, Transaction, TransactionKind,
 };
@@ -90,6 +91,7 @@ where
             spill_max_denominator: None,
             spill_min_denominator: None,
             geometry: None,
+            log_level: None,
             _marker: PhantomData,
         }
     }
@@ -384,6 +386,7 @@ where
     spill_max_denominator: Option<u64>,
     spill_min_denominator: Option<u64>,
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
+    log_level: Option<ffi::MDBX_log_level_t>,
     _marker: PhantomData<E>,
 }
 
@@ -408,6 +411,10 @@ where
     ) -> Result<Environment<E>> {
         let mut env: *mut ffi::MDBX_env = ptr::null_mut();
         unsafe {
+            if let Some(log_level) = self.log_level {
+                mdbx_result(ffi::mdbx_setup_debug(log_level, ffi::MDBX_DBG_DONTCHANGE, None))?;
+            }
+
             mdbx_result(ffi::mdbx_env_create(&mut env))?;
             if let Err(e) = (|| {
                 if let Some(geometry) = &self.geometry {
@@ -616,6 +623,11 @@ where
             shrink_threshold: geometry.shrink_threshold,
             page_size: geometry.page_size,
         });
+        self
+    }
+
+    pub fn set_log_level(&mut self, log_level: LogLevel) -> &mut Self {
+        self.log_level = Some(log_level.into());
         self
     }
 }

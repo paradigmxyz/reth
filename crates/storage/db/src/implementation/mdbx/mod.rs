@@ -7,8 +7,8 @@ use crate::{
     DatabaseError,
 };
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
-    SyncMode, RO, RW,
+    DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, LogLevel, Mode,
+    PageSize, SyncMode, RO, RW,
 };
 use std::{ops::Deref, path::Path};
 use tx::Tx;
@@ -89,6 +89,7 @@ impl<E: EnvironmentKind> Env<E> {
                 })
                 // configure more readers
                 .set_max_readers(DEFAULT_MAX_READERS)
+                .set_log_level(LogLevel::Extra)
                 .open(path)
                 .map_err(|e| DatabaseError::FailedToOpen(e.into()))?,
         };

@@ -17,6 +17,7 @@ pub use crate::{
     },
     error::{Error, Result},
     flags::*,
+    log_level::LogLevel,
     transaction::{Transaction, TransactionKind, RO, RW},
 };
 pub use ffi::MDBX_dbi as DBI;
@@ -27,6 +28,7 @@ mod database;
 mod environment;
 mod error;
 mod flags;
+mod log_level;
 mod transaction;
 
 #[cfg(test)]
