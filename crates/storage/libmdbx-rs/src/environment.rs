@@ -412,10 +412,13 @@ where
         let mut env: *mut ffi::MDBX_env = ptr::null_mut();
         unsafe {
             if let Some(log_level) = self.log_level {
-                mdbx_result(ffi::mdbx_setup_debug(log_level, ffi::MDBX_DBG_DONTCHANGE, None))?;
+                // Returns the previously debug_flags in the 0-15 bits and log_level in the
+                // 16-31 bits, no need to use `mdbx_result`.
+                ffi::mdbx_setup_debug(log_level, ffi::MDBX_DBG_DONTCHANGE, None);
             }
 
             mdbx_result(ffi::mdbx_env_create(&mut env))?;
+
             if let Err(e) = (|| {
                 if let Some(geometry) = &self.geometry {
                     let mut min_size = -1;
