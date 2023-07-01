@@ -1,5 +1,5 @@
 use crate::tracing::{
-    types::{CallTrace, CallTraceNode, CallTraceStep},
+    types::{CallTraceNode, CallTraceStep},
     TracingInspectorConfig,
 };
 use reth_primitives::{Address, Bytes, U64};
@@ -272,16 +272,21 @@ fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstr
         None => None,
     };
 
+    let maybe_memory = match step.memory.len() {
+        0 => None,
+        _ => Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() }),
+    };
+
     VmInstruction {
         pc: step.pc,
         cost: 0, // todo
         ex: Some(VmExecutedOperation {
             used: step.gas_cost,
-            push: Default::default(),
-            mem: Some(MemoryDelta {
-                off: step.memory_size,
-                data: step.memory.data().clone().into(),
-            }),
+            push: match step.new_stack {
+                Some(new_stack) => Some(new_stack.into()),
+                None => None,
+            },
+            mem: maybe_memory,
             store: maybe_storage,
         }),
         sub: maybe_sub,
@@ -296,6 +301,7 @@ where
     todo!()
 }
 
+/// Returns the code for the given address from the db.
 pub fn get_code<DB>(db: DB, address: Address) -> Result<Option<Bytes>, DB::Error>
 where
     DB: DatabaseRef,

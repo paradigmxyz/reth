@@ -228,6 +228,7 @@ impl TracingInspector {
             op,
             contract: interp.contract.address,
             stack,
+            new_stack: None,
             memory,
             memory_size: interp.memory.len(),
             gas_remaining: self.gas_inspector.gas_remaining(),
@@ -252,6 +253,10 @@ impl TracingInspector {
         let StackStep { trace_idx, step_idx } =
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
+
+        if interp.stack.len() > step.stack.len() {
+            step.new_stack = interp.stack.data().last().copied();
+        }
 
         if self.config.record_memory_snapshots {
             // resize memory so opcodes that allocated memory is correctly displayed
@@ -353,7 +358,7 @@ where
         if self.config.record_steps {
             self.gas_inspector.step_end(interp, data, is_static, eval);
             self.fill_step_on_step_end(interp, data, eval);
-            return eval
+            return eval;
         }
         InstructionResult::Continue
     }
@@ -491,7 +496,7 @@ struct StackStep {
 #[inline]
 fn is_precompile_call<DB: Database>(data: &EVMData<'_, DB>, to: &Address, value: U256) -> bool {
     if data.precompiles.contains(to) {
-        return data.journaled_state.depth() > 0 && value == U256::ZERO
+        return data.journaled_state.depth() > 0 && value == U256::ZERO;
     }
     false
 }
