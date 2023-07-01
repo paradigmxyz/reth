@@ -151,8 +151,8 @@ pub struct BodiesConfig {
     /// Maximum amount of received bodies to buffer internally.
     /// The response contains multiple bodies.
     ///
-    /// Default: ~43_000 or 4GB with block size of 100kb
-    pub downloader_max_buffered_blocks: usize,
+    /// Default: 4GB
+    pub downloader_max_buffered_blocks_size_bytes: usize,
     /// The minimum number of requests to send concurrently.
     ///
     /// Default: 5
@@ -169,8 +169,7 @@ impl Default for BodiesConfig {
         Self {
             downloader_request_limit: 200,
             downloader_stream_batch_size: 10_000,
-            // With high block sizes at around 100kb this will be ~4GB of buffered blocks: ~43k
-            downloader_max_buffered_blocks: 4 * 1024 * 1024 * 1024 / 100_000,
+            downloader_max_buffered_blocks_size_bytes: 4 * 1024 * 1024 * 1024, // ~4GB
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
@@ -182,7 +181,7 @@ impl From<BodiesConfig> for BodiesDownloaderBuilder {
         BodiesDownloaderBuilder::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
             .with_request_limit(config.downloader_request_limit)
-            .with_max_buffered_blocks(config.downloader_max_buffered_blocks)
+            .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
             .with_concurrent_requests_range(
                 config.downloader_min_concurrent_requests..=
                     config.downloader_max_concurrent_requests,
