@@ -7,13 +7,15 @@ use crate::{
     DatabaseError,
 };
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, LogLevel, Mode,
-    PageSize, SyncMode, RO, RW,
+    DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
+    SyncMode, RO, RW,
 };
 use std::{ops::Deref, path::Path};
 use tx::Tx;
 
 pub mod cursor;
+mod log_level;
+pub use log_level::LogLevel;
 pub mod tx;
 
 const GIGABYTE: usize = 1024 * 1024 * 1024;
@@ -61,38 +63,44 @@ impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
     /// It does not create the tables, for that call [`Env::create_tables`].
-    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, DatabaseError> {
+    pub fn open(
+        path: &Path,
+        kind: EnvKind,
+        log_level: Option<LogLevel>,
+    ) -> Result<Env<E>, DatabaseError> {
         let mode = match kind {
             EnvKind::RO => Mode::ReadOnly,
             EnvKind::RW => Mode::ReadWrite { sync_mode: SyncMode::Durable },
         };
 
-        let env = Env {
-            inner: Environment::new()
-                .set_max_dbs(Tables::ALL.len())
-                .set_geometry(Geometry {
-                    // Maximum database size of 4 terabytes
-                    size: Some(0..(4 * TERABYTE)),
-                    // We grow the database in increments of 4 gigabytes
-                    growth_step: Some(4 * GIGABYTE as isize),
-                    // The database never shrinks
-                    shrink_threshold: None,
-                    page_size: Some(PageSize::Set(default_page_size())),
-                })
-                .set_flags(EnvironmentFlags {
-                    mode,
-                    // We disable readahead because it improves performance for linear scans, but
-                    // worsens it for random access (which is our access pattern outside of sync)
-                    no_rdahead: true,
-                    coalesce: true,
-                    ..Default::default()
-                })
-                // configure more readers
-                .set_max_readers(DEFAULT_MAX_READERS)
-                .set_log_level(LogLevel::Extra)
-                .open(path)
-                .map_err(|e| DatabaseError::FailedToOpen(e.into()))?,
-        };
+        let mut inner_env = Environment::new();
+        inner_env.set_max_dbs(Tables::ALL.len());
+        inner_env.set_geometry(Geometry {
+            // Maximum database size of 4 terabytes
+            size: Some(0..(4 * TERABYTE)),
+            // We grow the database in increments of 4 gigabytes
+            growth_step: Some(4 * GIGABYTE as isize),
+            // The database never shrinks
+            shrink_threshold: None,
+            page_size: Some(PageSize::Set(default_page_size())),
+        });
+        inner_env.set_flags(EnvironmentFlags {
+            mode,
+            // We disable readahead because it improves performance for linear scans, but
+            // worsens it for random access (which is our access pattern outside of sync)
+            no_rdahead: true,
+            coalesce: true,
+            ..Default::default()
+        });
+        // configure more readers
+        inner_env.set_max_readers(DEFAULT_MAX_READERS);
+
+        if let Some(log_level) = log_level {
+            inner_env.set_log_level(log_level.into());
+        }
+
+        let env =
+            Env { inner: inner_env.open(path).map_err(|e| DatabaseError::FailedToOpen(e.into()))? };
 
         Ok(env)
     }

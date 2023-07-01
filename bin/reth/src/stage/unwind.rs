@@ -1,7 +1,7 @@
 //! Unwinding a certain block range
 
 use crate::{
-    args::utils::genesis_value_parser,
+    args::{utils::genesis_value_parser, DatabaseArgs},
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::{Parser, Subcommand};
@@ -41,6 +41,9 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
     #[clap(subcommand)]
     command: Subcommands,
 }
@@ -55,7 +58,7 @@ impl Command {
             eyre::bail!("Database {db_path:?} does not exist.")
         }
 
-        let db = open_db(db_path.as_ref())?;
+        let db = open_db(db_path.as_ref(), self.db.log_level)?;
 
         let range = self.command.unwind_range(&db)?;
 

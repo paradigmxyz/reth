@@ -1,6 +1,6 @@
 //! Database debugging tool
 use crate::{
-    args::utils::genesis_value_parser,
+    args::{utils::genesis_value_parser, DatabaseArgs},
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
@@ -53,6 +53,9 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
     #[clap(subcommand)]
     command: Subcommands,
 }
@@ -84,7 +87,7 @@ impl Command {
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
-                let db = open_db_read_only(&db_path)?;
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 let mut stats_table = ComfyTable::new();
                 stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
@@ -135,17 +138,17 @@ impl Command {
                 println!("{stats_table}");
             }
             Subcommands::List(command) => {
-                let db = open_db_read_only(&db_path)?;
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
-                let db = open_db_read_only(&db_path)?;
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Drop => {
-                let db = open_db(&db_path)?;
+                let db = open_db(&db_path, self.db.log_level)?;
                 let mut tool = DbTool::new(&db, self.chain.clone())?;
                 tool.drop(db_path)?;
             }

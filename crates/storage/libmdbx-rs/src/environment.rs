@@ -2,7 +2,6 @@ use crate::{
     database::Database,
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
-    log_level::LogLevel,
     transaction::{RO, RW},
     Mode, Transaction, TransactionKind,
 };
@@ -629,8 +628,8 @@ where
         self
     }
 
-    pub fn set_log_level(&mut self, log_level: LogLevel) -> &mut Self {
-        self.log_level = Some(log_level.into());
+    pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
+        self.log_level = Some(log_level);
         self
     }
 }

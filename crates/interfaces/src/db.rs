@@ -32,3 +32,25 @@ pub enum DatabaseError {
     #[error("Database stats error code: {0:?}")]
     Stats(i32),
 }
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+/// Database log level.
+pub enum LogLevel {
+    /// Critical conditions, i.e. assertion failures.
+    Fatal,
+    /// Enables logging for error conditions.
+    Error,
+    /// Enables logging for warning conditions.
+    Warn,
+    /// Enables logging for normal but significant condition.
+    Notice,
+    /// Enables logging for verbose informational.
+    Verbose,
+    /// Enables logging for debug-level messages.
+    Debug,
+    /// Enables logging for trace debug-level messages.
+    Trace,
+    /// Enables extra debug-level messages.
+    Extra,
+}
