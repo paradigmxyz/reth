@@ -240,12 +240,12 @@ impl CallTraceNode {
 
             // If the opcode is a call, put the child trace on the stack
             match step.op.u8() {
-                opcode::CREATE |
-                opcode::CREATE2 |
-                opcode::DELEGATECALL |
-                opcode::CALL |
-                opcode::STATICCALL |
-                opcode::CALLCODE => {
+                opcode::CREATE
+                | opcode::CREATE2
+                | opcode::DELEGATECALL
+                | opcode::CALL
+                | opcode::STATICCALL
+                | opcode::CALLCODE => {
                     let call_id = self.children[child_id];
                     item.call_child_id = Some(call_id);
                     child_id += 1;
@@ -357,7 +357,7 @@ impl CallTraceNode {
                 address: self.trace.address,
                 refund_address: self.trace.selfdestruct_refund_target.unwrap_or_default(),
                 balance: self.trace.value,
-            })
+            });
         }
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
@@ -466,7 +466,7 @@ pub(crate) struct CallTraceStep {
     ///
     /// This will be empty if memory capture is disabled
     pub(crate) memory: Memory,
-    /// Size of memory
+    /// Size of memory at the beginning of the step
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
     pub(crate) gas_remaining: u64,

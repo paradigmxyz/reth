@@ -1,8 +1,12 @@
-use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
-use reth_primitives::{Address, U64};
+use crate::tracing::{
+    types::{CallTrace, CallTraceNode, CallTraceStep},
+    TracingInspectorConfig,
+};
+use reth_primitives::{Address, Bytes, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
+    interpreter::opcode,
     primitives::{AccountInfo, ExecutionResult, ResultAndState},
 };
 use std::collections::HashSet;
@@ -56,12 +60,12 @@ impl ParityTraceBuilder {
     fn trace_address(&self, idx: usize) -> Vec<usize> {
         if idx == 0 {
             // root call has empty traceAddress
-            return vec![]
+            return vec![];
         }
         let mut graph = vec![];
         let mut node = &self.nodes[idx];
         if node.is_precompile() {
-            return graph
+            return graph;
         }
         while let Some(parent) = node.parent {
             // the index of the child call in the arena
@@ -154,7 +158,10 @@ impl ParityTraceBuilder {
         DB: DatabaseRef,
     {
         let ResultAndState { result, state } = res;
+
         let mut trace_res = self.into_trace_results(result, trace_types);
+
+        // check the state diff case
         if let Some(ref mut state_diff) = trace_res.state_diff {
             populate_account_balance_nonce_diffs(
                 state_diff,
@@ -162,6 +169,12 @@ impl ParityTraceBuilder {
                 state.into_iter().map(|(addr, acc)| (addr, acc.info)),
             )?;
         }
+
+        // check the vm trace case
+        if let Some(ref mut vm_trace) = trace_res.vm_trace {
+            populate_vm_trace_bytecodes(&db, vm_trace)?;
+        }
+
         Ok(trace_res)
     }
 
@@ -171,7 +184,7 @@ impl ParityTraceBuilder {
         trace_types: &HashSet<TraceType>,
     ) -> (Option<Vec<TransactionTrace>>, Option<VmTrace>, Option<StateDiff>) {
         if trace_types.is_empty() || self.nodes.is_empty() {
-            return (None, None, None)
+            return (None, None, None);
         }
 
         let with_traces = trace_types.contains(&TraceType::Trace);
@@ -221,10 +234,78 @@ impl ParityTraceBuilder {
 }
 
 /// Construct the vmtrace for the entire callgraph
+/// this function only does the conversion and does not populate the code field
+/// since we cant get all the code without the db
 fn vm_trace(nodes: &[CallTraceNode]) -> VmTrace {
-    // TODO: populate vm trace
+    make_trace(nodes, 0)
+}
 
-    VmTrace { code: nodes[0].trace.data.clone().into(), ops: vec![] }
+fn make_trace(nodes: &[CallTraceNode], idx: usize) -> VmTrace {
+    let mut instructions: Vec<VmInstruction> = Vec::with_capacity(nodes[idx].trace.steps.len());
+
+    let mut next_child_idx = 0;
+    for step in nodes[idx].trace.steps.iter() {
+        let maybe_sub = match step.op.u8() {
+            opcode::CALL
+            | opcode::CALLCODE
+            | opcode::DELEGATECALL
+            | opcode::STATICCALL
+            | opcode::CREATE
+            | opcode::CREATE2 => {
+                next_child_idx = next_child_idx + 1;
+                Some(make_trace(nodes, nodes[idx].children[next_child_idx]))
+            }
+            _ => None,
+        };
+
+        instructions.push(make_instruction(step, maybe_sub));
+    }
+
+    VmTrace { code: Default::default(), ops: instructions }
+}
+
+fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
+    let maybe_storage = match step.storage_change {
+        Some(storage_change) => {
+            Some(StorageDelta { key: storage_change.key, val: storage_change.value })
+        }
+        None => None,
+    };
+
+    VmInstruction {
+        pc: step.pc,
+        cost: 0, // todo
+        ex: Some(VmExecutedOperation {
+            used: step.gas_cost,
+            push: Default::default(),
+            mem: Some(MemoryDelta {
+                off: step.memory_size,
+                data: step.memory.data().clone().into(),
+            }),
+            store: maybe_storage,
+        }),
+        sub: maybe_sub,
+    }
+}
+
+/// Goes thru all the nodes.trace `address` fields and loads the code from the db.
+pub fn populate_vm_trace_bytecodes<DB>(db: DB, trace: &mut VmTrace) -> Result<(), DB::Error>
+where
+    DB: DatabaseRef,
+{
+    todo!()
+}
+
+pub fn get_code<DB>(db: DB, address: Address) -> Result<Option<Bytes>, DB::Error>
+where
+    DB: DatabaseRef,
+{
+    let db_acc = db.basic(address)?.unwrap_or_default();
+
+    match db_acc.code {
+        Some(code) => Ok(Some(code.bytecode.into())),
+        None => Ok(None),
+    }
 }
 
 /// Loops over all state accounts in the accounts diff that contains all accounts that are included
