@@ -105,12 +105,19 @@ build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR dir
 
 ##@ Test
 
-.PHONY: unit
-unit: ## Run unit tests with coverage.
-	cargo llvm-cov nextest --html --locked --workspace --all-features -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+UNIT_TEST_ARGS := --locked --workspace --all-features -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
-.PHONY: html
-html: ## Open coverage report in browser.
+.PHONY: test-unit
+test-unit: ## Run unit tests.
+	cargo nextest run $(UNIT_TEST_ARGS)
+
+.PHONY: cov-unit
+cov-unit: ## Run unit tests with coverage.
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov nextest $(UNIT_TEST_ARGS)
+
+.PHONY: cov-report-html
+cov-report-html: cov-unit ## Generate a HTML coverage report and open it in the browser.
 	open target/llvm-cov/html/index.html
 
 # Downloads and unpacks Ethereum Foundation tests in the `$(EF_TESTS_DIR)` directory.
