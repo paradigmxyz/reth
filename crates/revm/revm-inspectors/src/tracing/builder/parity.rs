@@ -293,7 +293,7 @@ fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstr
     }
 }
 
-/// Goes thru all the nodes.trace `address` fields and loads the code from the db.
+/// probably a dfs of the VMTrace to load the code from db
 pub fn populate_vm_trace_bytecodes<DB>(db: DB, trace: &mut VmTrace) -> Result<(), DB::Error>
 where
     DB: DatabaseRef,
