@@ -30,6 +30,7 @@ mod compression;
 pub mod constants;
 pub mod contract;
 mod forkid;
+pub mod fs;
 mod genesis;
 mod hardfork;
 mod header;
