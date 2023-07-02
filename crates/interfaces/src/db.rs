@@ -37,7 +37,7 @@ pub enum DatabaseError {
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Database log level.
 pub enum LogLevel {
-    /// Critical conditions, i.e. assertion failures.
+    /// Enables logging for critical conditions, i.e. assertion failures.
     Fatal,
     /// Enables logging for error conditions.
     Error,
@@ -51,6 +51,6 @@ pub enum LogLevel {
     Debug,
     /// Enables logging for trace debug-level messages.
     Trace,
-    /// Enables extra debug-level messages.
+    /// Enables logging for extra debug-level messages.
     Extra,
 }
