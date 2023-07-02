@@ -160,7 +160,7 @@ impl ParityTraceBuilder {
     {
         let ResultAndState { result, state } = res;
 
-        let df_addresses = self.df_ordered_addresses();
+        let mut df_addresses = self.df_ordered_addresses().into_iter();
 
         let mut trace_res = self.into_trace_results(result, trace_types);
 
@@ -175,7 +175,7 @@ impl ParityTraceBuilder {
 
         // check the vm trace case
         if let Some(ref mut vm_trace) = trace_res.vm_trace {
-            populate_vm_trace_bytecodes(&db, df_addresses, vm_trace)?;
+            populate_vm_trace_bytecodes(&db, &mut df_addresses, vm_trace)?;
         }
 
         Ok(trace_res)
@@ -320,18 +320,28 @@ impl ParityTraceBuilder {
 ///
 /// the walker should have the same len as the addresses, but it should be checked in testing rather than here
 pub(crate) fn populate_vm_trace_bytecodes<DB>(
-    db: DB,
-    df_addresses: Vec<Address>,
+    db: &DB,
+    df_addresses: &mut dyn Iterator<Item = Address>,
     trace: &mut VmTrace,
 ) -> Result<(), DB::Error>
 where
     DB: DatabaseRef,
 {
-    todo!()
+    let addr = df_addresses.next().expect("missing address");
+
+    trace.code = get_code(db, addr)?.unwrap_or_default();
+
+    for op in trace.ops.iter_mut() {
+        if let Some(sub) = op.sub.as_mut() {
+            populate_vm_trace_bytecodes(db, df_addresses, sub)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Returns the code for the given address from the db.
-pub fn get_code<DB>(db: DB, address: Address) -> Result<Option<Bytes>, DB::Error>
+pub fn get_code<DB>(db: &DB, address: Address) -> Result<Option<Bytes>, DB::Error>
 where
     DB: DatabaseRef,
 {
