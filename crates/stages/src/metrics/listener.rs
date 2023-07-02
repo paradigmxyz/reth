@@ -1,4 +1,4 @@
-use crate::metrics::{StageMetrics, SyncMetrics};
+use crate::metrics::SyncMetrics;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber,
@@ -16,6 +16,11 @@ pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 /// Collection of metric events.
 #[derive(Clone, Copy, Debug)]
 pub enum MetricEvent {
+    /// Sync reached new height. All stage checkpoints are updated.
+    SyncHeight {
+        /// Maximum height measured in block number that sync reached.
+        height: BlockNumber,
+    },
     /// Stage reached new checkpoint.
     StageCheckpoint {
         /// Stage ID.
@@ -44,10 +49,14 @@ impl MetricsListener {
 
     fn handle_event(&mut self, event: MetricEvent) {
         match event {
+            MetricEvent::SyncHeight { height } => {
+                for stage_id in StageId::ALL {
+                    let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
+                    stage_metrics.checkpoint.set(height as f64);
+                }
+            }
             MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number } => {
-                let stage_metrics = self.sync_metrics.stages.entry(stage_id).or_insert_with(|| {
-                    StageMetrics::new_with_labels(&[("stage", stage_id.to_string())])
-                });
+                let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
 
                 stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
