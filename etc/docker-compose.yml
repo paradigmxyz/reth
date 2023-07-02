@@ -8,12 +8,13 @@ services:
     ports:
       - '9000:9000'
     volumes:
-      - rethdata:$HOME/.local/share/reth/db
-      - rethlogs:$HOME/rethlogs
+      - rethdata:/root/.local/share/reth/db
+      - rethlogs:/root/rethlogs
     command: >
       node
       --metrics reth:9000
-      --log.directory $HOME
+      --log.persistent
+      --log.directory /root/rethlogs
 
   prometheus:
     restart: unless-stopped
