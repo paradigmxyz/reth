@@ -183,6 +183,11 @@ impl Command {
 
         self.init_trusted_nodes(&mut config);
 
+        debug!(target: "reth::cli", "Spawning metrics listener task");
+        let (metrics_tx, metrics_rx) = unbounded_channel();
+        let metrics_listener = MetricsListener::new(metrics_rx);
+        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
+
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             db.clone(),
@@ -195,11 +200,14 @@ impl Command {
         // depth at least N blocks must be sent at once.
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
-        let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
-            tree_externals,
-            canon_state_notification_sender.clone(),
-            tree_config,
-        )?);
+        let blockchain_tree = ShareableBlockchainTree::new(
+            BlockchainTree::new(
+                tree_externals,
+                canon_state_notification_sender.clone(),
+                tree_config,
+            )?
+            .with_sync_metrics_tx(metrics_tx.clone()),
+        );
 
         // setup the blockchain provider
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
@@ -277,11 +285,6 @@ impl Command {
 
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
-
-        debug!(target: "reth::cli", "Spawning metrics listener task");
-        let (metrics_tx, metrics_rx) = unbounded_channel();
-        let metrics_listener = MetricsListener::new(metrics_rx);
-        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
 
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
@@ -687,7 +690,7 @@ impl Command {
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
             .with_tip_sender(tip_tx)
-            .with_metric_events(metrics_tx)
+            .with_metrics_tx(metrics_tx)
             .add_stages(
                 DefaultStages::new(
                     header_mode,
