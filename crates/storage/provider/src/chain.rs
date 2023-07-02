@@ -192,7 +192,9 @@ impl Chain {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
         let block_number = match split_at {
             SplitAt::Hash(block_hash) => {
-                let Some(block_number) = self.block_number(block_hash) else { return ChainSplit::NoSplitPending(self)};
+                let Some(block_number) = self.block_number(block_hash) else {
+                    return ChainSplit::NoSplitPending(self)
+                };
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
                     return ChainSplit::NoSplitCanonical(self)
