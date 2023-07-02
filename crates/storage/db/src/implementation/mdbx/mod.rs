@@ -6,6 +6,7 @@ use crate::{
     utils::default_page_size,
     DatabaseError,
 };
+use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
@@ -15,7 +16,6 @@ use tx::Tx;
 
 pub mod cursor;
 mod log_level;
-pub use log_level::LogLevel;
 pub mod tx;
 
 const GIGABYTE: usize = 1024 * 1024 * 1024;
@@ -96,7 +96,7 @@ impl<E: EnvironmentKind> Env<E> {
         inner_env.set_max_readers(DEFAULT_MAX_READERS);
 
         if let Some(log_level) = log_level {
-            inner_env.set_log_level(log_level.into());
+            inner_env.set_log_level(log_level::LogLevel(log_level).into());
         }
 
         let env =

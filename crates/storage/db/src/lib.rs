@@ -122,8 +122,7 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
     }
     #[cfg(feature = "mdbx")]
     {
-        let db =
-            DatabaseEnv::open(rpath, EnvKind::RW, log_level.map(|log_level| log_level.into()))?;
+        let db = DatabaseEnv::open(rpath, EnvKind::RW, log_level)?;
         db.create_tables()?;
         Ok(db)
     }
@@ -137,12 +136,8 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
 pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnvRO> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<NoWriteMap>::open(
-            path,
-            mdbx::EnvKind::RO,
-            log_level.map(|log_level| log_level.into()),
-        )
-        .with_context(|| format!("Could not open database at path: {}", path.display()))
+        Env::<NoWriteMap>::open(path, EnvKind::RO, log_level)
+            .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
     {
@@ -155,7 +150,7 @@ pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Resu
 pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<WriteMap>::open(path, mdbx::EnvKind::RW, log_level.map(|log_level| log_level.into()))
+        Env::<WriteMap>::open(path, EnvKind::RW, log_level)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
