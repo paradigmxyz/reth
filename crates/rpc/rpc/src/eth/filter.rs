@@ -369,6 +369,8 @@ where
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&topics);
 
+        let is_multi_block_range = from_block != to_block;
+
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
         for (from, to) in
@@ -401,8 +403,9 @@ where
                             false,
                         );
 
-                        // size check
-                        if all_logs.len() > self.max_logs_per_response {
+                        // size check but only if range is multiple blocks, so we always return all
+                        // logs of a single block
+                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
                             ))

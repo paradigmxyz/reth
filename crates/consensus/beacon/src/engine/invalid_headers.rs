@@ -60,7 +60,7 @@ impl InvalidHeaderCache {
 
             // update metrics
             self.metrics.known_ancestor_inserts.increment(1);
-            self.metrics.invalid_headers.set(self.headers.len() as f64);
+            self.metrics.count.set(self.headers.len() as f64);
         }
     }
 
@@ -74,7 +74,7 @@ impl InvalidHeaderCache {
 
             // update metrics
             self.metrics.unique_inserts.increment(1);
-            self.metrics.invalid_headers.set(self.headers.len() as f64);
+            self.metrics.count.set(self.headers.len() as f64);
         }
     }
 }
@@ -88,10 +88,10 @@ struct HeaderEntry {
 
 /// Metrics for the invalid headers cache.
 #[derive(Metrics)]
-#[metrics(scope = "invalid_header_cache")]
+#[metrics(scope = "consensus.engine.beacon.invalid_headers")]
 struct InvalidHeaderCacheMetrics {
     /// The total number of invalid headers in the cache.
-    invalid_headers: Gauge,
+    count: Gauge,
     /// The number of inserts with a known ancestor.
     known_ancestor_inserts: Counter,
     /// The number of unique invalid header inserts (i.e. without a known ancestor).

@@ -514,8 +514,8 @@ mod tests {
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        mdbx::test_utils::create_test_rw_db,
         tables,
+        test_utils::create_test_rw_db,
         transaction::DbTxMut,
         DatabaseEnv,
     };

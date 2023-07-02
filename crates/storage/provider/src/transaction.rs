@@ -7,9 +7,9 @@ use std::fmt::Debug;
 mod test {
     use crate::{test_utils::blocks::*, ProviderFactory, TransactionsProvider};
     use reth_db::{
-        mdbx::test_utils::create_test_rw_db,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         tables,
+        test_utils::create_test_rw_db,
     };
     use reth_primitives::{ChainSpecBuilder, IntegerList, H160, MAINNET, U256};
     use std::sync::Arc;

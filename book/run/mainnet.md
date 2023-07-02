@@ -50,7 +50,7 @@ Assuming you have done that, run:
 RUST_LOG=info lighthouse bn \
     --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
     --execution-endpoint http://localhost:8551 \
-    --execution-jwt ~/.local/share/reth/mainnet/jwt.hex
+    --execution-jwt /path/to/secret
 ```
 
 If you don't intend on running validators on your node you can add :

@@ -22,7 +22,7 @@ use reth_interfaces::{
 };
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
 use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
 use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
@@ -200,7 +200,7 @@ impl Command {
 
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
-        std::fs::create_dir_all(&db_path)?;
+        fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path)?);
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");

@@ -2,7 +2,7 @@
 #[allow(clippy::module_inception)]
 pub mod bodies;
 
-/// TODO:
+/// A downloader implementation that spawns a downloader to a task
 pub mod task;
 
 mod queue;
