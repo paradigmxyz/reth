@@ -64,7 +64,8 @@ where
         }
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
-            return Err(EthApiError::UnknownBlockNumber) };
+            return Err(EthApiError::UnknownBlockNumber)
+        };
 
         // Check that we would not be querying outside of genesis
         if end_block < block_count {
