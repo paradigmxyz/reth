@@ -286,10 +286,6 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
-        debug!(target: "reth::cli", "Spawning metrics listener task");
-        let (metrics_tx, metrics_rx) = unbounded_channel();
-        let metrics_listener = MetricsListener::new(metrics_rx);
-
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
