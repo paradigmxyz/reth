@@ -1,3 +1,4 @@
+use super::walker::{CallTraceNodeWalker, DF};
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
     TracingInspectorConfig,
@@ -191,7 +192,7 @@ impl ParityTraceBuilder {
         let with_diff = trace_types.contains(&TraceType::StateDiff);
 
         let vm_trace = if trace_types.contains(&TraceType::VmTrace) {
-            Some(vm_trace(&self.nodes))
+            Some(self.into_vm_trace())
         } else {
             None
         };
@@ -231,37 +232,39 @@ impl ParityTraceBuilder {
     pub fn into_transaction_traces(self) -> Vec<TransactionTrace> {
         self.into_transaction_traces_iter().collect()
     }
-}
 
-/// Construct the vmtrace for the entire callgraph
-/// this function only does the conversion and does not populate the code field
-/// since we cant get all the code without the db
-fn vm_trace(nodes: &[CallTraceNode]) -> VmTrace {
-    make_trace(nodes, 0)
-}
+    pub fn into_vm_trace(&self) -> VmTrace {
+        let mut walker = CallTraceNodeWalker::from(self.nodes.iter().collect::<Vec<_>>());
 
-fn make_trace(nodes: &[CallTraceNode], idx: usize) -> VmTrace {
-    let mut instructions: Vec<VmInstruction> = Vec::with_capacity(nodes[idx].trace.steps.len());
-
-    let mut next_child_idx = 0;
-    for step in nodes[idx].trace.steps.iter() {
-        let maybe_sub = match step.op.u8() {
-            opcode::CALL
-            | opcode::CALLCODE
-            | opcode::DELEGATECALL
-            | opcode::STATICCALL
-            | opcode::CREATE
-            | opcode::CREATE2 => {
-                next_child_idx += 1;
-                Some(make_trace(nodes, nodes[idx].children[next_child_idx - 1]))
-            }
-            _ => None,
-        };
-
-        instructions.push(make_instruction(step, maybe_sub));
+        match walker.next() {
+            Some(start) => Self::make_trace(&mut walker, start),
+            // todo::n should probably but some logging here
+            None => VmTrace { code: Default::default(), ops: Vec::new() },
+        }
     }
 
-    VmTrace { code: Default::default(), ops: instructions }
+    fn make_trace(walker: &mut CallTraceNodeWalker<'_, DF>, current: &CallTraceNode) -> VmTrace {
+        let mut instructions: Vec<VmInstruction> = Vec::with_capacity(current.trace.steps.len());
+
+        for step in current.trace.steps.iter() {
+            let maybe_sub = match step.op.u8() {
+                opcode::CALL
+                | opcode::CALLCODE
+                | opcode::DELEGATECALL
+                | opcode::STATICCALL
+                | opcode::CREATE
+                | opcode::CREATE2 => {
+                    let next = walker.next().expect("missing next node");
+                    Some(Self::make_trace(walker, next))
+                }
+                _ => None,
+            };
+
+            instructions.push(make_instruction(step, maybe_sub));
+        }
+
+        VmTrace { code: Default::default(), ops: instructions }
+    }
 }
 
 fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
