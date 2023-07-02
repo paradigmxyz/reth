@@ -5651,6 +5651,7 @@ dependencies = [
  "jsonwebtoken",
  "pin-project",
  "rand 0.8.5",
+ "reth-consensus-common",
  "reth-interfaces",
  "reth-metrics",
  "reth-network-api",

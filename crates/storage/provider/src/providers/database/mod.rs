@@ -1,8 +1,9 @@
 use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
-    BlockHashReader, BlockNumReader, BlockReader, EvmEnvProvider, HeaderProvider, ProviderError,
-    StageCheckpointReader, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
+    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
+    HeaderProvider, ProviderError, StageCheckpointReader, StateProviderBox, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::Result;
@@ -340,6 +341,15 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 
     fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
         self.provider()?.fill_cfg_env_with_header(cfg, header)
+    }
+}
+
+impl<DB> ChainSpecProvider for ProviderFactory<DB>
+where
+    DB: Send + Sync,
+{
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.chain_spec.clone()
     }
 }
 

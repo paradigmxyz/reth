@@ -11,8 +11,11 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
-use reth_provider::{BlockReader, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_consensus_common::calc::{base_block_reward, block_reward};
+use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
+use reth_provider::{
+    BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -77,7 +80,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the future on a new blocking task.
@@ -396,7 +399,7 @@ where
         &self,
         block_id: BlockId,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let traces = self
+        let mut traces: Option<Vec<LocalizedTransactionTrace>> = self
             .trace_block_with(
                 block_id,
                 TracingInspectorConfig::default_parity(),
@@ -408,6 +411,43 @@ where
             )
             .await?
             .map(|traces| traces.into_iter().flatten().collect());
+
+        // Add block reward traces
+        // TODO: We only really need the header and ommers here to determine the reward
+        if let (Some(block), Some(traces)) =
+            (self.inner.eth_api.block_by_id(block_id).await?, traces.as_mut())
+        {
+            if let Some(header_td) = self.provider().header_td(&block.header.hash)? {
+                if let Some(base_block_reward) = base_block_reward(
+                    self.provider().chain_spec().as_ref(),
+                    block.header.number,
+                    block.header.difficulty,
+                    header_td,
+                ) {
+                    traces.push(reward_trace(
+                        &block.header,
+                        RewardAction {
+                            author: block.header.beneficiary,
+                            reward_type: RewardType::Block,
+                            value: U256::from(base_block_reward),
+                        },
+                    ));
+
+                    if !block.ommers.is_empty() {
+                        traces.push(reward_trace(
+                            &block.header,
+                            RewardAction {
+                                author: block.header.beneficiary,
+                                reward_type: RewardType::Uncle,
+                                value: block_reward(base_block_reward, block.ommers.len()) -
+                                    U256::from(base_block_reward),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+
         Ok(traces)
     }
 
@@ -448,7 +488,7 @@ where
 #[async_trait]
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
@@ -580,4 +620,21 @@ fn tracing_config(trace_types: &HashSet<TraceType>) -> TracingInspectorConfig {
     TracingInspectorConfig::default_parity()
         .set_state_diffs(trace_types.contains(&TraceType::StateDiff))
         .set_steps(trace_types.contains(&TraceType::VmTrace))
+}
+
+/// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
+/// beneficiary.
+fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransactionTrace {
+    LocalizedTransactionTrace {
+        block_hash: Some(header.hash),
+        block_number: Some(header.number),
+        transaction_hash: None,
+        transaction_position: None,
+        trace: TransactionTrace {
+            trace_address: vec![],
+            subtraces: 0,
+            action: Action::Reward(reward),
+            result: None,
+        },
+    }
 }
