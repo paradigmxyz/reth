@@ -11,7 +11,7 @@ pub(crate) trait Walk {}
 
 impl Walk for DFWalk {}
 
-pub(crate) trait Walker<T, W>: Iterator<Item = T> {}
+pub(crate) trait Walker<T, W: Walk>: Iterator<Item = T> {}
 
 /// pub crate type for doing a walk down a reth callgraph
 pub(crate) struct CallTraceNodeWalker<'trace, W: Walk> {
