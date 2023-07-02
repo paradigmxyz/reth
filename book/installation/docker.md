@@ -76,7 +76,7 @@ It will use the local image `reth:local`. If you want to use the GitHub Containe
 To run Reth with Docker Compose, run the following command from a shell inside the root directory of this repository:
 
 ```bash
-docker compose up -d
+docker compose -f etc/docker-compose.yml up -d
 ```
 
 To check if Reth is running correctly, run:

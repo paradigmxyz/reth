@@ -1,12 +1,10 @@
 version: '3.9'
+name: 'reth'
 
 services:
   reth:
     restart: unless-stopped
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: reth:local
+    image: ghcr.io/paradigmxyz/reth
     ports:
       - '9000:9000'
     volumes:
@@ -25,10 +23,10 @@ services:
     ports:
       - 9090:9090
     volumes:
-      - ./etc/prometheus/:/etc/prometheus/
+      - ./prometheus/:/etc/prometheus/
       - prometheusdata:/prometheus
     command:
-      - --config.file=/etc/prometheus/prometheus-docker.yml
+      - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
 
   grafana:
@@ -43,8 +41,8 @@ services:
       PROMETHEUS_URL: http://prometheus:9090
     volumes:
       - grafanadata:/var/lib/grafana
-      - ./etc/grafana/datasources:/etc/grafana/provisioning/datasources
-      - ./etc/grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
     # 1. Copy dashboards from temp directory to prevent modifying original host files
     # 2. Replace Prometheus datasource placeholder with the actual name
     # 3. Run Grafana
@@ -52,7 +50,7 @@ services:
       sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
              find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
              /run.sh"
-
+    
 volumes:
   rethdata:
     driver: local
