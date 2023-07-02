@@ -109,6 +109,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         self.tree.read().block_by_hash(block_hash).cloned()
     }
 
+    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
+        self.tree.read().get_buffered_block(&block_hash).map(|b| b.block.clone())
+    }
+
+    fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
+        self.tree.read().get_buffered_block(&block_hash).map(|b| b.header.clone())
+    }
+
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
         trace!(target: "blockchain_tree", "Returning canonical blocks in tree");
         self.tree.read().block_indices().canonical_chain().inner().clone()
