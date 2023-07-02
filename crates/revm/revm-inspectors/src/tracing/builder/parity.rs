@@ -160,6 +160,8 @@ impl ParityTraceBuilder {
     {
         let ResultAndState { result, state } = res;
 
+        let df_addresses = self.df_addresses();
+
         let mut trace_res = self.into_trace_results(result, trace_types);
 
         // check the state diff case
@@ -173,7 +175,7 @@ impl ParityTraceBuilder {
 
         // check the vm trace case
         if let Some(ref mut vm_trace) = trace_res.vm_trace {
-            populate_vm_trace_bytecodes(&db, vm_trace)?;
+            populate_vm_trace_bytecodes(&db, df_addresses, vm_trace)?;
         }
 
         Ok(trace_res)
@@ -233,6 +235,13 @@ impl ParityTraceBuilder {
         self.into_transaction_traces_iter().collect()
     }
 
+    fn df_addresses(&self) -> Vec<Address> {
+        let walker = CallTraceNodeWalker::from(self.nodes.iter().collect::<Vec<_>>());
+
+        walker.df_addresses()
+    }
+
+    /// Creates a VM trace by iterating over the instructions from the first one and recursively fills in the subcall traces
     pub fn into_vm_trace(&self) -> VmTrace {
         let mut walker = CallTraceNodeWalker::from(self.nodes.iter().collect::<Vec<_>>());
 
@@ -296,8 +305,20 @@ fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstr
     }
 }
 
-/// probably a dfs of the VMTrace to load the code from db
-pub fn populate_vm_trace_bytecodes<DB>(db: DB, trace: &mut VmTrace) -> Result<(), DB::Error>
+/// addresses are presorted via  DF walk
+///
+/// there should be a 1<>1 mapping between the [CallTraceNode]s and the [VmTrace]s when the former is converted into the latter
+///
+/// all of the sorting/walking is handled by the [crate::tracing::builder::walker::Walker] trait
+///
+/// todo::n here we will make a VmTrace walker, and fill in the code sections
+///
+/// the walker should have the same len as the addresses, but it should be checked in testing rather than here
+pub fn populate_vm_trace_bytecodes<DB>(
+    db: DB,
+    df_addresses: Vec<Address>,
+    trace: &mut VmTrace,
+) -> Result<(), DB::Error>
 where
     DB: DatabaseRef,
 {

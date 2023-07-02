@@ -49,7 +49,7 @@ impl<'a> CallTraceNodeWalker<'a, DF> {
         }
     }
 
-    pub(crate) fn DF_addresses(&self) -> Vec<Address> {
+    pub(crate) fn df_addresses(&self) -> Vec<Address> {
         self.idxs.iter().map(|idx| self.nodes[*idx].trace.address).collect::<Vec<_>>()
     }
 }

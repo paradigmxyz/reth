@@ -6,4 +6,5 @@ pub mod geth;
 /// Parity style trace builders for `trace_` namespace
 pub mod parity;
 
-pub mod walker;
+/// Walker trait and types used for walking various callgraphs
+mod walker;
