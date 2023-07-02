@@ -1,8 +1,8 @@
 use reth_db::open_db_read_only;
 use reth_primitives::{Address, ChainSpecBuilder, H256, U256};
 use reth_provider::{
-    BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
-    TransactionsProvider,
+    AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
+    StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
 
@@ -11,31 +11,40 @@ use std::path::Path;
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
 // exposing a familiar API to query the chain's information without requiring knowledge
 // of the inner tables.
+//
+// These abstractions do not include any caching and the user is responsible for doing that.
+// Other parts of the code which include caching are parts of the `EthApi` abstraction.
 fn main() -> eyre::Result<()> {
     // Opens a RO handle to the database file.
     // TODO: Should be able to do `ProviderFactory::new_with_db_path_ro(...)` instead of
     // doing in 2 steps.
-    let db = open_db_read_only(&Path::new(
-        "/Users/georgios/Library/Application Support/reth/mainnet/db",
-    ))?;
+    let db = open_db_read_only(&Path::new(&std::env::var("RETH_DB_PATH")?))?;
 
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
     let factory = ProviderFactory::new(db, spec.into());
 
-    let block_num = 100;
-
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
     let provider = factory.provider()?;
 
+    // Run basic queryies against the DB
+    let block_num = 100;
     header_provider_example(&provider, block_num)?;
     block_provider_example(&provider, block_num)?;
     txs_provider_example(&provider)?;
     receipts_provider_example(&provider)?;
-    // latest_state_provider_example(&provider)?;
-    // historical_state_provider_example(&provider)?;
+
+    // Closes the RO transaction opened in the `factory.provider()` call. This is optional and
+    // would happen anyway at the end of the function scope.
+    drop(provider);
+
+    // Run the example against latest state
+    state_provider_example(factory.latest()?)?;
+
+    // Run it with historical state
+    state_provider_example(factory.history_by_block_number(block_num)?)?;
 
     Ok(())
 }
@@ -194,6 +203,20 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
             }
         }
     }
+
+    Ok(())
+}
+
+fn state_provider_example<T: StateProvider + AccountReader>(provider: T) -> eyre::Result<()> {
+    let address = Address::random();
+    let storage_key = H256::random();
+
+    // Can get account / storage state with simple point queries
+    let _account = provider.basic_account(address)?;
+    let _code = provider.account_code(address)?;
+    let _storage = provider.storage(address, storage_key)?;
+    // TODO: unimplemented.
+    // let _proof = provider.proof(address, &[])?;
 
     Ok(())
 }
