@@ -14,7 +14,7 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, H256, U256};
 use reth_provider::{
-    BlockReader, ChainSpecReader, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+    BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
     database::{State, SubState},
@@ -80,7 +80,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecReader + 'static,
+    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the future on a new blocking task.
@@ -419,7 +419,7 @@ where
         {
             if let Some(header_td) = self.provider().header_td(&block.header.hash)? {
                 if let Some(base_block_reward) = base_block_reward(
-                    self.provider().spec().as_ref(),
+                    self.provider().chain_spec().as_ref(),
                     block.header.number,
                     block.header.difficulty,
                     header_td,
@@ -488,7 +488,7 @@ where
 #[async_trait]
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecReader + 'static,
+    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.

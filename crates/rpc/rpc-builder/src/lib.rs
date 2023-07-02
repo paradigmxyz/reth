@@ -113,7 +113,7 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecReader, EvmEnvProvider,
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
     StateProviderFactory,
 };
 use reth_rpc::{
@@ -173,7 +173,7 @@ where
     Provider: BlockReaderIdExt
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecReader
+        + ChainSpecProvider
         + Clone
         + Unpin
         + 'static,
@@ -278,7 +278,7 @@ where
     Provider: BlockReaderIdExt
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecReader
+        + ChainSpecProvider
         + Clone
         + Unpin
         + 'static,
@@ -501,7 +501,7 @@ impl RpcModuleSelection {
         Provider: BlockReaderIdExt
             + StateProviderFactory
             + EvmEnvProvider
-            + ChainSpecReader
+            + ChainSpecProvider
             + Clone
             + Unpin
             + 'static,
@@ -713,7 +713,7 @@ where
     Provider: BlockReaderIdExt
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecReader
+        + ChainSpecProvider
         + Clone
         + Unpin
         + 'static,

@@ -49,7 +49,7 @@ pub use chain::{
 };
 
 mod spec;
-pub use spec::ChainSpecReader;
+pub use spec::ChainSpecProvider;
 
 mod stage_checkpoint;
 pub use stage_checkpoint::{StageCheckpointReader, StageCheckpointWriter};

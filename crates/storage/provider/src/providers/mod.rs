@@ -1,7 +1,7 @@
 use crate::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecReader, EvmEnvProvider, HeaderProvider,
+    CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
     PostStateDataProvider, ProviderError, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, TransactionsProvider,
     WithdrawalsProvider,
@@ -433,13 +433,13 @@ where
     }
 }
 
-impl<DB, Tree> ChainSpecReader for BlockchainProvider<DB, Tree>
+impl<DB, Tree> ChainSpecProvider for BlockchainProvider<DB, Tree>
 where
     DB: Send + Sync,
     Tree: Send + Sync,
 {
-    fn spec(&self) -> Arc<ChainSpec> {
-        self.database.spec()
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.database.chain_spec()
     }
 }
 
