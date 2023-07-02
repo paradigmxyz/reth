@@ -263,7 +263,7 @@ where
             let mut block_env = BlockEnv::default();
             self.provider().fill_block_env_with_header(&mut block_env, &header)?;
             self.provider().fill_cfg_env_with_header(&mut cfg, &header)?;
-            return Ok((cfg, block_env, header.hash.into()));
+            return Ok((cfg, block_env, header.hash.into()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
@@ -687,7 +687,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                };
+                }
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -715,7 +715,7 @@ where
                     block.header.number,
                     block.header.base_fee_per_gas,
                     index.into(),
-                )));
+                )))
             }
         }
 
