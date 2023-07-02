@@ -3,7 +3,13 @@ use reth_primitives::Address;
 use reth_rpc_types::trace::parity::VmTrace;
 
 /// special type for doing a Depth first walk down the callgraph
-pub struct DF;
+pub(crate) struct DF;
+
+trait Walker<O>: Iterator<Item = Self::Node> {
+    type Node;
+
+    fn len(&self) -> usize;
+}
 
 /// pub crate type for doing a Depth first walk down the callgraph
 pub(crate) struct CallTraceNodeWalker<'a, O> {
@@ -112,10 +118,4 @@ impl<'a> Walker<DF> for CallTraceNodeWalker<'a, DF> {
     fn len(&self) -> usize {
         self.nodes.len()
     }
-}
-
-trait Walker<O>: Iterator<Item = Self::Node> {
-    type Node;
-
-    fn len(&self) -> usize;
 }
