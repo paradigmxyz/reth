@@ -278,6 +278,8 @@ impl ParityTraceBuilder {
     }
 
     /// todo::n config
+    ///
+    /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is one
     fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
         let maybe_storage = match step.storage_change {
             Some(storage_change) => {
@@ -310,7 +312,9 @@ impl ParityTraceBuilder {
     }
 }
 
-/// addresses are presorted via  DF walk
+/// addresses are presorted via DF walk thru [CallTraceNode]s
+///
+/// use recursion to fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB>(
     db: &DB,
     df_addresses: &mut dyn Iterator<Item = Address>,

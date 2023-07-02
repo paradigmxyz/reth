@@ -462,7 +462,7 @@ pub(crate) struct CallTraceStep {
     pub(crate) contract: Address,
     /// Stack before step execution
     pub(crate) stack: Stack,
-    /// The new stack item placed by this step
+    /// The new stack item placed by this step if any
     pub(crate) new_stack: Option<U256>,
     /// All allocated memory in a step
     ///

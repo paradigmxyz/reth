@@ -20,22 +20,23 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     pub(crate) fn new(nodes: &'trace Vec<CallTraceNode>) -> Self {
         let mut idxs: Vec<usize> = Vec::with_capacity(nodes.len());
 
-        Self::get_all_children(nodes, 0, &mut idxs);
+        Self::get_all_children(nodes, &mut idxs, 0);
 
         Self { nodes, curr_idx: 0, idxs, phantom: std::marker::PhantomData }
+    }
+
+    /// uses recursion to do a DFS down the callgraph
+    fn get_all_children(nodes: &'trace Vec<CallTraceNode>, holder: &mut Vec<usize>, idx: usize) {
+        holder.push(idx);
+        for child in nodes[idx].children.iter() {
+            holder.push(child.clone());
+            Self::get_all_children(nodes, holder, *child);
+        }
     }
 
     /// DFWalked order of input arena
     pub(crate) fn idxs(&self) -> &Vec<usize> {
         &self.idxs
-    }
-
-    fn get_all_children(nodes: &'trace Vec<CallTraceNode>, idx: usize, holder: &mut Vec<usize>) {
-        holder.push(idx);
-        for child in nodes[idx].children.iter() {
-            holder.push(child.clone());
-            Self::get_all_children(nodes, *child, holder);
-        }
     }
 }
 
