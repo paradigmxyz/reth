@@ -234,7 +234,7 @@ impl ParityTraceBuilder {
 
     /// get addresses here because cant get them from parity trace otherwise
     fn df_ordered_addresses(&self) -> Vec<Address> {
-        let walker = CallTraceNodeWalker::new(&self.nodes);
+        let walker: CallTraceNodeWalker<'_, DFWalk> = CallTraceNodeWalker::new(&self.nodes);
 
         walker.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
     }

@@ -4,14 +4,8 @@ use crate::tracing::types::CallTraceNode;
 /// type for doing a Depth first walk down the callgraph
 pub(crate) struct DFWalk;
 
-pub(crate) trait Walk {}
-
-impl Walk for DFWalk {}
-
-pub(crate) trait Walker<T, W: Walk>: Iterator<Item = T> {}
-
 /// pub crate type for doing a walk down a reth callgraph
-pub(crate) struct CallTraceNodeWalker<'trace, W: Walk> {
+pub(crate) struct CallTraceNodeWalker<'trace, W> {
     /// the entire arena
     nodes: &'trace Vec<CallTraceNode>,
     curr_idx: usize,
@@ -59,5 +53,3 @@ impl<'trace> Iterator for CallTraceNodeWalker<'trace, DFWalk> {
         Some(node)
     }
 }
-
-impl<'trace> Walker<&'trace CallTraceNode, DFWalk> for CallTraceNodeWalker<'trace, DFWalk> {}
