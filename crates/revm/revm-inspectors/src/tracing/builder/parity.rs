@@ -1,4 +1,4 @@
-use super::walker::{CallTraceNodeWalker, DFWalk, Walker};
+use super::walker::{CallTraceNodeWalker, DFWalk};
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
     TracingInspectorConfig,
@@ -234,14 +234,14 @@ impl ParityTraceBuilder {
 
     /// get addresses here because cant get them from parity trace otherwise
     fn df_ordered_addresses(&self) -> Vec<Address> {
-        let walker = CallTraceNodeWalker::from(&self.nodes);
+        let walker = CallTraceNodeWalker::new(&self.nodes);
 
         walker.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
     }
 
     /// Creates a VM trace by iterating over the instructions from the first one and recursively fills in the subcall traces
     pub fn vm_trace(&self) -> VmTrace {
-        let mut walker = CallTraceNodeWalker::from(&self.nodes);
+        let mut walker = CallTraceNodeWalker::new(&self.nodes);
 
         match walker.next() {
             Some(start) => Self::make_trace(&mut walker, start),
