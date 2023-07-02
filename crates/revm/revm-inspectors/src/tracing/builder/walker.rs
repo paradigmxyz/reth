@@ -14,7 +14,7 @@ trait Walker<O>: Iterator<Item = Self::Node> {
 /// pub crate type for doing a Depth first walk down the callgraph
 pub(crate) struct CallTraceNodeWalker<'a, O> {
     /// the entire arena
-    nodes: Vec<&'a CallTraceNode>,
+    nodes: &'a Vec<CallTraceNode>,
     curr_idx: usize,
     /// ordered indexes of [nodes]
     idxs: Vec<usize>,
@@ -42,7 +42,7 @@ impl<'a> VmTraceWalker<'a, DF> {
 }
 
 impl<'a> CallTraceNodeWalker<'a, DF> {
-    fn get_all_children(nodes: &Vec<&'a CallTraceNode>, idx: usize, holder: &mut Vec<usize>) {
+    fn get_all_children(nodes: &'a Vec<CallTraceNode>, idx: usize, holder: &mut Vec<usize>) {
         for child in nodes[idx].children.iter() {
             holder.push(child.clone());
             Self::get_all_children(nodes, *child, holder);
@@ -77,18 +77,18 @@ impl<'a> Iterator for CallTraceNodeWalker<'a, DF> {
             return None;
         }
 
-        let node = self.nodes[self.idxs[self.curr_idx]];
+        let node = &self.nodes[self.idxs[self.curr_idx]];
         self.curr_idx += 1;
 
         Some(node)
     }
 }
 
-impl<'a> From<Vec<&'a CallTraceNode>> for CallTraceNodeWalker<'a, DF> {
-    fn from(nodes: Vec<&'a CallTraceNode>) -> Self {
+impl<'a> From<&'a Vec<CallTraceNode>> for CallTraceNodeWalker<'a, DF> {
+    fn from(nodes: &'a Vec<CallTraceNode>) -> Self {
         let mut idxs: Vec<usize> = Vec::with_capacity(nodes.len());
 
-        Self::get_all_children(&nodes, 0, &mut idxs);
+        Self::get_all_children(nodes, 0, &mut idxs);
 
         Self { nodes, curr_idx: 0, idxs, phantom: std::marker::PhantomData }
     }

@@ -236,14 +236,14 @@ impl ParityTraceBuilder {
     }
 
     fn df_addresses(&self) -> Vec<Address> {
-        let walker = CallTraceNodeWalker::from(self.nodes.iter().collect::<Vec<_>>());
+        let walker = CallTraceNodeWalker::from(&self.nodes);
 
         walker.df_addresses()
     }
 
     /// Creates a VM trace by iterating over the instructions from the first one and recursively fills in the subcall traces
     pub fn into_vm_trace(&self) -> VmTrace {
-        let mut walker = CallTraceNodeWalker::from(self.nodes.iter().collect::<Vec<_>>());
+        let mut walker = CallTraceNodeWalker::from(&self.nodes);
 
         match walker.next() {
             Some(start) => Self::make_trace(&mut walker, start),
