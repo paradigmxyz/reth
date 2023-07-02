@@ -43,6 +43,7 @@ impl<'a> VmTraceWalker<'a, DF> {
 
 impl<'a> CallTraceNodeWalker<'a, DF> {
     fn get_all_children(nodes: &'a Vec<CallTraceNode>, idx: usize, holder: &mut Vec<usize>) {
+        holder.push(idx);
         for child in nodes[idx].children.iter() {
             holder.push(child.clone());
             Self::get_all_children(nodes, *child, holder);
