@@ -252,7 +252,7 @@ impl ParityTraceBuilder {
 
     /// returns a VM trace without the code filled in
     fn make_trace(
-        walker: &mut dyn Walker<&CallTraceNode, DFWalk>,
+        walker: &mut CallTraceNodeWalker<'_, DFWalk>,
         current: &CallTraceNode,
     ) -> VmTrace {
         let mut instructions: Vec<VmInstruction> = Vec::with_capacity(current.trace.steps.len());
@@ -311,14 +311,6 @@ impl ParityTraceBuilder {
 }
 
 /// addresses are presorted via  DF walk
-///
-/// there should be a 1<>1 mapping between the [CallTraceNode]s and the [VmTrace]s when the former is converted into the latter
-///
-/// all of the sorting/walking is handled by the [crate::tracing::builder::walker::Walker] trait
-///
-/// todo::n here we will make a VmTrace walker, and fill in the code sections
-///
-/// the walker should have the same len as the addresses, but it should be checked in testing rather than here
 pub(crate) fn populate_vm_trace_bytecodes<DB>(
     db: &DB,
     df_addresses: &mut dyn Iterator<Item = Address>,
@@ -329,7 +321,12 @@ where
 {
     let addr = df_addresses.next().expect("missing address");
 
-    trace.code = get_code(db, addr)?.unwrap_or_default();
+    let db_acc = db.basic(addr)?.unwrap_or_default();
+
+    trace.code = match db_acc.code {
+        Some(code) => code.bytecode.into(),
+        None => Default::default(),
+    };
 
     for op in trace.ops.iter_mut() {
         if let Some(sub) = op.sub.as_mut() {
@@ -338,19 +335,6 @@ where
     }
 
     Ok(())
-}
-
-/// Returns the code for the given address from the db.
-pub fn get_code<DB>(db: &DB, address: Address) -> Result<Option<Bytes>, DB::Error>
-where
-    DB: DatabaseRef,
-{
-    let db_acc = db.basic(address)?.unwrap_or_default();
-
-    match db_acc.code {
-        Some(code) => Ok(Some(code.bytecode.into())),
-        None => Ok(None),
-    }
 }
 
 /// Loops over all state accounts in the accounts diff that contains all accounts that are included
