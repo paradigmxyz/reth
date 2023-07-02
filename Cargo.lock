@@ -6061,6 +6061,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpc-db"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth-beacon-consensus",
+ "reth-blockchain-tree",
+ "reth-db",
+ "reth-network-api",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc-builder",
+ "reth-rpc-types",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "tokio",
+]
+
+[[package]]
 name = "ruint"
 version = "1.8.0"
 source = "git+https://github.com/paradigmxyz/uint#38f565ff907ccaf2a2c57d395ed7c2b8905ae1ab"
