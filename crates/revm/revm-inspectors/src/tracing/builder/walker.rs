@@ -1,48 +1,62 @@
+use std::ops::Index;
+
 use crate::tracing::types::CallTraceNode;
 use reth_primitives::Address;
 use reth_rpc_types::trace::parity::VmTrace;
 
-/// special type for doing a Depth first walk down the callgraph
-pub(crate) struct DF;
+/// type for doing a Depth first walk down the callgraph
+pub(crate) struct DFWalk;
 
-trait Walker<O>: Iterator<Item = Self::Node> {
-    type Node;
+pub(crate) trait Walk {}
 
-    fn len(&self) -> usize;
-}
+impl Walk for DFWalk {}
 
-/// pub crate type for doing a Depth first walk down the callgraph
-pub(crate) struct CallTraceNodeWalker<'a, O> {
+pub(crate) trait Walker<T, W>: Iterator<Item = T> {}
+
+/// pub crate type for doing a walk down a reth callgraph
+pub(crate) struct CallTraceNodeWalker<'trace, W: Walk> {
     /// the entire arena
-    nodes: &'a Vec<CallTraceNode>,
+    nodes: &'trace Vec<CallTraceNode>,
     curr_idx: usize,
-    /// ordered indexes of [nodes]
+
+    /// ordered indexes of nodes
     idxs: Vec<usize>,
-    phantom: std::marker::PhantomData<O>,
+
+    phantom: std::marker::PhantomData<W>,
 }
 
-/// pub crate type for doing a Depth first walk down the callgraph
-pub(crate) struct VmTraceWalker<'a, O> {
-    curr_idx: usize,
-    /// ordered set of nodes
-    nodes: Vec<&'a VmTrace>,
-    phantom: std::marker::PhantomData<O>,
-}
+// /// pub crate type for doing a walk down a parity callgraph
+// pub(crate) struct VmTraceWalker<'trace, W: Walk> {
+//     root: VmTrace,
+//     parent: Option<&'trace mut VmTrace>,
+//     current: Option<&'trace mut VmTrace>,
 
-impl<'a> VmTraceWalker<'a, DF> {
-    fn get_all_subs(node: &'a VmTrace, holder: &mut Vec<&'a VmTrace>) {
-        holder.push(node);
+//     /// the currnet index of the sub call on this level
+//     idx: usize,
 
-        for op in node.ops.iter() {
-            if let Some(sub) = &op.sub {
-                Self::get_all_subs(sub, holder);
-            }
-        }
-    }
-}
+//     done: bool,
+//     len: usize,
 
-impl<'a> CallTraceNodeWalker<'a, DF> {
-    fn get_all_children(nodes: &'a Vec<CallTraceNode>, idx: usize, holder: &mut Vec<usize>) {
+//     phantom: std::marker::PhantomData<W>,
+// }
+
+// impl<'trace> VmTraceWalker<'trace, DFWalk> {
+//     fn maybe_next_sub(
+//         trace: &'trace mut VmTrace,
+//         idx: usize,
+//     ) -> Option<(usize, &'trace mut VmTrace)> {
+//         for (curr, op) in trace.ops.iter_mut().enumerate() {
+//             if curr > idx {
+//                 return op.sub.as_mut().map(|sub| (curr, sub));
+//             }
+//         }
+
+//         None
+//     }
+// }
+
+impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
+    fn get_all_children(nodes: &'trace Vec<CallTraceNode>, idx: usize, holder: &mut Vec<usize>) {
         holder.push(idx);
         for child in nodes[idx].children.iter() {
             holder.push(child.clone());
@@ -50,31 +64,43 @@ impl<'a> CallTraceNodeWalker<'a, DF> {
         }
     }
 
-    pub(crate) fn df_addresses(&self) -> Vec<Address> {
-        self.idxs.iter().map(|idx| self.nodes[*idx].trace.address).collect::<Vec<_>>()
+    /// DFWalked order of input arena
+    pub(crate) fn idxs(&self) -> Vec<usize> {
+        self.idxs.clone()
     }
 }
 
-impl<'a> Iterator for VmTraceWalker<'a, DF> {
-    type Item = &'a VmTrace;
+// impl<'trace> Iterator for VmTraceWalker<'trace, DFWalk> {
+//     type Item = &'trace mut VmTrace;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         match self.current {
+//             Some(trace) => {
+//                 if let Some((new_idx, new_trace)) = Self::maybe_next_sub(trace, self.idx) {
+//                     self.idx = new_idx;
+//                     self.parent = self.current;
+//                     self.current = Some(new_trace);
+//                     Some(new_trace)
+//                 } else {
+//                     self.current = self.parent;
+//                     self.idx = 0;
+//                     // self.next()
+//                     None
+//                 }
+//             }
+//             None => {
+//                 self.current = Some(&mut self.root);
+//                 Some(&mut self.root)
+//             }
+//         }
+//     }
+// }
+
+impl<'trace> Iterator for CallTraceNodeWalker<'trace, DFWalk> {
+    type Item = &'trace CallTraceNode;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr_idx >= self.nodes.len() {
-            return None;
-        }
-
-        let node = self.nodes[self.curr_idx];
-        self.curr_idx += 1;
-
-        Some(node)
-    }
-}
-
-impl<'a> Iterator for CallTraceNodeWalker<'a, DF> {
-    type Item = &'a CallTraceNode;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.curr_idx >= self.nodes.len() {
+        if !(self.curr_idx < self.nodes.len()) {
             return None;
         }
 
@@ -85,8 +111,8 @@ impl<'a> Iterator for CallTraceNodeWalker<'a, DF> {
     }
 }
 
-impl<'a> From<&'a Vec<CallTraceNode>> for CallTraceNodeWalker<'a, DF> {
-    fn from(nodes: &'a Vec<CallTraceNode>) -> Self {
+impl<'trace> From<&'trace Vec<CallTraceNode>> for CallTraceNodeWalker<'trace, DFWalk> {
+    fn from(nodes: &'trace Vec<CallTraceNode>) -> Self {
         let mut idxs: Vec<usize> = Vec::with_capacity(nodes.len());
 
         Self::get_all_children(nodes, 0, &mut idxs);
@@ -95,28 +121,16 @@ impl<'a> From<&'a Vec<CallTraceNode>> for CallTraceNodeWalker<'a, DF> {
     }
 }
 
-impl<'a> From<&'a VmTrace> for VmTraceWalker<'a, DF> {
-    fn from(node: &'a VmTrace) -> Self {
-        let mut nodes: Vec<&'a VmTrace> = Vec::new();
+// impl<'trace> From<VmTrace> for VmTraceWalker<'trace, DFWalk> {
+//     fn from(node: VmTrace) -> Self {
+//         todo!()
+//     }
+// }
 
-        Self::get_all_subs(node, &mut nodes);
+// impl<'trace> Walker<&'trace mut VmTrace, DFWalk> for VmTraceWalker<'trace, DFWalk> {
+//     fn len(&self) -> usize {
+//         todo!()
+//     }
+// }
 
-        Self { curr_idx: 0, nodes, phantom: std::marker::PhantomData }
-    }
-}
-
-impl<'a> Walker<DF> for VmTraceWalker<'a, DF> {
-    type Node = &'a VmTrace;
-
-    fn len(&self) -> usize {
-        self.nodes.len()
-    }
-}
-
-impl<'a> Walker<DF> for CallTraceNodeWalker<'a, DF> {
-    type Node = &'a CallTraceNode;
-
-    fn len(&self) -> usize {
-        self.nodes.len()
-    }
-}
+impl<'trace> Walker<&'trace CallTraceNode, DFWalk> for CallTraceNodeWalker<'trace, DFWalk> {}

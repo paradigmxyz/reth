@@ -1,4 +1,4 @@
-use super::walker::{CallTraceNodeWalker, DF};
+use super::walker::{CallTraceNodeWalker, DFWalk, Walker};
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
     TracingInspectorConfig,
@@ -160,7 +160,7 @@ impl ParityTraceBuilder {
     {
         let ResultAndState { result, state } = res;
 
-        let df_addresses = self.df_addresses();
+        let df_addresses = self.df_ordered_addresses();
 
         let mut trace_res = self.into_trace_results(result, trace_types);
 
@@ -193,11 +193,8 @@ impl ParityTraceBuilder {
         let with_traces = trace_types.contains(&TraceType::Trace);
         let with_diff = trace_types.contains(&TraceType::StateDiff);
 
-        let vm_trace = if trace_types.contains(&TraceType::VmTrace) {
-            Some(self.into_vm_trace())
-        } else {
-            None
-        };
+        let vm_trace =
+            if trace_types.contains(&TraceType::VmTrace) { Some(self.vm_trace()) } else { None };
 
         let mut traces = Vec::with_capacity(if with_traces { self.nodes.len() } else { 0 });
         let mut diff = StateDiff::default();
@@ -235,14 +232,15 @@ impl ParityTraceBuilder {
         self.into_transaction_traces_iter().collect()
     }
 
-    fn df_addresses(&self) -> Vec<Address> {
+    /// get addresses here because cant get them from parity trace otherwise
+    fn df_ordered_addresses(&self) -> Vec<Address> {
         let walker = CallTraceNodeWalker::from(&self.nodes);
 
-        walker.df_addresses()
+        walker.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
     }
 
     /// Creates a VM trace by iterating over the instructions from the first one and recursively fills in the subcall traces
-    pub fn into_vm_trace(&self) -> VmTrace {
+    pub fn vm_trace(&self) -> VmTrace {
         let mut walker = CallTraceNodeWalker::from(&self.nodes);
 
         match walker.next() {
@@ -252,7 +250,11 @@ impl ParityTraceBuilder {
         }
     }
 
-    fn make_trace(walker: &mut CallTraceNodeWalker<'_, DF>, current: &CallTraceNode) -> VmTrace {
+    /// returns a VM trace without the code filled in
+    fn make_trace(
+        walker: &mut dyn Walker<&CallTraceNode, DFWalk>,
+        current: &CallTraceNode,
+    ) -> VmTrace {
         let mut instructions: Vec<VmInstruction> = Vec::with_capacity(current.trace.steps.len());
 
         for step in current.trace.steps.iter() {
@@ -269,39 +271,42 @@ impl ParityTraceBuilder {
                 _ => None,
             };
 
-            instructions.push(make_instruction(step, maybe_sub));
+            instructions.push(Self::make_instruction(step, maybe_sub));
         }
 
         VmTrace { code: Default::default(), ops: instructions }
     }
-}
 
-fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
-    let maybe_storage = match step.storage_change {
-        Some(storage_change) => {
-            Some(StorageDelta { key: storage_change.key, val: storage_change.value })
+    /// todo::n config
+    fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
+        let maybe_storage = match step.storage_change {
+            Some(storage_change) => {
+                Some(StorageDelta { key: storage_change.key, val: storage_change.value })
+            }
+            None => None,
+        };
+
+        let maybe_memory = match step.memory.len() {
+            0 => None,
+            _ => {
+                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+            }
+        };
+
+        VmInstruction {
+            pc: step.pc,
+            cost: 0, // todo::n
+            ex: Some(VmExecutedOperation {
+                used: step.gas_cost,
+                push: match step.new_stack {
+                    Some(new_stack) => Some(new_stack.into()),
+                    None => None,
+                },
+                mem: maybe_memory,
+                store: maybe_storage,
+            }),
+            sub: maybe_sub,
         }
-        None => None,
-    };
-
-    let maybe_memory = match step.memory.len() {
-        0 => None,
-        _ => Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() }),
-    };
-
-    VmInstruction {
-        pc: step.pc,
-        cost: 0, // todo::n
-        ex: Some(VmExecutedOperation {
-            used: step.gas_cost,
-            push: match step.new_stack {
-                Some(new_stack) => Some(new_stack.into()),
-                None => None,
-            },
-            mem: maybe_memory,
-            store: maybe_storage,
-        }),
-        sub: maybe_sub,
     }
 }
 
@@ -314,7 +319,7 @@ fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstr
 /// todo::n here we will make a VmTrace walker, and fill in the code sections
 ///
 /// the walker should have the same len as the addresses, but it should be checked in testing rather than here
-pub fn populate_vm_trace_bytecodes<DB>(
+pub(crate) fn populate_vm_trace_bytecodes<DB>(
     db: DB,
     df_addresses: Vec<Address>,
     trace: &mut VmTrace,
