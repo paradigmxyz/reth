@@ -15,7 +15,6 @@ use std::{ops::Deref, path::Path};
 use tx::Tx;
 
 pub mod cursor;
-mod log_level;
 pub mod tx;
 
 const GIGABYTE: usize = 1024 * 1024 * 1024;
@@ -96,7 +95,16 @@ impl<E: EnvironmentKind> Env<E> {
         inner_env.set_max_readers(DEFAULT_MAX_READERS);
 
         if let Some(log_level) = log_level {
-            inner_env.set_log_level(log_level::LogLevel(log_level).into());
+            inner_env.set_log_level(match log_level {
+                LogLevel::Fatal => 0,
+                LogLevel::Error => 1,
+                LogLevel::Warn => 2,
+                LogLevel::Notice => 3,
+                LogLevel::Verbose => 4,
+                LogLevel::Debug => 5,
+                LogLevel::Trace => 6,
+                LogLevel::Extra => 7,
+            });
         }
 
         let env =
@@ -126,7 +134,7 @@ impl<E: EnvironmentKind> Env<E> {
 }
 
 impl<E: EnvironmentKind> Deref for Env<E> {
-    type Target = reth_libmdbx::Environment<E>;
+    type Target = Environment<E>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -160,7 +168,7 @@ mod tests {
 
     /// Create database for testing with specified path
     fn create_test_db_with_path<E: EnvironmentKind>(kind: EnvKind, path: &Path) -> Env<E> {
-        let env = Env::<E>::open(path, kind).expect(ERROR_DB_CREATION);
+        let env = Env::<E>::open(path, kind, None).expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
@@ -755,7 +763,7 @@ mod tests {
             assert!(result.expect(ERROR_RETURN_VALUE) == 200);
         }
 
-        let env = Env::<WriteMap>::open(&path, EnvKind::RO).expect(ERROR_DB_CREATION);
+        let env = Env::<WriteMap>::open(&path, EnvKind::RO, None).expect(ERROR_DB_CREATION);
 
         // GET
         let result =
