@@ -2180,6 +2180,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
+name = "examples"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth-beacon-consensus",
+ "reth-blockchain-tree",
+ "reth-db",
+ "reth-network-api",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc-builder",
+ "reth-rpc-types",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "tokio",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

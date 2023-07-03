@@ -45,6 +45,8 @@ members = [
     "crates/transaction-pool",
     "crates/trie",
     "testing/ef-tests",
+
+    "examples",
 ]
 default-members = ["bin/reth"]
 
@@ -59,6 +61,9 @@ rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
+exclude = [
+    ".github/",
+]
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
@@ -85,9 +90,14 @@ revm-primitives = "1.1"
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
 reth-provider = { path = "./crates/storage/provider" }
+reth-db = { path = "./crates/storage/db" }
 reth-rlp = { path = "./crates/rlp" }
 reth-rpc-types = { path = "./crates/rpc/rpc-types" }
+reth-rpc-builder = { path = "./crates/rpc/rpc-builder" }
+reth-blockchain-tree = { path = "./crates/blockchain-tree" }
+reth-beacon-consensus = { path = "./crates/consensus/beacon" }
 reth-metrics = { path = "./crates/metrics" }
+reth-revm = { path = "./crates/revm" }
 reth-payload-builder = { path = "./crates/payload/builder" }
 reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
