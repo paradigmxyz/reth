@@ -1082,6 +1082,15 @@ where
                                     canonical_tip_num,
                                     downloaded_num_hash.number,
                                 );
+                            } else if let Some(buffered_finalized) =
+                                self.blockchain.buffered_header_by_hash(state.finalized_block_hash)
+                            {
+                                // if we have buffered the finalized block, we should check how far
+                                // we're off
+                                requires_pipeline = self.exceeds_pipeline_run_threshold(
+                                    canonical_tip_num,
+                                    buffered_finalized.number,
+                                );
                             }
                         }
 

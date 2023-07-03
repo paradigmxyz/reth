@@ -85,6 +85,29 @@ impl TracingInspector {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
 
+    /// Returns true if we're no longer in the context of the root call.
+    fn is_deep(&self) -> bool {
+        // the root call will always be the first entry in the trace stack
+        !self.trace_stack.is_empty()
+    }
+
+    /// Returns true if this a call to a precompile contract.
+    ///
+    /// Returns true if the `to` address is a precompile contract and the value is zero.
+    #[inline]
+    fn is_precompile_call<DB: Database>(
+        &self,
+        data: &EVMData<'_, DB>,
+        to: &Address,
+        value: U256,
+    ) -> bool {
+        if data.precompiles.contains(to) {
+            // only if this is _not_ the root call
+            return self.is_deep() && value == U256::ZERO
+        }
+        false
+    }
+
     /// Returns the currently active call trace.
     ///
     /// This will be the last call trace pushed to the stack: the call we entered most recently.
@@ -387,7 +410,7 @@ where
 
         // if calls to precompiles should be excluded, check whether this is a call to a precompile
         let maybe_precompile =
-            self.config.exclude_precompile_calls.then(|| is_precompile_call(data, &to, value));
+            self.config.exclude_precompile_calls.then(|| self.is_precompile_call(data, &to, value));
 
         self.start_trace_on_call(
             data.journaled_state.depth() as usize,
@@ -485,13 +508,4 @@ where
 struct StackStep {
     trace_idx: usize,
     step_idx: usize,
-}
-
-/// Returns true if this a call to a precompile contract with `depth > 0 && value == 0`.
-#[inline]
-fn is_precompile_call<DB: Database>(data: &EVMData<'_, DB>, to: &Address, value: U256) -> bool {
-    if data.precompiles.contains(to) {
-        return data.journaled_state.depth() > 0 && value == U256::ZERO
-    }
-    false
 }

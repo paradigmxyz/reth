@@ -21,6 +21,12 @@ pub struct Receipt {
     /// Gas used
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20)"
+        )
+    )]
     pub logs: Vec<Log>,
 }
 

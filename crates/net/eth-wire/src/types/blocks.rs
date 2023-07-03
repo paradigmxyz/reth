@@ -68,11 +68,17 @@ impl From<Vec<H256>> for GetBlockBodies {
 
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
-#[derive_arbitrary(rlp, 1)]
+#[derive_arbitrary(rlp, 16)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockBodies(
     /// The requested block bodies, each of which should correspond to a hash in the request.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<BlockBody>(), 0..=20)"
+        )
+    )]
     pub Vec<BlockBody>,
 );
 

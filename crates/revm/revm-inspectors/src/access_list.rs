@@ -28,7 +28,7 @@ impl AccessListInspector {
         precompiles: Vec<Address>,
     ) -> Self {
         AccessListInspector {
-            excluded: vec![from, to].iter().chain(precompiles.iter()).copied().collect(),
+            excluded: [from, to].iter().chain(precompiles.iter()).copied().collect(),
             access_list: access_list
                 .0
                 .iter()

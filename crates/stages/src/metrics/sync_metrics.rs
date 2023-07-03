@@ -11,6 +11,15 @@ pub(crate) struct SyncMetrics {
     pub(crate) execution_stage: ExecutionStageMetrics,
 }
 
+impl SyncMetrics {
+    /// Returns existing or initializes a new instance of [StageMetrics] for the provided [StageId].
+    pub(crate) fn get_stage_metrics(&mut self, stage_id: StageId) -> &mut StageMetrics {
+        self.stages
+            .entry(stage_id)
+            .or_insert_with(|| StageMetrics::new_with_labels(&[("stage", stage_id.to_string())]))
+    }
+}
+
 #[derive(Metrics)]
 #[metrics(scope = "sync")]
 pub(crate) struct StageMetrics {
