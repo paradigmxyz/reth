@@ -1,4 +1,9 @@
+use crate::tracing::{types::CallTraceStep, TracingInspectorConfig};
 use reth_primitives::Address;
+use reth_rpc_types::trace::parity::{
+    MemoryDelta, StorageDelta, VmExecutedOperation, VmInstruction, VmTrace,
+};
+use revm::interpreter::opcode;
 
 use crate::tracing::types::CallTraceNode;
 // use reth_rpc_types::trace::parity::VmTrace;
@@ -54,7 +59,6 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
                             // we are done with this node, so we go back up to the parent
                             curr = parent_idx;
 
-                            // we are done with this child, so we go to the next one
                             child_idx = stack.pop().expect("There should be a value here") + 1;
                         }
                         None => {
@@ -70,13 +74,81 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     }
 
     /// DFWalked order of input arena
-    pub(crate) fn idxs(&self) -> &Vec<usize> {
+    fn idxs(&self) -> &Vec<usize> {
         &self.idxs
     }
 
     /// returns the callee address in depth first order
     pub(crate) fn addresses(&self) -> Vec<Address> {
-        self.idxs.iter().map(|idx| self.nodes[*idx].trace.address).collect()
+        self.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
+    }
+
+    /// returns a VM trace without the code filled in
+    pub(crate) fn into_vm_trace(
+        &mut self,
+        config: &TracingInspectorConfig,
+        current: &CallTraceNode,
+    ) -> VmTrace {
+        let mut instructions: Vec<VmInstruction> = Vec::with_capacity(current.trace.steps.len());
+
+        for step in current.trace.steps.iter() {
+            let maybe_sub = match step.op.u8() {
+                opcode::CALL
+                | opcode::CALLCODE
+                | opcode::DELEGATECALL
+                | opcode::STATICCALL
+                | opcode::CREATE
+                | opcode::CREATE2 => {
+                    let next = self.next().expect("missing next node");
+                    Some(self.into_vm_trace(config, next))
+                }
+                _ => None,
+            };
+
+            instructions.push(Self::make_instruction(step, config, maybe_sub));
+        }
+
+        VmTrace { code: Default::default(), ops: instructions }
+    }
+
+    /// todo::n config
+    ///
+    /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is one
+    fn make_instruction(
+        step: &CallTraceStep,
+        _config: &TracingInspectorConfig,
+        maybe_sub: Option<VmTrace>,
+    ) -> VmInstruction {
+        let maybe_storage = match step.storage_change {
+            Some(storage_change) => {
+                Some(StorageDelta { key: storage_change.key, val: storage_change.value })
+            }
+            None => None,
+        };
+
+        let maybe_memory = match step.memory.len() {
+            0 => None,
+            _ => {
+                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+            }
+        };
+
+        let maybe_execution = Some(VmExecutedOperation {
+            used: step.gas_cost,
+            push: match step.new_stack {
+                Some(new_stack) => Some(new_stack.into()),
+                None => None,
+            },
+            mem: maybe_memory,
+            store: maybe_storage,
+        });
+
+        VmInstruction {
+            pc: step.pc,
+            cost: 0, // todo::n
+            ex: maybe_execution,
+            sub: maybe_sub,
+        }
     }
 }
 

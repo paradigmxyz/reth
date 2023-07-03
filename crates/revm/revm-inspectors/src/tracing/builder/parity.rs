@@ -1,13 +1,9 @@
 use super::walker::{CallTraceNodeWalker, DFWalk};
-use crate::tracing::{
-    types::{CallTraceNode, CallTraceStep},
-    TracingInspectorConfig,
-};
-use reth_primitives::{Address, Bytes, U64};
+use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
+use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    interpreter::opcode,
     primitives::{AccountInfo, ExecutionResult, ResultAndState},
 };
 use std::collections::HashSet;
@@ -244,72 +240,9 @@ impl ParityTraceBuilder {
         let mut walker = CallTraceNodeWalker::new(&self.nodes);
 
         match walker.next() {
-            Some(start) => Self::make_trace(&mut walker, start),
+            Some(start) => walker.into_vm_trace(&self._config, start),
             // todo::n should probably but some logging here
             None => VmTrace { code: Default::default(), ops: Vec::new() },
-        }
-    }
-
-    /// returns a VM trace without the code filled in
-    fn make_trace(
-        walker: &mut CallTraceNodeWalker<'_, DFWalk>,
-        current: &CallTraceNode,
-    ) -> VmTrace {
-        let mut instructions: Vec<VmInstruction> = Vec::with_capacity(current.trace.steps.len());
-
-        for step in current.trace.steps.iter() {
-            let maybe_sub = match step.op.u8() {
-                opcode::CALL
-                | opcode::CALLCODE
-                | opcode::DELEGATECALL
-                | opcode::STATICCALL
-                | opcode::CREATE
-                | opcode::CREATE2 => {
-                    let next = walker.next().expect("missing next node");
-                    Some(Self::make_trace(walker, next))
-                }
-                _ => None,
-            };
-
-            instructions.push(Self::make_instruction(step, maybe_sub));
-        }
-
-        VmTrace { code: Default::default(), ops: instructions }
-    }
-
-    /// todo::n config
-    ///
-    /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is one
-    fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
-        let maybe_storage = match step.storage_change {
-            Some(storage_change) => {
-                Some(StorageDelta { key: storage_change.key, val: storage_change.value })
-            }
-            None => None,
-        };
-
-        let maybe_memory = match step.memory.len() {
-            0 => None,
-            _ => {
-                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
-            }
-        };
-
-        let maybe_execution = Some(VmExecutedOperation {
-            used: step.gas_cost,
-            push: match step.new_stack {
-                Some(new_stack) => Some(new_stack.into()),
-                None => None,
-            },
-            mem: maybe_memory,
-            store: maybe_storage,
-        });
-
-        VmInstruction {
-            pc: step.pc,
-            cost: 0, // todo::n
-            ex: maybe_execution,
-            sub: maybe_sub,
         }
     }
 }
