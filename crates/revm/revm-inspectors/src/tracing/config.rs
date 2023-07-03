@@ -103,6 +103,16 @@ impl TracingInspectorConfig {
         self
     }
 
+    /// Configure whether the tracer should record steps and state diffs.
+    ///
+    /// This is a convenience method for setting both [TracingInspectorConfig::set_steps] and
+    /// [TracingInspectorConfig::set_state_diffs] since tracking state diffs requires steps tracing.
+    pub fn set_steps_and_state_diffs(mut self, steps_and_diffs: bool) -> Self {
+        self.record_steps = steps_and_diffs;
+        self.record_state_diff = steps_and_diffs;
+        self
+    }
+
     /// Configure whether the tracer should record logs
     pub fn set_record_logs(mut self, record_logs: bool) -> Self {
         self.record_logs = record_logs;
