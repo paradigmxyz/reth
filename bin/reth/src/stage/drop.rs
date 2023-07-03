@@ -2,12 +2,12 @@
 use crate::{
     args::{utils::genesis_value_parser, DatabaseArgs, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
+    init::{insert_genesis_header, insert_genesis_state},
     utils::DbTool,
 };
 use clap::Parser;
 use reth_db::{database::Database, open_db, tables, transaction::DbTxMut, DatabaseEnv};
 use reth_primitives::{fs, stage::StageId, ChainSpec};
-use reth_staged_sync::utils::init::{insert_genesis_header, insert_genesis_state};
 use std::sync::Arc;
 use tracing::info;
 

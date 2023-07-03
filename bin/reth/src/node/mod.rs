@@ -4,6 +4,7 @@
 use crate::{
     args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
     dirs::DataDirPath,
+    init::init_genesis,
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -46,7 +47,6 @@ use reth_provider::{
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     prelude::*,
     stages::{
