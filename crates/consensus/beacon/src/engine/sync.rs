@@ -271,7 +271,7 @@ where
         for idx in (0..self.inflight_full_block_requests.len()).rev() {
             let mut request = self.inflight_full_block_requests.swap_remove(idx);
             if let Poll::Ready(block) = request.poll_unpin(cx) {
-                trace!(target: "consensus::engine", ?block, "Received single full block, buffering");
+                trace!(target: "consensus::engine", block=?block.num_hash(), "Received single full block, buffering");
                 self.range_buffered_blocks.push(Reverse(OrderedSealedBlock(block)));
             } else {
                 // still pending
@@ -283,7 +283,7 @@ where
         for idx in (0..self.inflight_block_range_requests.len()).rev() {
             let mut request = self.inflight_block_range_requests.swap_remove(idx);
             if let Poll::Ready(blocks) = request.poll_unpin(cx) {
-                trace!(target: "consensus::engine", len=?blocks.len(), first_num=?blocks.first().map(|b| b.number), last_num=?blocks.last().map(|b| b.number), "Received full block range, buffering");
+                trace!(target: "consensus::engine", len=?blocks.len(), first=?blocks.first().map(|b| b.num_hash()), last=?blocks.last().map(|b| b.num_hash()), "Received full block range, buffering");
                 self.range_buffered_blocks
                     .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
             } else {
