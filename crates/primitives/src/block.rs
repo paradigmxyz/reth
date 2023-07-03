@@ -782,6 +782,43 @@ impl BlockBody {
             withdrawals: self.withdrawals.clone(),
         }
     }
+
+    /// Calculate the transaction root for the block body.
+    pub fn calculate_tx_root(&self) -> H256 {
+        crate::proofs::calculate_transaction_root(&self.transactions)
+    }
+
+    /// Calculate the ommers root for the block body.
+    pub fn calculate_ommers_root(&self) -> H256 {
+        crate::proofs::calculate_ommers_root(&self.ommers)
+    }
+
+    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
+    /// withdrawals, this will return `None`.
+    pub fn calculate_withdrawals_root(&self) -> Option<H256> {
+        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+    }
+
+    /// Calculate all roots (transaction, ommers, withdrawals) for the block body.
+    pub fn calculate_roots(&self) -> BlockBodyRoots {
+        BlockBodyRoots {
+            tx_root: self.calculate_tx_root(),
+            ommers_hash: self.calculate_ommers_root(),
+            withdrawals_root: self.calculate_withdrawals_root(),
+        }
+    }
+}
+
+/// A struct that represents roots associated with a block body. This can be used to correlate
+/// block body responses with headers.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Hash)]
+pub struct BlockBodyRoots {
+    /// The transaction root for the block body.
+    pub tx_root: H256,
+    /// The ommers hash for the block body.
+    pub ommers_hash: H256,
+    /// The withdrawals root for the block body, if withdrawals exist.
+    pub withdrawals_root: Option<H256>,
 }
 
 #[cfg(test)]

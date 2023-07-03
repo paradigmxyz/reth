@@ -7,9 +7,13 @@ use crate::{
     },
 };
 use futures::Stream;
-use reth_primitives::{BlockBody, Header, HeadersDirection, SealedBlock, SealedHeader, H256, WithPeerId};
+use reth_primitives::{
+    BlockBody, BlockBodyRoots, Header, HeadersDirection, SealedBlock, SealedHeader, H256,
+    WithPeerId
+};
 use std::{
     cmp::Reverse,
+    collections::HashMap,
     fmt::Debug,
     future::Future,
     pin::Pin,
@@ -88,7 +92,8 @@ where
             },
             client,
             headers: None,
-            bodies: None,
+            root_map: HashMap::new(),
+            bodies: HashMap::new(),
         }
     }
 }
@@ -344,7 +349,10 @@ where
     count: u64,
     request: FullBlockRangeRequest<Client>,
     headers: Option<Vec<SealedHeader>>,
-    bodies: Option<Vec<BlockBody>>,
+    // keeps track of root triples and their headers
+    root_map: HashMap<BlockBodyRoots, Vec<SealedHeader>>,
+    // keeps track of txroot-matched headers and bodies
+    bodies: HashMap<SealedHeader, BlockBody>,
 }
 
 impl<Client> FetchFullBlockRangeFuture<Client>
@@ -356,33 +364,57 @@ where
         self.headers.as_ref().map(|h| h.iter().map(|h| h.hash()).collect::<Vec<_>>())
     }
 
+    /// Returns whether or not the bodies map is fully populated with requested headers and bodies.
+    fn is_bodies_complete(&self) -> bool {
+        self.bodies.len() == self.count as usize
+    }
+
+    /// Inserts a block body, first checking that there is a matching header in the `root_map`.
+    fn insert_body(&mut self, body: BlockBody) {
+        let roots = body.calculate_roots();
+        if let Some(headers) = self.root_map.get_mut(&roots) {
+            // pop one of the headers
+            if let Some(header) = headers.pop() {
+                self.bodies.insert(header, body);
+            }
+        }
+    }
+
+    /// Inserts multiple block bodies, populating the `bodies` map with responses when bodies can
+    /// be matched with an existing root triple.
+    fn insert_bodies(&mut self, bodies: Vec<BlockBody>) {
+        for body in bodies {
+            self.insert_body(body);
+        }
+    }
+
+    /// Returns the remaining hashes for the bodies request, based on the headers that still exist
+    /// in the `root_map`.
+    fn remaining_bodies_hashes(&self) -> Vec<H256> {
+        self.root_map.values().flatten().map(|h| h.hash()).collect()
+    }
+
     /// Returns the [SealedBlock]s if the request is complete.
     fn take_blocks(&mut self) -> Option<Vec<SealedBlock>> {
-        if self.headers.is_none() || self.bodies.is_none() {
-            return None
-        }
-
-        if self.bodies.as_ref().unwrap().len() != self.count as usize {
-            // the response exists but is not complete
+        if self.headers.is_none() || !self.is_bodies_complete() {
             return None
         }
 
         let headers = self.headers.take().unwrap();
-        let bodies = self.bodies.take().unwrap();
+        let mut response = Vec::new();
+        for header in headers {
+            if let Some(body) = self.bodies.remove(&header) {
+                response.push(SealedBlock::new(header, body));
+            }
+        }
 
-        Some(
-            headers
-                .iter()
-                .zip(bodies.iter())
-                .map(|(h, b)| SealedBlock::new(h.clone(), b.clone()))
-                .collect::<Vec<_>>(),
-        )
+        Some(response)
     }
 
     /// Returns whether or not a bodies request has been started, returning false if there is no
     /// pending request, and if there is no buffered response.
     fn has_bodies_request_started(&self) -> bool {
-        self.request.bodies.is_some() && self.bodies.is_some()
+        self.request.bodies.is_some() && !self.bodies.is_empty()
     }
 }
 
@@ -428,6 +460,15 @@ where
                                     let hashes =
                                         headers.iter().map(|h| h.hash()).collect::<Vec<_>>();
 
+                                    // populate the root map
+                                    for header in &headers {
+                                        let root = header.header.body_roots();
+                                        this.root_map
+                                            .entry(root)
+                                            .or_insert_with(Vec::new)
+                                            .push(header.clone());
+                                    }
+
                                     // set the actual request if it hasn't been started yet
                                     if !this.has_bodies_request_started() {
                                         this.request.bodies =
@@ -466,41 +507,25 @@ where
                             let new_bodies = bodies_resp.into_data();
 
                             // calculate length after we add the new bodies
-                            let existing_len = this.bodies.as_ref().map(|b| b.len()).unwrap_or(0);
+                            let existing_len = this.bodies.len();
                             let new_len = new_bodies.len() + existing_len;
 
+                            // first insert the received bodies
+                            this.insert_bodies(new_bodies);
+
                             if new_len != this.count as usize {
-                                // append the bodies if possible
-                                if let Some(bodies) = this.bodies.as_mut() {
-                                    bodies.extend(new_bodies);
-                                } else {
-                                    this.bodies = Some(new_bodies);
-                                }
+                                // insert the received bodies
+                                let req_hashes = this.remaining_bodies_hashes();
 
-                                if let Some(hashes) = this.range_block_hashes() {
-                                    // set hashes for next request (slice hashes to match the number
-                                    // of still-missing bodies)
-                                    let req_hashes =
-                                        hashes.iter().cloned().skip(new_len).collect::<Vec<_>>();
-
-                                    // set a new request
-                                    this.request.bodies =
-                                        Some(this.client.get_block_bodies(req_hashes))
-                                }
-                            } else {
-                                // append the bodies if possible
-                                if let Some(bodies) = this.bodies.as_mut() {
-                                    bodies.extend(new_bodies);
-                                } else {
-                                    this.bodies = Some(new_bodies);
-                                }
+                                // set a new request
+                                this.request.bodies = Some(this.client.get_block_bodies(req_hashes))
                             }
                         }
                         Err(err) => {
                             debug!(target: "downloaders", %err, ?this.hash, "Body range download failed");
                         }
                     }
-                    if this.bodies.is_none() {
+                    if this.bodies.is_empty() {
                         // received bad response, re-request headers
                         // TODO: convert this into two futures, one which is a headers range
                         // future, and one which is a bodies range future.
@@ -513,7 +538,8 @@ where
                         // first completing the headers request. This way we can get rid of the
                         // following `if let Some`. A bodies request should never be sent before
                         // the headers request completes, so this should always be `Some` anyways.
-                        if let Some(hashes) = this.range_block_hashes() {
+                        let hashes = this.remaining_bodies_hashes();
+                        if !hashes.is_empty() {
                             this.request.bodies = Some(this.client.get_block_bodies(hashes));
                         }
                     }
