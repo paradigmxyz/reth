@@ -490,13 +490,11 @@ where
                         }));
                     }
                 }
-                // This branch handles block body responses from peers - it first checks that the
-                // number of bodies matches what we requested.
+                // This branch handles block body responses from peers - it first inserts the
+                // bodies into the `bodies` map, and then checks if the request is complete.
                 //
-                // If the number of bodies doesn't match, we penalize the peer and retry the
-                // request.
-                // If the number of bodies does match, we assemble the bodies with the headers
-                // received by a previous response, and return the result.
+                // If the request is not complete, and we need to request more bodies, we send
+                // a bodies request for the headers we don't yet have bodies for.
                 RangeResponseResult::Body(res) => {
                     match res {
                         Ok(bodies_resp) => {
