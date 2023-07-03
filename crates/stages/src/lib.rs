@@ -26,7 +26,7 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! # use reth_db::mdbx::test_utils::create_test_rw_db;
+//! # use reth_db::test_utils::create_test_rw_db;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
@@ -64,6 +64,7 @@
 //!
 //! - `test-utils`: Export utilities for testing
 mod error;
+mod metrics;
 mod pipeline;
 mod stage;
 mod util;
@@ -81,5 +82,6 @@ pub mod stages;
 pub mod sets;
 
 pub use error::*;
+pub use metrics::*;
 pub use pipeline::*;
 pub use stage::*;

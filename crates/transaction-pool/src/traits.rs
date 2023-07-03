@@ -89,6 +89,11 @@ pub trait TransactionPool: Send + Sync + Clone {
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
+    /// Returns a new transaction change event stream for the given transaction.
+    ///
+    /// Returns `None` if the transaction is not in the pool.
+    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
+
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
@@ -215,7 +220,7 @@ pub trait TransactionPoolExt: TransactionPool {
 }
 
 /// A Helper type that bundles all transactions in the pool.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AllPoolTransactions<T: PoolTransaction> {
     /// Transactions that are ready for inclusion in the next block.
     pub pending: Vec<Arc<ValidPoolTransaction<T>>>,
@@ -236,6 +241,12 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all queued [TransactionSignedEcRecovered] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
         self.queued.iter().map(|tx| tx.transaction.to_recovered_transaction())
+    }
+}
+
+impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
+    fn default() -> Self {
+        Self { pending: Default::default(), queued: Default::default() }
     }
 }
 
@@ -572,7 +583,7 @@ impl IntoRecoveredTransaction for PooledTransaction {
 }
 
 /// Represents the current status of the pool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PoolSize {
     /// Number of transactions in the _pending_ sub-pool.
     pub pending: usize,
@@ -586,6 +597,10 @@ pub struct PoolSize {
     pub queued: usize,
     /// Reported size of transactions in the _queued_ sub-pool.
     pub queued_size: usize,
+    /// Number of all transactions of all sub-pools
+    ///
+    /// Note: this is the sum of ```pending + basefee + queued```
+    pub total: usize,
 }
 
 /// Represents the current status of the pool.

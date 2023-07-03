@@ -9,7 +9,7 @@ use std::{
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-/// A Stream that receives [TransactionEvent] for the transactions
+/// A Stream that receives [TransactionEvent] for the transaction with the given hash.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct TransactionEvents {

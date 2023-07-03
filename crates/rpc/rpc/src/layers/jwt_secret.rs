@@ -1,9 +1,10 @@
 use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
+use reth_primitives::{fs, fs::FsPathError};
 use serde::{Deserialize, Serialize};
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
@@ -26,10 +27,8 @@ pub enum JwtError {
     MissingOrInvalidAuthorizationHeader,
     #[error("JWT decoding error {0}")]
     JwtDecodingError(String),
-    #[error("IO error occurred while reading {path}: {err}")]
-    IORead { err: std::io::Error, path: PathBuf },
-    #[error("IO error occurred while writing {path}: {err}")]
-    IOWrite { err: std::io::Error, path: PathBuf },
+    #[error(transparent)]
+    JwtFsPathError(#[from] FsPathError),
     #[error("An I/O error occurred: {0}")]
     IOError(#[from] std::io::Error),
 }
@@ -80,8 +79,7 @@ impl JwtSecret {
     /// I/O or secret validation errors might occur during read operations in the form of
     /// a [`JwtError`].
     pub fn from_file(fpath: &Path) -> Result<Self, JwtError> {
-        let hex = std::fs::read_to_string(fpath)
-            .map_err(|err| JwtError::IORead { err, path: fpath.to_path_buf() })?;
+        let hex = fs::read_to_string(fpath)?;
         let secret = JwtSecret::from_hex(hex)?;
         Ok(secret)
     }
@@ -91,14 +89,13 @@ impl JwtSecret {
     pub fn try_create(fpath: &Path) -> Result<Self, JwtError> {
         if let Some(dir) = fpath.parent() {
             // Create parent directory
-            std::fs::create_dir_all(dir)?
+            fs::create_dir_all(dir)?
         }
 
         let secret = JwtSecret::random();
         let bytes = &secret.0;
         let hex = hex::encode(bytes);
-        std::fs::write(fpath, hex)
-            .map_err(|err| JwtError::IOWrite { err, path: fpath.to_path_buf() })?;
+        fs::write(fpath, hex)?;
         Ok(secret)
     }
 }
@@ -204,6 +201,7 @@ mod tests {
     use assert_matches::assert_matches;
     use hex::encode as hex_encode;
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use reth_primitives::fs::FsPathError;
     use std::{
         path::Path,
         time::{Duration, SystemTime, UNIX_EPOCH},
@@ -375,7 +373,9 @@ mod tests {
     fn provided_file_not_exists() {
         let fpath = Path::new("secret3.hex");
         let result = JwtSecret::from_file(fpath);
-        assert_matches!(result, Err(JwtError::IORead {err: _, path}) if path == fpath.to_path_buf());
+        assert_matches!(result,
+            Err(JwtError::JwtFsPathError(FsPathError::Read { source: _, path })) if path == fpath.to_path_buf()
+        );
         assert!(!exists(fpath));
     }
 
@@ -383,7 +383,7 @@ mod tests {
     fn provided_file_is_a_directory() {
         let dir = tempdir().unwrap();
         let result = JwtSecret::from_file(dir.path());
-        assert_matches!(result, Err(JwtError::IORead {err: _, path}) if path == dir.into_path());
+        assert_matches!(result, Err(JwtError::JwtFsPathError(FsPathError::Read { source: _, path })) if path == dir.into_path());
     }
 
     fn hex(secret: &JwtSecret) -> String {

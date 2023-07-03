@@ -11,6 +11,7 @@ use reth_db::{
     table::{DupSort, Table},
     tables,
 };
+use reth_primitives::fs;
 use tracing::error;
 
 const VECTORS_FOLDER: &str = "testdata/micro/db";
@@ -19,7 +20,7 @@ const PER_TABLE: usize = 1000;
 /// Generates test vectors for specified `tables`. If list is empty, then generate for all tables.
 pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     let mut runner = TestRunner::new(ProptestConfig::default());
-    std::fs::create_dir_all(VECTORS_FOLDER)?;
+    fs::create_dir_all(VECTORS_FOLDER)?;
 
     macro_rules! generate_vector {
         ($table_type:ident, $per_table:expr, TABLE) => {

@@ -1,8 +1,7 @@
 use crate::{Address, H256};
-use revm_primitives::U256;
-
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 
 /// A list of addresses and storage keys that the transaction plans to access.
@@ -14,13 +13,27 @@ pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution
     pub address: Address,
     /// Keys of storage that would be loaded at the start of execution
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<H256>(), 0..=20)"
+        )
+    )]
     pub storage_keys: Vec<H256>,
 }
 
 /// AccessList as defined in EIP-2930
 #[main_codec(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodableWrapper, RlpEncodableWrapper)]
-pub struct AccessList(pub Vec<AccessListItem>);
+pub struct AccessList(
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<AccessListItem>(), 0..=20)"
+        )
+    )]
+    pub Vec<AccessListItem>,
+);
 
 impl AccessList {
     /// Converts the list into a vec, expected by revm

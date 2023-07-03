@@ -1139,9 +1139,7 @@ impl PeersConfig {
         self,
         optional_file: Option<impl AsRef<Path>>,
     ) -> Result<Self, io::Error> {
-        let Some(file_path) = optional_file else {
-            return Ok(self)
-        };
+        let Some(file_path) = optional_file else { return Ok(self) };
         let reader = match std::fs::File::open(file_path.as_ref()) {
             Ok(file) => io::BufReader::new(file),
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
@@ -1875,7 +1873,11 @@ mod test {
         let mut peer_manager = PeersManager::new(config);
         peer_manager.on_incoming_session_established(given_peer_id, socket_addr);
 
-        let Some(PeerAction::DisconnectBannedIncoming { peer_id }) = peer_manager.queued_actions.pop_front() else { panic!() };
+        let Some(PeerAction::DisconnectBannedIncoming { peer_id }) =
+            peer_manager.queued_actions.pop_front()
+        else {
+            panic!()
+        };
 
         assert_eq!(peer_id, given_peer_id)
     }

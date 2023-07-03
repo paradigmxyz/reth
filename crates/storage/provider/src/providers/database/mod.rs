@@ -1,8 +1,9 @@
 use crate::{
     providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
     traits::{BlockSource, ReceiptProvider},
-    BlockHashReader, BlockNumReader, BlockReader, EvmEnvProvider, HeaderProvider, ProviderError,
-    StageCheckpointReader, StateProviderBox, TransactionsProvider, WithdrawalsProvider,
+    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
+    HeaderProvider, ProviderError, StageCheckpointReader, StateProviderBox, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::Result;
@@ -343,15 +344,21 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     }
 }
 
+impl<DB> ChainSpecProvider for ProviderFactory<DB>
+where
+    DB: Send + Sync,
+{
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.chain_spec.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;
     use crate::{BlockHashReader, BlockNumReader};
     use reth_db::{
-        mdbx::{
-            test_utils::{create_test_db, ERROR_TEMPDIR},
-            EnvKind, WriteMap,
-        },
+        test_utils::{create_test_rw_db, ERROR_TEMPDIR},
         DatabaseEnv,
     };
     use reth_primitives::{ChainSpecBuilder, H256};
@@ -360,7 +367,7 @@ mod tests {
     #[test]
     fn common_history_provider() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let provider = ProviderFactory::new(db, Arc::new(chain_spec));
         let _ = provider.latest();
     }
@@ -368,7 +375,7 @@ mod tests {
     #[test]
     fn default_chain_info() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, Arc::new(chain_spec));
         let provider = factory.provider().unwrap();
 
@@ -380,7 +387,7 @@ mod tests {
     #[test]
     fn provider_flow() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, Arc::new(chain_spec));
         let provider = factory.provider().unwrap();
         provider.block_hash(0).unwrap();

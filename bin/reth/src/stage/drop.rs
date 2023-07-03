@@ -5,14 +5,8 @@ use crate::{
     utils::DbTool,
 };
 use clap::Parser;
-use reth_db::{
-    database::Database,
-    mdbx::{Env, WriteMap},
-    tables,
-    transaction::DbTxMut,
-    DatabaseEnv,
-};
-use reth_primitives::{stage::StageId, ChainSpec};
+use reth_db::{database::Database, open_db, tables, transaction::DbTxMut, DatabaseEnv};
+use reth_primitives::{fs, stage::StageId, ChainSpec};
 use reth_staged_sync::utils::init::{insert_genesis_header, insert_genesis_state};
 use std::sync::Arc;
 use tracing::info;
@@ -56,9 +50,9 @@ impl Command {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
-        std::fs::create_dir_all(&db_path)?;
+        fs::create_dir_all(&db_path)?;
 
-        let db = Env::<WriteMap>::open(db_path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
+        let db = open_db(db_path.as_ref())?;
 
         let tool = DbTool::new(&db, self.chain.clone())?;
 

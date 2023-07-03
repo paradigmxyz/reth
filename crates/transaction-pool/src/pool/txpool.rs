@@ -120,6 +120,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_size: self.basefee_pool.size(),
             queued: self.queued_pool.len(),
             queued_size: self.queued_pool.size(),
+            total: self.all_transactions.len(),
         }
     }
 
@@ -272,6 +273,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.basefee_pool_size_bytes.set(stats.basefee_size as f64);
         self.metrics.queued_pool_transactions.set(stats.queued as f64);
         self.metrics.queued_pool_size_bytes.set(stats.queued_size as f64);
+        self.metrics.total_transactions.set(stats.total as f64);
     }
 
     /// Adds the transaction into the pool.

@@ -514,8 +514,8 @@ mod tests {
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        mdbx::test_utils::create_test_rw_db,
         tables,
+        test_utils::create_test_rw_db,
         transaction::DbTxMut,
         DatabaseEnv,
     };
@@ -1212,12 +1212,13 @@ mod tests {
         assert_trie_updates(&account_updates);
     }
 
-    // TODO: limit the thumber of test cases?
     proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 128, ..ProptestConfig::default()
+        })]
         #[test]
         fn fuzz_state_root_incremental(account_changes: [BTreeMap<H256, U256>; 5]) {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
-
                 let db = create_test_rw_db();
                 let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
                 let tx = factory.provider_rw().unwrap();

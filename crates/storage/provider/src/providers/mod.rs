@@ -1,9 +1,10 @@
 use crate::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, PostStateDataProvider, ProviderError,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    PostStateDataProvider, ProviderError, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -14,7 +15,7 @@ use reth_interfaces::{
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock,
+    BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, H256, U256,
 };
@@ -26,6 +27,7 @@ pub use state::{
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
+    sync::Arc,
     time::Instant,
 };
 use tracing::trace;
@@ -431,6 +433,16 @@ where
     }
 }
 
+impl<DB, Tree> ChainSpecProvider for BlockchainProvider<DB, Tree>
+where
+    DB: Send + Sync,
+    Tree: Send + Sync,
+{
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.database.chain_spec()
+    }
+}
+
 impl<DB, Tree> StateProviderFactory for BlockchainProvider<DB, Tree>
 where
     DB: Database,
@@ -606,6 +618,14 @@ where
 
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         self.tree.block_by_hash(block_hash)
+    }
+
+    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
+        self.tree.buffered_block_by_hash(block_hash)
+    }
+
+    fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
+        self.tree.buffered_header_by_hash(block_hash)
     }
 
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {

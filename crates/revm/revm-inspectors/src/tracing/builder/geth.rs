@@ -137,7 +137,7 @@ impl GethTraceBuilder {
                 // we need to ensure that calls are in order they are called: the last child node is
                 // the last call, but since we walk up the tree, we need to always
                 // insert at position 0
-                parent_frame.1.calls.get_or_insert_with(Vec::new).insert(0, call);
+                parent_frame.1.calls.insert(0, call);
             } else {
                 debug_assert!(call_frames.is_empty(), "only one root node has no parent");
                 return call
