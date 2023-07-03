@@ -21,7 +21,8 @@ use reth_primitives::{
     SealedHeader, H256, U256,
 };
 use reth_provider::{
-    BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
+    BlockReader, BlockSource, CanonChainTracker, CanonStateNotification, ProviderError,
+    StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
@@ -39,7 +40,7 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
 use tracing::*;
 
 mod message;
@@ -57,12 +58,17 @@ mod metrics;
 
 mod event;
 mod forkchoice;
+pub(crate) mod prune;
 pub(crate) mod sync;
 
-use crate::engine::forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
+use crate::engine::{
+    forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
+    prune::{EnginePruneController, EnginePruneEvent},
+};
 pub use event::BeaconConsensusEngineEvent;
 use reth_interfaces::blockchain_tree::InsertPayloadOk;
 use reth_primitives::constants::EPOCH_SLOTS;
+use reth_prune::Pruner;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
 const MAX_INVALID_HEADERS: u32 = 512u32;
@@ -213,7 +219,7 @@ impl BeaconConsensusEngineHandle {
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, BT, Client>
+pub struct BeaconConsensusEngine<DB, BT, Client, St>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
@@ -252,12 +258,20 @@ where
     /// blocks using the pipeline. Otherwise, the engine, sync controller, and blockchain tree will
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
+    /// Controls pruning triggered by engine updates.
+    prune: Option<EnginePruneController<St>>,
 }
 
-impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
+impl<DB, BT, Client, St> BeaconConsensusEngine<DB, BT, Client, St>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader + 'static,
+    BT: BlockchainTreeEngine
+        + BlockReader
+        + CanonChainTracker
+        + StageCheckpointReader
+        + Unpin
+        + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -273,6 +287,7 @@ where
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
         pipeline_run_threshold: u64,
+        pruner: Option<Pruner<St>>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -288,6 +303,7 @@ where
             pipeline_run_threshold,
             to_engine,
             rx,
+            pruner,
         )
     }
 
@@ -317,15 +333,17 @@ where
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
+        pruner: Option<Pruner<St>>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
             pipeline,
             client,
-            task_spawner,
+            task_spawner.clone(),
             run_pipeline_continuously,
             max_block,
         );
+        let prune = pruner.map(|pruner| EnginePruneController::new(pruner, task_spawner));
         let mut this = Self {
             sync,
             blockchain,
@@ -338,6 +356,7 @@ where
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
+            prune,
         };
 
         let maybe_pipeline_target = match target {
@@ -572,6 +591,13 @@ where
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
+            return Ok(OnForkChoiceUpdated::syncing())
+        }
+
+        if self.is_prune_active() {
+            // We can only process new forkchoice updates if the pruner is idle, since it requires
+            // exclusive access to the database
+            trace!(target: "consensus::engine", "Pruning in progress, skipping forkchoice update");
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
@@ -837,9 +863,9 @@ where
             return Ok(status)
         }
 
-        let res = if self.sync.is_pipeline_idle() {
-            // we can only insert new payloads if the pipeline is _not_ running, because it holds
-            // exclusive access to the database
+        let res = if self.sync.is_pipeline_idle() && self.is_prune_idle() {
+            // we can only insert new payloads if the pipeline and the pruner are _not_ running,
+            // because they hold exclusive access to the database
             self.try_insert_new_payload(block)
         } else {
             self.try_buffer_payload(block)
@@ -1191,9 +1217,9 @@ where
     /// This returns a result to indicate whether the engine future should resolve (fatal error).
     fn on_sync_event(
         &mut self,
-        ev: EngineSyncEvent,
+        event: EngineSyncEvent,
     ) -> Option<Result<(), BeaconConsensusEngineError>> {
-        match ev {
+        match event {
             EngineSyncEvent::FetchedFullBlock(block) => {
                 self.on_downloaded_block(block);
             }
@@ -1312,6 +1338,46 @@ where
 
         None
     }
+
+    /// Event handler for events emitted by the [EnginePruneController].
+    ///
+    /// This returns a result to indicate whether the engine future should resolve (fatal error).
+    fn on_prune_event(
+        &mut self,
+        event: EnginePruneEvent,
+    ) -> Option<Result<(), BeaconConsensusEngineError>> {
+        match event {
+            EnginePruneEvent::Started => {
+                trace!(target: "consensus::engine", "Started the pruner");
+                self.metrics.pruner_runs.increment(1);
+                self.sync_state_updater.update_sync_state(SyncState::Syncing);
+            }
+            EnginePruneEvent::TaskDropped => {
+                error!(target: "consensus::engine", "Failed to receive spawned pruner");
+                return Some(Err(BeaconConsensusEngineError::PrunerChannelClosed))
+            }
+            EnginePruneEvent::Finished { result } => {
+                trace!(target: "consensus::engine", ?result, "Pruner finished");
+                match result {
+                    Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
+                    // Any pipeline error at this point is fatal.
+                    Err(error) => return Some(Err(error.into())),
+                };
+            }
+        };
+
+        None
+    }
+
+    /// Returns `true` if the prune controller's pruner is idle.
+    fn is_prune_idle(&self) -> bool {
+        self.prune.as_ref().map(|prune| prune.is_pruner_idle()).unwrap_or(true)
+    }
+
+    /// Returns `true` if the prune controller's pruner is idle.
+    fn is_prune_active(&self) -> bool {
+        self.prune.as_ref().map(|prune| prune.is_pruner_active()).unwrap_or(false)
+    }
 }
 
 /// On initialization, the consensus engine will poll the message receiver and return
@@ -1321,7 +1387,7 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, BT, Client> Future for BeaconConsensusEngine<DB, BT, Client>
+impl<DB, BT, Client, St> Future for BeaconConsensusEngine<DB, BT, Client, St>
 where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
@@ -1331,6 +1397,7 @@ where
         + StageCheckpointReader
         + Unpin
         + 'static,
+    St: Stream<Item = CanonStateNotification> + Unpin + Send + 'static,
 {
     type Output = Result<(), BeaconConsensusEngineError>;
 
@@ -1385,6 +1452,22 @@ where
                     }
                 }
             }
+
+            // process prune events if any
+            match this.prune.as_mut().map(|prune| prune.poll(cx)) {
+                Some(Poll::Ready(prune_event)) => {
+                    if let Some(res) = this.on_prune_event(prune_event) {
+                        return Poll::Ready(res)
+                    }
+                }
+                Some(Poll::Pending) => {
+                    if engine_messages_pending {
+                        // both the pruner and the engine message receiver are pending
+                        return Poll::Pending
+                    }
+                }
+                None => (),
+            }
         }
     }
 }
@@ -1407,7 +1490,7 @@ mod tests {
     use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
         providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockWriter,
-        ProviderFactory,
+        CanonStateNotificationStream, ProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use reth_tasks::TokioTaskExecutor;
@@ -1424,6 +1507,7 @@ mod tests {
             ShareableBlockchainTree<Arc<DatabaseEnv>, TestConsensus, TestExecutorFactory>,
         >,
         NoopFullBlockClient,
+        CanonStateNotificationStream,
     >;
 
     struct TestEnv<DB> {
@@ -1492,6 +1576,7 @@ mod tests {
         executor_results: Vec<PostState>,
         pipeline_run_threshold: Option<u64>,
         max_block: Option<BlockNumber>,
+        pruner_canon_state_stream: Option<CanonStateNotificationStream>,
     }
 
     impl TestConsensusEngineBuilder {
@@ -1503,6 +1588,7 @@ mod tests {
                 executor_results: Vec::new(),
                 pipeline_run_threshold: None,
                 max_block: None,
+                pruner_canon_state_stream: None,
             }
         }
 
@@ -1531,6 +1617,15 @@ mod tests {
         /// threshold to 0.
         fn disable_blockchain_tree_sync(mut self) -> Self {
             self.pipeline_run_threshold = Some(0);
+            self
+        }
+
+        /// Sets the pruner canonical state stream.
+        fn with_pruner_canon_state_stream(
+            mut self,
+            canon_state_stream: CanonStateNotificationStream,
+        ) -> Self {
+            self.pruner_canon_state_stream = Some(canon_state_stream);
             self
         }
 
@@ -1572,6 +1667,11 @@ mod tests {
             let shareable_db = ProviderFactory::new(db.clone(), self.chain_spec.clone());
             let latest = self.chain_spec.genesis_header().seal_slow();
             let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
+
+            let pruner = self
+                .pruner_canon_state_stream
+                .map(|canon_state_stream| Pruner::new(canon_state_stream, 5, 0));
+
             let (mut engine, handle) = BeaconConsensusEngine::new(
                 NoopFullBlockClient::default(),
                 pipeline,
@@ -1583,6 +1683,7 @@ mod tests {
                 payload_builder,
                 None,
                 self.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
+                pruner,
             )
             .expect("failed to create consensus engine");
 
@@ -1761,6 +1862,7 @@ mod tests {
         use super::*;
         use reth_db::{tables, transaction::DbTxMut};
         use reth_interfaces::test_utils::{generators, generators::random_block};
+        use reth_provider::test_utils::TestCanonStateSubscriptions;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
 
         #[tokio::test]

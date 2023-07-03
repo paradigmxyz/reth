@@ -5045,6 +5045,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-rpc-types",
  "reth-stages",
  "reth-tasks",
@@ -5575,6 +5576,7 @@ dependencies = [
  "futures-util",
  "reth-primitives",
  "reth-provider",
+ "thiserror",
  "tokio",
  "tracing",
 ]

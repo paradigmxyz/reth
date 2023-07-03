@@ -1,3 +1,5 @@
-mod prune;
+mod error;
+mod pruner;
 
-pub use prune::Pruner;
+pub use error::PrunerError;
+pub use pruner::{Pruner, PrunerFut, PrunerWithResult};

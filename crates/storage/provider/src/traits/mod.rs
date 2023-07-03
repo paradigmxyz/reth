@@ -44,8 +44,8 @@ pub use executor::{BlockExecutor, ExecutorFactory};
 
 mod chain;
 pub use chain::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    CanonStateSubscriptions,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
+    CanonStateNotifications, CanonStateSubscriptions,
 };
 
 mod spec;

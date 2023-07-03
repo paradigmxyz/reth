@@ -286,19 +286,6 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
-        if let Some(prune_config) = config.prune {
-            debug!(target: "reth::cli", "Spawning pruning task");
-            ctx.task_executor.spawn_critical(
-                "pruning task",
-                reth_prune::Pruner::new(
-                    blockchain_db.canonical_state_stream(),
-                    blockchain_db.clone(),
-                    prune_config.block_interval,
-                    tree_config.max_reorg_depth(),
-                ),
-            );
-        }
-
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
@@ -367,6 +354,14 @@ impl Command {
             None
         };
 
+        let pruner = config.prune.map(|prune_config| {
+            reth_prune::Pruner::new(
+                blockchain_db.canonical_state_stream(),
+                prune_config.block_interval,
+                tree_config.max_reorg_depth(),
+            )
+        });
+
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             client,
@@ -381,6 +376,7 @@ impl Command {
             MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
             consensus_engine_rx,
+            pruner,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
