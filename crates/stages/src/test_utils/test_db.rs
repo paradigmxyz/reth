@@ -5,7 +5,7 @@ use reth_db::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
     tables,
-    test_utils::create_test_rw_db,
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseEnv, DatabaseError as DbError,
 };
@@ -47,7 +47,7 @@ impl Default for TestTransaction {
 
 impl TestTransaction {
     pub fn new(path: &Path) -> Self {
-        let tx = create_test_rw_db();
+        let tx = create_test_rw_db_with_path(path);
         Self {
             tx: tx.clone(),
             path: Some(path.to_path_buf()),
