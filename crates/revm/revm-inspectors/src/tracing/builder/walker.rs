@@ -1,5 +1,3 @@
-use hashbrown::HashMap;
-
 use crate::tracing::types::CallTraceNode;
 // use reth_rpc_types::trace::parity::VmTrace;
 
