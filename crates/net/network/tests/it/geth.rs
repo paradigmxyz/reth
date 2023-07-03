@@ -3,6 +3,7 @@ use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, H160, U64},
     utils::Geth,
 };
+use ethers_providers::Middleware;
 use reth_network::{
     test_utils::{unused_tcp_and_udp_port, unused_tcp_udp, NetworkEventStream},
     NetworkConfig, NetworkManager,
