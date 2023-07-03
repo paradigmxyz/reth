@@ -140,7 +140,7 @@ where
 
         let mut transactions = transactions
             .into_iter()
-            .zip(receipts.into_iter())
+            .zip(receipts)
             .scan(0, |previous_gas, (tx, receipt)| {
                 // Convert the cumulative gas used in the receipts
                 // to the gas usage by the transaction

@@ -215,7 +215,7 @@ where
     /// Queues bodies and sets the latest queued block number
     fn queue_bodies(&mut self, bodies: Vec<BlockResponse>) {
         self.latest_queued_block_number = Some(bodies.last().expect("is not empty").block_number());
-        self.queued_bodies.extend(bodies.into_iter());
+        self.queued_bodies.extend(bodies);
         self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
     }
 

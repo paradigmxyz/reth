@@ -5345,7 +5345,7 @@ dependencies = [
 name = "reth-libmdbx"
 version = "0.1.0-alpha.1"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.3.2",
  "byteorder",
  "criterion",
  "derive_more",
