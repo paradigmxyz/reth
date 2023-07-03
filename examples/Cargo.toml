@@ -33,7 +33,3 @@ path = "rpc-db.rs"
 [[example]]
 name = "db-access"
 path = "db-access.rs"
-
-[[example]]
-name = "txpool"
-path = "txpool.rs"
