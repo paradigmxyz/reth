@@ -13,7 +13,7 @@ use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
     cmp::{Ordering, Reverse},
-    collections::{BinaryHeap, VecDeque},
+    collections::BinaryHeap,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -47,8 +47,6 @@ where
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
-    /// Buffered events until the manager is polled and the pipeline is idle.
-    queued_events: VecDeque<EngineSyncEvent>,
     /// If enabled, the pipeline will be triggered continuously, as soon as it becomes idle
     run_pipeline_continuously: bool,
     /// Max block after which the consensus engine would terminate the sync. Used for debugging
@@ -79,7 +77,6 @@ where
             inflight_full_block_requests: Vec::new(),
             inflight_block_range_requests: Vec::new(),
             range_buffered_blocks: BinaryHeap::new(),
-            queued_events: VecDeque::new(),
             run_pipeline_continuously,
             max_block,
             metrics: EngineSyncMetrics::default(),
@@ -263,28 +260,19 @@ where
         }
 
         loop {
-            // drain buffered events first if pipeline is not running
-            if self.is_pipeline_idle() {
-                if let Some(event) = self.queued_events.pop_front() {
-                    return Poll::Ready(event)
-                }
-            } else {
+            // make sure we poll the pipeline if it's active, and return any ready pipeline events
+            if !self.is_pipeline_idle() {
                 // advance the pipeline
                 if let Poll::Ready(event) = self.poll_pipeline(cx) {
                     return Poll::Ready(event)
                 }
             }
 
-            // drain an element of the block buffer
-            if let Some(block) = self.range_buffered_blocks.pop() {
-                return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
-            }
-
             // advance all full block requests
             for idx in (0..self.inflight_full_block_requests.len()).rev() {
                 let mut request = self.inflight_full_block_requests.swap_remove(idx);
                 if let Poll::Ready(block) = request.poll_unpin(cx) {
-                    self.queued_events.push_back(EngineSyncEvent::FetchedFullBlock(block));
+                    self.range_buffered_blocks.push(Reverse(OrderedSealedBlock(block)));
                 } else {
                     // still pending
                     self.inflight_full_block_requests.push(request);
@@ -305,8 +293,13 @@ where
 
             self.update_block_download_metrics();
 
-            if !self.pipeline_state.is_idle() || self.queued_events.is_empty() {
-                // can not make any progress
+            // drain an element of the block buffer if there are any
+            if let Some(block) = self.range_buffered_blocks.pop() {
+                return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
+            }
+
+            if !self.is_pipeline_idle() {
+                // if the pipeline is still running, we can't do anything else yet and should yield
                 return Poll::Pending
             }
         }
