@@ -25,6 +25,18 @@ pub(crate) struct CallTraceNodeWalker<'trace, W> {
     phantom: std::marker::PhantomData<W>,
 }
 
+#[derive(Debug)]
+pub(crate) struct VmTraceWalker<'trace, W> {
+    parents: Vec<Option<&'trace VmTrace>>,
+    current: &'trace VmTrace,
+
+    idx_stack: Vec<usize>,
+    curr_idx: usize,
+    started: bool,
+
+    phantom: std::marker::PhantomData<W>,
+}
+
 impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     pub(crate) fn new(nodes: &'trace Vec<CallTraceNode>) -> Self {
         let mut idxs: Vec<usize> = Vec::with_capacity(nodes.len());
@@ -164,6 +176,65 @@ impl<'trace> Iterator for CallTraceNodeWalker<'trace, DFWalk> {
         } else {
             None
         }
+    }
+}
+
+impl<'trace> VmTraceWalker<'trace, DFWalk> {
+    pub(crate) fn new(root: &'trace VmTrace) -> Self {
+        VmTraceWalker {
+            parents: vec![None],
+            current: root,
+            idx_stack: Vec::new(),
+            curr_idx: 0,
+            started: false,
+
+            phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'trace> Iterator for VmTraceWalker<'trace, DFWalk> {
+    type Item = &'trace VmTrace;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.started {
+            true => loop {
+                match self.current.ops.get(self.curr_idx) {
+                    Some(op) => match &op.sub {
+                        Some(sub) => {
+                            self.parents.push(Some(self.current));
+                            self.current = &sub;
+
+                            self.idx_stack.push(self.curr_idx);
+                            self.curr_idx = 0;
+                        }
+                        // if theres no subcall continue to the next opcode
+                        None => {
+                            self.curr_idx += 1;
+                        }
+                    },
+                    // there is no more opcodes check for parent
+                    None => {
+                        match self.parents.pop().expect("There should be a parent here") {
+                            Some(parent) => {
+                                self.current = parent;
+
+                                self.curr_idx =
+                                    self.idx_stack.pop().expect("There should be an index here")
+                                        + 1;
+                            }
+                            // we are back at the root node, so we are done
+                            None => break,
+                        }
+                    }
+                }
+            },
+            false => {
+                self.started = true;
+            }
+        };
+
+        Some(self.current)
     }
 }
 
