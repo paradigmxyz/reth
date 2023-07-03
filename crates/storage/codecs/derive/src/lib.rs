@@ -23,11 +23,11 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
     compact::derive(input, is_zstd)
 }
 
-/// Implements the main codec. If the codec supports it, it will call `derive_arbitrary(..)`.
+/// Implements the main codec. If the codec supports it, it will implement [`derive_arbitrary()`], which by itself implements arbitrary traits and roundtrip fuzz tests.
 /// 
 /// Example usage:
 /// * `#[main_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `main_codec`.
-/// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary`
+/// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
