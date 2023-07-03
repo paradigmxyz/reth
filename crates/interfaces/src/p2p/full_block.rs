@@ -499,14 +499,10 @@ where
                         Ok(bodies_resp) => {
                             let new_bodies = bodies_resp.into_data();
 
-                            // calculate length after we add the new bodies
-                            let existing_len = this.bodies.len();
-                            let new_len = new_bodies.len() + existing_len;
-
                             // first insert the received bodies
                             this.insert_bodies(new_bodies);
 
-                            if new_len != this.count as usize {
+                            if !this.is_bodies_complete() {
                                 // insert the received bodies
                                 let req_hashes = this.remaining_bodies_hashes();
 
