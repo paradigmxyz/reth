@@ -76,6 +76,7 @@ It will use the local image `reth:local`. If you want to use the GitHub Containe
 To run Reth with Docker Compose, run the following command from a shell inside the root directory of this repository:
 
 ```bash
+./etc/generate-jwt.sh
 docker compose -f etc/docker-compose.yml up -d
 ```
 
@@ -85,12 +86,14 @@ To check if Reth is running correctly, run:
 docker compose logs -f reth
 ```
 
-The default `docker-compose.yml` file will create three containers:
+The default `docker-compose.yml` file will create four containers:
+
 - Reth
 - Prometheus
 - Grafana
+- Lighthouse
 
-Grafana will be exposed on `localhost:3000` and accessible via default credentials (username and password = `admin`)
+Grafana will be exposed on `localhost:3000` and accessible via default credentials (username and password is `admin`)
 
 ## Interacting with Reth inside Docker
 
