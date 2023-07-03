@@ -14,7 +14,7 @@ pub type PrunerFut<St> = Pin<Box<dyn Future<Output = PrunerWithResult<St>> + Sen
 /// The pipeline type itself with the result of [Pruner::run_as_fut]
 pub type PrunerWithResult<St> = (Pruner<St>, Result<(), PrunerError>);
 
-/// Pruning routine. Implements [Future] where the pruning logic happens.
+/// Pruning routine. Main pruning logic happens in [Pruner::run].
 pub struct Pruner<St> {
     /// Stream of canonical state notifications. Pruning is triggered by new incoming
     /// notifications.
@@ -45,6 +45,8 @@ where
         }
     }
 
+    /// Consume the pruner and run it until it finishes.
+    /// Return the pruner and its result as a future.
     #[track_caller]
     pub fn run_as_fut(mut self) -> PrunerFut<St> {
         Box::pin(async move {
@@ -53,6 +55,10 @@ where
         })
     }
 
+    /// Run the pruner:
+    /// 1. Check if pruning is needed according to tip block number from the canonical state
+    /// notifications stream.
+    /// 2. Execute main pruning logic. (TODO)
     pub async fn run(&mut self) -> Result<(), PrunerError> {
         let Some(_tip_block_number) = self.check_tip().await else { return Ok(()) };
 

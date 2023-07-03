@@ -265,12 +265,7 @@ where
 impl<DB, BT, Client, St> BeaconConsensusEngine<DB, BT, Client, St>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine
-        + BlockReader
-        + CanonChainTracker
-        + StageCheckpointReader
-        + Unpin
-        + 'static,
+    BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
