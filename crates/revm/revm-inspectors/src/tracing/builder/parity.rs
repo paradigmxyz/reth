@@ -236,10 +236,10 @@ impl ParityTraceBuilder {
     fn depth_first_ordered_addresses(&self) -> Vec<Address> {
         let walker: CallTraceNodeWalker<'_, DFWalk> = CallTraceNodeWalker::new(&self.nodes);
 
-        walker.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
+        walker.addresses()
     }
 
-    /// Creates a VM trace by walking over the children from the first [CallTraceNode] and recursively fills in the subcall traces for the [VmTrace]
+    /// Creates a VM trace by walking over [CallTraceNode]s and recursively fills in the subcall traces for the [VmTrace]
     pub fn vm_trace(&self) -> VmTrace {
         let mut walker = CallTraceNodeWalker::new(&self.nodes);
 

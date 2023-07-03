@@ -1,3 +1,5 @@
+use reth_primitives::Address;
+
 use crate::tracing::types::CallTraceNode;
 // use reth_rpc_types::trace::parity::VmTrace;
 
@@ -70,6 +72,11 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     /// DFWalked order of input arena
     pub(crate) fn idxs(&self) -> &Vec<usize> {
         &self.idxs
+    }
+
+    /// returns the callee address in depth first order
+    pub(crate) fn addresses(&self) -> Vec<Address> {
+        self.idxs.iter().map(|idx| self.nodes[*idx].trace.address).collect()
     }
 }
 
