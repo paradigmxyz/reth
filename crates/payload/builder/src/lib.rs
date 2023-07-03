@@ -69,19 +69,19 @@
 //!    type ResolvePayloadFuture = futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
 //!
 //! fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
-//!    // NOTE: some fields are omitted here for brevity
+//!     // NOTE: some fields are omitted here for brevity
 //!     let payload = Block {
-//!        header: Header {
-//!        parent_hash: self.attributes.parent,
-//!        timestamp: self.attributes.timestamp,
-//!        beneficiary: self.attributes.suggested_fee_recipient,
-//!        ..Default::default()
-//!        },
-//!        ..Default::default()
-//!       };
-//!     let payload = BuiltPayload::new(self.attributes.id,payload.seal_slow(), U256::ZERO);
-//!    Ok(Arc::new(payload))
-//!  }
+//!         header: Header {
+//!             parent_hash: self.attributes.parent,
+//!             timestamp: self.attributes.timestamp,
+//!             beneficiary: self.attributes.suggested_fee_recipient,
+//!             ..Default::default()
+//!         },
+//!         ..Default::default()
+//!     };
+//!     let payload = BuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO);
+//!     Ok(Arc::new(payload))
+//! }
 //!
 //! fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
 //!        let payload = self.best_payload();
