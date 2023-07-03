@@ -6,15 +6,45 @@ services:
     restart: unless-stopped
     image: ghcr.io/paradigmxyz/reth
     ports:
-      - '9000:9000'
+      - '9001:9001' # metrics
+      - '30303:30303' # eth/66 peering
+      - '8545:8545' # rpc
     volumes:
-      - rethdata:/root/.local/share/reth/db
+      - rethdata:/root/.local/share/reth/mainnet/db
       - rethlogs:/root/rethlogs
+      - ./jwttoken:/root/jwt:ro
     command: >
       node
-      --metrics reth:9000
+      --metrics 0.0.0.0:9001
       --log.persistent
       --log.directory /root/rethlogs
+      --authrpc.addr 0.0.0.0
+      --authrpc.port 8551
+      --authrpc.jwtsecret /root/jwt/jwt.hex
+      --http --http.addr 0.0.0.0 --http.port 8545
+      --http.api "eth,net"
+
+  lighthouse:
+    restart: unless-stopped
+    image: sigp/lighthouse
+    depends_on:
+      - reth
+    ports:
+      - '5052:5052/tcp'
+      - '5053:5053/tcp'
+      - '5054:5054/tcp' # metrics
+      - '9000:9000/tcp'
+      - '9000:9000/udp'
+    volumes:
+      - lighthousedata:/root/.lighthouse
+      - ./jwttoken:/root/jwt:ro
+    command: >
+      lighthouse bn
+      --http --http-address 0.0.0.0
+      --execution-endpoint http://reth:8551
+      --metrics --metrics-address 0.0.0.0
+      --execution-jwt /root/jwt/jwt.hex
+      --checkpoint-sync-url https://mainnet.checkpoint.sigp.io 
 
   prometheus:
     restart: unless-stopped
@@ -56,6 +86,8 @@ volumes:
   rethdata:
     driver: local
   rethlogs:
+    driver: local
+  lighthousedata:
     driver: local
   prometheusdata:
     driver: local
