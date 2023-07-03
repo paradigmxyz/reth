@@ -2,7 +2,8 @@
 name = "examples"
 version = "0.0.0"
 publish = false
-edition = "2021"
+edition.workspace = true
+license.workspace = true
 
 [dev-dependencies]
 reth-primitives = { workspace = true }
@@ -32,3 +33,7 @@ path = "rpc-db.rs"
 [[example]]
 name = "db-access"
 path = "db-access.rs"
+
+[[example]]
+name = "txpool"
+path = "txpool.rs"
