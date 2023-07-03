@@ -160,7 +160,7 @@ impl ParityTraceBuilder {
     {
         let ResultAndState { result, state } = res;
 
-        let mut df_addresses = self.df_ordered_addresses().into_iter();
+        let mut df_addresses = self.depth_first_ordered_addresses().into_iter();
 
         let mut trace_res = self.into_trace_results(result, trace_types);
 
@@ -232,8 +232,8 @@ impl ParityTraceBuilder {
         self.into_transaction_traces_iter().collect()
     }
 
-    /// get addresses here because cant get them from parity trace otherwise
-    fn df_ordered_addresses(&self) -> Vec<Address> {
+    /// Vec of Callee address in the arena sorted in depth first order
+    fn depth_first_ordered_addresses(&self) -> Vec<Address> {
         let walker: CallTraceNodeWalker<'_, DFWalk> = CallTraceNodeWalker::new(&self.nodes);
 
         walker.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
@@ -317,13 +317,14 @@ impl ParityTraceBuilder {
 /// addresses are presorted via DF walk thru [CallTraceNode]s
 ///
 /// use recursion to fill the [VmTrace] code fields
-pub(crate) fn populate_vm_trace_bytecodes<DB>(
+pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
     db: &DB,
-    df_addresses: &mut dyn Iterator<Item = Address>,
+    df_addresses: &mut I,
     trace: &mut VmTrace,
 ) -> Result<(), DB::Error>
 where
     DB: DatabaseRef,
+    I: Iterator<Item = Address>,
 {
     let addr = df_addresses.next().expect("missing address");
 
