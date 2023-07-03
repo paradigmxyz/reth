@@ -1,3 +1,5 @@
+use hashbrown::HashMap;
+
 use crate::tracing::types::CallTraceNode;
 // use reth_rpc_types::trace::parity::VmTrace;
 
@@ -22,17 +24,49 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     pub(crate) fn new(nodes: &'trace Vec<CallTraceNode>) -> Self {
         let mut idxs: Vec<usize> = Vec::with_capacity(nodes.len());
 
-        Self::get_all_children(nodes, &mut idxs, 0);
+        let mut visited: Vec<bool> = vec![false; nodes.len()];
+
+        // stores the index of the parents children we are on
+        // could never have more elements than the number of nodes
+        let mut stack: Vec<usize> = Vec::with_capacity(nodes.len());
+
+        // the currnet nodes we are working with
+        let mut curr: usize = 0;
+
+        // index in this heights children
+        let mut child_idx: usize = 0;
+        loop {
+            if !visited[curr] {
+                visited[curr] = true;
+                idxs.push(curr);
+            }
+
+            match nodes[curr].children.get(child_idx) {
+                Some(next_idx) => {
+                    stack.push(child_idx);
+                    child_idx = 0;
+
+                    curr = *next_idx;
+                }
+                None => {
+                    match nodes[curr].parent {
+                        Some(parent_idx) => {
+                            // we are done with this node, so we go back up to the parent
+                            curr = parent_idx;
+
+                            // we are done with this child, so we go to the next one
+                            child_idx = stack.pop().expect("There should be a value here") + 1;
+                        }
+                        None => {
+                            // we are at the root node, so we are done
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
         Self { nodes, curr_idx: 0, idxs, phantom: std::marker::PhantomData }
-    }
-
-    /// uses recursion to do a DFS down the callgraph
-    fn get_all_children(nodes: &'trace Vec<CallTraceNode>, holder: &mut Vec<usize>, idx: usize) {
-        holder.push(idx);
-        for child_idx in nodes[idx].children.iter() {
-            Self::get_all_children(nodes, holder, *child_idx);
-        }
     }
 
     /// DFWalked order of input arena
