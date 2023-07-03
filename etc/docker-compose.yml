@@ -22,7 +22,7 @@ services:
       --authrpc.port 8551
       --authrpc.jwtsecret /root/jwt/jwt.hex
       --http --http.addr 0.0.0.0 --http.port 8545
-      --http.api "eth,net"
+      --http.api "eth,net,web3"
 
   lighthouse:
     restart: unless-stopped
