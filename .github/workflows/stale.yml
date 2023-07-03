@@ -1,5 +1,6 @@
 name: stale issues
 on:
+  workflow_dispatch: {}
   schedule:
     - cron: "30 1 * * *"
 
