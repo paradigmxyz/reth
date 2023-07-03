@@ -8,12 +8,11 @@ use crate::{
 };
 use futures::Stream;
 use reth_primitives::{
-    BlockBody, BlockBodyRoots, Header, HeadersDirection, SealedBlock, SealedHeader, H256,
-    WithPeerId
+    BlockBody, Header, HeadersDirection, SealedBlock, SealedHeader, H256, WithPeerId
 };
 use std::{
     cmp::Reverse,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::Debug,
     future::Future,
     pin::Pin,
@@ -92,7 +91,7 @@ where
             },
             client,
             headers: None,
-            root_map: HashMap::new(),
+            pending_headers: VecDeque::new(),
             bodies: HashMap::new(),
         }
     }
@@ -349,8 +348,8 @@ where
     count: u64,
     request: FullBlockRangeRequest<Client>,
     headers: Option<Vec<SealedHeader>>,
-    // keeps track of root triples and their headers
-    root_map: HashMap<BlockBodyRoots, Vec<SealedHeader>>,
+    // The next headers to request bodies for. This is drained as responses are received.
+    pending_headers: VecDeque<SealedHeader>,
     // keeps track of txroot-matched headers and bodies
     bodies: HashMap<SealedHeader, BlockBody>,
 }
@@ -369,14 +368,10 @@ where
         self.bodies.len() == self.count as usize
     }
 
-    /// Inserts a block body, first checking that there is a matching header in the `root_map`.
+    /// Inserts a block body, matching it with the `next_header`.
     fn insert_body(&mut self, body: BlockBody) {
-        let roots = body.calculate_roots();
-        if let Some(headers) = self.root_map.get_mut(&roots) {
-            // pop one of the headers
-            if let Some(header) = headers.pop() {
-                self.bodies.insert(header, body);
-            }
+        if let Some(header) = self.pending_headers.pop_front() {
+            self.bodies.insert(header, body);
         }
     }
 
@@ -391,7 +386,7 @@ where
     /// Returns the remaining hashes for the bodies request, based on the headers that still exist
     /// in the `root_map`.
     fn remaining_bodies_hashes(&self) -> Vec<H256> {
-        self.root_map.values().flatten().map(|h| h.hash()).collect()
+        self.pending_headers.iter().map(|h| h.hash()).collect::<Vec<_>>()
     }
 
     /// Returns the [SealedBlock]s if the request is complete.
@@ -460,14 +455,8 @@ where
                                     let hashes =
                                         headers.iter().map(|h| h.hash()).collect::<Vec<_>>();
 
-                                    // populate the root map
-                                    for header in &headers {
-                                        let root = header.header.body_roots();
-                                        this.root_map
-                                            .entry(root)
-                                            .or_insert_with(Vec::new)
-                                            .push(header.clone());
-                                    }
+                                    // populate the pending headers
+                                    this.pending_headers = headers.clone().into();
 
                                     // set the actual request if it hasn't been started yet
                                     if !this.has_bodies_request_started() {
