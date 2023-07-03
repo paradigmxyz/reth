@@ -259,50 +259,45 @@ where
             return Poll::Ready(event)
         }
 
-        loop {
-            // make sure we poll the pipeline if it's active, and return any ready pipeline events
-            if !self.is_pipeline_idle() {
-                // advance the pipeline
-                if let Poll::Ready(event) = self.poll_pipeline(cx) {
-                    return Poll::Ready(event)
-                }
-            }
-
-            // advance all full block requests
-            for idx in (0..self.inflight_full_block_requests.len()).rev() {
-                let mut request = self.inflight_full_block_requests.swap_remove(idx);
-                if let Poll::Ready(block) = request.poll_unpin(cx) {
-                    self.range_buffered_blocks.push(Reverse(OrderedSealedBlock(block)));
-                } else {
-                    // still pending
-                    self.inflight_full_block_requests.push(request);
-                }
-            }
-
-            // advance all full block range requests
-            for idx in (0..self.inflight_block_range_requests.len()).rev() {
-                let mut request = self.inflight_block_range_requests.swap_remove(idx);
-                if let Poll::Ready(blocks) = request.poll_unpin(cx) {
-                    self.range_buffered_blocks
-                        .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
-                } else {
-                    // still pending
-                    self.inflight_block_range_requests.push(request);
-                }
-            }
-
-            self.update_block_download_metrics();
-
-            // drain an element of the block buffer if there are any
-            if let Some(block) = self.range_buffered_blocks.pop() {
-                return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
-            }
-
-            if !self.is_pipeline_idle() {
-                // if the pipeline is still running, we can't do anything else yet and should yield
-                return Poll::Pending
+        // make sure we poll the pipeline if it's active, and return any ready pipeline events
+        if !self.is_pipeline_idle() {
+            // advance the pipeline
+            if let Poll::Ready(event) = self.poll_pipeline(cx) {
+                return Poll::Ready(event)
             }
         }
+
+        // advance all full block requests
+        for idx in (0..self.inflight_full_block_requests.len()).rev() {
+            let mut request = self.inflight_full_block_requests.swap_remove(idx);
+            if let Poll::Ready(block) = request.poll_unpin(cx) {
+                self.range_buffered_blocks.push(Reverse(OrderedSealedBlock(block)));
+            } else {
+                // still pending
+                self.inflight_full_block_requests.push(request);
+            }
+        }
+
+        // advance all full block range requests
+        for idx in (0..self.inflight_block_range_requests.len()).rev() {
+            let mut request = self.inflight_block_range_requests.swap_remove(idx);
+            if let Poll::Ready(blocks) = request.poll_unpin(cx) {
+                self.range_buffered_blocks
+                    .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
+            } else {
+                // still pending
+                self.inflight_block_range_requests.push(request);
+            }
+        }
+
+        self.update_block_download_metrics();
+
+        // drain an element of the block buffer if there are any
+        if let Some(block) = self.range_buffered_blocks.pop() {
+            return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
+        }
+
+        Poll::Pending
     }
 }
 
