@@ -504,7 +504,7 @@ where
                             this.insert_bodies(new_bodies);
 
                             if !this.is_bodies_complete() {
-                                // insert the received bodies
+                                // get remaining hashes so we can send the next request
                                 let req_hashes = this.remaining_bodies_hashes();
 
                                 // set a new request
