@@ -115,18 +115,20 @@ pub use crate::{
     },
 };
 
-mod config;
 pub mod error;
-mod identifier;
 pub mod maintain;
 pub mod metrics;
-mod ordering;
+pub mod noop;
 pub mod pool;
-mod traits;
 pub mod validate;
 
+mod config;
+mod identifier;
+mod ordering;
+mod traits;
+
 #[cfg(any(test, feature = "test-utils"))]
-/// Common test helpers for mocking A pool
+/// Common test helpers for mocking a pool
 pub mod test_utils;
 
 // TX_SLOT_SIZE is used to calculate how many data slots a single transaction
