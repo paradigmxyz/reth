@@ -139,6 +139,18 @@ impl SealedBlock {
         (self.header, self.body, self.ommers)
     }
 
+    /// Splits the [BlockBody] and [SealedHeader] into separate components
+    pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
+        (
+            self.header,
+            BlockBody {
+                transactions: self.body,
+                ommers: self.ommers,
+                withdrawals: self.withdrawals,
+            },
+        )
+    }
+
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
     pub fn senders(&self) -> Option<Vec<Address>> {
         self.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<Address>>>()

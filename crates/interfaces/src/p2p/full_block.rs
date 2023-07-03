@@ -8,7 +8,7 @@ use crate::{
 };
 use futures::Stream;
 use reth_primitives::{
-    BlockBody, Header, HeadersDirection, SealedBlock, SealedHeader, H256, WithPeerId
+    BlockBody, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, H256,
 };
 use std::{
     cmp::Reverse,
@@ -298,18 +298,18 @@ fn ensure_valid_body_response(
     header: &SealedHeader,
     block: &BlockBody,
 ) -> Result<(), ConsensusError> {
-    let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
-    if header.ommers_hash != ommers_hash {
+    let body_roots = block.calculate_roots();
+
+    if header.ommers_hash != body_roots.ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff {
-            got: ommers_hash,
+            got: body_roots.ommers_hash,
             expected: header.ommers_hash,
         })
     }
 
-    let transaction_root = reth_primitives::proofs::calculate_transaction_root(&block.transactions);
-    if header.transactions_root != transaction_root {
+    if header.transactions_root != body_roots.tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff {
-            got: transaction_root,
+            got: body_roots.tx_root,
             expected: header.transactions_root,
         })
     }
@@ -358,7 +358,7 @@ where
     /// The next headers to request bodies for. This is drained as responses are received.
     pending_headers: VecDeque<SealedHeader>,
     /// The bodies that have been received so far.
-    bodies: HashMap<SealedHeader, BlockBody>,
+    bodies: HashMap<SealedHeader, BodyResponse>,
 }
 
 impl<Client> FetchFullBlockRangeFuture<Client>
@@ -376,15 +376,14 @@ where
     }
 
     /// Inserts a block body, matching it with the `next_header`.
-    fn insert_body(&mut self, body: BlockBody) {
+    fn insert_body(&mut self, body_response: BodyResponse) {
         if let Some(header) = self.pending_headers.pop_front() {
-            self.bodies.insert(header, body);
+            self.bodies.insert(header, body_response);
         }
     }
 
-    /// Inserts multiple block bodies, populating the `bodies` map with responses when bodies can
-    /// be matched with an existing root triple.
-    fn insert_bodies(&mut self, bodies: Vec<BlockBody>) {
+    /// Inserts multiple block bodies.
+    fn insert_bodies(&mut self, bodies: Vec<BodyResponse>) {
         for body in bodies {
             self.insert_body(body);
         }
@@ -396,7 +395,10 @@ where
         self.pending_headers.iter().map(|h| h.hash()).collect::<Vec<_>>()
     }
 
-    /// Returns the [SealedBlock]s if the request is complete.
+    /// Returns the [SealedBlock]s if the request is complete and valid.
+    ///
+    /// The request is complete if the number of blocks requested is equal to the number of blocks
+    /// received. The request is valid if the returned bodies match the roots in the headers.
     ///
     /// These are returned in falling order starting with the requested `hash`, i.e. with
     /// descending block numbers.
@@ -406,11 +408,47 @@ where
         }
 
         let headers = self.headers.take().unwrap();
+        let mut needs_retry = false;
         let mut response = Vec::new();
-        for header in headers {
-            if let Some(body) = self.bodies.remove(&header) {
-                response.push(SealedBlock::new(header, body));
+        for header in &headers {
+            if let Some(body_resp) = self.bodies.remove(header) {
+                // validate body w.r.t. the hashes in the header, only inserting into the response
+                let body = match body_resp {
+                    BodyResponse::Validated(body) => body,
+                    BodyResponse::PendingValidation(resp) => {
+                        // ensure the block is valid, else retry
+                        if let Err(err) = ensure_valid_body_response(header, resp.data()) {
+                            debug!(target: "downloaders", ?err,  hash=?header.hash, "Received wrong body in range response");
+                            self.client.report_bad_message(resp.peer_id());
+
+                            // get body that doesn't match, put back into vecdeque, and just retry
+                            self.pending_headers.push_back(header.clone());
+                            needs_retry = true;
+                        }
+
+                        resp.into_data()
+                    }
+                };
+
+                response.push(SealedBlock::new(header.clone(), body));
             }
+        }
+
+        if needs_retry {
+            // put response hashes back into bodies map since we aren't returning them as a
+            // response
+            for block in response {
+                let (header, body) = block.split_header_body();
+                self.bodies.insert(header, BodyResponse::Validated(body));
+            }
+
+            // put headers back since they were `take`n before
+            self.headers = Some(headers);
+
+            // create response for failing bodies
+            let hashes = self.remaining_bodies_hashes();
+            self.request.bodies = Some(self.client.get_block_bodies(hashes));
+            return None
         }
 
         Some(response)
@@ -501,10 +539,16 @@ where
                 RangeResponseResult::Body(res) => {
                     match res {
                         Ok(bodies_resp) => {
-                            let new_bodies = bodies_resp.into_data();
+                            let (peer, new_bodies) = bodies_resp.split();
 
                             // first insert the received bodies
-                            this.insert_bodies(new_bodies);
+                            this.insert_bodies(
+                                new_bodies
+                                    .iter()
+                                    .map(|resp| WithPeerId::new(peer, resp.clone()))
+                                    .map(BodyResponse::PendingValidation)
+                                    .collect::<Vec<_>>(),
+                            );
 
                             if !this.is_bodies_complete() {
                                 // get remaining hashes so we can send the next request
