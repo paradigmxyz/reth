@@ -362,8 +362,14 @@ where
             return None
         }
 
+        if self.bodies.as_ref().unwrap().len() != self.count as usize {
+            // the response exists but is not complete
+            return None
+        }
+
         let headers = self.headers.take().unwrap();
         let bodies = self.bodies.take().unwrap();
+
         Some(
             headers
                 .iter()
@@ -408,11 +414,8 @@ where
                                 })
                                 .split();
 
-                            // ensure the response is what we requested
-                            if headers.is_empty() || (headers.len() as u64) != this.count {
-                                // received bad response
-                                this.client.report_bad_message(peer);
-                            } else {
+                            // fill in the response if it's the correct length
+                            if headers.len() == this.count as usize {
                                 // sort headers from highest to lowest block number
                                 headers.sort_unstable_by_key(|h| Reverse(h.number));
 
@@ -442,7 +445,7 @@ where
                     }
 
                     if this.headers.is_none() {
-                        // received bad response, retry
+                        // did not receive a correct response yet, retry
                         this.request.headers = Some(this.client.get_headers(HeadersRequest {
                             start: this.hash.into(),
                             limit: this.count,
@@ -460,12 +463,37 @@ where
                 RangeResponseResult::Body(res) => {
                     match res {
                         Ok(bodies_resp) => {
-                            let (peer, bodies) = bodies_resp.split();
-                            if bodies.len() != this.count as usize {
-                                // received bad response
-                                this.client.report_bad_message(peer);
+                            let new_bodies = bodies_resp.into_data();
+
+                            // calculate length after we add the new bodies
+                            let existing_len = this.bodies.as_ref().map(|b| b.len()).unwrap_or(0);
+                            let new_len = new_bodies.len() + existing_len;
+
+                            if new_len != this.count as usize {
+                                // append the bodies if possible
+                                if let Some(bodies) = this.bodies.as_mut() {
+                                    bodies.extend(new_bodies);
+                                } else {
+                                    this.bodies = Some(new_bodies);
+                                }
+
+                                if let Some(hashes) = this.range_block_hashes() {
+                                    // set hashes for next request (slice hashes to match the number
+                                    // of still-missing bodies)
+                                    let req_hashes =
+                                        hashes.iter().cloned().skip(new_len).collect::<Vec<_>>();
+
+                                    // set a new request
+                                    this.request.bodies =
+                                        Some(this.client.get_block_bodies(req_hashes))
+                                }
                             } else {
-                                this.bodies = Some(bodies);
+                                // append the bodies if possible
+                                if let Some(bodies) = this.bodies.as_mut() {
+                                    bodies.extend(new_bodies);
+                                } else {
+                                    this.bodies = Some(new_bodies);
+                                }
                             }
                         }
                         Err(err) => {
@@ -614,10 +642,22 @@ mod tests {
     use reth_primitives::{BlockHashOrNumber, BlockNumHash, PeerId, WithPeerId};
     use std::{collections::HashMap, sync::Arc};
 
-    #[derive(Clone, Default, Debug)]
+    #[derive(Clone, Debug)]
     struct TestFullBlockClient {
         headers: Arc<Mutex<HashMap<H256, Header>>>,
         bodies: Arc<Mutex<HashMap<H256, BlockBody>>>,
+        // soft response limit, max number of bodies to respond with
+        soft_limit: usize,
+    }
+
+    impl Default for TestFullBlockClient {
+        fn default() -> Self {
+            Self {
+                headers: Arc::new(Mutex::new(HashMap::new())),
+                bodies: Arc::new(Mutex::new(HashMap::new())),
+                soft_limit: 20,
+            }
+        }
     }
 
     impl TestFullBlockClient {
@@ -691,6 +731,10 @@ mod tests {
             for hash in hashes {
                 if let Some(body) = bodies.get(&hash) {
                     all_bodies.push(body.clone());
+                }
+
+                if all_bodies.len() == self.soft_limit {
+                    break
                 }
             }
             futures::future::ready(Ok(WithPeerId::new(PeerId::random(), all_bodies)))
@@ -791,5 +835,32 @@ mod tests {
         // ensure stream is done
         let received = stream.next().await;
         assert!(received.is_none());
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_over_soft_limit() {
+        // default soft limit is 20, so we will request 50 blocks
+        let client = TestFullBlockClient::default();
+        let mut header = SealedHeader::default();
+        let body = BlockBody::default();
+        client.insert(header.clone(), body.clone());
+        for _ in 0..50 {
+            header.parent_hash = header.hash_slow();
+            header.number += 1;
+            header = header.header.seal_slow();
+            client.insert(header.clone(), body.clone());
+        }
+        let client = FullBlockClient::new(client);
+
+        let received = client.get_full_block_range(header.hash(), 1).await;
+        let received = received.first().expect("response should include a block");
+        assert_eq!(*received, SealedBlock::new(header.clone(), body));
+
+        let received = client.get_full_block_range(header.hash(), 50).await;
+        assert_eq!(received.len(), 50);
+        for (i, block) in received.iter().enumerate() {
+            let expected_number = header.number - i as u64;
+            assert_eq!(block.header.number, expected_number);
+        }
     }
 }
