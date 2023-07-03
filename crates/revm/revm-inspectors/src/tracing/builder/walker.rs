@@ -2,9 +2,11 @@ use crate::tracing::types::CallTraceNode;
 // use reth_rpc_types::trace::parity::VmTrace;
 
 /// type for doing a Depth first walk down the callgraph
+#[derive(Debug)]
 pub(crate) struct DFWalk;
 
 /// pub crate type for doing a walk down a reth callgraph
+#[derive(Debug)]
 pub(crate) struct CallTraceNodeWalker<'trace, W> {
     /// the entire arena
     nodes: &'trace Vec<CallTraceNode>,
@@ -28,9 +30,8 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     /// uses recursion to do a DFS down the callgraph
     fn get_all_children(nodes: &'trace Vec<CallTraceNode>, holder: &mut Vec<usize>, idx: usize) {
         holder.push(idx);
-        for child in nodes[idx].children.iter() {
-            holder.push(child.clone());
-            Self::get_all_children(nodes, holder, *child);
+        for child_idx in nodes[idx].children.iter() {
+            Self::get_all_children(nodes, holder, *child_idx);
         }
     }
 
@@ -52,5 +53,51 @@ impl<'trace> Iterator for CallTraceNodeWalker<'trace, DFWalk> {
         self.curr_idx += 1;
 
         Some(node)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tracing::builder::walker::{CallTraceNodeWalker, DFWalk};
+    use crate::tracing::types::{CallTrace, CallTraceNode};
+
+    #[test]
+    fn test_walker_build() {
+        let nodes = vec![
+            CallTraceNode { idx: 0, parent: None, children: vec![1, 2], ..Default::default() },
+            CallTraceNode { idx: 1, parent: Some(0), children: vec![3], ..Default::default() },
+            CallTraceNode { idx: 2, parent: Some(0), children: vec![4], ..Default::default() },
+            CallTraceNode { idx: 3, parent: Some(1), children: vec![], ..Default::default() },
+            CallTraceNode { idx: 4, parent: Some(2), children: vec![], ..Default::default() },
+        ];
+
+        let walker = CallTraceNodeWalker::new(&nodes);
+        println!("{:#?}", walker);
+
+        assert_eq!(walker.idxs()[0], 0);
+        assert_eq!(walker.idxs()[1], 1);
+        assert_eq!(walker.idxs()[2], 3);
+        assert_eq!(walker.idxs()[3], 2);
+        assert_eq!(walker.idxs()[4], 4);
+
+        assert_eq!(walker.idxs().len(), nodes.len());
+    }
+
+    #[test]
+    fn test_iter() {
+        let nodes = vec![
+            CallTraceNode { idx: 0, parent: None, children: vec![1, 2], ..Default::default() },
+            CallTraceNode { idx: 1, parent: Some(0), children: vec![3], ..Default::default() },
+            CallTraceNode { idx: 2, parent: Some(0), children: vec![4], ..Default::default() },
+            CallTraceNode { idx: 3, parent: Some(1), children: vec![], ..Default::default() },
+            CallTraceNode { idx: 4, parent: Some(2), children: vec![], ..Default::default() },
+        ];
+
+        let walker = CallTraceNodeWalker::new(&nodes);
+
+        let mut i = walker.idxs().len();
+        for (idx, node) in walker.enumerate() {
+            i += 1;
+        }
     }
 }

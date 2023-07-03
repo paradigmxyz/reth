@@ -239,7 +239,7 @@ impl ParityTraceBuilder {
         walker.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
     }
 
-    /// Creates a VM trace by iterating over the instructions from the first one and recursively fills in the subcall traces
+    /// Creates a VM trace by walking over the children from the first [CallTraceNode] and recursively fills in the subcall traces for the [VmTrace]
     pub fn vm_trace(&self) -> VmTrace {
         let mut walker = CallTraceNodeWalker::new(&self.nodes);
 
@@ -295,18 +295,20 @@ impl ParityTraceBuilder {
             }
         };
 
+        let maybe_execution = Some(VmExecutedOperation {
+            used: step.gas_cost,
+            push: match step.new_stack {
+                Some(new_stack) => Some(new_stack.into()),
+                None => None,
+            },
+            mem: maybe_memory,
+            store: maybe_storage,
+        });
+
         VmInstruction {
             pc: step.pc,
             cost: 0, // todo::n
-            ex: Some(VmExecutedOperation {
-                used: step.gas_cost,
-                push: match step.new_stack {
-                    Some(new_stack) => Some(new_stack.into()),
-                    None => None,
-                },
-                mem: maybe_memory,
-                store: maybe_storage,
-            }),
+            ex: maybe_execution,
             sub: maybe_sub,
         }
     }
