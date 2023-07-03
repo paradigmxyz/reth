@@ -66,6 +66,8 @@ where
     /// Caution: This does no validation of body (transactions) responses but guarantees that
     /// the starting [SealedHeader] matches the requested hash, and that the number of headers and
     /// bodies received matches the requested limit.
+    ///
+    /// The returned future yields bodies in falling order, i.e. with descending block numbers.
     pub fn get_full_block_range(
         &self,
         hash: H256,
