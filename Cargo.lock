@@ -4996,7 +4996,6 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-builder",
  "reth-rpc-engine-api",
- "reth-staged-sync",
  "reth-stages",
  "reth-tasks",
  "reth-tracing",
@@ -5789,45 +5788,6 @@ dependencies = [
  "serde_json",
  "similar-asserts",
  "thiserror",
-]
-
-[[package]]
-name = "reth-staged-sync"
-version = "0.1.0-alpha.1"
-dependencies = [
- "assert_matches",
- "async-trait",
- "confy",
- "enr",
- "ethers-core",
- "ethers-middleware",
- "ethers-providers",
- "ethers-signers",
- "eyre",
- "futures",
- "hex",
- "rand 0.8.5",
- "reth-db",
- "reth-discv4",
- "reth-downloaders",
- "reth-interfaces",
- "reth-net-nat",
- "reth-network",
- "reth-network-api",
- "reth-primitives",
- "reth-provider",
- "reth-staged-sync",
- "reth-stages",
- "reth-tracing",
- "secp256k1",
- "serde",
- "serde_json",
- "shellexpand",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "walkdir",
 ]
 
 [[package]]
