@@ -417,9 +417,9 @@ where
     }
 
     /// Returns whether or not a bodies request has been started, returning false if there is no
-    /// pending request, and if there is no buffered response.
+    /// pending request.
     fn has_bodies_request_started(&self) -> bool {
-        self.request.bodies.is_some() && !self.bodies.is_empty()
+        self.request.bodies.is_some()
     }
 }
 
