@@ -23,6 +23,7 @@ reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-revm = { path = "../../revm" }
 reth-tasks = { workspace = true }
 reth-metrics = { workspace = true }
+reth-consensus-common = { path = "../../consensus/common" }
 
 # eth
 revm = { workspace = true, features = [

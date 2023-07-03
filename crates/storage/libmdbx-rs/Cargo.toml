@@ -12,7 +12,7 @@ repository.workspace = true
 name = "reth_libmdbx"
 
 [dependencies]
-bitflags = "1"
+bitflags = "2"
 byteorder = "1"
 derive_more = "0.99"
 indexmap = "1"

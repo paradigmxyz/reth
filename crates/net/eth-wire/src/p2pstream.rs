@@ -533,7 +533,9 @@ where
             match ready!(this.inner.as_mut().poll_flush(cx)) {
                 Err(err) => return Poll::Ready(Err(err.into())),
                 Ok(()) => {
-                    let Some(message) = this.outgoing_messages.pop_front() else { return Poll::Ready(Ok(())) };
+                    let Some(message) = this.outgoing_messages.pop_front() else {
+                        return Poll::Ready(Ok(()))
+                    };
                     if let Err(err) = this.inner.as_mut().start_send(message) {
                         return Poll::Ready(Err(err.into()))
                     }
