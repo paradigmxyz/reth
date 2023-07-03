@@ -97,7 +97,6 @@ use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
-use traits::TransactionPoolExt;
 
 pub use crate::{
     config::PoolConfig,
@@ -107,7 +106,7 @@ pub use crate::{
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
         NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
-        PropagatedTransactions, TransactionOrigin, TransactionPool,
+        PropagatedTransactions, TransactionOrigin, TransactionPool, TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
