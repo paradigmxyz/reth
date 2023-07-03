@@ -399,24 +399,23 @@ where
         &self,
         block_id: BlockId,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let mut traces: Option<Vec<LocalizedTransactionTrace>> = self
-            .trace_block_with(
-                block_id,
-                TracingInspectorConfig::default_parity(),
-                |tx_info, inspector, _, _, _| {
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    Ok(traces)
-                },
-            )
-            .await?
-            .map(|traces| traces.into_iter().flatten().collect());
+        let traces = self.trace_block_with(
+            block_id,
+            TracingInspectorConfig::default_parity(),
+            |tx_info, inspector, _, _, _| {
+                let traces =
+                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                Ok(traces)
+            },
+        );
 
-        // Add block reward traces
-        // TODO: We only really need the header and ommers here to determine the reward
-        if let (Some(block), Some(traces)) =
-            (self.inner.eth_api.block_by_id(block_id).await?, traces.as_mut())
-        {
+        let block = self.inner.eth_api.block_by_id(block_id);
+        let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
+
+        let mut maybe_traces =
+            maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
+
+        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
             if let Some(header_td) = self.provider().header_td(&block.header.hash)? {
                 if let Some(base_block_reward) = base_block_reward(
                     self.provider().chain_spec().as_ref(),
@@ -448,7 +447,7 @@ where
             }
         }
 
-        Ok(traces)
+        Ok(maybe_traces)
     }
 
     /// Replays all transactions in a block
