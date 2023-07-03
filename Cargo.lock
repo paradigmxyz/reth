@@ -5321,6 +5321,7 @@ dependencies = [
  "arbitrary",
  "async-trait",
  "auto_impl",
+ "clap 4.1.8",
  "futures",
  "hex-literal 0.3.4",
  "modular-bitfield",

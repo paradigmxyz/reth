@@ -12,6 +12,10 @@ pub use rpc_server_args::RpcServerArgs;
 mod debug_args;
 pub use debug_args::DebugArgs;
 
+/// DatabaseArgs struct for configuring the database
+mod database_args;
+pub use database_args::DatabaseArgs;
+
 mod secret_key;
 pub use secret_key::{get_secret_key, SecretKeyError};
 

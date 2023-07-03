@@ -69,7 +69,7 @@ use tracing::*;
 use crate::{
     args::{
         utils::{genesis_value_parser, parse_socket_address},
-        PayloadBuilderArgs,
+        DatabaseArgs, PayloadBuilderArgs,
     },
     dirs::MaybePlatformPath,
     node::cl_events::ConsensusLayerHealthEvents,
@@ -138,6 +138,9 @@ pub struct Command {
     #[clap(flatten)]
     debug: DebugArgs,
 
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
     /// Automatically mine blocks for new transactions
     #[arg(long)]
     auto_mine: bool,
@@ -163,7 +166,7 @@ impl Command {
 
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;

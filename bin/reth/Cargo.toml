@@ -18,7 +18,7 @@ reth-revm = { path = "../../crates/revm" }
 reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
 reth-staged-sync = { path = "../../crates/staged-sync" }
 reth-stages = { path = "../../crates/stages" }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
 reth-transaction-pool = { workspace = true }
 reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
 reth-auto-seal-consensus = { path = "../../crates/consensus/auto-seal" }

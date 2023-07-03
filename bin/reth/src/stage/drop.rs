@@ -1,6 +1,6 @@
 //! Database debugging tool
 use crate::{
-    args::{utils::genesis_value_parser, StageEnum},
+    args::{utils::genesis_value_parser, DatabaseArgs, StageEnum},
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
@@ -33,13 +33,16 @@ pub struct Command {
     /// - goerli
     /// - sepolia
     #[arg(
-    long,
-    value_name = "CHAIN_OR_PATH",
-    verbatim_doc_comment,
-    default_value = "mainnet",
-    value_parser = genesis_value_parser
+        long,
+        value_name = "CHAIN_OR_PATH",
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 
     stage: StageEnum,
 }
@@ -52,7 +55,7 @@ impl Command {
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
 
-        let db = open_db(db_path.as_ref())?;
+        let db = open_db(db_path.as_ref(), self.db.log_level)?;
 
         let tool = DbTool::new(&db, self.chain.clone())?;
 
