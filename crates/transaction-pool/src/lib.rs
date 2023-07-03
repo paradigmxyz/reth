@@ -103,7 +103,7 @@ pub use crate::{
     config::PoolConfig,
     error::PoolResult,
     ordering::{GasCostOrdering, TransactionOrdering},
-    pool::TransactionEvents,
+    pool::{AllTransactionsEvents, TransactionEvent, TransactionEventType, TransactionEvents},
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
         NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
@@ -286,12 +286,16 @@ where
         self.pool.add_transaction_event_listener(tx_hash)
     }
 
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
+        self.pool.add_all_transactions_event_listener()
+    }
+
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
         self.pool.add_pending_listener()
     }
 
-    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
-        self.pool.add_transaction_listener()
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_new_transaction_listener()
     }
 
     fn pooled_transaction_hashes(&self) -> Vec<TxHash> {

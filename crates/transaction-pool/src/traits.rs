@@ -2,6 +2,7 @@ use crate::{
     error::PoolResult,
     pool::{state::SubPool, TransactionEvents},
     validate::ValidPoolTransaction,
+    AllTransactionsEvents,
 };
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
@@ -94,13 +95,16 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns `None` if the transaction is not in the pool.
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
 
+    /// Returns a new transaction change event stream for _all_ transactions in the pool.
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents;
+
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
     fn pending_transactions_listener(&self) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
-    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
     /// Returns the _hashes_ of all transactions in the pool.
     ///
