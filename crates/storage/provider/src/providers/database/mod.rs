@@ -19,6 +19,7 @@ use tracing::trace;
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+use reth_interfaces::db::LogLevel;
 
 /// A common provider that fetches data from a database.
 ///
@@ -61,9 +62,11 @@ impl<DB: Database> ProviderFactory<DB> {
     pub fn new_with_database_path<P: AsRef<std::path::Path>>(
         path: P,
         chain_spec: Arc<ChainSpec>,
+        log_level: Option<LogLevel>,
     ) -> Result<ProviderFactory<DatabaseEnv>> {
         Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path).map_err(|e| reth_interfaces::Error::Custom(e.to_string()))?,
+            db: init_db(path, log_level)
+                .map_err(|e| reth_interfaces::Error::Custom(e.to_string()))?,
             chain_spec,
         })
     }
@@ -402,6 +405,7 @@ mod tests {
         let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
+            None,
         )
         .unwrap();
 

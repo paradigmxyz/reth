@@ -1,6 +1,6 @@
 //! Command for debugging execution.
 use crate::{
-    args::{get_secret_key, utils::genesis_value_parser, NetworkArgs},
+    args::{get_secret_key, utils::genesis_value_parser, DatabaseArgs, NetworkArgs},
     dirs::{DataDirPath, MaybePlatformPath},
     node::events,
     runner::CliContext,
@@ -74,6 +74,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 
     /// Set the chain tip manually for testing purposes.
     ///
@@ -201,7 +204,7 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path)?);
+        let db = Arc::new(init_db(db_path, self.db.log_level)?);
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;

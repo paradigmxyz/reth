@@ -9,7 +9,7 @@ use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 
-use crate::args::utils::genesis_value_parser;
+use crate::args::{utils::genesis_value_parser, DatabaseArgs};
 use reth_config::Config;
 use reth_db::{database::Database, init_db};
 use reth_downloaders::{
@@ -64,6 +64,9 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
     /// The path to a block file for import.
     ///
     /// The online stages (headers and bodies) are replaced by a file import, after which the
@@ -87,7 +90,7 @@ impl ImportCommand {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path)?);
+        let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");

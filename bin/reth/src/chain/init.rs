@@ -1,5 +1,5 @@
 use crate::{
-    args::utils::genesis_value_parser,
+    args::{utils::genesis_value_parser, DatabaseArgs},
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
@@ -38,6 +38,9 @@ pub struct InitCommand {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 }
 
 impl InitCommand {
@@ -49,7 +52,7 @@ impl InitCommand {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
         info!(target: "reth::cli", "Writing genesis block");
