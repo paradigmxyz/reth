@@ -615,10 +615,12 @@ struct TraceApiInner<Provider, Eth> {
 }
 
 /// Returns the [TracingInspectorConfig] depending on the enabled [TraceType]s
+#[inline]
 fn tracing_config(trace_types: &HashSet<TraceType>) -> TracingInspectorConfig {
-    TracingInspectorConfig::default_parity()
-        .set_state_diffs(trace_types.contains(&TraceType::StateDiff))
-        .set_steps(trace_types.contains(&TraceType::VmTrace))
+    let needs_diff = trace_types.contains(&TraceType::StateDiff);
+    let needs_vm_trace = trace_types.contains(&TraceType::VmTrace);
+    let needs_steps = needs_vm_trace || needs_diff;
+    TracingInspectorConfig::default_parity().set_steps(needs_steps).set_state_diffs(needs_diff)
 }
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
@@ -635,5 +637,32 @@ fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransac
             action: Action::Reward(reward),
             result: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parity_config() {
+        let mut s = HashSet::new();
+        s.insert(TraceType::StateDiff);
+        let config = tracing_config(&s);
+        assert!(config.record_steps);
+        assert!(config.record_state_diff);
+
+        let mut s = HashSet::new();
+        s.insert(TraceType::VmTrace);
+        let config = tracing_config(&s);
+        assert!(config.record_steps);
+        assert!(!config.record_state_diff);
+
+        let mut s = HashSet::new();
+        s.insert(TraceType::VmTrace);
+        s.insert(TraceType::StateDiff);
+        let config = tracing_config(&s);
+        assert!(config.record_steps);
+        assert!(config.record_state_diff);
     }
 }
