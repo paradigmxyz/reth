@@ -111,7 +111,7 @@ impl TrieUpdates {
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
         let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
-        let mut trie_operations = Vec::from_iter(self.trie_operations.into_iter());
+        let mut trie_operations = Vec::from_iter(self.trie_operations);
         trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         for (key, operation) in trie_operations {
             match key {

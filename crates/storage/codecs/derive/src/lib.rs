@@ -117,7 +117,7 @@ pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut args = args.into_iter().collect::<Vec<_>>();
     args.push(TokenTree::Ident(proc_macro::Ident::new("compact", proc_macro::Span::call_site())));
 
-    derive_arbitrary(TokenStream::from_iter(args.into_iter()), compact)
+    derive_arbitrary(TokenStream::from_iter(args), compact)
 }
 
 /// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum.
