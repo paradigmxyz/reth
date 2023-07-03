@@ -95,16 +95,29 @@ impl<E: EnvironmentKind> Env<E> {
         inner_env.set_max_readers(DEFAULT_MAX_READERS);
 
         if let Some(log_level) = log_level {
-            inner_env.set_log_level(match log_level {
-                LogLevel::Fatal => 0,
-                LogLevel::Error => 1,
-                LogLevel::Warn => 2,
-                LogLevel::Notice => 3,
-                LogLevel::Verbose => 4,
-                LogLevel::Debug => 5,
-                LogLevel::Trace => 6,
-                LogLevel::Extra => 7,
-            });
+            // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
+            let is_log_level_available = if cfg!(debug_assertions) {
+                true
+            } else {
+                matches!(
+                    log_level,
+                    LogLevel::Fatal | LogLevel::Error | LogLevel::Warn | LogLevel::Notice
+                )
+            };
+            if is_log_level_available {
+                inner_env.set_log_level(match log_level {
+                    LogLevel::Fatal => 0,
+                    LogLevel::Error => 1,
+                    LogLevel::Warn => 2,
+                    LogLevel::Notice => 3,
+                    LogLevel::Verbose => 4,
+                    LogLevel::Debug => 5,
+                    LogLevel::Trace => 6,
+                    LogLevel::Extra => 7,
+                });
+            } else {
+                return Err(DatabaseError::LogLevelUnavailable(log_level))
+            }
         }
 
         let env =

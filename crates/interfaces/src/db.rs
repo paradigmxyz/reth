@@ -31,6 +31,9 @@ pub enum DatabaseError {
     /// Failed to get database stats.
     #[error("Database stats error code: {0:?}")]
     Stats(i32),
+    /// Failed to use the specified log level, as it's not available.
+    #[error("Log level is not available: {0:?}")]
+    LogLevelUnavailable(LogLevel),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
