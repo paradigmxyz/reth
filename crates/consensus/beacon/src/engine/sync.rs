@@ -134,16 +134,23 @@ where
     }
 
     /// Starts requesting a range of blocks from the network, in reverse from the given hash.
+    ///
+    /// If the `count` is 1, this will use the `download_full_block` method instead, because it
+    /// downloads headers and bodies for the block concurrently.
     pub(crate) fn download_block_range(&mut self, hash: H256, count: u64) {
-        trace!(
-            target: "consensus::engine",
-            ?hash,
-            ?count,
-            "start downloading full block range."
-        );
+        if count == 1 {
+            self.download_full_block(hash);
+        } else {
+            trace!(
+                target: "consensus::engine",
+                ?hash,
+                ?count,
+                "start downloading full block range."
+            );
 
-        let request = self.full_block_client.get_full_block_range(hash, count);
-        self.inflight_block_range_requests.push(request);
+            let request = self.full_block_client.get_full_block_range(hash, count);
+            self.inflight_block_range_requests.push(request);
+        }
 
         // // TODO: need more metrics for block ranges
         // self.update_block_download_metrics();
