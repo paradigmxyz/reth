@@ -8,6 +8,9 @@ There are two ways to obtain a Reth Docker image:
 Once you have obtained the Docker image, proceed to [Using the Docker
 image](#using-the-docker-image).
 
+> **Note**
+>
+> Reth requires Docker Engine version 20.10.10 or higher due to [missing support](https://docs.docker.com/engine/release-notes/20.10/#201010) for the `clone3` syscall in previous versions.
 ## GitHub
 
 Reth docker images for both x86_64 and ARM64 machines are published with every release of reth on GitHub Container Registry.
