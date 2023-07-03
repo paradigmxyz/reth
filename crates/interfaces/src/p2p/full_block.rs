@@ -394,6 +394,9 @@ where
     }
 
     /// Returns the [SealedBlock]s if the request is complete.
+    ///
+    /// These are returned in falling order starting with the requested `hash`, i.e. with
+    /// descending block numbers.
     fn take_blocks(&mut self) -> Option<Vec<SealedBlock>> {
         if self.headers.is_none() || !self.is_bodies_complete() {
             return None
