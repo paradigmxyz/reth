@@ -45,21 +45,21 @@ impl<'trace> Iterator for CallTraceNodeWalker<'trace, DFWalk> {
     type Item = &'trace CallTraceNode;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !(self.curr_idx < self.nodes.len()) {
-            return None;
+        if self.curr_idx < self.idxs.len() {
+            let node = &self.nodes[self.idxs[self.curr_idx]];
+            self.curr_idx += 1;
+
+            Some(node)
+        } else {
+            None
         }
-
-        let node = &self.nodes[self.idxs[self.curr_idx]];
-        self.curr_idx += 1;
-
-        Some(node)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::tracing::builder::walker::{CallTraceNodeWalker, DFWalk};
-    use crate::tracing::types::{CallTrace, CallTraceNode};
+    use crate::tracing::builder::walker::CallTraceNodeWalker;
+    use crate::tracing::types::CallTraceNode;
 
     #[test]
     fn test_walker_build() {
@@ -95,9 +95,12 @@ mod tests {
 
         let walker = CallTraceNodeWalker::new(&nodes);
 
-        let mut i = walker.idxs().len();
+        let mut i = 0;
         for (idx, node) in walker.enumerate() {
+            println!("idx: {},", idx);
             i += 1;
         }
+
+        assert_eq!(i, nodes.len());
     }
 }
