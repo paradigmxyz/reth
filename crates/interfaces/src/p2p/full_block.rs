@@ -1,9 +1,12 @@
-use crate::p2p::{
-    bodies::client::{BodiesClient, SingleBodyRequest},
-    error::PeerRequestResult,
-    headers::client::{HeadersClient, SingleHeaderRequest},
+use crate::{
+    consensus::ConsensusError,
+    p2p::{
+        bodies::client::{BodiesClient, SingleBodyRequest},
+        error::PeerRequestResult,
+        headers::client::{HeadersClient, SingleHeaderRequest},
+    },
 };
-use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader, H256};
+use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader, WithPeerId, H256};
 use std::{
     fmt::Debug,
     future::Future,
@@ -60,7 +63,7 @@ where
     hash: H256,
     request: FullBlockRequest<Client>,
     header: Option<SealedHeader>,
-    body: Option<BlockBody>,
+    body: Option<BodyResponse>,
 }
 
 impl<Client> FetchFullBlockFuture<Client>
@@ -77,15 +80,41 @@ where
         self.header.as_ref().map(|h| h.number)
     }
 
-    /// Returns the [SealedBlock] if the request is complete.
+    /// Returns the [SealedBlock] if the request is complete and valid.
     fn take_block(&mut self) -> Option<SealedBlock> {
         if self.header.is_none() || self.body.is_none() {
             return None
         }
-        let header = self.header.take().unwrap();
-        let body = self.body.take().unwrap();
 
-        Some(SealedBlock::new(header, body))
+        let header = self.header.take().unwrap();
+        let resp = self.body.take().unwrap();
+        match resp {
+            BodyResponse::Validated(body) => Some(SealedBlock::new(header, body)),
+            BodyResponse::PendingValidation(resp) => {
+                // ensure the block is valid, else retry
+                if let Err(err) = ensure_valid_body_response(&header, resp.data()) {
+                    debug!(target: "downloaders", ?err,  hash=?header.hash, "Received wrong body");
+                    self.client.report_bad_message(resp.peer_id());
+                    self.header = Some(header);
+                    self.request.body = Some(self.client.get_block_body(self.hash));
+                    return None
+                }
+                Some(SealedBlock::new(header, resp.into_data()))
+            }
+        }
+    }
+
+    fn on_block_response(&mut self, resp: WithPeerId<BlockBody>) {
+        if let Some(ref header) = self.header {
+            if let Err(err) = ensure_valid_body_response(header, resp.data()) {
+                debug!(target: "downloaders", ?err,  hash=?header.hash, "Received wrong body");
+                self.client.report_bad_message(resp.peer_id());
+                return
+            }
+            self.body = Some(BodyResponse::Validated(resp.into_data()));
+            return
+        }
+        self.body = Some(BodyResponse::PendingValidation(resp));
     }
 }
 
@@ -128,7 +157,9 @@ where
                 ResponseResult::Body(res) => {
                     match res {
                         Ok(maybe_body) => {
-                            this.body = maybe_body.into_data();
+                            if let Some(body) = maybe_body.transpose() {
+                                this.on_block_response(body);
+                            }
                         }
                         Err(err) => {
                             debug!(target: "downloaders", %err, ?this.hash, "Body download failed");
@@ -195,6 +226,60 @@ where
 enum ResponseResult {
     Header(PeerRequestResult<Option<Header>>),
     Body(PeerRequestResult<Option<BlockBody>>),
+}
+
+/// The response of a body request.
+#[derive(Debug)]
+enum BodyResponse {
+    /// Already validated against transaction root of header
+    Validated(BlockBody),
+    /// Still needs to be validated against header
+    PendingValidation(WithPeerId<BlockBody>),
+}
+
+/// Ensures the block response data matches the header.
+///
+/// This ensures the body response items match the header's hashes:
+///   - ommer hash
+///   - transaction root
+///   - withdrawals root
+fn ensure_valid_body_response(
+    header: &SealedHeader,
+    block: &BlockBody,
+) -> Result<(), ConsensusError> {
+    let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
+    if header.ommers_hash != ommers_hash {
+        return Err(ConsensusError::BodyOmmersHashDiff {
+            got: ommers_hash,
+            expected: header.ommers_hash,
+        })
+    }
+
+    let transaction_root = reth_primitives::proofs::calculate_transaction_root(&block.transactions);
+    if header.transactions_root != transaction_root {
+        return Err(ConsensusError::BodyTransactionRootDiff {
+            got: transaction_root,
+            expected: header.transactions_root,
+        })
+    }
+
+    let withdrawals = block.withdrawals.as_deref().unwrap_or(&[]);
+    if let Some(header_withdrawals_root) = header.withdrawals_root {
+        let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+        if withdrawals_root != header_withdrawals_root {
+            return Err(ConsensusError::BodyWithdrawalsRootDiff {
+                got: withdrawals_root,
+                expected: header_withdrawals_root,
+            })
+        }
+        return Ok(())
+    }
+
+    if !withdrawals.is_empty() {
+        return Err(ConsensusError::WithdrawalsRootUnexpected)
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
