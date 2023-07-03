@@ -79,7 +79,7 @@ where
             if count == 1 { None } else { Some(client.get_block_bodies(vec![hash])) };
 
         FetchFullBlockRangeFuture {
-            hash,
+            start_hash: hash,
             count,
             request: FullBlockRangeRequest {
                 headers: Some(client.get_headers(HeadersRequest {
@@ -349,12 +349,13 @@ where
     Client: BodiesClient + HeadersClient,
 {
     client: Client,
-    hash: H256,
+    start_hash: H256,
     count: u64,
     request: FullBlockRangeRequest<Client>,
     headers: Option<Vec<SealedHeader>>,
-    // The next headers to request bodies for. This is drained as responses are received.
+    /// The next headers to request bodies for. This is drained as responses are received.
     pending_headers: VecDeque<SealedHeader>,
+    /// The bodies that have been received so far.
     bodies: HashMap<SealedHeader, BlockBody>,
 }
 
@@ -454,7 +455,7 @@ where
                                 headers.sort_unstable_by_key(|h| Reverse(h.number));
 
                                 // check the starting hash
-                                if headers[0].hash() != this.hash {
+                                if headers[0].hash() != this.start_hash {
                                     // received bad response
                                     this.client.report_bad_message(peer);
                                 } else {
@@ -477,14 +478,14 @@ where
                             }
                         }
                         Err(err) => {
-                            debug!(target: "downloaders", %err, ?this.hash, "Header range download failed");
+                            debug!(target: "downloaders", %err, ?this.start_hash, "Header range download failed");
                         }
                     }
 
                     if this.headers.is_none() {
                         // did not receive a correct response yet, retry
                         this.request.headers = Some(this.client.get_headers(HeadersRequest {
-                            start: this.hash.into(),
+                            start: this.start_hash.into(),
                             limit: this.count,
                             direction: HeadersDirection::Falling,
                         }));
@@ -512,7 +513,7 @@ where
                             }
                         }
                         Err(err) => {
-                            debug!(target: "downloaders", %err, ?this.hash, "Body range download failed");
+                            debug!(target: "downloaders", %err, ?this.start_hash, "Body range download failed");
                         }
                     }
                     if this.bodies.is_empty() {
