@@ -1,4 +1,4 @@
-//! Support for maintaining the state of the transaction pool
+//! Support for pruning.
 
 use futures_util::{Stream, StreamExt};
 use reth_primitives::BlockNumber;
