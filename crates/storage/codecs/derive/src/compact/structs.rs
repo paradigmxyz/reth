@@ -119,14 +119,8 @@ impl<'a> StructHandler<'a> {
         assert!(
             known_types.contains(&ftype.as_str()) ||
                 is_flag_type(ftype) ||
-                self.fields_iterator.peek().map_or(true, |ftypes| {
-                    if let FieldTypes::StructField((_, ftype, _, _)) = ftypes {
-                        !known_types.contains(&ftype.as_str())
-                    } else {
-                        false
-                    }
-                }),
-            "`{ftype}` field should be placed as the last one since it's not known. 
+                self.fields_iterator.peek().is_none(),
+            "`{ftype}` field should be placed as the last one since it's not known.
             If it's an alias type (which are not supported by proc_macro), be sure to add it to either `known_types` or `get_bit_size` lists in the derive crate."
         );
 
