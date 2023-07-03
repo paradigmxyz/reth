@@ -338,6 +338,11 @@ fn ensure_valid_body_response(
 ///
 /// Once the bodies request completes, the [SealedBlock]s will be assembled and the future will
 /// yield the full block range.
+///
+/// The full block range will be returned with falling block numbers, i.e. in descending order.
+///
+/// NOTE: this assumes that bodies responses are returned in the same order as the hash array used
+/// to request them.
 #[must_use = "futures do nothing unless polled"]
 pub struct FetchFullBlockRangeFuture<Client>
 where
@@ -350,7 +355,6 @@ where
     headers: Option<Vec<SealedHeader>>,
     // The next headers to request bodies for. This is drained as responses are received.
     pending_headers: VecDeque<SealedHeader>,
-    // keeps track of txroot-matched headers and bodies
     bodies: HashMap<SealedHeader, BlockBody>,
 }
 
