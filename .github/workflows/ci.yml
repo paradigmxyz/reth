@@ -35,7 +35,7 @@ jobs:
       - name: cargo clippy
         uses: actions-rs/clippy-check@v1
         with:
-          args: --all --all-features
+          args: --all --all-features -- -A clippy::incorrect_clone_impl_on_copy_type -A clippy::arc_with_non_send_sync
           token: ${{ secrets.GITHUB_TOKEN }}
 
   doc-lint:

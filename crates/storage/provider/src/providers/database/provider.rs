@@ -518,11 +518,9 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut block_withdrawals = block_withdrawals_iter.next();
 
         let mut blocks = Vec::new();
-        for ((main_block_number, header), (_, header_hash), (_, tx)) in izip!(
-            block_header_iter.into_iter(),
-            block_header_hashes_iter.into_iter(),
-            block_tx_iter.into_iter()
-        ) {
+        for ((main_block_number, header), (_, header_hash), (_, tx)) in
+            izip!(block_header_iter.into_iter(), block_header_hashes_iter, block_tx_iter)
+        {
             let header = header.seal(header_hash);
 
             let (body, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
@@ -1303,15 +1301,15 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
         // storage hashing stage
         {
             let lists = self.changed_storages_with_range(range.clone())?;
-            let storages = self.plainstate_storages(lists.into_iter())?;
-            self.insert_storage_for_hashing(storages.into_iter())?;
+            let storages = self.plainstate_storages(lists)?;
+            self.insert_storage_for_hashing(storages)?;
         }
 
         // account hashing stage
         {
             let lists = self.changed_accounts_with_range(range.clone())?;
-            let accounts = self.basic_accounts(lists.into_iter())?;
-            self.insert_account_for_hashing(accounts.into_iter())?;
+            let accounts = self.basic_accounts(lists)?;
+            self.insert_account_for_hashing(accounts)?;
         }
 
         // merkle tree
@@ -1649,8 +1647,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
         // get execution res
         let execution_res = self.get_take_block_execution_result_range::<TAKE>(range.clone())?;
         // combine them
-        let blocks_with_exec_result: Vec<_> =
-            blocks.into_iter().zip(execution_res.into_iter()).collect();
+        let blocks_with_exec_result: Vec<_> = blocks.into_iter().zip(execution_res).collect();
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
@@ -1712,7 +1709,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         let senders_len = senders.as_ref().map(|s| s.len());
         let tx_iter = if Some(block.body.len()) == senders_len {
-            block.body.into_iter().zip(senders.unwrap().into_iter()).collect::<Vec<(_, _)>>()
+            block.body.into_iter().zip(senders.unwrap()).collect::<Vec<(_, _)>>()
         } else {
             block
                 .body
