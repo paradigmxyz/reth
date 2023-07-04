@@ -4,7 +4,7 @@ use crate::PrunerError;
 use futures_util::{FutureExt, Stream, StreamExt};
 use reth_primitives::BlockNumber;
 use reth_provider::CanonStateNotification;
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, time::Duration};
 use tracing::debug;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
@@ -58,6 +58,8 @@ where
     /// Run the pruner
     pub async fn run(&mut self, _tip_block_number: BlockNumber) -> Result<(), PrunerError> {
         // Pruning logic
+
+        tokio::time::sleep(Duration::from_secs(12)).await;
 
         Ok(())
     }
