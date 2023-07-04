@@ -6,6 +6,7 @@ use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
+use tracing::trace;
 
 /// Manages pruning under the control of the engine.
 ///
@@ -59,12 +60,13 @@ where
         Poll::Ready(ev)
     }
 
-    /// This will spawn the pruner if it is idle.
+    /// This will try to spawn the pruner if it is idle.
     fn try_spawn_pruner(&mut self, cx: &mut Context<'_>) -> Option<EnginePruneEvent> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
                 let mut pruner = pruner.take()?;
 
+                trace!(target: "consensus::engine::prune", "Checking tip...");
                 let tip_block_number = {
                     let check_tip_fut = pruner.check_tip();
                     tokio::pin!(check_tip_fut);
@@ -73,6 +75,7 @@ where
                         Poll::Pending => None,
                     }
                 };
+                trace!(target: "consensus::engine::prune", ?tip_block_number, "Checked tip");
 
                 match tip_block_number {
                     Some(tip_block_number) => {
@@ -90,7 +93,7 @@ where
                     }
                     None => {
                         self.pruner_state = PrunerState::Idle(Some(pruner));
-                        None
+                        Some(EnginePruneEvent::NotReady)
                     }
                 }
             }
@@ -121,6 +124,8 @@ where
 /// The event type emitted by the [EnginePruneController].
 #[derive(Debug)]
 pub(crate) enum EnginePruneEvent {
+    /// Pruner is not ready
+    NotReady,
     /// Pruner started
     Started,
     /// Pruner finished
