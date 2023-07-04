@@ -57,21 +57,20 @@ macro_rules! should_prune_method {
                 }
             }
         )+
+
+        /// Sets pruning to all targets.
+        pub fn all() -> PruneTargets {
+            PruneTargets {
+                $(
+                    $config: Some(PruneTarget::All),
+                )+
+            }
+        }
+
     };
 }
 
 impl PruneTargets {
-    /// Sets pruning to all targets.
-    pub fn all() -> PruneTargets {
-        PruneTargets {
-            sender_recovery: Some(PruneTarget::All),
-            transaction_lookup: Some(PruneTarget::All),
-            receipts: Some(PruneTarget::All),
-            account_history: Some(PruneTarget::All),
-            storage_history: Some(PruneTarget::All),
-        }
-    }
-
     /// Sets pruning to no target.
     pub fn none() -> PruneTargets {
         PruneTargets::default()
