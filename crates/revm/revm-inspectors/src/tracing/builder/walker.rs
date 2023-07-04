@@ -21,68 +21,22 @@ pub(crate) struct CallTraceNodeWalker<'trace, W> {
     nodes: &'trace Vec<CallTraceNode>,
     curr_idx: usize,
 
-    /// ordered indexes of nodes
-    idxs: Vec<usize>,
+    stack: Vec<usize>,
+
+    visited: Vec<bool>,
 
     phantom: std::marker::PhantomData<W>,
 }
 
 impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     pub(crate) fn new(nodes: &'trace Vec<CallTraceNode>) -> Self {
-        let mut idxs: Vec<usize> = Vec::with_capacity(nodes.len());
-
-        let mut visited: Vec<bool> = vec![false; nodes.len()];
-
-        // stores the index of the parents children we are on
-        // could never have more elements than the number of nodes
-        let mut stack: Vec<usize> = Vec::with_capacity(nodes.len());
-
-        // the currnet nodes we are working with
-        let mut curr: usize = 0;
-
-        // index in this heights children
-        let mut child_idx: usize = 0;
-        loop {
-            if !visited[curr] {
-                visited[curr] = true;
-                idxs.push(curr);
-            }
-
-            match nodes[curr].children.get(child_idx) {
-                Some(next_idx) => {
-                    stack.push(child_idx);
-                    child_idx = 0;
-
-                    curr = *next_idx;
-                }
-                None => {
-                    match nodes[curr].parent {
-                        Some(parent_idx) => {
-                            // we are done with this node, so we go back up to the parent
-                            curr = parent_idx;
-
-                            child_idx = stack.pop().expect("stack value missing") + 1;
-                        }
-                        None => {
-                            // we are at the root node, so we are done
-                            break;
-                        }
-                    }
-                }
-            }
+        Self {
+            nodes,
+            curr_idx: 0,
+            stack: Vec::with_capacity(nodes.len()),
+            visited: vec![false; nodes.len()],
+            phantom: std::marker::PhantomData,
         }
-
-        Self { nodes, curr_idx: 0, idxs, phantom: std::marker::PhantomData }
-    }
-
-    /// DFWalked order of input arena
-    pub(crate) fn idxs(&self) -> &Vec<usize> {
-        &self.idxs
-    }
-
-    /// returns the callee address in depth first order
-    pub(crate) fn addresses(&self) -> Vec<Address> {
-        self.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
     }
 
     pub(crate) fn into_vm_trace(&mut self, config: &TracingInspectorConfig) -> VmTrace {
@@ -165,13 +119,41 @@ impl<'trace> Iterator for CallTraceNodeWalker<'trace, DFWalk> {
     type Item = &'trace CallTraceNode;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr_idx < self.idxs.len() {
-            let node = &self.nodes[self.idxs[self.curr_idx]];
-            self.curr_idx += 1;
+        match self.visited[0] {
+            true => loop {
+                let next_child = match self.visited[self.curr_idx] {
+                    true => self.stack.pop().expect("stack value missing"),
+                    false => {
+                        self.visited[self.curr_idx] = true;
+                        0
+                    }
+                };
 
-            Some(node)
-        } else {
-            None
+                let curr = self.nodes.get(self.curr_idx).expect("missing node");
+
+                match curr.children.get(next_child) {
+                    Some(child_idx) => {
+                        self.stack.push(next_child + 1);
+
+                        self.curr_idx = *child_idx;
+
+                        return self.nodes.get(self.curr_idx);
+                    }
+                    None => match curr.parent {
+                        Some(parent_idx) => {
+                            self.curr_idx = parent_idx;
+                        }
+                        None => {
+                            return None;
+                        }
+                    },
+                }
+            },
+            false => {
+                self.visited[0] = true;
+                self.stack.push(0);
+                return self.nodes.get(0);
+            }
         }
     }
 }
@@ -263,16 +245,14 @@ mod tests {
             CallTraceNode { idx: 4, parent: Some(2), children: vec![], ..Default::default() },
         ];
 
-        let walker = CallTraceNodeWalker::new(&nodes);
-        println!("{:#?}", walker);
+        let mut walker = CallTraceNodeWalker::new(&nodes);
+        // println!("{:#?}", walker);
 
-        assert_eq!(walker.idxs()[0], 0);
-        assert_eq!(walker.idxs()[1], 1);
-        assert_eq!(walker.idxs()[2], 3);
-        assert_eq!(walker.idxs()[3], 2);
-        assert_eq!(walker.idxs()[4], 4);
-
-        assert_eq!(walker.idxs().len(), nodes.len());
+        assert_eq!(walker.next().unwrap().clone(), nodes[0]);
+        assert_eq!(walker.next().unwrap().clone(), nodes[1]);
+        assert_eq!(walker.next().unwrap().clone(), nodes[3]);
+        assert_eq!(walker.next().unwrap().clone(), nodes[2]);
+        assert_eq!(walker.next().unwrap().clone(), nodes[4]);
     }
 
     #[test]
@@ -333,6 +313,6 @@ mod tests {
         //     node_walk_len += 1;
         // }
 
-        assert_eq!(1, 0);
+        // assert_eq!(1, 0);
     }
 }

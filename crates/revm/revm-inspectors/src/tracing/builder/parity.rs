@@ -157,8 +157,10 @@ impl ParityTraceBuilder {
     {
         let ResultAndState { result, state } = res;
 
-        let mut depth_first_call_addresses =
-            CallTraceNodeWalker::new(&self.nodes).addresses().into_iter();
+        let mut depth_first_call_addresses = CallTraceNodeWalker::new(&self.nodes)
+            .map(|node| node.trace.caller)
+            .collect::<Vec<_>>()
+            .into_iter();
 
         let mut trace_res = self.into_trace_results(result, trace_types);
 
