@@ -1616,6 +1616,7 @@ mod tests {
         }
 
         /// Sets the pruner canonical state stream.
+        #[allow(dead_code)]
         fn with_pruner_canon_state_stream(
             mut self,
             canon_state_stream: CanonStateNotificationStream,
@@ -1857,7 +1858,6 @@ mod tests {
         use super::*;
         use reth_db::{tables, transaction::DbTxMut};
         use reth_interfaces::test_utils::{generators, generators::random_block};
-        use reth_provider::test_utils::TestCanonStateSubscriptions;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
 
         #[tokio::test]
