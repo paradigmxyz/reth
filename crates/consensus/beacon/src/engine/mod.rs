@@ -1356,7 +1356,7 @@ where
     ) -> Option<Result<(), BeaconConsensusEngineError>> {
         match event {
             EnginePruneEvent::Started => {
-                trace!(target: "consensus::engine", "Started the pruner");
+                trace!(target: "consensus::engine", "Pruner started");
                 self.metrics.pruner_runs.increment(1);
                 self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }

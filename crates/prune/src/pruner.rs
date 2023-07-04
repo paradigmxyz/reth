@@ -48,20 +48,15 @@ where
     /// Consume the pruner and run it until it finishes.
     /// Return the pruner and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self) -> PrunerFut<St> {
+    pub fn run_as_fut(mut self, tip_block_number: BlockNumber) -> PrunerFut<St> {
         Box::pin(async move {
-            let result = self.run().await;
+            let result = self.run(tip_block_number).await;
             (self, result)
         })
     }
 
-    /// Run the pruner:
-    /// 1. Check if pruning is needed according to tip block number from the canonical state
-    /// notifications stream.
-    /// 2. Execute main pruning logic. (TODO)
-    pub async fn run(&mut self) -> Result<(), PrunerError> {
-        let Some(_tip_block_number) = self.check_tip().await else { return Ok(()) };
-
+    /// Run the pruner
+    pub async fn run(&mut self, _tip_block_number: BlockNumber) -> Result<(), PrunerError> {
         // Pruning logic
 
         Ok(())
@@ -72,7 +67,7 @@ where
     ///
     /// Returns `None` if either the stream is empty, or the minimum pruning interval check didn't
     /// pass.
-    async fn check_tip(&mut self) -> Option<BlockNumber> {
+    pub async fn check_tip(&mut self) -> Option<BlockNumber> {
         let mut latest_canon_state = None;
         while let Some(canon_state) = self.canon_state_stream.next().now_or_never().flatten() {
             latest_canon_state = Some(canon_state);

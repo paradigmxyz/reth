@@ -60,22 +60,39 @@ where
     }
 
     /// This will spawn the pruner if it is idle.
-    fn try_spawn_pruner(&mut self) -> Option<EnginePruneEvent> {
+    fn try_spawn_pruner(&mut self, cx: &mut Context<'_>) -> Option<EnginePruneEvent> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
-                let pruner = pruner.take()?;
+                let mut pruner = pruner.take()?;
 
-                let (tx, rx) = oneshot::channel();
-                self.pruner_task_spawner.spawn_critical_blocking(
-                    "pruner task",
-                    Box::pin(async move {
-                        let result = pruner.run_as_fut().await;
-                        let _ = tx.send(result);
-                    }),
-                );
-                self.pruner_state = PrunerState::Running(rx);
+                let tip_block_number = {
+                    let check_tip_fut = pruner.check_tip();
+                    tokio::pin!(check_tip_fut);
+                    match check_tip_fut.poll_unpin(cx) {
+                        Poll::Ready(block_number) => block_number,
+                        Poll::Pending => None,
+                    }
+                };
 
-                Some(EnginePruneEvent::Started)
+                match tip_block_number {
+                    Some(tip_block_number) => {
+                        let (tx, rx) = oneshot::channel();
+                        self.pruner_task_spawner.spawn_critical_blocking(
+                            "pruner task",
+                            Box::pin(async move {
+                                let result = pruner.run_as_fut(tip_block_number).await;
+                                let _ = tx.send(result);
+                            }),
+                        );
+                        self.pruner_state = PrunerState::Running(rx);
+
+                        Some(EnginePruneEvent::Started)
+                    }
+                    None => {
+                        self.pruner_state = PrunerState::Idle(Some(pruner));
+                        None
+                    }
+                }
             }
             PrunerState::Running(_) => None,
         }
@@ -84,7 +101,7 @@ where
     /// Advances the prune process.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EnginePruneEvent> {
         // Try to spawn a pruner
-        if let Some(event) = self.try_spawn_pruner() {
+        if let Some(event) = self.try_spawn_pruner(cx) {
             return Poll::Ready(event)
         }
 
