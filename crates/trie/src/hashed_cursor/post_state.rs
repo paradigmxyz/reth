@@ -58,12 +58,14 @@ impl HashedPostState {
 
     /// Sort account and storage entries.
     pub fn sort(&mut self) {
-        for (_, storage) in self.storages.iter_mut() {
-            storage.sort_storage();
-        }
+        if !self.sorted {
+            for (_, storage) in self.storages.iter_mut() {
+                storage.sort_storage();
+            }
 
-        self.accounts.sort_unstable_by_key(|(address, _)| *address);
-        self.sorted = true;
+            self.accounts.sort_unstable_by_key(|(address, _)| *address);
+            self.sorted = true;
+        }
     }
 
     /// Construct (PrefixSets)[PrefixSet] from hashed post state.
