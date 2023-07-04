@@ -12,13 +12,13 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct HashedStorage {
     /// Hashed storage slots with non-zero.
-    pub non_zero_valued_storage: Vec<(H256, U256)>,
+    non_zero_valued_storage: Vec<(H256, U256)>,
     /// Slots that have been zero valued.
-    pub zero_valued_slots: HashSet<H256>,
+    zero_valued_slots: HashSet<H256>,
     /// Whether the storage was wiped or not.
-    pub wiped: bool,
+    wiped: bool,
     /// Whether the storage entries were sorted or not.
-    pub sorted: bool,
+    sorted: bool,
 }
 
 impl HashedStorage {
@@ -34,17 +34,29 @@ impl HashedStorage {
             self.sorted = true;
         }
     }
+
+    /// Insert non zero-valued storage entry.
+    pub fn insert_non_zero_valued_storage(&mut self, slot: H256, value: U256) {
+        debug_assert!(value != U256::ZERO, "value cannot be zero");
+        self.non_zero_valued_storage.push((slot, value));
+        self.sorted = false;
+    }
+
+    /// Insert zero-valued storage slot.
+    pub fn insert_zero_valued_slot(&mut self, slot: H256) {
+        self.zero_valued_slots.insert(slot);
+    }
 }
 
 /// The post state with hashed addresses as keys.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct HashedPostState {
     /// Map of hashed addresses to account info.
-    pub accounts: Vec<(H256, Account)>,
+    accounts: Vec<(H256, Account)>,
     /// Set of cleared accounts.
-    pub cleared_accounts: HashSet<H256>,
+    cleared_accounts: HashSet<H256>,
     /// Map of hashed addresses to hashed storage.
-    pub storages: HashMap<H256, HashedStorage>,
+    storages: HashMap<H256, HashedStorage>,
     /// Whether the account and storage entries were sorted or not.
     sorted: bool,
 }
@@ -66,6 +78,23 @@ impl HashedPostState {
             self.accounts.sort_unstable_by_key(|(address, _)| *address);
             self.sorted = true;
         }
+    }
+
+    /// Insert non-empty account info.
+    pub fn insert_account(&mut self, hashed_address: H256, account: Account) {
+        self.accounts.push((hashed_address, account));
+        self.sorted = false;
+    }
+
+    /// Insert cleared hashed account key.
+    pub fn insert_cleared_account(&mut self, hashed_address: H256) {
+        self.cleared_accounts.insert(hashed_address);
+    }
+
+    /// Insert hashed storage entry.
+    pub fn insert_hashed_storage(&mut self, hashed_address: H256, hashed_storage: HashedStorage) {
+        self.sorted |= hashed_storage.sorted;
+        self.storages.insert(hashed_address, hashed_storage);
     }
 
     /// Construct (PrefixSets)[PrefixSet] from hashed post state.

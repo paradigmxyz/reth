@@ -199,9 +199,9 @@ impl PostState {
         for (address, account) in self.accounts() {
             let hashed_address = keccak256(address);
             if let Some(account) = account {
-                hashed_post_state.accounts.push((hashed_address, *account));
+                hashed_post_state.insert_account(hashed_address, *account);
             } else {
-                hashed_post_state.cleared_accounts.insert(hashed_address);
+                hashed_post_state.insert_cleared_account(hashed_address);
             }
         }
 
@@ -211,13 +211,13 @@ impl PostState {
             for (slot, value) in &storage.storage {
                 let hashed_slot = H256(slot.to_be_bytes());
                 if *value == U256::ZERO {
-                    hashed_storage.zero_valued_slots.insert(hashed_slot);
+                    hashed_storage.insert_zero_valued_slot(hashed_slot);
                 } else {
-                    hashed_storage.non_zero_valued_storage.push((hashed_slot, *value));
+                    hashed_storage.insert_non_zero_valued_storage(hashed_slot, *value);
                 }
             }
 
-            hashed_post_state.storages.insert(keccak256(address), hashed_storage);
+            hashed_post_state.insert_hashed_storage(keccak256(address), hashed_storage);
         }
 
         hashed_post_state
