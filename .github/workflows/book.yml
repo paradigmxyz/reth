@@ -7,6 +7,25 @@ on:
   merge_group:
 
 jobs:
+  up-to-date:
+    runs-on: ubuntu-latest
+    name: up-to-date
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Try to update the book cli documentation
+        run: make update-book-cli
+
+      - name: Check if the book cli documentation is up to date
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "Error: Documentation is not up to date. Please run `make update-book-cli`."
+            exit 1
+          else
+            echo "The documentation is up to date."
+          fi 
+
   test:
     runs-on: ubuntu-latest
     name: test
