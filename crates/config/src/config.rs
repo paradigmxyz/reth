@@ -5,7 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_primitives::PruneMode;
+use reth_primitives::{PruneMode, PruneTarget, PruneTargets};
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -291,6 +291,31 @@ pub struct PruneConfig {
 impl Default for PruneConfig {
     fn default() -> Self {
         Self { block_interval: 10, parts: PruneParts::default() }
+    }
+}
+
+impl PruneConfig {
+    /// Converts a [`PruneConfig`] into an usuable [`PruneTargets`].
+    pub fn into_targets(&self, head: Option<u64>) -> PruneTargets {
+        PruneTargets {
+            sender_recovery: self
+                .parts
+                .sender_recovery
+                .map(|p| PruneTarget::new(p, head.unwrap_or_default())),
+            transaction_lookup: self
+                .parts
+                .transaction_lookup
+                .map(|p| PruneTarget::new(p, head.unwrap_or_default())),
+            receipts: self.parts.receipts.map(|p| PruneTarget::new(p, head.unwrap_or_default())),
+            account_history: self
+                .parts
+                .account_history
+                .map(|p| PruneTarget::new(p, head.unwrap_or_default())),
+            storage_history: self
+                .parts
+                .storage_history
+                .map(|p| PruneTarget::new(p, head.unwrap_or_default())),
+        }
     }
 }
 
