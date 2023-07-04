@@ -1,4 +1,4 @@
-use super::walker::{CallTraceNodeWalker, DFWalk};
+use super::walker::CallTraceNodeWalker;
 use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
 use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
@@ -15,6 +15,7 @@ use std::collections::HashSet;
 pub struct ParityTraceBuilder {
     /// Recorded trace nodes
     nodes: Vec<CallTraceNode>,
+
     /// How the traces were recorded
     _config: TracingInspectorConfig,
 }
@@ -156,7 +157,8 @@ impl ParityTraceBuilder {
     {
         let ResultAndState { result, state } = res;
 
-        let mut df_addresses = self.depth_first_ordered_addresses().into_iter();
+        let mut depth_first_call_addresses =
+            CallTraceNodeWalker::new(&self.nodes).addresses().into_iter();
 
         let mut trace_res = self.into_trace_results(result, trace_types);
 
@@ -171,7 +173,7 @@ impl ParityTraceBuilder {
 
         // check the vm trace case
         if let Some(ref mut vm_trace) = trace_res.vm_trace {
-            populate_vm_trace_bytecodes(&db, &mut df_addresses, vm_trace)?;
+            populate_vm_trace_bytecodes(&db, &mut depth_first_call_addresses, vm_trace)?;
         }
 
         Ok(trace_res)
@@ -228,22 +230,11 @@ impl ParityTraceBuilder {
         self.into_transaction_traces_iter().collect()
     }
 
-    /// Vec of Callee address in the arena sorted in depth first order
-    fn depth_first_ordered_addresses(&self) -> Vec<Address> {
-        let walker: CallTraceNodeWalker<'_, DFWalk> = CallTraceNodeWalker::new(&self.nodes);
-
-        walker.addresses()
-    }
-
-    /// Creates a VM trace by walking over [CallTraceNode]s and recursively fills in the subcall traces for the [VmTrace]
+    /// Creates a VM trace by walking over [CallTraceNode]s
     pub fn vm_trace(&self) -> VmTrace {
         let mut walker = CallTraceNodeWalker::new(&self.nodes);
 
-        match walker.next() {
-            Some(start) => walker.into_vm_trace(&self._config, start),
-            // todo::n should probably but some logging here
-            None => VmTrace { code: Default::default(), ops: Vec::new() },
-        }
+        walker.into_vm_trace(&self._config)
     }
 }
 
@@ -252,14 +243,14 @@ impl ParityTraceBuilder {
 /// use recursion to fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
     db: &DB,
-    df_addresses: &mut I,
+    depth_first_call_addresses: &mut I,
     trace: &mut VmTrace,
 ) -> Result<(), DB::Error>
 where
     DB: DatabaseRef,
     I: Iterator<Item = Address>,
 {
-    let addr = df_addresses.next().expect("missing address");
+    let addr = depth_first_call_addresses.next().expect("missing address");
 
     let db_acc = db.basic(addr)?.unwrap_or_default();
 
@@ -270,7 +261,7 @@ where
 
     for op in trace.ops.iter_mut() {
         if let Some(sub) = op.sub.as_mut() {
-            populate_vm_trace_bytecodes(db, df_addresses, sub)?;
+            populate_vm_trace_bytecodes(db, depth_first_call_addresses, sub)?;
         }
     }
 

@@ -9,11 +9,13 @@ use crate::tracing::types::CallTraceNode;
 // use reth_rpc_types::trace::parity::VmTrace;
 
 /// type for doing a Depth first walk down the callgraph
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DFWalk;
 
 /// pub crate type for doing a walk down a reth callgraph
-#[derive(Debug)]
+///
+/// eager evaluation of the callgraph is done in the constructor, because you might want to use the ordering more than once
+#[derive(Debug, Clone)]
 pub(crate) struct CallTraceNodeWalker<'trace, W> {
     /// the entire arena
     nodes: &'trace Vec<CallTraceNode>,
@@ -21,18 +23,6 @@ pub(crate) struct CallTraceNodeWalker<'trace, W> {
 
     /// ordered indexes of nodes
     idxs: Vec<usize>,
-
-    phantom: std::marker::PhantomData<W>,
-}
-
-#[derive(Debug)]
-pub(crate) struct VmTraceWalker<'trace, W> {
-    parents: Vec<Option<&'trace VmTrace>>,
-    current: &'trace VmTrace,
-
-    idx_stack: Vec<usize>,
-    curr_idx: usize,
-    started: bool,
 
     phantom: std::marker::PhantomData<W>,
 }
@@ -71,7 +61,7 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
                             // we are done with this node, so we go back up to the parent
                             curr = parent_idx;
 
-                            child_idx = stack.pop().expect("There should be a value here") + 1;
+                            child_idx = stack.pop().expect("stack value missing") + 1;
                         }
                         None => {
                             // we are at the root node, so we are done
@@ -86,7 +76,7 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     }
 
     /// DFWalked order of input arena
-    fn idxs(&self) -> &Vec<usize> {
+    pub(crate) fn idxs(&self) -> &Vec<usize> {
         &self.idxs
     }
 
@@ -95,8 +85,15 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
         self.idxs().iter().map(|idx| self.nodes[*idx].trace.address).collect()
     }
 
+    pub(crate) fn into_vm_trace(&mut self, config: &TracingInspectorConfig) -> VmTrace {
+        match self.next() {
+            Some(current) => self.make_vm_trace(config, current),
+            None => VmTrace { code: Default::default(), ops: Vec::new() },
+        }
+    }
+
     /// returns a VM trace without the code filled in
-    pub(crate) fn into_vm_trace(
+    fn make_vm_trace(
         &mut self,
         config: &TracingInspectorConfig,
         current: &CallTraceNode,
@@ -112,7 +109,7 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
                 | opcode::CREATE
                 | opcode::CREATE2 => {
                     let next = self.next().expect("missing next node");
-                    Some(self.into_vm_trace(config, next))
+                    Some(self.make_vm_trace(config, next))
                 }
                 _ => None,
             };
@@ -179,6 +176,18 @@ impl<'trace> Iterator for CallTraceNodeWalker<'trace, DFWalk> {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct VmTraceWalker<'trace, W> {
+    parents: Vec<Option<&'trace VmTrace>>,
+    current: &'trace VmTrace,
+
+    idx_stack: Vec<usize>,
+    curr_idx: usize,
+    started: bool,
+
+    phantom: std::marker::PhantomData<W>,
+}
+
 impl<'trace> VmTraceWalker<'trace, DFWalk> {
     pub(crate) fn new(root: &'trace VmTrace) -> Self {
         VmTraceWalker {
@@ -240,8 +249,9 @@ impl<'trace> Iterator for VmTraceWalker<'trace, DFWalk> {
 
 #[cfg(test)]
 mod tests {
-    use crate::tracing::builder::walker::CallTraceNodeWalker;
+    use crate::tracing::builder::walker::{CallTraceNodeWalker, VmTraceWalker};
     use crate::tracing::types::CallTraceNode;
+    use crate::tracing::TracingInspectorConfig;
 
     #[test]
     fn test_walker_build() {
@@ -284,5 +294,45 @@ mod tests {
         }
 
         assert_eq!(i, nodes.len());
+    }
+
+    #[test]
+    fn test_vm_trace_len_eq_arena() {
+        let config = TracingInspectorConfig {
+            record_steps: false,
+            record_memory_snapshots: false,
+            record_stack_snapshots: false,
+            record_state_diff: false,
+            exclude_precompile_calls: false,
+            record_logs: false,
+        };
+
+        let nodes = vec![
+            CallTraceNode { idx: 0, parent: None, children: vec![1, 2], ..Default::default() },
+            CallTraceNode { idx: 1, parent: Some(0), children: vec![3], ..Default::default() },
+            CallTraceNode { idx: 2, parent: Some(0), children: vec![4], ..Default::default() },
+            CallTraceNode { idx: 3, parent: Some(1), children: vec![], ..Default::default() },
+            CallTraceNode { idx: 4, parent: Some(2), children: vec![], ..Default::default() },
+        ];
+
+        let mut walker = CallTraceNodeWalker::new(&nodes);
+
+        let vm_trace = walker.into_vm_trace(&config);
+
+        println!("here");
+
+        println!("trace: {:#?}", vm_trace);
+
+        // let mut vm_trace_len = 0;
+        // for _ in VmTraceWalker::new(&vm_trace) {
+        //     vm_trace_len += 1;
+        // }
+
+        // let mut node_walk_len = 0;
+        // for _ in CallTraceNodeWalker::new(&nodes) {
+        //     node_walk_len += 1;
+        // }
+
+        assert_eq!(1, 0);
     }
 }
