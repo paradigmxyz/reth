@@ -215,8 +215,8 @@ impl PostState {
 
     /// Calculate the state root for this [PostState].
     /// Internally, function calls [Self::hash_state_slow] to obtain the [HashedPostState].
-    /// Afterwards, it retrieves the prefixsets from the [HashedPostState] and uses them to
-    /// calculate the incremental state root.
+    /// Afterwards, it retrieves the [PrefixSets](reth_trie::prefix_set::PrefixSet) of changed keys
+    /// from the [HashedPostState] and uses them to calculate the incremental state root.
     ///
     /// # Example
     ///
