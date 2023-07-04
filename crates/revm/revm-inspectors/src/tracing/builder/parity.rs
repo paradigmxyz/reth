@@ -1,4 +1,4 @@
-use super::walker::CallTraceNodeWalker;
+use super::walker::CallTraceNodeWalkerDF;
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
     TracingInspectorConfig,
@@ -161,7 +161,7 @@ impl ParityTraceBuilder {
     {
         let ResultAndState { result, state } = res;
 
-        let mut depth_first_call_addresses = CallTraceNodeWalker::new(&self.nodes)
+        let mut depth_first_call_addresses = CallTraceNodeWalkerDF::new(&self.nodes)
             .map(|node| node.trace.caller)
             .collect::<Vec<_>>()
             .into_iter();
@@ -238,7 +238,7 @@ impl ParityTraceBuilder {
 
     /// Creates a VM trace by walking over [CallTraceNode]s
     pub fn vm_trace(&self) -> VmTrace {
-        let mut walker = CallTraceNodeWalker::new(&self.nodes);
+        let mut walker = CallTraceNodeWalkerDF::new(&self.nodes);
 
         match self.nodes.get(0) {
             Some(current) => self.make_vm_trace(current),
