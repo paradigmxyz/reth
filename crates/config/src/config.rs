@@ -148,8 +148,7 @@ pub struct BodiesConfig {
     ///
     /// Default: 10_000
     pub downloader_stream_batch_size: usize,
-    /// Maximum amount of received bodies to buffer internally.
-    /// The response contains multiple bodies.
+    /// The size of the internal block buffer in bytes.
     ///
     /// Default: 4GB
     pub downloader_max_buffered_blocks_size_bytes: usize,

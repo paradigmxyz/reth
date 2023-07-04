@@ -26,10 +26,6 @@ pub enum CliqueError<E> {
     #[error("no genesis block returned from the provider")]
     NoGenesis,
 
-    /// No tip block returned from the provider
-    #[error("no tip block returned from the provider")]
-    NoTip,
-
     /// Account was not successfully unlocked on the provider
     #[error("account was not successfully unlocked on the provider")]
     AccountNotUnlocked,
@@ -92,12 +88,6 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
             return Err(CliqueError::MiningNotEnabled)
         }
         Ok(())
-    }
-
-    /// Returns the chain tip of the [`Geth`](ethers_core::utils::Geth) instance by calling
-    /// geth's `eth_getBlock`.
-    async fn remote_tip_block(&self) -> Result<Block<H256>, CliqueMiddlewareError<Self>> {
-        self.get_block(BlockNumber::Latest).await?.ok_or(CliqueError::NoTip)
     }
 
     /// Returns the genesis block of the [`Geth`](ethers_core::utils::Geth) instance by calling

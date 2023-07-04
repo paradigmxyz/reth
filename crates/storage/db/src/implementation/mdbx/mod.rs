@@ -6,6 +6,7 @@ use crate::{
     utils::default_page_size,
     DatabaseError,
 };
+use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, EnvironmentKind, Geometry, Mode, PageSize,
     SyncMode, RO, RW,
@@ -61,37 +62,66 @@ impl<E: EnvironmentKind> Env<E> {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
     /// It does not create the tables, for that call [`Env::create_tables`].
-    pub fn open(path: &Path, kind: EnvKind) -> Result<Env<E>, DatabaseError> {
+    pub fn open(
+        path: &Path,
+        kind: EnvKind,
+        log_level: Option<LogLevel>,
+    ) -> Result<Env<E>, DatabaseError> {
         let mode = match kind {
             EnvKind::RO => Mode::ReadOnly,
             EnvKind::RW => Mode::ReadWrite { sync_mode: SyncMode::Durable },
         };
 
-        let env = Env {
-            inner: Environment::new()
-                .set_max_dbs(Tables::ALL.len())
-                .set_geometry(Geometry {
-                    // Maximum database size of 4 terabytes
-                    size: Some(0..(4 * TERABYTE)),
-                    // We grow the database in increments of 4 gigabytes
-                    growth_step: Some(4 * GIGABYTE as isize),
-                    // The database never shrinks
-                    shrink_threshold: None,
-                    page_size: Some(PageSize::Set(default_page_size())),
-                })
-                .set_flags(EnvironmentFlags {
-                    mode,
-                    // We disable readahead because it improves performance for linear scans, but
-                    // worsens it for random access (which is our access pattern outside of sync)
-                    no_rdahead: true,
-                    coalesce: true,
-                    ..Default::default()
-                })
-                // configure more readers
-                .set_max_readers(DEFAULT_MAX_READERS)
-                .open(path)
-                .map_err(|e| DatabaseError::FailedToOpen(e.into()))?,
-        };
+        let mut inner_env = Environment::new();
+        inner_env.set_max_dbs(Tables::ALL.len());
+        inner_env.set_geometry(Geometry {
+            // Maximum database size of 4 terabytes
+            size: Some(0..(4 * TERABYTE)),
+            // We grow the database in increments of 4 gigabytes
+            growth_step: Some(4 * GIGABYTE as isize),
+            // The database never shrinks
+            shrink_threshold: None,
+            page_size: Some(PageSize::Set(default_page_size())),
+        });
+        inner_env.set_flags(EnvironmentFlags {
+            mode,
+            // We disable readahead because it improves performance for linear scans, but
+            // worsens it for random access (which is our access pattern outside of sync)
+            no_rdahead: true,
+            coalesce: true,
+            ..Default::default()
+        });
+        // configure more readers
+        inner_env.set_max_readers(DEFAULT_MAX_READERS);
+
+        if let Some(log_level) = log_level {
+            // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
+            let is_log_level_available = if cfg!(debug_assertions) {
+                true
+            } else {
+                matches!(
+                    log_level,
+                    LogLevel::Fatal | LogLevel::Error | LogLevel::Warn | LogLevel::Notice
+                )
+            };
+            if is_log_level_available {
+                inner_env.set_log_level(match log_level {
+                    LogLevel::Fatal => 0,
+                    LogLevel::Error => 1,
+                    LogLevel::Warn => 2,
+                    LogLevel::Notice => 3,
+                    LogLevel::Verbose => 4,
+                    LogLevel::Debug => 5,
+                    LogLevel::Trace => 6,
+                    LogLevel::Extra => 7,
+                });
+            } else {
+                return Err(DatabaseError::LogLevelUnavailable(log_level))
+            }
+        }
+
+        let env =
+            Env { inner: inner_env.open(path).map_err(|e| DatabaseError::FailedToOpen(e.into()))? };
 
         Ok(env)
     }
@@ -117,7 +147,7 @@ impl<E: EnvironmentKind> Env<E> {
 }
 
 impl<E: EnvironmentKind> Deref for Env<E> {
-    type Target = reth_libmdbx::Environment<E>;
+    type Target = Environment<E>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -151,7 +181,7 @@ mod tests {
 
     /// Create database for testing with specified path
     fn create_test_db_with_path<E: EnvironmentKind>(kind: EnvKind, path: &Path) -> Env<E> {
-        let env = Env::<E>::open(path, kind).expect(ERROR_DB_CREATION);
+        let env = Env::<E>::open(path, kind, None).expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
@@ -746,7 +776,7 @@ mod tests {
             assert!(result.expect(ERROR_RETURN_VALUE) == 200);
         }
 
-        let env = Env::<WriteMap>::open(&path, EnvKind::RO).expect(ERROR_DB_CREATION);
+        let env = Env::<WriteMap>::open(&path, EnvKind::RO, None).expect(ERROR_DB_CREATION);
 
         // GET
         let result =
