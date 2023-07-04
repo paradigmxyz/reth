@@ -67,7 +67,7 @@ where
     ///
     /// Returns `None` if either the stream is empty, or the minimum pruning interval check didn't
     /// pass.
-    pub async fn check_tip(&mut self) -> Option<BlockNumber> {
+    pub fn check_tip(&mut self) -> Option<BlockNumber> {
         let mut latest_canon_state = None;
         while let Some(canon_state) = self.canon_state_stream.next().now_or_never().flatten() {
             latest_canon_state = Some(canon_state);

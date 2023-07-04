@@ -33,11 +33,6 @@ where
         self.pruner_state.is_idle()
     }
 
-    /// Returns `true` if the pruner is active.
-    pub(crate) fn is_pruner_active(&self) -> bool {
-        !self.is_pruner_idle()
-    }
-
     /// Advances the pruner state.
     ///
     /// This checks for the result in the channel, or returns pending if the pruner is idle.
@@ -62,29 +57,19 @@ where
     }
 
     /// This will try to spawn the pruner if it is idle:
-    /// 1. Try to acquire the tip block number through [Pruner::check_tip]. If it
-    /// returns [Poll::Pending], return. We will retry on next invocation.
+    /// 1. Try to acquire the tip block number through [Pruner::check_tip].
     /// 2. If tip block number is ready, pass it to the [Pruner::run_as_fut] and spawn in a separate
     /// task. Set pruner state to [PruneState::Running].
     /// 3. If tip block number is not ready yet, set pruner state back to [PruneState::Idle].
     ///
     /// If pruner is already running, do nothing.
-    fn try_spawn_pruner(&mut self, cx: &mut Context<'_>) -> Option<EnginePruneEvent> {
+    fn try_spawn_pruner(&mut self) -> Option<EnginePruneEvent> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
                 let mut pruner = pruner.take()?;
 
                 // Check tip for pruning
-                let tip_block_number = {
-                    let check_tip_fut = pruner.check_tip();
-                    tokio::pin!(check_tip_fut);
-                    match check_tip_fut.poll_unpin(cx) {
-                        Poll::Ready(block_number) => block_number,
-                        Poll::Pending => None,
-                    }
-                };
-
-                match tip_block_number {
+                match pruner.check_tip() {
                     // If tip is ready, start pruning
                     Some(tip_block_number) => {
                         trace!(target: "consensus::engine::prune", %tip_block_number, "Tip block number for pruning is acquired");
@@ -115,7 +100,7 @@ where
     /// Advances the prune process.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EnginePruneEvent> {
         // Try to spawn a pruner
-        if let Some(event) = self.try_spawn_pruner(cx) {
+        if let Some(event) = self.try_spawn_pruner() {
             return Poll::Ready(event)
         }
 
