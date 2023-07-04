@@ -27,7 +27,9 @@ pub struct HashedPostState {
 }
 
 impl HashedPostState {
-    /// Construct prefix sets from hashed post state.
+    /// Construct (PrefixSets)[PrefixSet] from hashed post state.
+    /// The prefix sets contain the hashed account and storage keys that have been changed in the
+    /// post state.
     pub fn construct_prefix_sets(&self) -> (PrefixSet, HashMap<H256, PrefixSet>) {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSet::default();
@@ -89,11 +91,15 @@ where
 }
 
 /// The cursor to iterate over post state hashed accounts and corresponding database entries.
-/// It will always give precedence to the data from the post state.
+/// It will always give precedence to the data from the hashed post state.
 #[derive(Debug, Clone)]
 pub struct HashedPostStateAccountCursor<'b, C> {
+    /// The database cursor.
     cursor: C,
+    /// The reference to the in-memory [HashedPostState].
     post_state: &'b HashedPostState,
+    /// The last hashed account key that was returned by the cursor.
+    /// De facto, this is a current cursor position.
     last_account: Option<H256>,
 }
 
@@ -101,10 +107,19 @@ impl<'b, 'tx, C> HashedPostStateAccountCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedAccount>,
 {
+    /// Returns `true` if the account has been destroyed.
+    /// This check is used for evicting account keys from the state trie.
+    ///
+    /// This function only checks the post state, not the database, because the latter does not
+    /// store destroyed accounts.
     fn is_account_cleared(&self, account: &H256) -> bool {
         matches!(self.post_state.accounts.get(account), Some(None))
     }
 
+    /// Return the account with the lowest hashed account key.
+    ///
+    /// Given the next post state and database entries, return the smallest of the two.
+    /// If the account keys are the same, the post state entry is given precedence.
     fn next_account(
         &self,
         post_state_item: Option<(H256, Account)>,
@@ -137,6 +152,14 @@ impl<'b, 'tx, C> HashedAccountCursor for HashedPostStateAccountCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedAccount>,
 {
+    /// Seek the next entry for a given hashed account key.
+    ///
+    /// If the post state contains the exact match for the key, return it.
+    /// Otherwise, retrieve the next entries that are greater than or equal to the key from the
+    /// database and the post state. The two entries are compared and the lowest is returned.
+    ///
+    /// The returned account key is memoized and the cursor remains positioned at that key until
+    /// [HashedAccountCursor::seek] or [HashedAccountCursor::next] are called.
     fn seek(&mut self, key: H256) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
         self.last_account = None;
 
@@ -171,6 +194,13 @@ where
         Ok(result)
     }
 
+    /// Retrieve the next entry from the cursor.
+    ///
+    /// If the cursor is positioned at the entry, return the entry with next greater key.
+    /// Returns [None] if the previous memoized or the next greater entries are missing.
+    ///
+    /// NOTE: This function will not return any entry unless [HashedAccountCursor::seek] has been
+    /// called.
     fn next(&mut self) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
         let last_account = match self.last_account.as_ref() {
             Some(account) => account,
@@ -203,13 +233,20 @@ where
 /// It will always give precedence to the data from the post state.
 #[derive(Debug, Clone)]
 pub struct HashedPostStateStorageCursor<'b, C> {
-    post_state: &'b HashedPostState,
+    /// The database cursor.
     cursor: C,
+    /// The reference to the post state.
+    post_state: &'b HashedPostState,
+    /// The current hashed account key.
     account: Option<H256>,
+    /// The last slot that has been returned by the cursor.
+    /// De facto, this is the cursor's position for the given account key.
     last_slot: Option<H256>,
 }
 
 impl<'b, C> HashedPostStateStorageCursor<'b, C> {
+    /// Returns `true` if the storage for the given
+    /// The database is not checked since it already has no wiped storage entries.
     fn is_db_storage_wiped(&self, account: &H256) -> bool {
         match self.post_state.storages.get(account) {
             Some(storage) => storage.wiped,
@@ -218,7 +255,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     }
 
     /// Check if the slot was zeroed out in the post state.
-    /// The database is not checked since we don't insert zero valued slots.
+    /// The database is not checked since it already has no zero-valued slots.
     fn is_touched_slot_value_zero(&self, account: &H256, slot: &H256) -> bool {
         self.post_state
             .storages
@@ -228,6 +265,10 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
             .unwrap_or_default()
     }
 
+    /// Return the storage entry with the lowest hashed storage key (hashed slot).
+    ///
+    /// Given the next post state and database entries, return the smallest of the two.
+    /// If the storage keys are the same, the post state entry is given precedence.
     fn next_slot(
         &self,
         post_state_item: Option<(&H256, &U256)>,
@@ -260,16 +301,24 @@ impl<'b, 'tx, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
 where
     C: DbCursorRO<'tx, tables::HashedStorage> + DbDupCursorRO<'tx, tables::HashedStorage>,
 {
+    /// Returns `true` if the account has no storage entries.
+    ///
+    /// This function should be called before attempting to call [HashedStorageCursor::seek] or
+    /// [HashedStorageCursor::next].
     fn is_storage_empty(&mut self, key: H256) -> Result<bool, reth_db::DatabaseError> {
         let is_empty = match self.post_state.storages.get(&key) {
             Some(storage) => {
-                storage.wiped && storage.storage.iter().all(|(_, value)| *value == U256::ZERO)
+                // If the storage has been wiped at any point
+                storage.wiped &&
+                    // and the current storage does not contain any non-zero values 
+                    storage.storage.iter().all(|(_, value)| *value == U256::ZERO)
             }
             None => self.cursor.seek_exact(key)?.is_none(),
         };
         Ok(is_empty)
     }
 
+    /// Seek the next account storage entry for a given hashed key pair.
     fn seek(
         &mut self,
         account: H256,
@@ -321,6 +370,12 @@ where
         Ok(result)
     }
 
+    /// Return the next account storage entry for the current accont key.
+    ///
+    /// # Panics
+    ///
+    /// If the account key is not set. [HashedStorageCursor::seek] must be called first in order to
+    /// position the cursor.
     fn next(&mut self) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
         let account = self.account.expect("`seek` must be called first");
 
