@@ -172,16 +172,6 @@ RPC:
           
           [default: 30000000]
 
-<<<<<<< HEAD
-      --block-cache-len
-          Maximum number of block cache entries.
-
-      --receipt-cache-len
-          Maximum number of receipt cache entries.
-
-      --env-cache-len
-          Maximum number of env cache entries.
-=======
 GAS PRICE ORACLE:
       --gpo.blocks <BLOCKS>
           Number of recent blocks to check for gas price
@@ -217,7 +207,6 @@ GAS PRICE ORACLE:
           Max size for cached evm env data in megabytes
           
           [default: 1]
->>>>>>> 6aa521c3 (doc: add script to update the book cli doc)
 
 Builder:
       --builder.extradata <EXTRADATA>
