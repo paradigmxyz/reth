@@ -594,7 +594,7 @@ where
             // exclusive access to the database
             warn!(
                 target: "consensus::engine",
-                "Pruning in progress, skipping forkchoice update. \
+                "Pruning is in progress, skipping forkchoice update. \
                 This may affect the performance of your node as a validator."
             );
             return Ok(OnForkChoiceUpdated::syncing())
@@ -1353,7 +1353,6 @@ where
             EnginePruneEvent::Started(tip_block_number) => {
                 trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
                 self.metrics.pruner_runs.increment(1);
-                self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
             EnginePruneEvent::TaskDropped => {
                 error!(target: "consensus::engine", "Failed to receive spawned pruner");
@@ -1362,8 +1361,8 @@ where
             EnginePruneEvent::Finished { result } => {
                 trace!(target: "consensus::engine", ?result, "Pruner finished");
                 match result {
-                    Ok(_) => self.sync_state_updater.update_sync_state(SyncState::Idle),
-                    // Any pipeline error at this point is fatal.
+                    Ok(_) => (),
+                    // Any pruner error at this point is fatal.
                     Err(error) => return Some(Err(error.into())),
                 };
             }
