@@ -26,3 +26,15 @@ As an example, you could install the Linux x86_64 version like so:
 1. Test the binary with `./reth --version` (it should print the version).
 2. (Optional) Move the `reth` binary to a location in your `PATH`, so the `reth` command can be called from anywhere.  
    For most Linux distros, you can move the binary to `/usr/local/bin`: `sudo cp ./reth /usr/local/bin`.
+
+Alternatively, you can use [binstall](https://github.com/cargo-bins/cargo-binstall) to install and load the binary:
+
+1. To install `binstall`, run: 
+   ```bash
+   curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+   ```
+2. Then, install `reth` with:
+   ```bash
+   cargo binstall reth
+   ```
+
