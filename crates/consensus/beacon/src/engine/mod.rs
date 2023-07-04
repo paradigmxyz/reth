@@ -1463,11 +1463,7 @@ where
                             return Poll::Ready(res)
                         }
                     }
-                    Some(Poll::Pending) | None => {
-                        if engine_messages_pending && sync_pending {
-                            return Poll::Pending
-                        }
-                    }
+                    Some(Poll::Pending) | None => return Poll::Pending,
                 }
             }
         }
