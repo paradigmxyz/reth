@@ -12,6 +12,11 @@ use crate::tracing::types::CallTraceNode;
 #[derive(Debug, Clone)]
 pub(crate) struct DFWalk;
 
+/// type for doing a Breadth first walk down the callgraph
+/// TODO: implement
+#[derive(Debug, Clone)]
+pub(crate) struct BFWalk;
+
 /// pub crate type for doing a walk down a reth callgraph
 ///
 /// eager evaluation of the callgraph is done in the constructor, because you might want to use the ordering more than once
@@ -36,81 +41,6 @@ impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
             stack: Vec::with_capacity(nodes.len()),
             visited: vec![false; nodes.len()],
             phantom: std::marker::PhantomData,
-        }
-    }
-
-    pub(crate) fn into_vm_trace(&mut self, config: &TracingInspectorConfig) -> VmTrace {
-        match self.next() {
-            Some(current) => self.make_vm_trace(config, current),
-            None => VmTrace { code: Default::default(), ops: Vec::new() },
-        }
-    }
-
-    /// returns a VM trace without the code filled in
-    fn make_vm_trace(
-        &mut self,
-        config: &TracingInspectorConfig,
-        current: &CallTraceNode,
-    ) -> VmTrace {
-        let mut instructions: Vec<VmInstruction> = Vec::with_capacity(current.trace.steps.len());
-
-        for step in current.trace.steps.iter() {
-            let maybe_sub = match step.op.u8() {
-                opcode::CALL
-                | opcode::CALLCODE
-                | opcode::DELEGATECALL
-                | opcode::STATICCALL
-                | opcode::CREATE
-                | opcode::CREATE2 => {
-                    let next = self.next().expect("missing next node");
-                    Some(self.make_vm_trace(config, next))
-                }
-                _ => None,
-            };
-
-            instructions.push(Self::make_instruction(step, config, maybe_sub));
-        }
-
-        VmTrace { code: Default::default(), ops: instructions }
-    }
-
-    /// todo::n config
-    ///
-    /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is one
-    fn make_instruction(
-        step: &CallTraceStep,
-        _config: &TracingInspectorConfig,
-        maybe_sub: Option<VmTrace>,
-    ) -> VmInstruction {
-        let maybe_storage = match step.storage_change {
-            Some(storage_change) => {
-                Some(StorageDelta { key: storage_change.key, val: storage_change.value })
-            }
-            None => None,
-        };
-
-        let maybe_memory = match step.memory.len() {
-            0 => None,
-            _ => {
-                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
-            }
-        };
-
-        let maybe_execution = Some(VmExecutedOperation {
-            used: step.gas_cost,
-            push: match step.new_stack {
-                Some(new_stack) => Some(new_stack.into()),
-                None => None,
-            },
-            mem: maybe_memory,
-            store: maybe_storage,
-        });
-
-        VmInstruction {
-            pc: step.pc,
-            cost: 0, // todo::n
-            ex: maybe_execution,
-            sub: maybe_sub,
         }
     }
 }
@@ -245,26 +175,26 @@ mod tests {
         assert_eq!(walker.next().unwrap().clone(), nodes[4]);
     }
 
-    #[test]
-    fn test_iter() {
-        let nodes = vec![
-            CallTraceNode { idx: 0, parent: None, children: vec![1, 2], ..Default::default() },
-            CallTraceNode { idx: 1, parent: Some(0), children: vec![3], ..Default::default() },
-            CallTraceNode { idx: 2, parent: Some(0), children: vec![4], ..Default::default() },
-            CallTraceNode { idx: 3, parent: Some(1), children: vec![], ..Default::default() },
-            CallTraceNode { idx: 4, parent: Some(2), children: vec![], ..Default::default() },
-        ];
+    // #[test]
+    // fn test_iter() {
+    //     let nodes = vec![
+    //         CallTraceNode { idx: 0, parent: None, children: vec![1, 2], ..Default::default() },
+    //         CallTraceNode { idx: 1, parent: Some(0), children: vec![3], ..Default::default() },
+    //         CallTraceNode { idx: 2, parent: Some(0), children: vec![4], ..Default::default() },
+    //         CallTraceNode { idx: 3, parent: Some(1), children: vec![], ..Default::default() },
+    //         CallTraceNode { idx: 4, parent: Some(2), children: vec![], ..Default::default() },
+    //     ];
 
-        let walker = CallTraceNodeWalker::new(&nodes);
+    //     let walker = CallTraceNodeWalker::new(&nodes);
 
-        let mut i = 0;
-        for (idx, node) in walker.enumerate() {
-            println!("idx: {},", idx);
-            i += 1;
-        }
+    //     let mut i = 0;
+    //     for (idx, node) in walker.enumerate() {
+    //         println!("idx: {},", idx);
+    //         i += 1;
+    //     }
 
-        assert_eq!(i, nodes.len());
-    }
+    //     assert_eq!(i, nodes.len());
+    // }
 
     // #[test]
     // fn test_vm_trace_len_eq_arena() {

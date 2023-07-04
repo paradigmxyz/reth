@@ -1,12 +1,16 @@
 use super::walker::CallTraceNodeWalker;
-use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
+use crate::tracing::{
+    types::{CallTraceNode, CallTraceStep},
+    TracingInspectorConfig,
+};
 use reth_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
+    interpreter::opcode,
     primitives::{AccountInfo, ExecutionResult, ResultAndState},
 };
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 /// A type for creating parity style traces
 ///
@@ -236,7 +240,99 @@ impl ParityTraceBuilder {
     pub fn vm_trace(&self) -> VmTrace {
         let mut walker = CallTraceNodeWalker::new(&self.nodes);
 
-        walker.into_vm_trace(&self._config)
+        match self.nodes.get(0) {
+            Some(current) => self.make_vm_trace(current),
+            None => VmTrace { code: Default::default(), ops: Vec::new() },
+        }
+    }
+
+    /// returns a VM trace without the code filled in
+    fn make_vm_trace(&self, start: &CallTraceNode) -> VmTrace {
+        let mut child_idx_stack: Vec<usize> = Vec::with_capacity(self.nodes.len());
+        let mut sub_stack: VecDeque<Option<VmTrace>> = VecDeque::with_capacity(self.nodes.len());
+
+        let mut current = start;
+        let mut child_idx: usize = 0;
+        let instructions = loop {
+            match current.children.get(child_idx) {
+                Some(child) => {
+                    child_idx_stack.push(child_idx + 1);
+
+                    child_idx = 0;
+                    current = self.nodes.get(*child).expect("missing child");
+                }
+                None => {
+                    let mut instructions: Vec<VmInstruction> =
+                        Vec::with_capacity(current.trace.steps.len());
+
+                    for step in &current.trace.steps {
+                        let maybe_sub = match step.op.u8() {
+                            opcode::CALL
+                            | opcode::CALLCODE
+                            | opcode::DELEGATECALL
+                            | opcode::STATICCALL
+                            | opcode::CREATE
+                            | opcode::CREATE2 => sub_stack.pop_front().expect("missing sub trace"),
+                            _ => None,
+                        };
+
+                        instructions.push(Self::make_instruction(step, maybe_sub));
+                    }
+
+                    match current.parent {
+                        Some(parent) => {
+                            sub_stack.push_back(Some(VmTrace {
+                                code: Default::default(),
+                                ops: instructions,
+                            }));
+
+                            child_idx = child_idx_stack.pop().expect("missing child idx");
+
+                            current = self.nodes.get(parent).expect("missing parent");
+                        }
+                        None => break instructions,
+                    }
+                }
+            }
+        };
+
+        VmTrace { code: Default::default(), ops: instructions }
+    }
+
+    /// todo::n config
+    ///
+    /// Creates a VM instruction from a [CallTraceStep] and a [VmTrace] for the subcall if there is one
+    fn make_instruction(step: &CallTraceStep, maybe_sub: Option<VmTrace>) -> VmInstruction {
+        let maybe_storage = match step.storage_change {
+            Some(storage_change) => {
+                Some(StorageDelta { key: storage_change.key, val: storage_change.value })
+            }
+            None => None,
+        };
+
+        let maybe_memory = match step.memory.len() {
+            0 => None,
+            _ => {
+                Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+            }
+        };
+
+        let maybe_execution = Some(VmExecutedOperation {
+            used: step.gas_cost,
+            push: match step.new_stack {
+                Some(new_stack) => Some(new_stack.into()),
+                None => None,
+            },
+            mem: maybe_memory,
+            store: maybe_storage,
+        });
+
+        VmInstruction {
+            pc: step.pc,
+            cost: 0, // todo::n
+            ex: maybe_execution,
+            sub: maybe_sub,
+        }
     }
 }
 
