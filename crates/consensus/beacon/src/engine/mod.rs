@@ -1416,6 +1416,7 @@ where
         // SyncController, hence they are polled first, and they're also time sensitive.
         loop {
             let mut engine_messages_pending = false;
+            let mut sync_pending = false;
 
             // handle next engine message
             match this.engine_message_rx.poll_next_unpin(cx) {
@@ -1454,27 +1455,26 @@ where
                     }
                 }
                 Poll::Pending => {
-                    if engine_messages_pending {
-                        // both the sync and the engine message receiver are pending
-                        return Poll::Pending
-                    }
+                    // no more sync events to process
+                    sync_pending = true;
                 }
             }
 
-            // process prune events if any
-            match this.prune.as_mut().map(|prune| prune.poll(cx)) {
-                Some(Poll::Ready(prune_event)) => {
-                    if let Some(res) = this.on_prune_event(prune_event) {
-                        return Poll::Ready(res)
+            // check prune events if pipeline is idle and both engine and sync events are pending
+            if this.sync.is_pipeline_idle() && engine_messages_pending & sync_pending {
+                // process prune events if any
+                match this.prune.as_mut().map(|prune| prune.poll(cx)) {
+                    Some(Poll::Ready(prune_event)) => {
+                        if let Some(res) = this.on_prune_event(prune_event) {
+                            return Poll::Ready(res)
+                        }
+                    }
+                    Some(Poll::Pending) | None => {
+                        if engine_messages_pending && sync_pending {
+                            return Poll::Pending
+                        }
                     }
                 }
-                Some(Poll::Pending) => {
-                    if engine_messages_pending {
-                        // both the pruner and the engine message receiver are pending
-                        return Poll::Pending
-                    }
-                }
-                None => (),
             }
         }
     }
