@@ -8,7 +8,7 @@ use reth_db::{
 };
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, Receipt, StorageEntry, H256, U256,
+    BlockNumber, Bloom, Bytecode, Log, PruneTargets, Receipt, StorageEntry, H256, U256,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
@@ -78,6 +78,8 @@ pub struct PostState {
     bytecode: BTreeMap<H256, Bytecode>,
     /// The receipt(s) of the executed transaction(s).
     receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
+    /// Pruning configuration.
+    pruning: PruneTargets,
 }
 
 impl PostState {
@@ -89,6 +91,11 @@ impl PostState {
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
     pub fn with_tx_capacity(block: BlockNumber, txs: usize) -> Self {
         Self { receipts: BTreeMap::from([(block, Vec::with_capacity(txs))]), ..Default::default() }
+    }
+
+    /// Add a pruning configuration.
+    pub fn add_pruning(&mut self, pruning: PruneTargets) {
+        self.pruning = pruning;
     }
 
     /// Return the current size of the poststate.
@@ -308,7 +315,10 @@ impl PostState {
             our_storage.storage.extend(their_storage.storage);
         }
 
-        self.receipts.extend(other.receipts);
+        self.receipts.extend(
+            other.receipts.into_iter().filter(|(k, _)| !self.pruning.should_prune_receipts(*k)),
+        );
+
         self.bytecode.extend(other.bytecode);
     }
 
@@ -622,14 +632,17 @@ impl PostState {
 
         // Write the receipts of the transactions
         tracing::trace!(target: "provider::post_state", len = self.receipts.len(), "Writing receipts");
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-        for (block, receipts) in self.receipts {
-            let (_, body_indices) = bodies_cursor.seek_exact(block)?.expect("body indices exist");
-            let tx_range = body_indices.tx_num_range();
-            assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
-            for (tx_num, receipt) in tx_range.zip(receipts) {
-                receipts_cursor.append(tx_num, receipt)?;
+        if !self.receipts.is_empty() {
+            let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+            let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+            for (block, receipts) in self.receipts {
+                let (_, body_indices) =
+                    bodies_cursor.seek_exact(block)?.expect("body indices exist");
+                let tx_range = body_indices.tx_num_range();
+                assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
+                for (tx_num, receipt) in tx_range.zip(receipts) {
+                    receipts_cursor.append(tx_num, receipt)?;
+                }
             }
         }
 

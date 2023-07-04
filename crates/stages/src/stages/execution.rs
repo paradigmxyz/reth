@@ -16,7 +16,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, U256,
+    BlockNumber, Header, PruneTargets, U256,
 };
 use reth_provider::{
     post_state::PostState, BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory,
@@ -69,19 +69,25 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     executor_factory: EF,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
+    /// Pruning configuration.
+    pruning: PruneTargets,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
-    pub fn new(executor_factory: EF, thresholds: ExecutionStageThresholds) -> Self {
-        Self { metrics: ExecutionStageMetrics::default(), executor_factory, thresholds }
+    pub fn new(
+        executor_factory: EF,
+        thresholds: ExecutionStageThresholds,
+        pruning: PruneTargets,
+    ) -> Self {
+        Self { metrics: ExecutionStageMetrics::default(), executor_factory, thresholds, pruning }
     }
 
     /// Create an execution stage with the provided  executor factory.
     ///
     /// The commit threshold will be set to 10_000.
     pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self::new(executor_factory, ExecutionStageThresholds::default())
+        Self::new(executor_factory, ExecutionStageThresholds::default(), PruneTargets::default())
     }
 
     /// Execute the stage.
@@ -108,6 +114,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
+        state.add_pruning(self.pruning);
+
         for block_number in start_block..=max_block {
             let td = provider
                 .header_td_by_number(block_number)?
@@ -420,7 +428,7 @@ mod tests {
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
-        ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
+        ChainSpecBuilder, PruneTargets, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
@@ -433,6 +441,7 @@ mod tests {
         ExecutionStage::new(
             factory,
             ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
+            PruneTargets::none(),
         )
     }
 

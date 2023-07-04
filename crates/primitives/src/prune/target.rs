@@ -2,7 +2,7 @@ use crate::{BlockNumber, PruneMode};
 use paste::paste;
 
 /// Prune target.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum PruneTarget {
     /// Prune all blocks, i.e. not save any data.
     All,
@@ -30,7 +30,7 @@ impl PruneTarget {
 }
 
 /// Pruning configuration for every part of the data that can be pruned.
-#[derive(Debug, Clone, Default, Copy)]
+#[derive(Debug, Clone, Default, Copy, Eq, PartialEq)]
 pub struct PruneTargets {
     /// Sender Recovery pruning configuration.
     pub sender_recovery: Option<PruneTarget>,
