@@ -30,10 +30,13 @@ pub(crate) struct CallTraceNodeWalker<'trace, W> {
 
 impl<'trace> CallTraceNodeWalker<'trace, DFWalk> {
     pub(crate) fn new(nodes: &'trace Vec<CallTraceNode>) -> Self {
+        let mut stack = Vec::with_capacity(nodes.len());
+        stack.push(0);
+
         Self {
             nodes,
             curr_idx: 0,
-            stack: Vec::with_capacity(nodes.len()),
+            stack,
             visited: vec![false; nodes.len()],
             phantom: std::marker::PhantomData,
         }
@@ -119,40 +122,30 @@ impl<'trace> Iterator for CallTraceNodeWalker<'trace, DFWalk> {
     type Item = &'trace CallTraceNode;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.visited[0] {
-            true => loop {
-                let next_child = match self.visited[self.curr_idx] {
-                    true => self.stack.pop().expect("stack value missing"),
-                    false => {
-                        self.visited[self.curr_idx] = true;
-                        0
-                    }
-                };
+        let mut next_child = 0;
+        loop {
+            if !self.visited[self.curr_idx] {
+                self.visited[self.curr_idx] = true;
+                return self.nodes.get(self.curr_idx);
+            }
 
-                let curr = self.nodes.get(self.curr_idx).expect("missing node");
+            let curr = self.nodes.get(self.curr_idx).expect("missing node");
 
-                match curr.children.get(next_child) {
-                    Some(child_idx) => {
-                        self.stack.push(next_child + 1);
+            match curr.children.get(next_child) {
+                Some(child_idx) => {
+                    self.stack.push(next_child + 1);
 
-                        self.curr_idx = *child_idx;
-
-                        return self.nodes.get(self.curr_idx);
-                    }
-                    None => match curr.parent {
-                        Some(parent_idx) => {
-                            self.curr_idx = parent_idx;
-                        }
-                        None => {
-                            return None;
-                        }
-                    },
+                    self.curr_idx = *child_idx;
                 }
-            },
-            false => {
-                self.visited[0] = true;
-                self.stack.push(0);
-                return self.nodes.get(0);
+                None => match curr.parent {
+                    Some(parent_idx) => {
+                        next_child = self.stack.pop().expect("missing stack");
+                        self.curr_idx = parent_idx;
+                    }
+                    None => {
+                        return None;
+                    }
+                },
             }
         }
     }
