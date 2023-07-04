@@ -91,7 +91,7 @@ where
             tip_block_number.saturating_sub(last_pruned_block_number) >= self.min_block_interval
         }) {
             debug!(
-                target: "prune",
+                target: "pruner",
                 last_pruned_block_number = ?self.last_pruned_block_number,
                 %tip_block_number,
                 "Minimum pruning interval reached"
