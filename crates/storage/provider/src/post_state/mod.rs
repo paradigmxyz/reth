@@ -258,7 +258,7 @@ impl PostState {
         &self,
         tx: &'a TX,
     ) -> Result<H256, StateRootError> {
-        let hashed_post_state = self.hash_state_slow();
+        let mut hashed_post_state = self.hash_state_slow().sorted();
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
         StateRoot::new(tx)

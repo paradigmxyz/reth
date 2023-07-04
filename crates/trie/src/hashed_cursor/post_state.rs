@@ -46,10 +46,16 @@ pub struct HashedPostState {
     /// Map of hashed addresses to hashed storage.
     pub storages: HashMap<H256, HashedStorage>,
     /// Whether the account and storage entries were sorted or not.
-    pub sorted: bool,
+    sorted: bool,
 }
 
 impl HashedPostState {
+    /// Sort and return self.
+    pub fn sorted(mut self) -> Self {
+        self.sort();
+        self
+    }
+
     /// Sort account and storage entries.
     pub fn sort(&mut self) {
         for (_, storage) in self.storages.iter_mut() {
