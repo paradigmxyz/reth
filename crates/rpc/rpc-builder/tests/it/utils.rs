@@ -29,7 +29,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         NoopProvider::default(),
         MAINNET.clone(),
         beacon_engine_handle,
-        spawn_test_payload_service().into(),
+        Some(spawn_test_payload_service().into()),
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()
