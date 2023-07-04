@@ -99,7 +99,10 @@ use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
 pub use crate::{
-    config::PoolConfig,
+    config::{
+        PoolConfig, SubPoolLimit, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+        TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    },
     error::PoolResult,
     ordering::{GasCostOrdering, TransactionOrdering},
     pool::TransactionEvents,
