@@ -33,7 +33,6 @@ members = [
     "crates/rpc/rpc-engine-api",
     "crates/rpc/rpc-types",
     "crates/rpc/rpc-testing-util",
-    "crates/staged-sync",
     "crates/stages",
     "crates/storage/codecs",
     "crates/storage/db",

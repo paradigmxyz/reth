@@ -1,3 +1,4 @@
+//! Reth genesis initialization utility functions.
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},

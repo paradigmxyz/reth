@@ -2,6 +2,7 @@
 use crate::{
     args::{get_secret_key, utils::genesis_value_parser, DatabaseArgs, NetworkArgs},
     dirs::{DataDirPath, MaybePlatformPath},
+    init::init_genesis,
     node::events,
     runner::CliContext,
     utils::get_single_header,
@@ -24,7 +25,6 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
 use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
-use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     sets::DefaultStages,
     stages::{

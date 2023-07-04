@@ -1,5 +1,6 @@
 use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
+    init::init_genesis,
     node::events::{handle_events, NodeEvent},
     version::SHORT_VERSION,
 };
@@ -18,7 +19,6 @@ use reth_downloaders::{
 };
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::{stage::StageId, ChainSpec, H256};
-use reth_staged_sync::utils::init::init_genesis;
 use reth_stages::{
     prelude::*,
     stages::{
