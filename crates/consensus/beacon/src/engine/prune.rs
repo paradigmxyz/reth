@@ -59,8 +59,8 @@ where
     /// This will try to spawn the pruner if it is idle:
     /// 1. Try to acquire the tip block number through [Pruner::check_tip].
     /// 2. If tip block number is ready, pass it to the [Pruner::run_as_fut] and spawn in a separate
-    /// task. Set pruner state to [PruneState::Running].
-    /// 3. If tip block number is not ready yet, set pruner state back to [PruneState::Idle].
+    /// task. Set pruner state to [PrunerState::Running].
+    /// 3. If tip block number is not ready yet, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
     fn try_spawn_pruner(&mut self) -> Option<EnginePruneEvent> {
