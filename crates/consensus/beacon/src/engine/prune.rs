@@ -63,13 +63,13 @@ where
     /// 3. If tip block number is not ready yet, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
-    fn try_spawn_pruner(&mut self) -> Option<EnginePruneEvent> {
+    fn try_spawn_pruner(&mut self, cx: &mut Context<'_>) -> Option<EnginePruneEvent> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
                 let mut pruner = pruner.take()?;
 
                 // Check tip for pruning
-                match pruner.check_tip() {
+                match pruner.check_tip(cx) {
                     // If tip is ready, start pruning
                     Some(tip_block_number) => {
                         trace!(target: "consensus::engine::prune", %tip_block_number, "Tip block number for pruning is acquired");
@@ -100,7 +100,7 @@ where
     /// Advances the prune process.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EnginePruneEvent> {
         // Try to spawn a pruner
-        if let Some(event) = self.try_spawn_pruner() {
+        if let Some(event) = self.try_spawn_pruner(cx) {
             return Poll::Ready(event)
         }
 

@@ -1,10 +1,14 @@
 //! Support for pruning.
 
 use crate::PrunerError;
-use futures_util::{FutureExt, Stream, StreamExt};
+use futures_util::Stream;
 use reth_primitives::BlockNumber;
 use reth_provider::CanonStateNotification;
-use std::{future::Future, pin::Pin};
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tracing::debug;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
@@ -67,9 +71,11 @@ where
     ///
     /// Returns `None` if either the stream is empty, or the minimum pruning interval check didn't
     /// pass.
-    pub fn check_tip(&mut self) -> Option<BlockNumber> {
+    pub fn check_tip(&mut self, cx: &mut Context<'_>) -> Option<BlockNumber> {
         let mut latest_canon_state = None;
-        while let Some(canon_state) = self.canon_state_stream.next().now_or_never().flatten() {
+        while let Poll::Ready(Some(canon_state)) =
+            Pin::new(&mut self.canon_state_stream).poll_next(cx)
+        {
             latest_canon_state = Some(canon_state);
         }
         let latest_canon_state = latest_canon_state?;
@@ -104,7 +110,7 @@ mod tests {
     use crate::Pruner;
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{test_utils::TestCanonStateSubscriptions, CanonStateSubscriptions, Chain};
-    use std::sync::Arc;
+    use std::{future::poll_fn, sync::Arc, task::Poll};
 
     #[tokio::test]
     async fn pruner_check_tip() {
@@ -112,7 +118,11 @@ mod tests {
         let mut pruner = Pruner::new(canon_state_stream.canonical_state_stream(), 5, 0);
 
         // Canonical state stream is empty
-        assert_eq!(pruner.check_tip().await, None);
+        poll_fn(|cx| {
+            assert_eq!(pruner.check_tip(cx), None);
+            Poll::Ready(())
+        })
+        .await;
 
         let mut chain = Chain::default();
 
@@ -122,7 +132,11 @@ mod tests {
         canon_state_stream.add_next_commit(Arc::new(chain.clone()));
 
         // No last pruned block number was set before
-        assert_eq!(pruner.check_tip().await, Some(first_block_number));
+        poll_fn(|cx| {
+            assert_eq!(pruner.check_tip(cx), Some(first_block_number));
+            Poll::Ready(())
+        })
+        .await;
 
         canon_state_stream.add_next_commit(Arc::new(chain.clone()));
         let mut second_block = SealedBlockWithSenders::default();
@@ -132,7 +146,11 @@ mod tests {
         canon_state_stream.add_next_commit(Arc::new(chain.clone()));
 
         // Delta is larger than min block interval
-        assert_eq!(pruner.check_tip().await, Some(second_block_number));
+        poll_fn(|cx| {
+            assert_eq!(pruner.check_tip(cx), Some(second_block_number));
+            Poll::Ready(())
+        })
+        .await;
 
         canon_state_stream.add_next_commit(Arc::new(chain.clone()));
         let mut third_block = SealedBlockWithSenders::default();
@@ -141,6 +159,10 @@ mod tests {
         canon_state_stream.add_next_commit(Arc::new(chain.clone()));
 
         // Delta is smaller than min block interval
-        assert_eq!(pruner.check_tip().await, None);
+        poll_fn(|cx| {
+            assert_eq!(pruner.check_tip(cx), None);
+            Poll::Ready(())
+        })
+        .await;
     }
 }
