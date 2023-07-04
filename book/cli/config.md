@@ -24,7 +24,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/leovct/Library/Caches/reth/logs]
+          [default: /Users/reth/Library/Caches/reth/logs]
 
       --log.journald
           Log events to journald

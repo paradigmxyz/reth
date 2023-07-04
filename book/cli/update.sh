@@ -39,7 +39,6 @@ update_main_doc() {
   local file_path="./book/cli/cli.md"
   local cmd_help_output=$($reth_path --help)
   sed -i -e '/## Commands/,$d' "$file_path"
-  rm "$file_path-e"
   cat >> "$file_path" << EOF
 ## Commands
 
@@ -111,11 +110,18 @@ EOF
 # Update the book CLI documentation.
 main() {
   update_main_doc
+
+  # Update commands doc.
   cmds=($(read_cmds_from_json "$json_file"))
   for cmd in "${cmds[@]}"; do
     subcmds=($(read_subcmds_from_json "$json_file" "$cmd"))
     update_cli_cmd "$cmd" "${subcmds[@]}"
   done
+
+  # Replace `/Users/**` path by `/Users/reth`.
+  sed -i -e 's/\/Users\/[^/]*\//\/Users\/reth\//g' ./book/cli/*.md
+  rm ./book/cli/*.md-e
+
   echo "Book updated successfully."
 }
 
