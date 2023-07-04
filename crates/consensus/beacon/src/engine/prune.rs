@@ -1,6 +1,7 @@
 //! Prune management for the engine implementation.
 
 use futures::{FutureExt, Stream};
+use reth_primitives::BlockNumber;
 use reth_provider::CanonStateNotification;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
@@ -79,7 +80,7 @@ where
                 match tip_block_number {
                     // If tip is ready, start pruning
                     Some(tip_block_number) => {
-                        trace!(target: "consensus::engine::prune", ?tip_block_number, "Tip block number for pruning is acquired");
+                        trace!(target: "consensus::engine::prune", %tip_block_number, "Tip block number for pruning is acquired");
 
                         let (tx, rx) = oneshot::channel();
                         self.pruner_task_spawner.spawn_critical_blocking(
@@ -91,7 +92,7 @@ where
                         );
                         self.pruner_state = PrunerState::Running(rx);
 
-                        Some(EnginePruneEvent::Started)
+                        Some(EnginePruneEvent::Started(tip_block_number))
                     }
                     // If tip is not ready yet, make pruner idle again
                     None => {
@@ -129,8 +130,8 @@ where
 pub(crate) enum EnginePruneEvent {
     /// Pruner is not ready
     NotReady,
-    /// Pruner started
-    Started,
+    /// Pruner started with tip block number
+    Started(BlockNumber),
     /// Pruner finished
     ///
     /// If this is returned, the pruner is idle.

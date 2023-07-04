@@ -1356,8 +1356,8 @@ where
     ) -> Option<Result<(), BeaconConsensusEngineError>> {
         match event {
             EnginePruneEvent::NotReady => {}
-            EnginePruneEvent::Started => {
-                trace!(target: "consensus::engine", "Pruner started");
+            EnginePruneEvent::Started(tip_block_number) => {
+                trace!(target: "consensus::engine", %tip_block_number, "Pruner started");
                 self.metrics.pruner_runs.increment(1);
                 self.sync_state_updater.update_sync_state(SyncState::Syncing);
             }
