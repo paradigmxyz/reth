@@ -16,7 +16,6 @@ reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] 
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { path = "../../crates/revm" }
 reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
-reth-staged-sync = { path = "../../crates/staged-sync" }
 reth-stages = { path = "../../crates/stages" }
 reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
 reth-transaction-pool = { workspace = true }

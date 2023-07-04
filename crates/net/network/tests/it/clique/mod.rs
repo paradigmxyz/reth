@@ -1,5 +1,3 @@
-//! Common helpers for staged sync integration testing.
-
 pub mod clique;
 pub mod clique_middleware;
 

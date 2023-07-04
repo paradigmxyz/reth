@@ -1,3 +1,4 @@
+use crate::clique::{CliqueGethInstance, CliqueMiddleware};
 use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, H160, U64},
     utils::Geth,
@@ -10,7 +11,6 @@ use reth_network::{
 use reth_network_api::Peers;
 use reth_primitives::{ChainSpec, Genesis, PeerId, SealedHeader};
 use reth_provider::test_utils::NoopProvider;
-use reth_staged_sync::test_utils::{CliqueGethInstance, CliqueMiddleware};
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc};
 
