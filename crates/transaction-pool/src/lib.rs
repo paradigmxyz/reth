@@ -103,7 +103,7 @@ pub use crate::{
     config::PoolConfig,
     error::PoolResult,
     ordering::{GasCostOrdering, TransactionOrdering},
-    pool::{AllTransactionsEvents, TransactionEvent, TransactionEventType, TransactionEvents},
+    pool::{AllTransactionsEvents, PoolTransactionEvent, TransactionEvent, TransactionEvents},
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
         NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,

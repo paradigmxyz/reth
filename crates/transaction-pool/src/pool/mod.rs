@@ -93,7 +93,7 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 mod events;
-pub use events::{TransactionEvent, TransactionEventType};
+pub use events::{PoolTransactionEvent, TransactionEvent};
 
 mod listener;
 pub use listener::{AllTransactionsEvents, TransactionEvents};

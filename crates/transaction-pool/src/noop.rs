@@ -74,7 +74,7 @@ impl TransactionPool for NoopTransactionPool {
     }
 
     fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
-        AllTransactionsEvents { events: mpsc::unbounded_channel().1 }
+        AllTransactionsEvents { events: mpsc::channel(1).1 }
     }
 
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
