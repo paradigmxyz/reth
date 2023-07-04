@@ -63,7 +63,7 @@ where
     }
 
     /// Drain canonical state stream to get the tip block number,
-    /// and check using against minimum pruning interval and last pruned block number.
+    /// and check against minimum pruning interval and last pruned block number.
     ///
     /// Returns `None` if either the stream is empty, or the minimum pruning interval check didn't
     /// pass.
