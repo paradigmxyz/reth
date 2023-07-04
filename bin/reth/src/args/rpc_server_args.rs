@@ -136,7 +136,7 @@ pub struct RpcServerArgs {
     pub rpc_max_tracing_requests: u32,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
-    #[arg(long, default_value_t = RPC_DEFAULT_GAS_CAP)]
+    #[arg(long = "rpc.gascap", default_value_t = RPC_DEFAULT_GAS_CAP)]
     pub rpc_gas_cap: u64,
 
     /// Gas price oracle configuration.
