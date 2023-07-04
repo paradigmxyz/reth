@@ -193,24 +193,34 @@ impl PostState {
     ///
     /// The hashed post state.
     pub fn hash_state_slow(&self) -> HashedPostState {
-        let mut accounts = BTreeMap::default();
+        let mut hashed_post_state = HashedPostState::default();
+
+        // Insert accounts with hashed keys from account changes.
         for (address, account) in self.accounts() {
-            accounts.insert(keccak256(address), *account);
-        }
-
-        let mut storages = BTreeMap::default();
-        for (address, storage) in self.storage() {
-            let mut hashed_storage = BTreeMap::default();
-            for (slot, value) in &storage.storage {
-                hashed_storage.insert(keccak256(H256(slot.to_be_bytes())), *value);
+            let hashed_address = keccak256(address);
+            if let Some(account) = account {
+                hashed_post_state.accounts.push((hashed_address, *account));
+            } else {
+                hashed_post_state.cleared_accounts.insert(hashed_address);
             }
-            storages.insert(
-                keccak256(address),
-                HashedStorage { wiped: storage.wiped(), storage: hashed_storage },
-            );
         }
 
-        HashedPostState { accounts, storages }
+        // Insert accounts and storages with hashed keys from storage changes.
+        for (address, storage) in self.storage() {
+            let mut hashed_storage = HashedStorage::new(storage.wiped());
+            for (slot, value) in &storage.storage {
+                let hashed_slot = H256(slot.to_be_bytes());
+                if *value == U256::ZERO {
+                    hashed_storage.zero_valued_slots.insert(hashed_slot);
+                } else {
+                    hashed_storage.non_zero_valued_storage.push((hashed_slot, *value));
+                }
+            }
+
+            hashed_post_state.storages.insert(keccak256(address), hashed_storage);
+        }
+
+        hashed_post_state
     }
 
     /// Calculate the state root for this [PostState].

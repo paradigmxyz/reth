@@ -6,27 +6,60 @@ use reth_db::{
     transaction::{DbTx, DbTxGAT},
 };
 use reth_primitives::{trie::Nibbles, Account, StorageEntry, H256, U256};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap, HashSet};
 
 /// The post state account storage with hashed slots.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct HashedStorage {
+    /// Hashed storage slots with non-zero.
+    pub non_zero_valued_storage: Vec<(H256, U256)>,
+    /// Slots that have been zero valued.
+    pub zero_valued_slots: HashSet<H256>,
     /// Whether the storage was wiped or not.
     pub wiped: bool,
-    /// Hashed storage slots.
-    pub storage: BTreeMap<H256, U256>,
+    /// Whether the storage entries were sorted or not.
+    pub sorted: bool,
+}
+
+impl HashedStorage {
+    /// Create new instance of [HashedStorage].
+    pub fn new(wiped: bool) -> Self {
+        Self { wiped, ..Default::default() }
+    }
+
+    /// Sorts the non zero value storage entries.
+    pub fn sort_storage(&mut self) {
+        if !self.sorted {
+            self.non_zero_valued_storage.sort_unstable_by_key(|(slot, _)| *slot);
+            self.sorted = true;
+        }
+    }
 }
 
 /// The post state with hashed addresses as keys.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct HashedPostState {
     /// Map of hashed addresses to account info.
-    pub accounts: BTreeMap<H256, Option<Account>>,
+    pub accounts: Vec<(H256, Account)>,
+    /// Set of cleared accounts.
+    pub cleared_accounts: HashSet<H256>,
     /// Map of hashed addresses to hashed storage.
-    pub storages: BTreeMap<H256, HashedStorage>,
+    pub storages: HashMap<H256, HashedStorage>,
+    /// Whether the account and storage entries were sorted or not.
+    pub sorted: bool,
 }
 
 impl HashedPostState {
+    /// Sort account and storage entries.
+    pub fn sort(&mut self) {
+        for (_, storage) in self.storages.iter_mut() {
+            storage.sort_storage();
+        }
+
+        self.accounts.sort_unstable_by_key(|(address, _)| *address);
+        self.sorted = true;
+    }
+
     /// Construct (PrefixSets)[PrefixSet] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
@@ -35,17 +68,24 @@ impl HashedPostState {
         let mut account_prefix_set = PrefixSet::default();
         let mut storage_prefix_set: HashMap<H256, PrefixSet> = HashMap::default();
 
-        for hashed_address in self.accounts.keys() {
+        // Populate account prefix set.
+        for (hashed_address, _) in &self.accounts {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+        }
+        for hashed_address in &self.cleared_accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
         }
 
+        // Populate storage prefix sets.
         for (hashed_address, hashed_storage) in self.storages.iter() {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
-            for hashed_slot in hashed_storage.storage.keys() {
-                storage_prefix_set
-                    .entry(*hashed_address)
-                    .or_default()
-                    .insert(Nibbles::unpack(hashed_slot));
+
+            let storage_prefix_set_entry = storage_prefix_set.entry(*hashed_address).or_default();
+            for (hashed_slot, _) in &hashed_storage.non_zero_valued_storage {
+                storage_prefix_set_entry.insert(Nibbles::unpack(hashed_slot));
+            }
+            for hashed_slot in &hashed_storage.zero_valued_slots {
+                storage_prefix_set_entry.insert(Nibbles::unpack(hashed_slot));
             }
         }
 
@@ -71,22 +111,17 @@ impl<'a, 'b, 'tx, TX: DbTx<'tx>> HashedCursorFactory<'a>
 where
     'a: 'b,
 {
-    type AccountCursor = HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>> where Self: 'a ;
+    type AccountCursor = HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>> where Self: 'a;
     type StorageCursor = HashedPostStateStorageCursor<'b, <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>> where Self: 'a;
 
     fn hashed_account_cursor(&'a self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         let cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
-        Ok(HashedPostStateAccountCursor { post_state: self.post_state, cursor, last_account: None })
+        Ok(HashedPostStateAccountCursor::new(cursor, self.post_state))
     }
 
     fn hashed_storage_cursor(&'a self) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
         let cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
-        Ok(HashedPostStateStorageCursor {
-            post_state: self.post_state,
-            cursor,
-            account: None,
-            last_slot: None,
-        })
+        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state))
     }
 }
 
@@ -98,22 +133,26 @@ pub struct HashedPostStateAccountCursor<'b, C> {
     cursor: C,
     /// The reference to the in-memory [HashedPostState].
     post_state: &'b HashedPostState,
+    /// The post state account index where the cursor is currently at.
+    post_state_account_index: usize,
     /// The last hashed account key that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_account: Option<H256>,
 }
 
-impl<'b, 'tx, C> HashedPostStateAccountCursor<'b, C>
-where
-    C: DbCursorRO<'tx, tables::HashedAccount>,
-{
+impl<'b, C> HashedPostStateAccountCursor<'b, C> {
+    /// Create new instance of [HashedPostStateAccountCursor].
+    pub fn new(cursor: C, post_state: &'b HashedPostState) -> Self {
+        Self { cursor, post_state, last_account: None, post_state_account_index: 0 }
+    }
+
     /// Returns `true` if the account has been destroyed.
     /// This check is used for evicting account keys from the state trie.
     ///
     /// This function only checks the post state, not the database, because the latter does not
     /// store destroyed accounts.
     fn is_account_cleared(&self, account: &H256) -> bool {
-        matches!(self.post_state.accounts.get(account), Some(None))
+        self.post_state.cleared_accounts.contains(account)
     }
 
     /// Return the account with the lowest hashed account key.
@@ -121,30 +160,28 @@ where
     /// Given the next post state and database entries, return the smallest of the two.
     /// If the account keys are the same, the post state entry is given precedence.
     fn next_account(
-        &self,
-        post_state_item: Option<(H256, Account)>,
+        post_state_item: Option<&(H256, Account)>,
         db_item: Option<(H256, Account)>,
-    ) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
-        let result = match (post_state_item, db_item) {
+    ) -> Option<(H256, Account)> {
+        match (post_state_item, db_item) {
             // If both are not empty, return the smallest of the two
             // Post state is given precedence if keys are equal
             (Some((post_state_address, post_state_account)), Some((db_address, db_account))) => {
-                if post_state_address <= db_address {
-                    Some((post_state_address, post_state_account))
+                if post_state_address <= &db_address {
+                    Some((*post_state_address, *post_state_account))
                 } else {
                     Some((db_address, db_account))
                 }
             }
             // If the database is empty, return the post state entry
             (Some((post_state_address, post_state_account)), None) => {
-                Some((post_state_address, post_state_account))
+                Some((*post_state_address, *post_state_account))
             }
             // If the post state is empty, return the database entry
             (None, Some((db_address, db_account))) => Some((db_address, db_account)),
             // If both are empty, return None
             (None, None) => None,
-        };
-        Ok(result)
+        }
     }
 }
 
@@ -161,35 +198,45 @@ where
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [HashedAccountCursor::seek] or [HashedAccountCursor::next] are called.
     fn seek(&mut self, key: H256) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
+        // TODO: remove
         self.last_account = None;
+        debug_assert!(self.post_state.sorted, "`HashedPostState` must be pre-sorted");
 
-        // Attempt to find the account in poststate.
-        let post_state_item = self
-            .post_state
-            .accounts
-            .iter()
-            .find_map(|(k, v)| v.filter(|_| k >= &key).map(|v| (*k, v)));
-        if let Some((address, account)) = post_state_item {
-            // It's an exact match, return the account from post state without looking up in the
-            // database.
-            if address == key {
-                self.last_account = Some(address);
-                return Ok(Some((address, account)))
+        // Take the next account from the post state with the key greater than or equal to the
+        // sought key.
+        let mut post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
+        while let Some((k, _)) = post_state_entry {
+            if k >= &key {
+                // Found the next entry that is equal or greater than the key.
+                break
+            }
+
+            self.post_state_account_index += 1;
+            post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
+        }
+
+        // It's an exact match, return the account from post state without looking up in the
+        // database.
+        if let Some((address, account)) = post_state_entry {
+            if address == &key {
+                self.last_account = Some(*address);
+                return Ok(Some((*address, *account)))
             }
         }
 
         // It's not an exact match, reposition to the first greater or equal account that wasn't
         // cleared.
-        let mut db_item = self.cursor.seek(key)?;
-        while db_item
+        let mut db_entry = self.cursor.seek(key)?;
+        while db_entry
             .as_ref()
             .map(|(address, _)| self.is_account_cleared(address))
             .unwrap_or_default()
         {
-            db_item = self.cursor.next()?;
+            db_entry = self.cursor.next()?;
         }
 
-        let result = self.next_account(post_state_item, db_item)?;
+        // Compare two entries and return the lowest.
+        let result = Self::next_account(post_state_entry, db_entry);
         self.last_account = result.as_ref().map(|(address, _)| *address);
         Ok(result)
     }
@@ -202,28 +249,38 @@ where
     /// NOTE: This function will not return any entry unless [HashedAccountCursor::seek] has been
     /// called.
     fn next(&mut self) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
+        debug_assert!(self.post_state.sorted, "`HashedPostState` must be pre-sorted");
+
         let last_account = match self.last_account.as_ref() {
             Some(account) => account,
             None => return Ok(None), // no previous entry was found
         };
 
         // If post state was given precedence, move the cursor forward.
-        let mut db_item = self.cursor.current()?;
-        while db_item
+        let mut db_entry = self.cursor.current()?;
+        while db_entry
             .as_ref()
             .map(|(address, _)| address <= last_account || self.is_account_cleared(address))
             .unwrap_or_default()
         {
-            db_item = self.cursor.next()?;
+            db_entry = self.cursor.next()?;
         }
 
-        let post_state_item = self
-            .post_state
-            .accounts
-            .iter()
-            .find(|(k, v)| k > &last_account && v.is_some())
-            .map(|(address, info)| (*address, info.unwrap()));
-        let result = self.next_account(post_state_item, db_item)?;
+        // Take the next account from the post state with the key greater than or equal to the
+        // sought key.
+        let mut post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
+        while let Some((k, _)) = post_state_entry {
+            if k > &last_account {
+                // Found the next entry in the post state.
+                break
+            }
+
+            self.post_state_account_index += 1;
+            post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
+        }
+
+        // Compare two entries and return the lowest.
+        let result = Self::next_account(post_state_entry, db_entry);
         self.last_account = result.as_ref().map(|(address, _)| *address);
         Ok(result)
     }
@@ -237,6 +294,8 @@ pub struct HashedPostStateStorageCursor<'b, C> {
     cursor: C,
     /// The reference to the post state.
     post_state: &'b HashedPostState,
+    /// The post state index where the cursor is currently at.
+    post_state_storage_index: usize,
     /// The current hashed account key.
     account: Option<H256>,
     /// The last slot that has been returned by the cursor.
@@ -245,6 +304,11 @@ pub struct HashedPostStateStorageCursor<'b, C> {
 }
 
 impl<'b, C> HashedPostStateStorageCursor<'b, C> {
+    /// Create new instance of [HashedPostStateStorageCursor].
+    pub fn new(cursor: C, post_state: &'b HashedPostState) -> Self {
+        Self { cursor, post_state, account: None, last_slot: None, post_state_storage_index: 0 }
+    }
+
     /// Returns `true` if the storage for the given
     /// The database is not checked since it already has no wiped storage entries.
     fn is_db_storage_wiped(&self, account: &H256) -> bool {
@@ -256,12 +320,11 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
 
     /// Check if the slot was zeroed out in the post state.
     /// The database is not checked since it already has no zero-valued slots.
-    fn is_touched_slot_value_zero(&self, account: &H256, slot: &H256) -> bool {
+    fn is_slot_zero_valued(&self, account: &H256, slot: &H256) -> bool {
         self.post_state
             .storages
             .get(account)
-            .and_then(|storage| storage.storage.get(slot))
-            .map(|value| *value == U256::ZERO)
+            .map(|storage| storage.zero_valued_slots.contains(slot))
             .unwrap_or_default()
     }
 
@@ -271,10 +334,10 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     /// If the storage keys are the same, the post state entry is given precedence.
     fn next_slot(
         &self,
-        post_state_item: Option<(&H256, &U256)>,
+        post_state_item: Option<&(H256, U256)>,
         db_item: Option<StorageEntry>,
-    ) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
-        let result = match (post_state_item, db_item) {
+    ) -> Option<StorageEntry> {
+        match (post_state_item, db_item) {
             // If both are not empty, return the smallest of the two
             // Post state is given precedence if keys are equal
             (Some((post_state_slot, post_state_value)), Some(db_entry)) => {
@@ -292,8 +355,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
             (None, Some(db_entry)) => Some(db_entry),
             // If both are empty, return None
             (None, None) => None,
-        };
-        Ok(result)
+        }
     }
 }
 
@@ -311,7 +373,7 @@ where
                 // If the storage has been wiped at any point
                 storage.wiped &&
                     // and the current storage does not contain any non-zero values 
-                    storage.storage.iter().all(|(_, value)| *value == U256::ZERO)
+                    storage.non_zero_valued_storage.is_empty()
             }
             None => self.cursor.seek_exact(key)?.is_none(),
         };
@@ -324,24 +386,34 @@ where
         account: H256,
         subkey: H256,
     ) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
-        self.last_slot = None;
-        self.account = Some(account);
+        if self.account.map_or(true, |acc| acc != account) {
+            self.account = Some(account);
+            self.last_slot = None;
+            self.post_state_storage_index = 0;
+        }
 
-        // Attempt to find the account's storage in poststate.
-        let post_state_item = self
-            .post_state
-            .storages
-            .get(&account)
-            .map(|storage| {
-                storage
-                    .storage
-                    .iter()
-                    .skip_while(|(slot, value)| slot < &&subkey || value == &&U256::ZERO)
-            })
-            .and_then(|mut iter| iter.next());
-        if let Some((slot, value)) = post_state_item {
-            // It's an exact match, return the storage slot from post state without looking up in
-            // the database.
+        // Attempt to find the account's storage in post state.
+        let mut post_state_entry = None;
+        if let Some(storage) = self.post_state.storages.get(&account) {
+            debug_assert!(storage.sorted, "`HashStorage` must be pre-sorted");
+
+            post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
+
+            while let Some((slot, _)) = post_state_entry {
+                if slot >= &subkey {
+                    // Found the next entry that is equal or greater than the key.
+                    break
+                }
+
+                self.post_state_storage_index += 1;
+                post_state_entry =
+                    storage.non_zero_valued_storage.get(self.post_state_storage_index);
+            }
+        }
+
+        // It's an exact match, return the storage slot from post state without looking up in
+        // the database.
+        if let Some((slot, value)) = post_state_entry {
             if slot == &subkey {
                 self.last_slot = Some(*slot);
                 return Ok(Some(StorageEntry { key: *slot, value: *value }))
@@ -349,23 +421,24 @@ where
         }
 
         // It's not an exact match, reposition to the first greater or equal account.
-        let db_item = if self.is_db_storage_wiped(&account) {
+        let db_entry = if self.is_db_storage_wiped(&account) {
             None
         } else {
-            let mut db_item = self.cursor.seek_by_key_subkey(account, subkey)?;
+            let mut db_entry = self.cursor.seek_by_key_subkey(account, subkey)?;
 
-            while db_item
+            while db_entry
                 .as_ref()
-                .map(|entry| self.is_touched_slot_value_zero(&account, &entry.key))
+                .map(|entry| self.is_slot_zero_valued(&account, &entry.key))
                 .unwrap_or_default()
             {
-                db_item = self.cursor.next_dup_val()?;
+                db_entry = self.cursor.next_dup_val()?;
             }
 
-            db_item
+            db_entry
         };
 
-        let result = self.next_slot(post_state_item, db_item)?;
+        // Compare two entries and return the lowest.
+        let result = self.next_slot(post_state_entry, db_entry);
         self.last_slot = result.as_ref().map(|entry| entry.key);
         Ok(result)
     }
@@ -384,40 +457,49 @@ where
             None => return Ok(None), // no previous entry was found
         };
 
-        let db_item = if self.is_db_storage_wiped(&account) {
+        let db_entry = if self.is_db_storage_wiped(&account) {
             None
         } else {
             // If post state was given precedence, move the cursor forward.
-            let mut db_item = self.cursor.seek_by_key_subkey(account, *last_slot)?;
+            let mut db_entry = self.cursor.seek_by_key_subkey(account, *last_slot)?;
 
             // If the entry was already returned, move to the next.
-            if db_item.as_ref().map(|entry| &entry.key == last_slot).unwrap_or_default() {
-                db_item = self.cursor.next_dup_val()?;
+            if db_entry.as_ref().map(|entry| &entry.key == last_slot).unwrap_or_default() {
+                db_entry = self.cursor.next_dup_val()?;
             }
 
-            while db_item
+            while db_entry
                 .as_ref()
-                .map(|entry| self.is_touched_slot_value_zero(&account, &entry.key))
+                .map(|entry| self.is_slot_zero_valued(&account, &entry.key))
                 .unwrap_or_default()
             {
-                db_item = self.cursor.next_dup_val()?;
+                db_entry = self.cursor.next_dup_val()?;
             }
 
-            db_item
+            db_entry
         };
 
-        let post_state_item = self
-            .post_state
-            .storages
-            .get(&account)
-            .map(|storage| {
-                storage
-                    .storage
-                    .iter()
-                    .skip_while(|(slot, value)| slot <= &last_slot || value == &&U256::ZERO)
-            })
-            .and_then(|mut iter| iter.next());
-        let result = self.next_slot(post_state_item, db_item)?;
+        // Attempt to find the account's storage in post state.
+        let mut post_state_entry = None;
+        if let Some(storage) = self.post_state.storages.get(&account) {
+            debug_assert!(storage.sorted, "`HashStorage` must be pre-sorted");
+
+            post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
+
+            while let Some((k, _)) = post_state_entry {
+                if k > &last_slot {
+                    // Found the next entry.
+                    break
+                }
+
+                self.post_state_storage_index += 1;
+                post_state_entry =
+                    storage.non_zero_valued_storage.get(self.post_state_storage_index);
+            }
+        }
+
+        // Compare two entries and return the lowest.
+        let result = self.next_slot(post_state_entry, db_entry);
         self.last_slot = result.as_ref().map(|entry| entry.key);
         Ok(result)
     }
@@ -691,7 +773,10 @@ mod tests {
                     address,
                     HashedStorage {
                         wiped: true,
-                        storage: BTreeMap::from_iter([(H256::random(), U256::ZERO)]),
+                        non_zero_valued_storage: BTreeMap::from_iter([(
+                            H256::random(),
+                            U256::ZERO,
+                        )]),
                     },
                 )]),
             };
@@ -709,7 +794,10 @@ mod tests {
                     address,
                     HashedStorage {
                         wiped: true,
-                        storage: BTreeMap::from_iter([(H256::random(), U256::from(1))]),
+                        non_zero_valued_storage: BTreeMap::from_iter([(
+                            H256::random(),
+                            U256::from(1),
+                        )]),
                     },
                 )]),
             };
@@ -745,7 +833,7 @@ mod tests {
             accounts: Default::default(),
             storages: BTreeMap::from([(
                 address,
-                HashedStorage { wiped: false, storage: post_state_storage.clone() },
+                HashedStorage { wiped: false, non_zero_valued_storage: post_state_storage.clone() },
             )]),
         };
 
@@ -781,7 +869,7 @@ mod tests {
             accounts: Default::default(),
             storages: BTreeMap::from([(
                 address,
-                HashedStorage { wiped: false, storage: post_state_storage.clone() },
+                HashedStorage { wiped: false, non_zero_valued_storage: post_state_storage.clone() },
             )]),
         };
         let tx = db.tx().unwrap();
@@ -816,7 +904,7 @@ mod tests {
             accounts: Default::default(),
             storages: BTreeMap::from([(
                 address,
-                HashedStorage { wiped: true, storage: post_state_storage.clone() },
+                HashedStorage { wiped: true, non_zero_valued_storage: post_state_storage.clone() },
             )]),
         };
 
@@ -849,7 +937,7 @@ mod tests {
             accounts: Default::default(),
             storages: BTreeMap::from([(
                 address,
-                HashedStorage { wiped: false, storage: storage.clone() },
+                HashedStorage { wiped: false, non_zero_valued_storage: storage.clone() },
             )]),
         };
 
@@ -882,7 +970,7 @@ mod tests {
                 accounts: Default::default(),
                 storages: BTreeMap::from_iter(post_state_storages.iter().map(
                     |(address, (wiped, storage))| {
-                        (*address, HashedStorage { wiped: *wiped, storage: storage.clone() })
+                        (*address, HashedStorage { wiped: *wiped, non_zero_valued_storage: storage.clone() })
                     },
                 )),
             };
