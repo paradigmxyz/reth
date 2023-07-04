@@ -595,8 +595,7 @@ where
             warn!(
                 target: "consensus::engine",
                 "Pruning in progress, skipping forkchoice update. \
-                This may affect the performance of your node as a validator, \
-                please tune the pruning settings."
+                This may affect the performance of your node as a validator."
             );
             return Ok(OnForkChoiceUpdated::syncing())
         }
@@ -867,13 +866,8 @@ where
             // we can only insert new payloads if the pipeline and the pruner are _not_ running,
             // because they hold exclusive access to the database
             self.try_insert_new_payload(block)
-        } else if !self.is_prune_idle() {
-            warn!(
-                target: "consensus::engine",
-                "Pruning in progress, skipping new payload. \
-                This may affect the performance of your node as a validator, \
-                please tune the pruning settings."
-            );
+        } else if self.is_prune_active() {
+            warn!(target: "consensus::engine", "Pruning is in progress, buffering new payload.");
             self.try_buffer_payload(block)
         } else {
             self.try_buffer_payload(block)
@@ -936,12 +930,12 @@ where
         Ok(block)
     }
 
-    /// When the pipeline is actively syncing the tree is unable to commit any additional blocks
-    /// since the pipeline holds exclusive access to the database.
+    /// When the pipeline or the pruner is active, the tree is unable to commit any additional
+    /// blocks since the pipeline holds exclusive access to the database.
     ///
     /// In this scenario we buffer the payload in the tree if the payload is valid, once the
-    /// pipeline finished syncing the tree is then able to also use the buffered payloads to commit
-    /// to a (newer) canonical chain.
+    /// pipeline or pruner is finished, the tree is then able to also use the buffered payloads to
+    /// commit to a (newer) canonical chain.
     ///
     /// This will return `SYNCING` if the block was buffered successfully, and an error if an error
     /// occurred while buffering the block.
@@ -956,7 +950,7 @@ where
 
     /// Attempts to insert a new payload into the tree.
     ///
-    /// Caution: This expects that the pipeline is idle.
+    /// Caution: This expects that the pipeline and the pruner are idle.
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
@@ -1383,9 +1377,9 @@ where
         self.prune.as_ref().map(|prune| prune.is_pruner_idle()).unwrap_or(true)
     }
 
-    /// Returns `true` if the prune controller's pruner is idle.
+    /// Returns `true` if the prune controller's pruner is active.
     fn is_prune_active(&self) -> bool {
-        self.prune.as_ref().map(|prune| prune.is_pruner_active()).unwrap_or(false)
+        !self.is_prune_idle()
     }
 }
 
