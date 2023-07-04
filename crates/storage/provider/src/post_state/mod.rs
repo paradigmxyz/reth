@@ -209,7 +209,7 @@ impl PostState {
         for (address, storage) in self.storage() {
             let mut hashed_storage = HashedStorage::new(storage.wiped());
             for (slot, value) in &storage.storage {
-                let hashed_slot = H256(slot.to_be_bytes());
+                let hashed_slot = keccak256(H256(slot.to_be_bytes()));
                 if *value == U256::ZERO {
                     hashed_storage.insert_zero_valued_slot(hashed_slot);
                 } else {
@@ -1842,7 +1842,7 @@ mod tests {
             .map(|key| {
                 let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
                 let storage =
-                    (0..10).map(|key| (H256::from_low_u64_be(key), U256::from(key))).collect();
+                    (1..11).map(|key| (H256::from_low_u64_be(key), U256::from(key))).collect();
                 (Address::from_low_u64_be(key), (account, storage))
             })
             .collect();
