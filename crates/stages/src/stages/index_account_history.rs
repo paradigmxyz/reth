@@ -79,6 +79,12 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner,
     };
+    use itertools::Itertools;
+    use reth_db::{cursor::DbCursorRO, models::sharded_key, transaction::DbTx};
+    use reth_interfaces::test_utils::generators::{
+        random_block_range, random_contract_account_range, random_transition_range,
+    };
+    use reth_primitives::{Address, BlockNumber, H256};
 
     stage_test_suite_ext!(IndexAccountHistoryTestRunner, index_account_history);
     use reth_db::{
@@ -390,27 +396,25 @@ mod tests {
         type Seed = ();
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let stage_process = input.checkpoint().block_number;
+            let start = stage_process + 1;
             let end = input.target();
-            self.tx
-                .commit(|tx| {
-                    // we just need first and last
-                    tx.put::<tables::BlockBodyIndices>(
-                        0,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )
-                    .unwrap();
+            let num_of_accounts = 31;
+            let accounts = random_contract_account_range(&mut (0..num_of_accounts))
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
 
-                    tx.put::<tables::BlockBodyIndices>(
-                        end,
-                        StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
-                    )
-                    .unwrap();
+            let blocks = random_block_range(start..=end, H256::zero(), 0..3);
 
-                    // setup changeset that are going to be applied to history index
-                    tx.put::<tables::AccountChangeSet>(end, acc()).unwrap();
-                    Ok(())
-                })
-                .unwrap();
+            let (transitions, _) = random_transition_range(
+                blocks.iter(),
+                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                0..3,
+                0..256,
+            );
+
+            // add block changeset from block 1.
+            self.tx.insert_transitions(transitions, Some(start))?;
 
             Ok(())
         }
@@ -431,11 +435,56 @@ mod tests {
                     output,
                     ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true }
                 );
+
+                let provider = self.tx.inner();
+                let mut changeset_cursor =
+                    provider.tx_ref().cursor_read::<tables::AccountChangeSet>()?;
+
+                let account_transitions =
+                    changeset_cursor.walk_range(start_block..=end_block)?.try_fold(
+                        BTreeMap::new(),
+                        |mut accounts: BTreeMap<Address, Vec<u64>>,
+                         entry|
+                         -> Result<_, TestRunnerError> {
+                            let (index, account) = entry?;
+                            accounts.entry(account.address).or_default().push(index);
+                            Ok(accounts)
+                        },
+                    )?;
+
+                let mut result = BTreeMap::new();
+                for (address, indices) in account_transitions {
+                    // chunk indices and insert them in shards of N size.
+                    let mut chunks = indices
+                        .iter()
+                        .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
+                        .into_iter()
+                        .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
+                        .collect::<Vec<_>>();
+                    let last_chunk = chunks.pop();
+
+                    chunks.into_iter().try_for_each(|list| -> Result<_, TestRunnerError> {
+                        result.insert(
+                            ShardedKey::new(
+                                address,
+                                *list.last().expect("Chuck does not return empty list")
+                                    as BlockNumber,
+                            ) as ShardedKey<H160>,
+                            list,
+                        );
+                        Ok(())
+                    })?;
+
+                    if let Some(last_list) = last_chunk {
+                        result.insert(
+                            ShardedKey::new(address, u64::MAX) as ShardedKey<H160>,
+                            last_list,
+                        );
+                    };
+                }
+
                 let table = cast(self.tx.table::<tables::AccountHistory>().unwrap());
-                assert_eq!(
-                    table,
-                    BTreeMap::from([(shard(u64::MAX), vec![input.target() as usize])])
-                );
+                assert_eq!(table, result);
             }
             Ok(())
         }
