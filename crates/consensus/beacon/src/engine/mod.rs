@@ -592,7 +592,12 @@ where
         if self.is_prune_active() {
             // We can only process new forkchoice updates if the pruner is idle, since it requires
             // exclusive access to the database
-            trace!(target: "consensus::engine", "Pruning in progress, skipping forkchoice update");
+            warn!(
+                target: "consensus::engine",
+                "Pruning in progress, skipping forkchoice update. \
+                This may affect the performance of your node as a validator, \
+                please tune the pruning settings."
+            );
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
@@ -862,6 +867,14 @@ where
             // we can only insert new payloads if the pipeline and the pruner are _not_ running,
             // because they hold exclusive access to the database
             self.try_insert_new_payload(block)
+        } else if !self.is_prune_idle() {
+            warn!(
+                target: "consensus::engine",
+                "Pruning in progress, skipping new payload. \
+                This may affect the performance of your node as a validator, \
+                please tune the pruning settings."
+            );
+            self.try_buffer_payload(block)
         } else {
             self.try_buffer_payload(block)
         };
