@@ -15,7 +15,7 @@ pub use debug_args::DebugArgs;
 mod secret_key;
 pub use secret_key::{get_secret_key, SecretKeyError};
 
-/// MinerArgs struct for configuring the miner
+/// PayloadBuilderArgs struct for configuring the payload builder
 mod payload_builder_args;
 pub use payload_builder_args::PayloadBuilderArgs;
 
@@ -23,7 +23,12 @@ pub use payload_builder_args::PayloadBuilderArgs;
 mod stage_args;
 pub use stage_args::StageEnum;
 
+/// Gas price oracle related arguments
 mod gas_price_oracle_args;
-pub mod utils;
-
 pub use gas_price_oracle_args::GasPriceOracleArgs;
+
+/// TxPoolArgs for congiguring the transaction pool
+mod txpool_args;
+pub use txpool_args::TxPoolArgs;
+
+pub mod utils;
