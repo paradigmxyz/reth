@@ -66,7 +66,7 @@ where
             PrunerState::Idle(pruner) => {
                 let mut pruner = pruner.take()?;
 
-                trace!(target: "consensus::engine::prune", "Checking tip...");
+                // Check tip for pruning
                 let tip_block_number = {
                     let check_tip_fut = pruner.check_tip();
                     tokio::pin!(check_tip_fut);
@@ -75,10 +75,12 @@ where
                         Poll::Pending => None,
                     }
                 };
-                trace!(target: "consensus::engine::prune", ?tip_block_number, "Checked tip");
 
                 match tip_block_number {
+                    // If tip is ready, start pruning
                     Some(tip_block_number) => {
+                        trace!(target: "consensus::engine::prune", ?tip_block_number, "Tip block number for pruning is acquired");
+
                         let (tx, rx) = oneshot::channel();
                         self.pruner_task_spawner.spawn_critical_blocking(
                             "pruner task",
@@ -91,6 +93,7 @@ where
 
                         Some(EnginePruneEvent::Started)
                     }
+                    // If tip is not ready yet, make pruner idle again
                     None => {
                         self.pruner_state = PrunerState::Idle(Some(pruner));
                         Some(EnginePruneEvent::NotReady)
