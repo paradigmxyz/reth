@@ -232,7 +232,7 @@ where
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
-    payload_builder: PayloadBuilderHandle,
+    payload_builder: Option<PayloadBuilderHandle>,
     /// Listeners for engine events.
     listeners: EventListeners<BeaconConsensusEngineEvent>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
@@ -270,7 +270,7 @@ where
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
-        payload_builder: PayloadBuilderHandle,
+        payload_builder: Option<PayloadBuilderHandle>,
         target: Option<H256>,
         pipeline_run_threshold: u64,
     ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
@@ -312,7 +312,7 @@ where
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
-        payload_builder: PayloadBuilderHandle,
+        payload_builder: Option<PayloadBuilderHandle>,
         target: Option<H256>,
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
@@ -586,9 +586,10 @@ where
                     debug!(target: "consensus::engine", fcu_head_num=?outcome.header().number, current_head_num=?self.blockchain.canonical_tip().number, "Ignoring beacon update to old head");
                 }
 
-                if let Some(attrs) = attrs {
+                if let Some((builder, attrs)) = self.payload_builder.as_ref().zip(attrs) {
                     // the CL requested to build a new payload on top of this new VALID head
                     let payload_response = self.process_payload_attributes(
+                        builder,
                         attrs,
                         outcome.into_header().unseal(),
                         state,
@@ -768,6 +769,7 @@ where
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
+        payload_builder: &PayloadBuilderHandle,
         attrs: PayloadAttributes,
         head: Header,
         state: ForkchoiceState,
@@ -789,7 +791,7 @@ where
 
         // send the payload to the builder and return the receiver for the pending payload id,
         // initiating payload job is handled asynchronously
-        let pending_payload_id = self.payload_builder.send_new_payload(attributes);
+        let pending_payload_id = payload_builder.send_new_payload(attributes);
 
         // Client software MUST respond to this method call in the following way:
         // {
@@ -1580,7 +1582,7 @@ mod tests {
                 Box::<NoopSyncStateUpdater>::default(),
                 None,
                 false,
-                payload_builder,
+                Some(payload_builder),
                 None,
                 self.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
             )

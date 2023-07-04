@@ -10,8 +10,13 @@ use std::{ffi::OsStr, time::Duration};
 /// Parameters for configuring the Payload Builder
 #[derive(Debug, Args, PartialEq, Default)]
 pub struct PayloadBuilderArgs {
+    /// Disable built-in payload builder.
+    /// NOTE: Ideally, this argument should be exclusive within this ArgGroup. Ref <https://github.com/clap-rs/clap/issues/2621>.
+    #[arg(long = "builder.disable", help_heading = "Builder")]
+    pub disabled: bool,
+
     /// Block extra data set by the payload builder.
-    #[arg(long = "builder.extradata", help_heading = "Builder", value_parser=ExtradataValueParser::default(),  default_value_t = default_extradata())]
+    #[arg(long = "builder.extradata", help_heading = "Builder", value_parser = ExtradataValueParser::default(), default_value_t = default_extradata())]
     pub extradata: String,
 
     /// Target gas ceiling for built blocks.

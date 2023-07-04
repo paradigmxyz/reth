@@ -269,22 +269,27 @@ impl Command {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        let payload_generator = BasicPayloadJobGenerator::new(
-            blockchain_db.clone(),
-            transaction_pool.clone(),
-            ctx.task_executor.clone(),
-            BasicPayloadJobGeneratorConfig::default()
-                .interval(self.builder.interval)
-                .deadline(self.builder.deadline)
-                .max_payload_tasks(self.builder.max_payload_tasks)
-                .extradata(self.builder.extradata_bytes())
-                .max_gas_limit(self.builder.max_gas_limit),
-            Arc::clone(&self.chain),
-        );
-        let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
+        let payload_builder = if self.builder.disabled {
+            None
+        } else {
+            let payload_generator = BasicPayloadJobGenerator::new(
+                blockchain_db.clone(),
+                transaction_pool.clone(),
+                ctx.task_executor.clone(),
+                BasicPayloadJobGeneratorConfig::default()
+                    .interval(self.builder.interval)
+                    .deadline(self.builder.deadline)
+                    .max_payload_tasks(self.builder.max_payload_tasks)
+                    .extradata(self.builder.extradata_bytes())
+                    .max_gas_limit(self.builder.max_gas_limit),
+                Arc::clone(&self.chain),
+            );
+            let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
 
-        debug!(target: "reth::cli", "Spawning payload builder service");
-        ctx.task_executor.spawn_critical("payload builder service", payload_service);
+            debug!(target: "reth::cli", "Spawning payload builder service");
+            ctx.task_executor.spawn_critical("payload builder service", payload_service);
+            Some(payload_builder)
+        };
 
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
@@ -393,7 +398,7 @@ impl Command {
             blockchain_db.clone(),
             self.chain.clone(),
             beacon_engine_handle,
-            payload_builder.into(),
+            payload_builder.map(Into::into),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 

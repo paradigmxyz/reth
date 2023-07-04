@@ -11,7 +11,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ExecutionPayloadEnvelope, ForkchoiceUpdated,
     PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 use tokio::sync::oneshot;
 use tracing::trace;
 
@@ -31,7 +31,7 @@ pub struct EngineApi<Provider> {
     /// The channel to send messages to the beacon consensus engine.
     beacon_consensus: BeaconConsensusEngineHandle,
     /// The type that can communicate with the payload service to retrieve payloads.
-    payload_store: PayloadStore,
+    payload_store: Option<PayloadStore>,
 }
 
 impl<Provider> EngineApi<Provider>
@@ -43,7 +43,7 @@ where
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
         beacon_consensus: BeaconConsensusEngineHandle,
-        payload_store: PayloadStore,
+        payload_store: Option<PayloadStore>,
     ) -> Self {
         Self { provider, chain_spec, beacon_consensus, payload_store }
     }
@@ -125,12 +125,13 @@ where
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     pub async fn get_payload_v1(&self, payload_id: PayloadId) -> EngineApiResult<ExecutionPayload> {
-        Ok(self
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v1_payload())?)
+        if let Some(store) = &self.payload_store {
+            if let Some(payload) = store.resolve(payload_id).await {
+                return Ok(payload?.deref().clone().into_v1_payload())
+            }
+        }
+
+        Err(EngineApiError::UnknownPayload)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -144,12 +145,13 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelope> {
-        Ok(self
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v2_payload())?)
+        if let Some(store) = &self.payload_store {
+            if let Some(payload) = store.resolve(payload_id).await {
+                return Ok(payload?.deref().clone().into_v2_payload())
+            }
+        }
+
+        Err(EngineApiError::UnknownPayload)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -451,7 +453,7 @@ mod tests {
             provider.clone(),
             chain_spec.clone(),
             BeaconConsensusEngineHandle::new(to_engine),
-            payload_store.into(),
+            Some(payload_store.into()),
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
