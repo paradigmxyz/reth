@@ -373,3 +373,236 @@ impl<DB: Database> PipelineState<DB> {
         matches!(self, PipelineState::Idle(_))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+    use futures::poll;
+    use reth_db::{
+        mdbx::{Env, WriteMap},
+        test_utils::create_test_rw_db,
+    };
+    use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
+    use reth_primitives::{
+        stage::StageCheckpoint, BlockBody, ChainSpec, ChainSpecBuilder, SealedHeader, MAINNET,
+    };
+    use reth_provider::{test_utils::TestExecutorFactory, PostState};
+    use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+    use reth_tasks::TokioTaskExecutor;
+    use std::{collections::VecDeque, future::poll_fn, sync::Arc};
+    use tokio::sync::watch;
+
+    struct TestPipelineBuilder {
+        pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
+        executor_results: Vec<PostState>,
+        max_block: Option<BlockNumber>,
+    }
+
+    impl TestPipelineBuilder {
+        /// Create a new [TestPipelineBuilder].
+        fn new() -> Self {
+            Self {
+                pipeline_exec_outputs: VecDeque::new(),
+                executor_results: Vec::new(),
+                max_block: None,
+            }
+        }
+
+        /// Set the pipeline execution outputs to use for the test consensus engine.
+        fn with_pipeline_exec_outputs(
+            mut self,
+            pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
+        ) -> Self {
+            self.pipeline_exec_outputs = pipeline_exec_outputs;
+            self
+        }
+
+        /// Set the executor results to use for the test consensus engine.
+        #[allow(dead_code)]
+        fn with_executor_results(mut self, executor_results: Vec<PostState>) -> Self {
+            self.executor_results = executor_results;
+            self
+        }
+
+        /// Sets the max block for the pipeline to run.
+        #[allow(dead_code)]
+        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+            self.max_block = Some(max_block);
+            self
+        }
+
+        /// Builds the pipeline.
+        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<Env<WriteMap>>> {
+            reth_tracing::init_test_tracing();
+            let db = create_test_rw_db();
+
+            let executor_factory = TestExecutorFactory::new(chain_spec.clone());
+            executor_factory.extend(self.executor_results);
+
+            // Setup pipeline
+            let (tip_tx, _tip_rx) = watch::channel(H256::default());
+            let mut pipeline = Pipeline::builder()
+                .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
+                .with_tip_sender(tip_tx);
+
+            if let Some(max_block) = self.max_block {
+                pipeline = pipeline.with_max_block(max_block);
+            }
+
+            pipeline.build(db, chain_spec)
+        }
+    }
+
+    struct TestSyncControllerBuilder<Client> {
+        max_block: Option<BlockNumber>,
+        client: Option<Client>,
+    }
+
+    impl<Client> TestSyncControllerBuilder<Client> {
+        /// Create a new [TestSyncControllerBuilder].
+        fn new() -> Self {
+            Self { max_block: None, client: None }
+        }
+
+        /// Sets the max block for the pipeline to run.
+        #[allow(dead_code)]
+        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+            self.max_block = Some(max_block);
+            self
+        }
+
+        /// Sets the client to use for network operations.
+        fn with_client(mut self, client: Client) -> Self {
+            self.client = Some(client);
+            self
+        }
+
+        /// Builds the sync controller.
+        fn build<DB>(
+            self,
+            pipeline: Pipeline<DB>,
+        ) -> EngineSyncController<DB, EitherDownloader<Client, TestFullBlockClient>>
+        where
+            DB: Database + 'static,
+            Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+        {
+            let client = self
+                .client
+                .map(EitherDownloader::Left)
+                .unwrap_or_else(|| EitherDownloader::Right(TestFullBlockClient::default()));
+
+            EngineSyncController::new(
+                pipeline,
+                client,
+                Box::<TokioTaskExecutor>::default(),
+                // run_pipeline_continuously: false here until we want to test this
+                false,
+                self.max_block,
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn pipeline_started_after_setting_target() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+
+        let client = TestFullBlockClient::default();
+        let mut header = SealedHeader::default();
+        let body = BlockBody::default();
+        client.insert(header.clone(), body.clone());
+        for _ in 0..10 {
+            header.parent_hash = header.hash_slow();
+            header.number += 1;
+            header = header.header.seal_slow();
+            client.insert(header.clone(), body.clone());
+        }
+
+        // force the pipeline to be "done" after 5 blocks
+        let pipeline = TestPipelineBuilder::new()
+            .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                checkpoint: StageCheckpoint::new(5),
+                done: true,
+            })]))
+            .build(chain_spec);
+
+        let mut sync_controller =
+            TestSyncControllerBuilder::new().with_client(client.clone()).build(pipeline);
+
+        let tip = client.highest_block().expect("there should be blocks here");
+        sync_controller.set_pipeline_sync_target(tip.hash);
+
+        let sync_future = poll_fn(|cx| sync_controller.poll(cx));
+        let next_event = poll!(sync_future);
+
+        // can assert that the first event here is PipelineStarted because we set the sync target,
+        // and we should get Ready because the pipeline should be spawned immediately
+        assert_matches!(next_event, Poll::Ready(EngineSyncEvent::PipelineStarted(Some(target))) => {
+            assert_eq!(target, tip.hash);
+        });
+
+        // the next event should be the pipeline finishing in a good state
+        let sync_future = poll_fn(|cx| sync_controller.poll(cx));
+        let next_ready = sync_future.await;
+        assert_matches!(next_ready, EngineSyncEvent::PipelineFinished { result, reached_max_block } => {
+            assert_matches!(result, Ok(control_flow) => assert_eq!(control_flow, ControlFlow::Continue { block_number: 5 }));
+            // no max block configured
+            assert!(!reached_max_block);
+        });
+    }
+
+    #[tokio::test]
+    async fn controller_sends_range_request() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+
+        let client = TestFullBlockClient::default();
+        let mut header = SealedHeader::default();
+        let body = BlockBody::default();
+        for _ in 0..10 {
+            header.parent_hash = header.hash_slow();
+            header.number += 1;
+            header = header.header.seal_slow();
+            client.insert(header.clone(), body.clone());
+        }
+
+        // set up a pipeline
+        let pipeline = TestPipelineBuilder::new().build(chain_spec);
+
+        let mut sync_controller =
+            TestSyncControllerBuilder::new().with_client(client.clone()).build(pipeline);
+
+        let tip = client.highest_block().expect("there should be blocks here");
+
+        // call the download range method
+        sync_controller.download_block_range(tip.hash, tip.number);
+
+        // ensure we have one in flight range request
+        assert_eq!(sync_controller.inflight_block_range_requests.len(), 1);
+
+        // ensure the range request is made correctly
+        let first_req = sync_controller.inflight_block_range_requests.first().unwrap();
+        assert_eq!(first_req.start_hash(), tip.hash);
+        assert_eq!(first_req.count(), tip.number);
+
+        // ensure they are in ascending order
+        for num in 1..=10 {
+            let sync_future = poll_fn(|cx| sync_controller.poll(cx));
+            let next_ready = sync_future.await;
+            assert_matches!(next_ready, EngineSyncEvent::FetchedFullBlock(block) => {
+                assert_eq!(block.number, num);
+            });
+        }
+    }
+}
