@@ -7,21 +7,23 @@ use proptest::{
     test_runner::{basic_result_cache, TestRunner},
 };
 use reth_primitives::trie::Nibbles;
-use reth_trie::prefix_set::PrefixSet;
+use reth_trie::prefix_set::PrefixSetMut;
 use std::collections::BTreeSet;
 
+/// Abstractions used for benching
 pub trait PrefixSetAbstraction: Default {
     fn insert(&mut self, key: Nibbles);
     fn contains(&mut self, key: Nibbles) -> bool;
 }
 
-impl PrefixSetAbstraction for PrefixSet {
+/// Abstractions used for benching
+impl PrefixSetAbstraction for PrefixSetMut {
     fn insert(&mut self, key: Nibbles) {
         self.insert(key)
     }
 
     fn contains(&mut self, key: Nibbles) -> bool {
-        PrefixSet::contains(self, key)
+        PrefixSetMut::contains(self, key)
     }
 }
 
