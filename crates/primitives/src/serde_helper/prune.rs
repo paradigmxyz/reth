@@ -16,7 +16,8 @@ pub fn deserialize_opt_prune_mode_with_min_distance<
         Some(PruneMode::Distance(distance)) if distance < MIN_DISTANCE => {
             Err(serde::de::Error::invalid_value(
                 serde::de::Unexpected::Unsigned(distance),
-                &"prune mode distance is below minimum allowed value",
+                // This message should have "expected" wording, so we say "not less than"
+                &format!("prune mode distance not less than {MIN_DISTANCE} blocks").as_str(),
             ))
         }
         _ => Ok(prune_mode),
@@ -42,7 +43,7 @@ mod test {
         assert!(serde_json::from_str::<V>(r#"{"distance": 10}"#).is_ok());
         assert_matches!(
             serde_json::from_str::<V>(r#"{"distance": 9}"#),
-            Err(err) if err.to_string() == "invalid value: integer `9`, expected prune mode distance is below minimum allowed value"
+            Err(err) if err.to_string() == "invalid value: integer `9`, expected prune mode distance not less than 10 blocks"
         );
     }
 }
