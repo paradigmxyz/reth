@@ -64,6 +64,7 @@ impl Pruner {
 mod tests {
     use crate::Pruner;
 
+    #[test]
     fn pruner_is_pruning_needed() {
         let pruner = Pruner::new(5, 0);
 
