@@ -83,15 +83,12 @@ To run Reth with Docker Compose, run the following command from a shell inside t
 docker compose -f etc/docker-compose.yml -f etc/lighthouse.yml up -d
 ```
 
-> **Note:**
-> If you want to run Reth without Lighthouse:
-> - the JWT for the consensus client can be found at path `etc/jwttoken/jwt.hex` of this repository, after the `etc/generate-jwt.sh` script is run
-> - the Reth Engine API is accessible on `localhost:8551`
-> - start Docker Compose without the `etc/lighthouse.yml` file:
-> ```bash
-> ./etc/generate-jwt.sh
-> docker compose -f etc/docker-compose.yml up -d
-> ```
+> **Note**
+>
+> If you want to run Reth with a CL that is not Lighthouse:
+>
+> - The JWT for the consensus client can be found at `etc/jwttoken/jwt.hex` in this repository, after the `etc/generate-jwt.sh` script is run
+> - The Reth Engine API is accessible on `localhost:8551`
 
 To check if Reth is running correctly, run:
 
