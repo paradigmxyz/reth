@@ -138,6 +138,7 @@ impl TaskSpawner for TokioTaskExecutor {
 /// diagnostic purposes, since tokio task essentially fail silently. Therefore, this type is a
 /// Stream that yields the name of panicked task, See [`TaskExecutor::spawn_critical`]. In order to
 /// execute Tasks use the [`TaskExecutor`] type [`TaskManager::executor`].
+#[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
     /// Handle to the tokio runtime this task manager is associated with.
     ///

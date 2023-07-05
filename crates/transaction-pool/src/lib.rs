@@ -148,17 +148,19 @@ use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
-use traits::TransactionPoolExt;
 
 pub use crate::{
-    config::PoolConfig,
+    config::{
+        PoolConfig, SubPoolLimit, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+        TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    },
     error::PoolResult,
     ordering::{GasCostOrdering, TransactionOrdering},
-    pool::TransactionEvents,
+    pool::{AllTransactionsEvents, PoolTransactionEvent, TransactionEvent, TransactionEvents},
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
         NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
-        PropagatedTransactions, TransactionOrigin, TransactionPool,
+        PropagatedTransactions, TransactionOrigin, TransactionPool, TransactionPoolExt,
     },
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
@@ -166,18 +168,20 @@ pub use crate::{
     },
 };
 
-mod config;
 pub mod error;
-mod identifier;
 pub mod maintain;
 pub mod metrics;
-mod ordering;
+pub mod noop;
 pub mod pool;
-mod traits;
 pub mod validate;
 
+mod config;
+mod identifier;
+mod ordering;
+mod traits;
+
 #[cfg(any(test, feature = "test-utils"))]
-/// Common test helpers for mocking A pool
+/// Common test helpers for mocking a pool
 pub mod test_utils;
 
 // TX_SLOT_SIZE is used to calculate how many data slots a single transaction
@@ -346,12 +350,20 @@ where
         Ok(transactions)
     }
 
+    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
+        self.pool.add_transaction_event_listener(tx_hash)
+    }
+
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
+        self.pool.add_all_transactions_event_listener()
+    }
+
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
         self.pool.add_pending_listener()
     }
 
-    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
-        self.pool.add_transaction_listener()
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_new_transaction_listener()
     }
 
     fn pooled_transaction_hashes(&self) -> Vec<TxHash> {

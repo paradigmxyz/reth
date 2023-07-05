@@ -77,7 +77,7 @@ reth-tracing = { path = "../../tracing" }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 ethers-core = { workspace = true, default-features = false }
-ethers-providers = { workspace = true, default-features = false }
+ethers-providers = { workspace = true, default-features = false, features = ["ws"] }
 ethers-signers = { workspace = true, default-features = false }
 ethers-middleware = { workspace = true, default-features = false }
 

@@ -6,6 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
+use reth_primitives::fs;
 use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.
@@ -59,7 +60,7 @@ where
     T::Value: Default + Clone,
 {
     // Reset DB
-    let _ = std::fs::remove_dir_all(bench_db_path);
+    let _ = fs::remove_dir_all(bench_db_path);
     let db = Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap();
 
     {

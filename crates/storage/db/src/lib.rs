@@ -100,11 +100,12 @@ pub type DatabaseEnv = Env<WriteMap>;
 pub type DatabaseEnvRO = Env<NoWriteMap>;
 
 use eyre::WrapErr;
+use reth_interfaces::db::LogLevel;
 use std::path::Path;
 
 /// Opens up an existing database or creates a new one at the specified path. Creates tables if
 /// necessary. Read/Write mode.
-pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<DatabaseEnv> {
+pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
 
     let rpath = path.as_ref();
@@ -121,7 +122,7 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<DatabaseEnv> {
     }
     #[cfg(feature = "mdbx")]
     {
-        let db = DatabaseEnv::open(rpath, EnvKind::RW)?;
+        let db = DatabaseEnv::open(rpath, EnvKind::RW, log_level)?;
         db.create_tables()?;
         Ok(db)
     }
@@ -132,10 +133,10 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<DatabaseEnv> {
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
-pub fn open_db_read_only(path: &Path) -> eyre::Result<DatabaseEnvRO> {
+pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnvRO> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<NoWriteMap>::open(path, mdbx::EnvKind::RO)
+        Env::<NoWriteMap>::open(path, EnvKind::RO, log_level)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -146,10 +147,10 @@ pub fn open_db_read_only(path: &Path) -> eyre::Result<DatabaseEnvRO> {
 
 /// Opens up an existing database. Read/Write mode. It doesn't create it or create tables if
 /// missing.
-pub fn open_db(path: &Path) -> eyre::Result<DatabaseEnv> {
+pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<WriteMap>::open(path, mdbx::EnvKind::RW)
+        Env::<WriteMap>::open(path, EnvKind::RW, log_level)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -176,23 +177,23 @@ pub mod test_utils {
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<DatabaseEnv> {
         Arc::new(
-            init_db(tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path())
+            init_db(tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(), None)
                 .expect(ERROR_DB_CREATION),
         )
     }
 
     /// Create read/write database for testing
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<DatabaseEnv> {
-        Arc::new(init_db(path.as_ref()).expect(ERROR_DB_CREATION))
+        Arc::new(init_db(path.as_ref(), None).expect(ERROR_DB_CREATION))
     }
 
     /// Create read only database for testing
     pub fn create_test_ro_db() -> Arc<DatabaseEnvRO> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         {
-            init_db(path.as_path()).expect(ERROR_DB_CREATION);
+            init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
         }
-        Arc::new(open_db_read_only(path.as_path()).expect(ERROR_DB_OPEN))
+        Arc::new(open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN))
     }
 }
 
@@ -211,13 +212,13 @@ mod tests {
 
         // Database is empty
         {
-            let db = init_db(&path);
+            let db = init_db(&path, None);
             assert_matches!(db, Ok(_));
         }
 
         // Database is not empty, current version is the same as in the file
         {
-            let db = init_db(&path);
+            let db = init_db(&path, None);
             assert_matches!(db, Ok(_));
         }
 
@@ -225,7 +226,7 @@ mod tests {
         {
             std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
                 .unwrap();
-            let db = init_db(&path);
+            let db = init_db(&path, None);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
@@ -236,7 +237,7 @@ mod tests {
         // Database is not empty, version file contains not matching version
         {
             std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
-            let db = init_db(&path);
+            let db = init_db(&path, None);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),

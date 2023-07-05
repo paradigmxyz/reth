@@ -1,5 +1,11 @@
 /// Guarantees max transactions for one sender, compatible with geth/erigon
-pub(crate) const MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
+pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
+
+/// The default maximum allowed number of transactions in the given subpool.
+pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 10_000;
+
+/// The default maximum allowed size of the given subpool.
+pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
 
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
@@ -20,7 +26,7 @@ impl Default for PoolConfig {
             pending_limit: Default::default(),
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
-            max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
+            max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
         }
     }
 }
@@ -45,6 +51,9 @@ impl SubPoolLimit {
 impl Default for SubPoolLimit {
     fn default() -> Self {
         // either 10k transactions or 20MB
-        Self { max_txs: 10_000, max_size: 20 * 1024 * 1024 }
+        Self {
+            max_txs: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+            max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT * 1024 * 1024,
+        }
     }
 }

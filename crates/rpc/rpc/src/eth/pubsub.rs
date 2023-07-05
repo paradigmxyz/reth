@@ -284,7 +284,7 @@ where
                 let all_logs = logs_utils::matching_block_logs(
                     &filter,
                     block_receipts.block,
-                    block_receipts.tx_receipts.into_iter(),
+                    block_receipts.tx_receipts,
                     removed,
                 );
                 futures::stream::iter(all_logs)
