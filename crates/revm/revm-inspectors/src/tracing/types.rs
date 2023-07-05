@@ -6,8 +6,7 @@ use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
         Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
-        CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TraceResult,
-        TransactionTrace,
+        CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
     },
 };
 use revm::interpreter::{
@@ -321,9 +320,10 @@ impl CallTraceNode {
     /// Converts this node into a parity `TransactionTrace`
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
-        let output = TraceResult::parity_success(self.parity_trace_output());
+        let output = self.parity_trace_output();
         TransactionTrace {
             action,
+            error: None,
             result: Some(output),
             trace_address,
             subtraces: self.children.len(),
