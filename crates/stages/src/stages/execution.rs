@@ -119,7 +119,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
-        state.add_pruning(self.prune_targets);
+        state.add_prune_targets(self.prune_targets);
 
         for block_number in start_block..=max_block {
             let td = provider
