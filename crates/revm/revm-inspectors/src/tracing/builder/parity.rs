@@ -1,4 +1,4 @@
-use super::walker::{CallTraceNodeWalkerBF, CallTraceNodeWalkerDF};
+use super::walker::CallTraceNodeWalkerBF;
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
     TracingInspectorConfig,
