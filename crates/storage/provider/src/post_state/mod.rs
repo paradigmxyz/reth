@@ -315,9 +315,7 @@ impl PostState {
             our_storage.storage.extend(their_storage.storage);
         }
 
-        self.receipts.extend(
-            other.receipts.into_iter().filter(|(k, _)| !self.pruning.should_prune_receipts(*k)),
-        );
+        self.receipts.extend(other.receipts);
 
         self.bytecode.extend(other.bytecode);
     }
@@ -636,12 +634,14 @@ impl PostState {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
             for (block, receipts) in self.receipts {
-                let (_, body_indices) =
-                    bodies_cursor.seek_exact(block)?.expect("body indices exist");
-                let tx_range = body_indices.tx_num_range();
-                assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
-                for (tx_num, receipt) in tx_range.zip(receipts) {
-                    receipts_cursor.append(tx_num, receipt)?;
+                if !self.pruning.should_prune_receipts(block) {
+                    let (_, body_indices) =
+                        bodies_cursor.seek_exact(block)?.expect("body indices exist");
+                    let tx_range = body_indices.tx_num_range();
+                    assert_eq!(receipts.len(), tx_range.clone().count(), "Receipt length mismatch");
+                    for (tx_num, receipt) in tx_range.zip(receipts) {
+                        receipts_cursor.append(tx_num, receipt)?;
+                    }
                 }
             }
         }
