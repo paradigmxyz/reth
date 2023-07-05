@@ -406,6 +406,48 @@ where
         block > local_tip && block - local_tip > self.pipeline_run_threshold
     }
 
+    fn exceeds_pipeline_threshold(&self, canonical_tip_num: u64, target_block_number: u64) -> bool {
+        let sync_target_state = self.forkchoice_state_tracker.sync_target_state();
+
+        let mut exceeds_pipeline_run_threshold =
+            self.exceeds_pipeline_run_threshold(canonical_tip_num, target_block_number);
+
+        // check if the downloaded block is the tracked finalized block
+        if let Some(ref buffered_finalized) = sync_target_state
+            .as_ref().and_then(|state| self.blockchain.buffered_header_by_hash(state.finalized_block_hash))
+        {
+            // if we have buffered the finalized block, we should check how far
+            // we're off
+            exceeds_pipeline_run_threshold =
+                self.exceeds_pipeline_run_threshold(canonical_tip_num, buffered_finalized.number);
+        }
+
+        // if the number of missing blocks is greater than the max, run the
+        // pipeline
+        if exceeds_pipeline_run_threshold {
+            if let Some(state) = sync_target_state {
+                // if we have already canonicalized the finalized block, we should
+                // skip the pipeline run
+                match self.blockchain.header_by_hash_or_number(state.finalized_block_hash.into()) {
+                    Err(err) => {
+                        warn!(target: "consensus::engine", ?err, "Failed to get finalized block header");
+                    }
+                    Ok(None) => {
+                        // we don't have the block yet and the distance exceeds the allowed
+                        // threshold
+                        return true
+                    }
+                    Ok(Some(_)) => {
+                        // we're fully synced to the finalized block
+                        // but we want to continue downloading the missing parent
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
@@ -1319,6 +1361,13 @@ where
                     self.lowest_buffered_ancestor_or(sync_target_state.head_block_hash);
 
                 // this inserts the head if the lowest buffered ancestor is invalid
+                let is_invalid_head = self
+                    .check_invalid_ancestor_with_head(
+                        lowest_buffered_ancestor,
+                        sync_target_state.head_block_hash,
+                    )
+                    .is_some();
+
                 if self
                     .check_invalid_ancestor_with_head(
                         lowest_buffered_ancestor,
@@ -1326,6 +1375,9 @@ where
                     )
                     .is_none()
                 {
+                    // Check if we need to run another pipeline iteration
+                    if let Some(reached_block) = ctrl.progress() {}
+
                     // Update the state and hashes of the blockchain tree if possible.
                     match self
                         .update_tree_on_finished_pipeline(sync_target_state.finalized_block_hash)
