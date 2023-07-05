@@ -17,11 +17,17 @@ pub struct GetReceipts(
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
-#[derive_arbitrary(rlp, 1)]
+#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Receipts(
     /// Each receipt hash should correspond to a block hash in the request.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::collection::vec(proptest::arbitrary::any::<ReceiptWithBloom>(), 0..=50), 0..=5)"
+        )
+    )]
     pub Vec<Vec<ReceiptWithBloom>>,
 );
 

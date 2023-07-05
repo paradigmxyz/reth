@@ -277,25 +277,24 @@ mod tests {
                 }
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
                     let (flags, mut buf) = TestStructFlags::from(buf);
-                    let mut f_u64 = u64::default();
-                    (f_u64, buf) = u64::from_compact(buf, flags.f_u64_len() as usize);
-                    let mut f_u256 = U256::default();
-                    (f_u256, buf) = U256::from_compact(buf, flags.f_u256_len() as usize);
-                    let mut f_bool_t = bool::default();
-                    (f_bool_t, buf) = bool::from_compact(buf, flags.f_bool_t_len() as usize);
-                    let mut f_bool_f = bool::default();
-                    (f_bool_f, buf) = bool::from_compact(buf, flags.f_bool_f_len() as usize);
-                    let mut f_option_none = Option::default();
-                    (f_option_none, buf) = Option::from_compact(buf, flags.f_option_none_len() as usize);
-                    let mut f_option_some = Option::default();
-                    (f_option_some, buf) = Option::specialized_from_compact(buf, flags.f_option_some_len() as usize);
-                    let mut f_option_some_u64 = Option::default();
-                    (f_option_some_u64, buf) =
-                        Option::from_compact(buf, flags.f_option_some_u64_len() as usize);
-                    let mut f_vec_empty = Vec::default();
-                    (f_vec_empty, buf) = Vec::from_compact(buf, buf.len());
-                    let mut f_vec_some = Vec::default();
-                    (f_vec_some, buf) = Vec::specialized_from_compact(buf, buf.len());
+                    let (f_u64, new_buf) = u64::from_compact(buf, flags.f_u64_len() as usize);
+                    buf = new_buf;
+                    let (f_u256, new_buf) = U256::from_compact(buf, flags.f_u256_len() as usize);
+                    buf = new_buf;
+                    let (f_bool_t, new_buf) = bool::from_compact(buf, flags.f_bool_t_len() as usize);
+                    buf = new_buf;
+                    let (f_bool_f, new_buf) = bool::from_compact(buf, flags.f_bool_f_len() as usize);
+                    buf = new_buf;
+                    let (f_option_none, new_buf) = Option::from_compact(buf, flags.f_option_none_len() as usize);
+                    buf = new_buf;
+                    let (f_option_some, new_buf) = Option::specialized_from_compact(buf, flags.f_option_some_len() as usize);
+                    buf = new_buf;
+                    let (f_option_some_u64, new_buf) = Option::from_compact(buf, flags.f_option_some_u64_len() as usize);
+                    buf = new_buf;
+                    let (f_vec_empty, new_buf) = Vec::from_compact(buf, buf.len());
+                    buf = new_buf;
+                    let (f_vec_some, new_buf) = Vec::specialized_from_compact(buf, buf.len());
+                    buf = new_buf;
                     let obj = TestStruct {
                         f_u64: f_u64,
                         f_u256: f_u256,

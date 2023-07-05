@@ -16,11 +16,11 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    Block, BlockNumber, BlockWithSenders, Header, TransactionSigned, U256,
+    BlockNumber, Header, U256,
 };
 use reth_provider::{
-    post_state::PostState, BlockExecutor, BlockProvider, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, ProviderError, WithdrawalsProvider,
+    post_state::PostState, BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory,
+    HeaderProvider, LatestStateProviderRef, ProviderError,
 };
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
@@ -84,63 +84,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         Self::new(executor_factory, ExecutionStageThresholds::default())
     }
 
-    // TODO(joshie): This should be in the block provider trait once we consolidate
-    fn read_block_with_senders<DB: Database>(
-        provider: &DatabaseProviderRW<'_, &DB>,
-        block_number: BlockNumber,
-    ) -> Result<(BlockWithSenders, U256), StageError> {
-        let header = provider
-            .header_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        let td = provider
-            .header_td_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        let ommers = provider.ommers(block_number.into())?.unwrap_or_default();
-        let withdrawals = provider.withdrawals_by_block(block_number.into(), header.timestamp)?;
-
-        // Get the block body
-        let body = provider.block_body_indices(block_number)?;
-        let tx_range = body.tx_num_range();
-
-        // Get the transactions in the body
-        let tx = provider.tx_ref();
-        let (transactions, senders) = if tx_range.is_empty() {
-            (Vec::new(), Vec::new())
-        } else {
-            let transactions = tx
-                .cursor_read::<tables::Transactions>()?
-                .walk_range(tx_range.clone())?
-                .map(|entry| entry.map(|tx| tx.1))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let senders = tx
-                .cursor_read::<tables::TxSenders>()?
-                .walk_range(tx_range)?
-                .map(|entry| entry.map(|sender| sender.1))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            (transactions, senders)
-        };
-
-        let body = transactions
-            .into_iter()
-            .map(|tx| {
-                TransactionSigned {
-                    // TODO: This is the fastest way right now to make everything just work with
-                    // a dummy transaction hash.
-                    hash: Default::default(),
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                }
-            })
-            .collect();
-        Ok((Block { header, body, ommers, withdrawals }.with_senders(senders), td))
-    }
-
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -162,7 +109,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Execute block range
         let mut state = PostState::default();
         for block_number in start_block..=max_block {
-            let (block, td) = Self::read_block_with_senders(provider, block_number)?;
+            let td = provider
+                .header_td_by_number(block_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            let block = provider
+                .block_with_senders(block_number)?
+                .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
@@ -310,7 +262,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Execute the stage
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         // For Ethereum transactions that reaches the max call depth (1024) revm can use more stack
@@ -337,7 +289,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -401,7 +353,10 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         // Look up the start index for the transaction range
-        let first_tx_num = provider.block_body_indices(*range.start())?.first_tx_num();
+        let first_tx_num = provider
+            .block_body_indices(*range.start())?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(*range.start()))?
+            .first_tx_num();
 
         let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
@@ -462,15 +417,12 @@ mod tests {
     use super::*;
     use crate::test_utils::TestTransaction;
     use assert_matches::assert_matches;
-    use reth_db::{
-        mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
-        models::AccountBeforeTx,
-    };
+    use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
         ChainSpecBuilder, SealedBlock, StorageEntry, H160, H256, MAINNET, U256,
     };
-    use reth_provider::{insert_canonical_block, ShareableDatabase};
+    use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
     use reth_rlp::Decodable;
     use std::sync::Arc;
@@ -486,9 +438,9 @@ mod tests {
 
     #[test]
     fn execution_checkpoint_matches() {
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let db = ShareableDatabase::new(state_db.as_ref(), MAINNET.clone());
-        let tx = db.provider_rw().unwrap();
+        let state_db = create_test_rw_db();
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let tx = factory.provider_rw().unwrap();
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
@@ -511,16 +463,16 @@ mod tests {
 
     #[test]
     fn execution_checkpoint_precedes() {
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let db = ShareableDatabase::new(state_db.as_ref(), MAINNET.clone());
-        let mut provider = db.provider_rw().unwrap();
+        let state_db = create_test_rw_db();
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(provider.tx_mut(), genesis, None).unwrap();
-        insert_canonical_block(provider.tx_mut(), block.clone(), None).unwrap();
+        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(block.clone(), None).unwrap();
         provider.commit().unwrap();
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
@@ -532,7 +484,7 @@ mod tests {
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
         };
 
-        let provider = db.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
@@ -547,16 +499,16 @@ mod tests {
 
     #[test]
     fn execution_checkpoint_recalculate_full_previous_some() {
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let db = ShareableDatabase::new(state_db.as_ref(), MAINNET.clone());
-        let mut provider = db.provider_rw().unwrap();
+        let state_db = create_test_rw_db();
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(provider.tx_mut(), genesis, None).unwrap();
-        insert_canonical_block(provider.tx_mut(), block.clone(), None).unwrap();
+        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(block.clone(), None).unwrap();
         provider.commit().unwrap();
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
@@ -568,7 +520,7 @@ mod tests {
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
         };
 
-        let provider = db.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
@@ -583,21 +535,21 @@ mod tests {
 
     #[test]
     fn execution_checkpoint_recalculate_full_previous_none() {
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let db = ShareableDatabase::new(state_db.as_ref(), MAINNET.clone());
-        let mut provider = db.provider_rw().unwrap();
+        let state_db = create_test_rw_db();
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(provider.tx_mut(), genesis, None).unwrap();
-        insert_canonical_block(provider.tx_mut(), block.clone(), None).unwrap();
+        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(block.clone(), None).unwrap();
         provider.commit().unwrap();
 
         let previous_checkpoint = StageCheckpoint { block_number: 1, stage_checkpoint: None };
 
-        let provider = db.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
@@ -613,9 +565,9 @@ mod tests {
     async fn sanity_execution_of_block() {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let db = ShareableDatabase::new(state_db.as_ref(), MAINNET.clone());
-        let mut provider = db.provider_rw().unwrap();
+        let state_db = create_test_rw_db();
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
         let input = ExecInput {
             target: Some(1),
             /// The progress of this stage the last time it was executed.
@@ -625,13 +577,14 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(provider.tx_mut(), genesis, None).unwrap();
-        insert_canonical_block(provider.tx_mut(), block.clone(), None).unwrap();
+        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(block.clone(), None).unwrap();
         provider.commit().unwrap();
 
         // insert pre state
-        let mut provider = db.provider_rw().unwrap();
-        let db_tx = provider.tx_mut();
+        let provider = factory.provider_rw().unwrap();
+
+        let db_tx = provider.tx_ref();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let code = hex!("5a465a905090036002900360015500");
@@ -652,9 +605,9 @@ mod tests {
         db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         provider.commit().unwrap();
 
-        let mut provider = db.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let output = execution_stage.execute(&mut provider, input).await.unwrap();
+        let output = execution_stage.execute(&provider, input).await.unwrap();
         provider.commit().unwrap();
         assert_matches!(output, ExecOutput {
             checkpoint: StageCheckpoint {
@@ -672,8 +625,9 @@ mod tests {
             },
             done: true
         } if processed == total && total == block.gas_used);
-        let mut provider = db.provider_rw().unwrap();
-        let tx = provider.tx_mut();
+
+        let provider = factory.provider().unwrap();
+
         // check post state
         let account1 = H160(hex!("1000000000000000000000000000000000000000"));
         let account1_info =
@@ -693,24 +647,24 @@ mod tests {
 
         // assert accounts
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account1),
+            provider.basic_account(account1),
             Ok(Some(account1_info)),
             "Post changed of a account"
         );
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account2),
+            provider.basic_account(account2),
             Ok(Some(account2_info)),
             "Post changed of a account"
         );
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(account3),
+            provider.basic_account(account3),
             Ok(Some(account3_info)),
             "Post changed of a account"
         );
         // assert storage
         // Get on dupsort would return only first value. This is good enough for this test.
         assert_eq!(
-            tx.get::<tables::PlainStorageState>(account1),
+            provider.tx_ref().get::<tables::PlainStorageState>(account1),
             Ok(Some(StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(2) })),
             "Post changed of a account"
         );
@@ -721,9 +675,9 @@ mod tests {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
 
-        let state_db = create_test_db::<WriteMap>(EnvKind::RW);
-        let db = ShareableDatabase::new(state_db.as_ref(), MAINNET.clone());
-        let mut provider = db.provider_rw().unwrap();
+        let state_db = create_test_rw_db();
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
         let input = ExecInput {
             target: Some(1),
             /// The progress of this stage the last time it was executed.
@@ -733,8 +687,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(provider.tx_mut(), genesis, None).unwrap();
-        insert_canonical_block(provider.tx_mut(), block.clone(), None).unwrap();
+        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(block.clone(), None).unwrap();
         provider.commit().unwrap();
 
         // variables
@@ -742,8 +696,9 @@ mod tests {
         let balance = U256::from(0x3635c9adc5dea00000u128);
         let code_hash = keccak256(code);
         // pre state
-        let mut provider = db.provider_rw().unwrap();
-        let db_tx = provider.tx_mut();
+        let provider = factory.provider_rw().unwrap();
+
+        let db_tx = provider.tx_ref();
         let acc1 = H160(hex!("1000000000000000000000000000000000000000"));
         let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
         let acc2 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
@@ -755,16 +710,16 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let mut provider = db.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let result = execution_stage.execute(&mut provider, input).await.unwrap();
+        let result = execution_stage.execute(&provider, input).await.unwrap();
         provider.commit().unwrap();
 
-        let mut provider = db.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut stage = stage();
         let result = stage
             .unwind(
-                &mut provider,
+                &provider,
                 UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
             )
             .await
@@ -787,33 +742,20 @@ mod tests {
         } if total == block.gas_used);
 
         // assert unwind stage
-        let db_tx = provider.tx_ref();
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(acc1),
-            Ok(Some(acc1_info)),
-            "Pre changed of a account"
-        );
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(acc2),
-            Ok(Some(acc2_info)),
-            "Post changed of a account"
-        );
+        assert_eq!(provider.basic_account(acc1), Ok(Some(acc1_info)), "Pre changed of a account");
+        assert_eq!(provider.basic_account(acc2), Ok(Some(acc2_info)), "Post changed of a account");
 
         let miner_acc = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
-        assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(miner_acc),
-            Ok(None),
-            "Third account should be unwound"
-        );
+        assert_eq!(provider.basic_account(miner_acc), Ok(None), "Third account should be unwound");
 
-        assert_eq!(db_tx.get::<tables::Receipts>(0), Ok(None), "First receipt should be unwound");
+        assert_eq!(provider.receipt(0), Ok(None), "First receipt should be unwound");
     }
 
     #[tokio::test]
     async fn test_selfdestruct() {
         let test_tx = TestTransaction::default();
-        let factory = ShareableDatabase::new(test_tx.tx.as_ref(), MAINNET.clone());
-        let mut provider = factory.provider_rw().unwrap();
+        let factory = ProviderFactory::new(test_tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
         let input = ExecInput {
             target: Some(1),
             /// The progress of this stage the last time it was executed.
@@ -823,8 +765,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(provider.tx_mut(), genesis, None).unwrap();
-        insert_canonical_block(provider.tx_mut(), block.clone(), None).unwrap();
+        provider.insert_block(genesis, None).unwrap();
+        provider.insert_block(block.clone(), None).unwrap();
         provider.commit().unwrap();
 
         // variables
@@ -871,18 +813,14 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let mut provider = factory.provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let _ = execution_stage.execute(&mut provider, input).await.unwrap();
+        let _ = execution_stage.execute(&provider, input).await.unwrap();
         provider.commit().unwrap();
 
         // assert unwind stage
         let provider = factory.provider_rw().unwrap();
-        assert_eq!(
-            provider.tx_ref().get::<tables::PlainAccountState>(destroyed_address),
-            Ok(None),
-            "Account was destroyed"
-        );
+        assert_eq!(provider.basic_account(destroyed_address), Ok(None), "Account was destroyed");
 
         assert_eq!(
             provider.tx_ref().get::<tables::PlainStorageState>(destroyed_address),

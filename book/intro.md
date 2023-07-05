@@ -5,7 +5,7 @@ _Documentation for Reth users and developers._
 
 Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is an **Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient.** 
 
-<img src="https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth.jpg" style="border-radius: 20px">
+<img src="https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-alpha.png" style="border-radius: 20px">
 
 <!-- Add a quick description about Reth, what it is, the goals of the build, and any other quick overview information   -->
 
@@ -65,7 +65,7 @@ As a data engineer/analyst, or as a data indexer, you'll want to use Archive mod
 
 ## Is this secure?
 
-Reth implements the specification of Ethereum as defined in the [ethereum/execution-specs](https://github.com/ethereum/execution-specs/) repository. To make sure the node is built securelty, we run the following tests:
+Reth implements the specification of Ethereum as defined in the [ethereum/execution-specs](https://github.com/ethereum/execution-specs/) repository. To make sure the node is built securely, we run the following tests:
 
 1. EVM state tests are run on every [Revm Pull Request](https://github.com/bluealloy/revm/blob/main/.github/workflows/ethereum-tests.yml)
 1. Hive tests are [run every 24 hours](https://github.com/paradigmxyz/reth/blob/main/.github/workflows/hive.yml) in the main Reth repository.
@@ -82,8 +82,8 @@ Here are some useful sections to jump to:
 - Install Reth by following the [guide](./installation/installation.md).
 - Sync your node on any [official network](./run/run-a-node.md).
 - View [statistics and metrics](./run/observability.md) about your node.
-- Query the [JSON-RPC](./api/api.md) using Foundry's `cast` or `curl`.
-- Set up your [development environment and contribute](./contribute.md)!
+- Query the [JSON-RPC](./jsonrpc/intro.md) using Foundry's `cast` or `curl`.
+- Set up your [development environment and contribute](./developers/contribute.md)!
 
 > 📖 **About this book**
 >

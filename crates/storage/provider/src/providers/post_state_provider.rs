@@ -1,5 +1,5 @@
 use crate::{
-    AccountProvider, BlockHashProvider, PostState, PostStateDataProvider, StateProvider,
+    AccountReader, BlockHashReader, PostState, PostStateDataProvider, StateProvider,
     StateRootProvider,
 };
 use reth_interfaces::{provider::ProviderError, Result};
@@ -23,7 +23,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> PostStateProvider<SP, PSDP>
 
 /* Implement StateProvider traits */
 
-impl<SP: StateProvider, PSDP: PostStateDataProvider> BlockHashProvider
+impl<SP: StateProvider, PSDP: PostStateDataProvider> BlockHashReader
     for PostStateProvider<SP, PSDP>
 {
     fn block_hash(&self, block_number: BlockNumber) -> Result<Option<H256>> {
@@ -39,9 +39,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> BlockHashProvider
     }
 }
 
-impl<SP: StateProvider, PSDP: PostStateDataProvider> AccountProvider
-    for PostStateProvider<SP, PSDP>
-{
+impl<SP: StateProvider, PSDP: PostStateDataProvider> AccountReader for PostStateProvider<SP, PSDP> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         if let Some(account) = self.post_state_data_provider.state().account(&address) {
             Ok(*account)

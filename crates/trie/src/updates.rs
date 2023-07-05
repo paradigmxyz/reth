@@ -77,20 +77,25 @@ impl TrieUpdates {
     }
 
     /// Extend the updates with account trie updates.
+    #[allow(clippy::mutable_key_type)]
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
         self.extend(updates.into_iter().map(|(nibbles, node)| {
-            (TrieKey::AccountNode(nibbles.hex_data.into()), TrieOp::Update(node))
+            (TrieKey::AccountNode(nibbles.hex_data.to_vec().into()), TrieOp::Update(node))
         }));
     }
 
     /// Extend the updates with storage trie updates.
+    #[allow(clippy::mutable_key_type)]
     pub fn extend_with_storage_updates(
         &mut self,
         hashed_address: H256,
         updates: HashMap<Nibbles, BranchNodeCompact>,
     ) {
         self.extend(updates.into_iter().map(|(nibbles, node)| {
-            (TrieKey::StorageNode(hashed_address, nibbles.hex_data.into()), TrieOp::Update(node))
+            (
+                TrieKey::StorageNode(hashed_address, nibbles.hex_data.to_vec().into()),
+                TrieOp::Update(node),
+            )
         }));
     }
 
@@ -106,7 +111,7 @@ impl TrieUpdates {
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
         let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
-        let mut trie_operations = Vec::from_iter(self.trie_operations.into_iter());
+        let mut trie_operations = Vec::from_iter(self.trie_operations);
         trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         for (key, operation) in trie_operations {
             match key {

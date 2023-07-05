@@ -2,6 +2,7 @@ use crate::{
     error::PoolResult,
     pool::{state::SubPool, TransactionEvents},
     validate::ValidPoolTransaction,
+    AllTransactionsEvents,
 };
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
@@ -35,13 +36,6 @@ pub trait TransactionPool: Send + Sync + Clone {
     ///
     /// This tracks the block that the pool has last seen.
     fn block_info(&self) -> BlockInfo;
-
-    /// Event listener for when the pool needs to be updated
-    ///
-    /// Implementers need to update the pool accordingly.
-    /// For example the base fee of the pending block is determined after a block is mined which
-    /// affects the dynamic fee requirement of pending transactions in the pool.
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
 
     /// Imports an _external_ transaction.
     ///
@@ -96,13 +90,21 @@ pub trait TransactionPool: Send + Sync + Clone {
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>>;
 
+    /// Returns a new transaction change event stream for the given transaction.
+    ///
+    /// Returns `None` if the transaction is not in the pool.
+    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
+
+    /// Returns a new transaction change event stream for _all_ transactions in the pool.
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents;
+
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
     /// Consumer: RPC
     fn pending_transactions_listener(&self) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
-    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
     /// Returns the _hashes_ of all transactions in the pool.
     ///
@@ -207,8 +209,22 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 }
 
+/// Extension for [TransactionPool] trait that allows to set the current block info.
+#[auto_impl::auto_impl(Arc)]
+pub trait TransactionPoolExt: TransactionPool {
+    /// Sets the current block info for the pool.
+    fn set_block_info(&self, info: BlockInfo);
+
+    /// Event listener for when the pool needs to be updated
+    ///
+    /// Implementers need to update the pool accordingly.
+    /// For example the base fee of the pending block is determined after a block is mined which
+    /// affects the dynamic fee requirement of pending transactions in the pool.
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate);
+}
+
 /// A Helper type that bundles all transactions in the pool.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AllPoolTransactions<T: PoolTransaction> {
     /// Transactions that are ready for inclusion in the next block.
     pub pending: Vec<Arc<ValidPoolTransaction<T>>>,
@@ -229,6 +245,12 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all queued [TransactionSignedEcRecovered] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
         self.queued.iter().map(|tx| tx.transaction.to_recovered_transaction())
+    }
+}
+
+impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
+    fn default() -> Self {
+        Self { pending: Default::default(), queued: Default::default() }
     }
 }
 
@@ -383,20 +405,22 @@ pub trait PoolTransaction:
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64;
 
-    /// Calculates the cost that this transaction is allowed to consume:
+    /// Returns the cost that this transaction is allowed to consume:
     ///
-    /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value`
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
+    /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     fn cost(&self) -> U256;
 
-    /// Returns the effective gas price for this transaction.
+    /// Returns the gas cost for this transaction.
     ///
-    /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
-    fn effective_gas_price(&self) -> u128;
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
+    /// For legacy transactions: `gas_price * gas_limit`.
+    fn gas_cost(&self) -> U256;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64;
 
-    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
+    /// Returns the EIP-1559 the maximum fee per gas the caller is willing to pay.
     ///
     /// For legacy transactions this is gas_price.
     ///
@@ -439,11 +463,13 @@ pub struct PooledTransaction {
     /// EcRecovered transaction info
     pub(crate) transaction: TransactionSignedEcRecovered,
 
-    /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
+    /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub(crate) cost: U256,
 
-    /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
-    pub(crate) effective_gas_price: u128,
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit`.
+    /// For legacy transactions: `gas_price * gas_limit`.
+    pub(crate) gas_cost: U256,
 }
 
 impl PooledTransaction {
@@ -469,18 +495,20 @@ impl PoolTransaction for PooledTransaction {
         self.transaction.nonce()
     }
 
-    /// Calculates the cost that this transaction is allowed to consume:
+    /// Returns the cost that this transaction is allowed to consume:
     ///
-    /// For EIP-1559 transactions that is `feeCap x gasLimit + transferred_value`
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
+    /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     fn cost(&self) -> U256 {
         self.cost
     }
 
-    /// Returns the effective gas price for this transaction.
+    /// Returns the gas cost for this transaction.
     ///
-    /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
-    fn effective_gas_price(&self) -> u128 {
-        self.effective_gas_price
+    /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
+    /// For legacy transactions: `gas_price * gas_limit + tx_value`.
+    fn gas_cost(&self) -> U256 {
+        self.gas_cost
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
@@ -541,26 +569,14 @@ impl PoolTransaction for PooledTransaction {
 
 impl FromRecoveredTransaction for PooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        let (cost, effective_gas_price) = match &tx.transaction {
-            Transaction::Legacy(t) => {
-                let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = t.gas_price;
-                (cost, effective_gas_price)
-            }
-            Transaction::Eip2930(t) => {
-                let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = t.gas_price;
-                (cost, effective_gas_price)
-            }
-            Transaction::Eip1559(t) => {
-                let cost =
-                    U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = t.max_priority_fee_per_gas;
-                (cost, effective_gas_price)
-            }
+        let gas_cost = match &tx.transaction {
+            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
         };
+        let cost = gas_cost + U256::from(tx.value());
 
-        PooledTransaction { transaction: tx, cost, effective_gas_price }
+        PooledTransaction { transaction: tx, cost, gas_cost }
     }
 }
 
@@ -571,7 +587,7 @@ impl IntoRecoveredTransaction for PooledTransaction {
 }
 
 /// Represents the current status of the pool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PoolSize {
     /// Number of transactions in the _pending_ sub-pool.
     pub pending: usize,
@@ -585,6 +601,10 @@ pub struct PoolSize {
     pub queued: usize,
     /// Reported size of transactions in the _queued_ sub-pool.
     pub queued_size: usize,
+    /// Number of all transactions of all sub-pools
+    ///
+    /// Note: this is the sum of ```pending + basefee + queued```
+    pub total: usize,
 }
 
 /// Represents the current status of the pool.

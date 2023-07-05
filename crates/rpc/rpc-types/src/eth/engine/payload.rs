@@ -427,7 +427,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{
-        random_block, random_block_range, random_header,
+        self, random_block, random_block_range, random_header,
     };
     use reth_primitives::{
         bytes::{Bytes, BytesMut},
@@ -453,7 +453,8 @@ mod tests {
 
     #[test]
     fn payload_body_roundtrip() {
-        for block in random_block_range(0..=99, H256::default(), 0..2) {
+        let mut rng = generators::rng();
+        for block in random_block_range(&mut rng, 0..=99, H256::default(), 0..2) {
             let unsealed = block.clone().unseal();
             let payload_body: ExecutionPayloadBody = unsealed.into();
 
@@ -472,7 +473,8 @@ mod tests {
 
     #[test]
     fn payload_validation() {
-        let block = random_block(100, Some(H256::random()), Some(3), Some(0));
+        let mut rng = generators::rng();
+        let block = random_block(&mut rng, 100, Some(H256::random()), Some(3), Some(0));
 
         // Valid extra data
         let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
@@ -514,7 +516,7 @@ mod tests {
 
         // Non empty ommers
         let block_with_ommers = transform_block(block.clone(), |mut b| {
-            b.ommers.push(random_header(100, None).unseal());
+            b.ommers.push(random_header(&mut rng, 100, None).unseal());
             b
         });
         assert_matches!(

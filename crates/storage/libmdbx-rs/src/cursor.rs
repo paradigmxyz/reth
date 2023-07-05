@@ -13,14 +13,14 @@ use ffi::{
 };
 use libc::{c_uint, c_void};
 use parking_lot::Mutex;
-use std::{borrow::Cow, fmt, marker::PhantomData, mem, ptr, result, sync::Arc};
+use std::{borrow::Cow, fmt, marker::PhantomData, mem, ptr, rc::Rc, result};
 
 /// A cursor for navigating the items within a database.
 pub struct Cursor<'txn, K>
 where
     K: TransactionKind,
 {
-    txn: Arc<Mutex<*mut ffi::MDBX_txn>>,
+    txn: Rc<Mutex<*mut ffi::MDBX_txn>>,
     cursor: *mut ffi::MDBX_cursor,
     _marker: PhantomData<fn(&'txn (), K)>,
 }

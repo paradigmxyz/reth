@@ -5,10 +5,10 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::{
-    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+    cursor::DbCursorRO, database::Database, init_db, table::TableImporter, tables,
+    transaction::DbTx, DatabaseEnv,
 };
 use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::init::init_db;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -22,7 +22,7 @@ mod execution;
 use execution::dump_execution_stage;
 
 mod merkle;
-use crate::args::utils::genesis_value_parser;
+use crate::args::{utils::genesis_value_parser, DatabaseArgs};
 use merkle::dump_merkle_stage;
 
 /// `reth dump-stage` command
@@ -54,6 +54,9 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
 
     #[clap(subcommand)]
     command: Stages,
@@ -98,13 +101,8 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        std::fs::create_dir_all(&db_path)?;
-
-        // TODO: Auto-impl for Database trait
-        let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            db_path.as_ref(),
-            reth_db::mdbx::EnvKind::RW,
-        )?;
+        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        info!(target: "reth::cli", "Database opened");
 
         let mut tool = DbTool::new(&db, self.chain.clone())?;
 
@@ -134,12 +132,12 @@ pub(crate) fn setup<DB: Database>(
     to: u64,
     output_db: &PathBuf,
     db_tool: &mut DbTool<'_, DB>,
-) -> eyre::Result<(reth_db::mdbx::Env<reth_db::mdbx::WriteMap>, u64)> {
+) -> eyre::Result<(DatabaseEnv, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
-    let output_db = init_db(output_db)?;
+    let output_db = init_db(output_db, None)?;
 
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(

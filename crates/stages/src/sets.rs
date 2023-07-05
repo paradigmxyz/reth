@@ -14,7 +14,7 @@
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
-//! use reth_db::mdbx::test_utils::create_test_rw_db;
+//! use reth_db::test_utils::create_test_rw_db;
 //!
 //! # let factory = Factory::new(MAINNET.clone());
 //! # let db = create_test_rw_db();

@@ -1,5 +1,5 @@
-use super::AccountProvider;
-use crate::{post_state::PostState, BlockHashProvider, BlockIdProvider};
+use super::AccountReader;
+use crate::{post_state::PostState, BlockHashReader, BlockIdReader};
 use auto_impl::auto_impl;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
@@ -12,9 +12,7 @@ pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
-pub trait StateProvider:
-    BlockHashProvider + AccountProvider + StateRootProvider + Send + Sync
-{
+pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + Send + Sync {
     /// Get storage of given account.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;
 
@@ -96,20 +94,20 @@ pub trait StateProvider:
 /// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
-pub trait StateProviderFactory: BlockIdProvider + Send + Sync {
+pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> Result<StateProviderBox<'_>>;
 
     /// Returns a [StateProvider] indexed by the given [BlockId].
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox<'_>> {
         match block_id {
-            BlockId::Number(block_number) => self.history_by_block_number_or_tag(block_number),
+            BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
             BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
         }
     }
 
     /// Returns a [StateProvider] indexed by the given block number or tag.
-    fn history_by_block_number_or_tag(
+    fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
     ) -> Result<StateProviderBox<'_>> {
@@ -160,6 +158,13 @@ pub trait StateProviderFactory: BlockIdProvider + Send + Sync {
     /// Represents the state at the block that extends the canonical chain by one.
     /// If there's no `pending` block, then this is equal to [StateProviderFactory::latest]
     fn pending(&self) -> Result<StateProviderBox<'_>>;
+
+    /// Storage provider for pending state for the given block hash.
+    ///
+    /// Represents the state at the block that extends the canonical chain.
+    ///
+    /// If the block couldn't be found, returns `None`.
+    fn pending_state_by_hash(&self, block_hash: H256) -> Result<Option<StateProviderBox<'_>>>;
 
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
@@ -215,5 +220,6 @@ pub trait PostStateDataProvider: Send + Sync {
 #[auto_impl[Box,&, Arc]]
 pub trait StateRootProvider: Send + Sync {
     /// Returns the state root of the PostState on top of the current state.
+    /// See [PostState::state_root_slow] for more info.
     fn state_root(&self, post_state: PostState) -> Result<H256>;
 }

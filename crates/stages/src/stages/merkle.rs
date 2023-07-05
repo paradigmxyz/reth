@@ -12,7 +12,9 @@ use reth_primitives::{
     trie::StoredSubNode,
     BlockNumber, SealedHeader, H256,
 };
-use reth_provider::{DatabaseProviderRW, HeaderProvider, ProviderError};
+use reth_provider::{
+    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
+};
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;
 use tracing::*;
@@ -42,8 +44,8 @@ use tracing::*;
 pub enum MerkleStage {
     /// The execution portion of the merkle stage.
     Execution {
-        /// The threshold for switching from incremental trie building
-        /// of changes to whole rebuild. Num of transitions.
+        /// The threshold (in number of blocks) for switching from incremental trie building
+        /// of changes to whole rebuild.
         clean_threshold: u64,
     },
     /// The unwind portion of the merkle stage.
@@ -56,14 +58,19 @@ pub enum MerkleStage {
 }
 
 impl MerkleStage {
-    /// Stage default for the Execution variant.
+    /// Stage default for the [MerkleStage::Execution].
     pub fn default_execution() -> Self {
         Self::Execution { clean_threshold: 50_000 }
     }
 
-    /// Stage default for the Unwind variant.
+    /// Stage default for the [MerkleStage::Unwind].
     pub fn default_unwind() -> Self {
         Self::Unwind
+    }
+
+    /// Create new instance of [MerkleStage::Execution].
+    pub fn new_execution(clean_threshold: u64) -> Self {
+        Self::Execution { clean_threshold }
     }
 
     /// Check that the computed state root matches the root in the expected header.
@@ -138,7 +145,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let threshold = match self {
@@ -153,17 +160,17 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let range = input.next_block_range();
         let (from_block, to_block) = range.clone().into_inner();
-        let current_block = input.target();
+        let current_block_number = input.checkpoint().block_number;
 
-        let block = provider
-            .header_by_number(current_block)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(current_block.into()))?;
-        let block_root = block.state_root;
+        let target_block = provider
+            .header_by_number(to_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(to_block.into()))?;
+        let target_block_root = target_block.state_root;
 
         let mut checkpoint = self.get_execution_checkpoint(provider)?;
 
         let (trie_root, entities_checkpoint) = if range.is_empty() {
-            (block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
+            (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
         } else if to_block - from_block > threshold || from_block == 1 {
             // if there are more blocks than threshold it is faster to rebuild the trie
             let mut entities_checkpoint = if let Some(checkpoint) =
@@ -171,7 +178,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             {
                 debug!(
                     target: "sync::stages::merkle::exec",
-                    current = ?current_block,
+                    current = ?current_block_number,
                     target = ?to_block,
                     last_account_key = ?checkpoint.last_account_key,
                     last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
@@ -182,7 +189,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             } else {
                 debug!(
                     target: "sync::stages::merkle::exec",
-                    current = ?current_block,
+                    current = ?current_block_number,
                     target = ?to_block,
                     previous_checkpoint = ?checkpoint,
                     "Rebuilding trie"
@@ -214,7 +221,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
                         state.last_account_key,
-                        state.last_walker_key.hex_data,
+                        state.last_walker_key.hex_data.to_vec(),
                         state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
                         state.hash_builder.into(),
                     );
@@ -238,7 +245,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_block, target = ?to_block, "Updating trie");
+            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
             let (root, updates) =
                 StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
@@ -262,7 +269,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        self.validate_state_root(trie_root, block.seal_slow(), to_block)?;
+        self.validate_state_root(trie_root, target_block.seal_slow(), to_block)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
@@ -274,7 +281,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -339,8 +346,12 @@ mod tests {
         tables,
         transaction::{DbTx, DbTxMut},
     };
-    use reth_interfaces::test_utils::generators::{
-        random_block, random_block_range, random_contract_account_range, random_transition_range,
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{
+            random_block, random_block_range, random_contract_account_range,
+            random_transition_range,
+        },
     };
     use reth_primitives::{
         keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, H256, U256,
@@ -462,9 +473,10 @@ mod tests {
             let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
             let end = input.target();
+            let mut rng = generators::rng();
 
             let num_of_accounts = 31;
-            let accounts = random_contract_account_range(&mut (0..num_of_accounts))
+            let accounts = random_contract_account_range(&mut rng, &mut (0..num_of_accounts))
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
@@ -473,7 +485,7 @@ mod tests {
             )?;
 
             let SealedBlock { header, body, ommers, withdrawals } =
-                random_block(stage_progress, None, Some(0), None);
+                random_block(&mut rng, stage_progress, None, Some(0), None);
             let mut header = header.unseal();
 
             header.state_root = state_root(
@@ -486,10 +498,11 @@ mod tests {
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
-            blocks.extend(random_block_range(start..=end, head_hash, 0..3));
+            blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
             self.tx.insert_blocks(blocks.iter(), None)?;
 
             let (transitions, final_state) = random_transition_range(
+                &mut rng,
                 blocks.iter(),
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
                 0..3,

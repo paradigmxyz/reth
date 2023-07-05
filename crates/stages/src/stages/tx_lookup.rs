@@ -9,7 +9,7 @@ use reth_db::{
     DatabaseError,
 };
 use reth_primitives::{
-    rpc_utils::keccak256,
+    keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     TransactionSignedNoHash, TxNumber, H256,
 };
@@ -30,7 +30,7 @@ pub struct TransactionLookupStage {
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { commit_threshold: 5_000_000 }
     }
 }
 
@@ -51,7 +51,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Write transaction hash -> id entries
     async fn execute(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -60,6 +60,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let (tx_range, block_range, is_final_range) =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
+        let tx_range_size = tx_range.clone().count();
 
         debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
 
@@ -67,7 +68,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         let tx_walker = tx_cursor.walk_range(tx_range)?;
 
-        let chunk_size = 100_000 / rayon::current_num_threads();
+        let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
         let mut channels = Vec::with_capacity(chunk_size);
         let mut transaction_count = 0;
 
@@ -78,16 +79,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
             let chunk: Vec<_> = chunk.collect();
             transaction_count += chunk.len();
-
-            // closure that will calculate the TxHash
-            let calculate_hash =
-                |entry: Result<(TxNumber, TransactionSignedNoHash), reth_db::DatabaseError>,
-                 rlp_buf: &mut Vec<u8>|
-                 -> Result<(H256, u64), Box<StageError>> {
-                    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
-                    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-                    Ok((H256(keccak256(rlp_buf)), tx_id))
-                };
 
             // Spawn the task onto the global rayon pool
             // This task will send the results through the channel after it has calculated the hash.
@@ -145,7 +136,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        provider: &mut DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -179,6 +170,17 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     }
 }
 
+/// Calculates the hash of the given transaction
+#[inline]
+fn calculate_hash(
+    entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
+    rlp_buf: &mut Vec<u8>,
+) -> Result<(H256, TxNumber), Box<StageError>> {
+    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
+    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+    Ok((keccak256(rlp_buf), tx_id))
+}
+
 fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
@@ -196,8 +198,12 @@ mod tests {
         TestTransaction, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{random_block, random_block_range};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block, random_block_range},
+    };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, H256};
+    use reth_provider::{BlockReader, ProviderError, TransactionsProvider};
 
     // Implement stage test suite.
     stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
@@ -205,6 +211,7 @@ mod tests {
     #[tokio::test]
     async fn execute_single_transaction_lookup() {
         let (previous_stage, stage_progress) = (500, 100);
+        let mut rng = generators::rng();
 
         // Set up the runner
         let runner = TransactionLookupTestRunner::default();
@@ -217,7 +224,13 @@ mod tests {
         let non_empty_block_number = stage_progress + 10;
         let blocks = (stage_progress..=input.target())
             .map(|number| {
-                random_block(number, None, Some((number == non_empty_block_number) as u8), None)
+                random_block(
+                    &mut rng,
+                    number,
+                    None,
+                    Some((number == non_empty_block_number) as u8),
+                    None,
+                )
             })
             .collect::<Vec<_>>();
         runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
@@ -253,9 +266,11 @@ mod tests {
             target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
+        let mut rng = generators::rng();
 
         // Seed only once with full input range
-        let seed = random_block_range(stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
+        let seed =
+            random_block_range(&mut rng, stage_progress + 1..=previous_stage, H256::zero(), 0..4); // set tx count range high enough to hit the threshold
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
         let total_txs = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
@@ -324,13 +339,17 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TxHashNumber] table above
-        ///    a given block number.
+        /// 1. If there are any entries in the [tables::TxHashNumber] table above a given block
+        ///    number.
         ///
-        /// 2. If the is no requested block entry in the bodies table,
-        ///    but [tables::TxHashNumber] is not empty.
+        /// 2. If the is no requested block entry in the bodies table, but [tables::TxHashNumber] is
+        ///    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().block_body_indices(number);
+            let body_result = self
+                .tx
+                .inner_rw()
+                .block_body_indices(number)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(number));
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
                     body.last_tx_num(),
@@ -363,8 +382,9 @@ mod tests {
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
+            let mut rng = generators::rng();
 
-            let blocks = random_block_range(stage_progress + 1..=end, H256::zero(), 0..2);
+            let blocks = random_block_range(&mut rng, stage_progress + 1..=end, H256::zero(), 0..2);
             self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }
@@ -375,7 +395,9 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             match output {
-                Some(output) => self.tx.query(|tx| {
+                Some(output) => {
+                    let provider = self.tx.inner();
+
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
 
@@ -383,23 +405,18 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+                    let mut body_cursor =
+                        provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
-                            let transaction = tx
-                                .get::<tables::Transactions>(tx_id)?
-                                .expect("no transaction entry");
-                            assert_eq!(
-                                Some(tx_id),
-                                tx.get::<tables::TxHashNumber>(transaction.hash())?,
-                            );
+                            let transaction =
+                                provider.transaction_by_id(tx_id)?.expect("no transaction entry");
+                            assert_eq!(Some(tx_id), provider.transaction_id(transaction.hash())?);
                         }
                     }
-
-                    Ok(())
-                })?,
+                }
                 None => self.ensure_no_hash_by_block(input.checkpoint().block_number)?,
             };
             Ok(())

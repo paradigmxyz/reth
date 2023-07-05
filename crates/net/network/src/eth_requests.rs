@@ -8,7 +8,7 @@ use reth_eth_wire::{
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
-use reth_provider::{BlockProvider, HeaderProvider};
+use reth_provider::{BlockReader, HeaderProvider};
 use std::{
     borrow::Borrow,
     future::Future,
@@ -70,7 +70,7 @@ impl<C> EthRequestHandler<C> {
 
 impl<C> EthRequestHandler<C>
 where
-    C: BlockProvider + HeaderProvider,
+    C: BlockReader + HeaderProvider,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
@@ -81,7 +81,9 @@ where
         let mut block: BlockHashOrNumber = match start_block {
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
-                let Some(hash) = self.client.block_hash(num).unwrap_or_default() else { return headers };
+                let Some(hash) = self.client.block_hash(num).unwrap_or_default() else {
+                    return headers
+                };
                 hash.into()
             }
         };
@@ -190,7 +192,7 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C> Future for EthRequestHandler<C>
 where
-    C: BlockProvider + HeaderProvider + Unpin,
+    C: BlockReader + HeaderProvider + Unpin,
 {
     type Output = ();
 

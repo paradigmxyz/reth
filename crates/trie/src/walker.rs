@@ -129,16 +129,16 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let key = self.key().expect("key must exist");
         let entry = if exact {
-            self.cursor.seek_exact(key.hex_data.into())?
+            self.cursor.seek_exact(key.hex_data.to_vec().into())?
         } else {
-            self.cursor.seek(key.hex_data.into())?
+            self.cursor.seek(key.hex_data.to_vec().into())?
         };
 
         if let Some((_, node)) = &entry {
             assert!(!node.state_mask.is_empty());
         }
 
-        Ok(entry.map(|(k, v)| (Nibbles::from(k), v)))
+        Ok(entry.map(|(k, v)| (Nibbles::from_hex(k), v)))
     }
 
     /// Consumes the next node in the trie, updating the stack.
@@ -146,7 +146,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
-            return Ok(());
+            return Ok(())
         };
 
         // Overwrite the root node's first nibble
@@ -178,9 +178,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         &mut self,
         allow_root_to_child_nibble: bool,
     ) -> Result<(), DatabaseError> {
-        let Some(subnode) = self.stack.last_mut() else {
-            return Ok(());
-        };
+        let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
@@ -258,12 +256,15 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 mod tests {
 
     use super::*;
-    use crate::trie_cursor::{AccountTrieCursor, StorageTrieCursor};
+    use crate::{
+        prefix_set::PrefixSetMut,
+        trie_cursor::{AccountTrieCursor, StorageTrieCursor},
+    };
     use reth_db::{
-        cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
+        cursor::DbCursorRW, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
     };
     use reth_primitives::{trie::StorageTrieEntry, MAINNET};
-    use reth_provider::ShareableDatabase;
+    use reth_provider::ProviderFactory;
 
     #[test]
     fn walk_nodes_with_common_prefix() {
@@ -290,7 +291,7 @@ mod tests {
 
         let db = create_test_rw_db();
 
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
@@ -336,7 +337,7 @@ mod tests {
     #[test]
     fn cursor_rootnode_with_changesets() {
         let db = create_test_rw_db();
-        let factory = ShareableDatabase::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
         let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
@@ -374,26 +375,26 @@ mod tests {
 
         // No changes
         let mut cursor = TrieWalker::new(&mut trie, Default::default());
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![]))); // root
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![]))); // root
         assert!(cursor.can_skip_current_node); // due to root_hash
         cursor.advance().unwrap(); // skips to the end of trie
         assert_eq!(cursor.key(), None);
 
         // We insert something that's not part of the existing trie/prefix.
-        let mut changed = PrefixSet::default();
+        let mut changed = PrefixSetMut::default();
         changed.insert(&[0xF, 0x1]);
-        let mut cursor = TrieWalker::new(&mut trie, changed);
+        let mut cursor = TrieWalker::new(&mut trie, changed.freeze());
 
         // Root node
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![])));
         // Should not be able to skip state due to the changed values
         assert!(!cursor.can_skip_current_node);
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x2])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x2])));
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x2, 0x1])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x2, 0x1])));
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x4])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x4])));
 
         cursor.advance().unwrap();
         assert_eq!(cursor.key(), None); // the end of trie

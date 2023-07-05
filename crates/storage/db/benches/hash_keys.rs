@@ -12,7 +12,6 @@ use proptest::{
 };
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    mdbx::Env,
     TxHashNumber,
 };
 use std::{collections::HashSet, time::Instant};
@@ -85,8 +84,8 @@ where
         // Setup phase before each benchmark iteration
         let setup = || {
             // Reset DB
-            let _ = std::fs::remove_dir_all(bench_db_path);
-            let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
+            let _ = fs::remove_dir_all(bench_db_path);
+            let db = Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap();
 
             let mut unsorted_input = unsorted_input.clone();
             if scenario_str == "append_all" {
@@ -162,10 +161,7 @@ where
     (preload, input)
 }
 
-fn append<T>(
-    db: Env<WriteMap>,
-    input: Vec<(<T as Table>::Key, <T as Table>::Value)>,
-) -> Env<WriteMap>
+fn append<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value)>) -> DatabaseEnv
 where
     T: Table + Default,
 {
@@ -183,10 +179,7 @@ where
     db
 }
 
-fn insert<T>(
-    db: Env<WriteMap>,
-    input: Vec<(<T as Table>::Key, <T as Table>::Value)>,
-) -> Env<WriteMap>
+fn insert<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value)>) -> DatabaseEnv
 where
     T: Table + Default,
 {
@@ -204,7 +197,7 @@ where
     db
 }
 
-fn put<T>(db: Env<WriteMap>, input: Vec<(<T as Table>::Key, <T as Table>::Value)>) -> Env<WriteMap>
+fn put<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value)>) -> DatabaseEnv
 where
     T: Table + Default,
 {
@@ -231,7 +224,7 @@ struct TableStats {
     size: usize,
 }
 
-fn get_table_stats<T>(db: Env<WriteMap>)
+fn get_table_stats<T>(db: DatabaseEnv)
 where
     T: Table + Default,
 {

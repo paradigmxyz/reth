@@ -3,53 +3,13 @@ use reth_primitives::{BlockHash, BlockNumber, H256};
 use reth_trie::StateRootError;
 use std::fmt::Debug;
 
-/// An error that can occur when using the transaction container
-#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
-pub enum TransactionError {
-    /// The transaction encountered a database error.
-    #[error(transparent)]
-    Database(#[from] DbError),
-    /// The transaction encountered a database integrity error.
-    #[error(transparent)]
-    DatabaseIntegrity(#[from] ProviderError),
-    /// The trie error.
-    #[error(transparent)]
-    TrieError(#[from] StateRootError),
-    /// Root mismatch
-    #[error("Merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
-    StateRootMismatch {
-        /// Expected root
-        expected: H256,
-        /// Calculated root
-        got: H256,
-        /// Block number
-        block_number: BlockNumber,
-        /// Block hash
-        block_hash: BlockHash,
-    },
-    /// Root mismatch during unwind
-    #[error("Unwind merkle trie root mismatch at #{block_number} ({block_hash:?}). Got: {got:?}. Expected: {expected:?}")]
-    UnwindStateRootMismatch {
-        /// Expected root
-        expected: H256,
-        /// Calculated root
-        got: H256,
-        /// Target block number
-        block_number: BlockNumber,
-        /// Block hash
-        block_hash: BlockHash,
-    },
-}
-
 #[cfg(test)]
 mod test {
-    use crate::{
-        insert_canonical_block, test_utils::blocks::*, ShareableDatabase, TransactionsProvider,
-    };
+    use crate::{test_utils::blocks::*, ProviderFactory, TransactionsProvider};
     use reth_db::{
-        mdbx::test_utils::create_test_rw_db,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         tables,
+        test_utils::create_test_rw_db,
     };
     use reth_primitives::{ChainSpecBuilder, IntegerList, H160, MAINNET, U256};
     use std::sync::Arc;
@@ -65,8 +25,8 @@ mod test {
             .shanghai_activated()
             .build();
 
-        let factory = ShareableDatabase::new(db.as_ref(), Arc::new(chain_spec.clone()));
-        let mut provider = factory.provider_rw().unwrap();
+        let factory = ProviderFactory::new(db.as_ref(), Arc::new(chain_spec.clone()));
+        let provider = factory.provider_rw().unwrap();
 
         let data = BlockChainTestData::default();
         let genesis = data.genesis.clone();
@@ -78,7 +38,7 @@ mod test {
         let storage1_shard_key =
             StorageShardedKey::new(H160([0x60; 20]), U256::from(5).into(), u64::MAX);
 
-        insert_canonical_block(provider.tx_ref(), data.genesis.clone(), None).unwrap();
+        provider.insert_block(data.genesis.clone(), None).unwrap();
 
         assert_genesis_block(&provider, data.genesis);
 
@@ -183,15 +143,15 @@ mod test {
                 .build(),
         );
 
-        let factory = ShareableDatabase::new(db.as_ref(), chain_spec.clone());
-        let mut provider = factory.provider_rw().unwrap();
+        let factory = ProviderFactory::new(db.as_ref(), chain_spec.clone());
+        let provider = factory.provider_rw().unwrap();
 
         let data = BlockChainTestData::default();
         let genesis = data.genesis.clone();
         let (block1, exec_res1) = data.blocks[0].clone();
         let (block2, exec_res2) = data.blocks[1].clone();
 
-        insert_canonical_block(provider.tx_mut(), data.genesis.clone(), None).unwrap();
+        provider.insert_block(data.genesis.clone(), None).unwrap();
 
         assert_genesis_block(&provider, data.genesis);
 

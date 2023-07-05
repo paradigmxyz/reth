@@ -20,7 +20,7 @@ mod work;
 pub use account::*;
 pub use block::*;
 pub use call::CallRequest;
-pub use fee::{FeeHistory, FeeHistoryCache, FeeHistoryCacheItem, TxGasAndReward};
+pub use fee::{FeeHistory, TxGasAndReward};
 pub use filter::*;
 pub use index::Index;
 pub use log::Log;

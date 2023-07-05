@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
-    PostState, ProviderError, StateProvider, StateRootProvider,
+    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, PostState,
+    ProviderError, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -102,7 +102,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b, TX> {
+impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         match self.account_history_lookup(address)? {
@@ -122,7 +122,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for HistoricalStateProviderRef<'a, 'b, TX> {
+impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
@@ -219,13 +219,13 @@ delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 #[cfg(test)]
 mod tests {
     use crate::{
-        AccountProvider, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
+        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };
     use reth_db::{
         database::Database,
-        mdbx::test_utils::create_test_rw_db,
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
         tables,
+        test_utils::create_test_rw_db,
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };

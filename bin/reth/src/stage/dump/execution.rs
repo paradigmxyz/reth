@@ -3,9 +3,10 @@ use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+    DatabaseEnv,
 };
 use reth_primitives::{stage::StageCheckpoint, ChainSpec};
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use reth_revm::Factory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use std::{path::PathBuf, sync::Arc};
@@ -33,7 +34,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
 
 /// Imports all the tables that can be copied over a range.
 fn import_tables_with_range<DB: Database>(
-    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    output_db: &DatabaseEnv,
     db_tool: &mut DbTool<'_, DB>,
     from: u64,
     to: u64,
@@ -92,16 +93,16 @@ async fn unwind_and_copy<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
     from: u64,
     tip_block_number: u64,
-    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
-    let shareable_db = ShareableDatabase::new(db_tool.db, db_tool.chain.clone());
-    let mut provider = shareable_db.provider_rw()?;
+    let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
+    let provider = factory.provider_rw()?;
 
     let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(db_tool.chain.clone()));
 
     exec_stage
         .unwind(
-            &mut provider,
+            &provider,
             UnwindInput {
                 unwind_to: from,
                 checkpoint: StageCheckpoint::new(tip_block_number),
@@ -129,13 +130,13 @@ async fn dry_run<DB: Database>(
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let shareable_db = ShareableDatabase::new(&output_db, chain.clone());
-    let mut provider = shareable_db.provider_rw()?;
+    let factory = ProviderFactory::new(&output_db, chain.clone());
+    let provider = factory.provider_rw()?;
     let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(chain.clone()));
 
     exec_stage
         .execute(
-            &mut provider,
+            &provider,
             reth_stages::ExecInput {
                 target: Some(to),
                 checkpoint: Some(StageCheckpoint::new(from)),

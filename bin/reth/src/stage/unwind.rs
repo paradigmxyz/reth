@@ -1,19 +1,13 @@
 //! Unwinding a certain block range
 
 use crate::{
-    args::utils::genesis_value_parser,
+    args::{utils::genesis_value_parser, DatabaseArgs},
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::{Parser, Subcommand};
-use reth_db::{
-    cursor::DbCursorRO,
-    database::Database,
-    mdbx::{Env, WriteMap},
-    tables,
-    transaction::DbTx,
-};
+use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx};
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::ShareableDatabase;
+use reth_provider::{BlockExecutionWriter, ProviderFactory};
 use std::{ops::RangeInclusive, sync::Arc};
 
 /// `reth stage unwind` command
@@ -47,6 +41,9 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
     #[clap(subcommand)]
     command: Subcommands,
 }
@@ -61,7 +58,7 @@ impl Command {
             eyre::bail!("Database {db_path:?} does not exist.")
         }
 
-        let db = Env::<WriteMap>::open(db_path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
+        let db = open_db(db_path.as_ref(), self.db.log_level)?;
 
         let range = self.command.unwind_range(&db)?;
 
@@ -69,8 +66,8 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        let shareable_db = ShareableDatabase::new(&db, self.chain.clone());
-        let provider = shareable_db.provider_rw()?;
+        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let provider = factory.provider_rw()?;
 
         let blocks_and_execution = provider
             .take_block_and_execution_range(&self.chain, range)

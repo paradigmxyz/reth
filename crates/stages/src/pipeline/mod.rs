@@ -1,4 +1,7 @@
-use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, UnwindInput};
+use crate::{
+    error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
+    UnwindInput,
+};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
@@ -6,7 +9,7 @@ use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
     BlockNumber, ChainSpec, H256,
 };
-use reth_provider::{providers::get_stage_checkpoint, ShareableDatabase};
+use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -17,14 +20,12 @@ mod ctrl;
 mod event;
 mod progress;
 mod set;
-mod sync_metrics;
 
 pub use crate::pipeline::ctrl::ControlFlow;
 pub use builder::*;
 pub use event::*;
 use progress::*;
 pub use set::*;
-use sync_metrics::*;
 
 /// A container for a queued stage.
 pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
@@ -105,7 +106,7 @@ pub struct Pipeline<DB: Database> {
     progress: PipelineProgress,
     /// A receiver for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<H256>>,
-    metrics: Metrics,
+    metrics_tx: Option<MetricEventsSender>,
 }
 
 impl<DB> Pipeline<DB>
@@ -117,9 +118,10 @@ where
         PipelineBuilder::default()
     }
 
-    /// Return the minimum pipeline progress
-    pub fn minimum_progress(&self) -> Option<u64> {
-        self.progress.minimum_progress
+    /// Return the minimum block number achieved by
+    /// any stage during the execution of the pipeline.
+    pub fn minimum_block_number(&self) -> Option<u64> {
+        self.progress.minimum_block_number
     }
 
     /// Set tip for reverse sync.
@@ -137,14 +139,17 @@ where
 
     /// Registers progress metrics for each registered stage
     pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
-        let tx = self.db.tx()?;
+        let Some(metrics_tx) = &mut self.metrics_tx else { return Ok(()) };
+        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+        let provider = factory.provider()?;
+
         for stage in &self.stages {
             let stage_id = stage.id();
-            self.metrics.stage_checkpoint(
+            let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
                 stage_id,
-                get_stage_checkpoint(&tx, stage_id)?.unwrap_or_default(),
-                None,
-            );
+                checkpoint: provider.get_stage_checkpoint(stage_id)?.unwrap_or_default(),
+                max_block_number: None,
+            });
         }
         Ok(())
     }
@@ -179,14 +184,14 @@ where
             // configured block.
             if next_action.should_continue() &&
                 self.progress
-                    .minimum_progress
+                    .minimum_block_number
                     .zip(self.max_block)
                     .map_or(false, |(progress, target)| progress >= target)
             {
                 trace!(
                     target: "sync::pipeline",
                     ?next_action,
-                    minimum_progress = ?self.progress.minimum_progress,
+                    minimum_block_number = ?self.progress.minimum_block_number,
                     max_block = ?self.max_block,
                     "Terminating pipeline."
                 );
@@ -216,20 +221,26 @@ where
             trace!(target: "sync::pipeline", stage = %stage_id, ?next, "Completed stage");
 
             match next {
-                ControlFlow::NoProgress { stage_progress } => {
-                    if let Some(progress) = stage_progress {
-                        self.progress.update(progress);
+                ControlFlow::NoProgress { block_number } => {
+                    if let Some(block_number) = block_number {
+                        self.progress.update(block_number);
                     }
                 }
-                ControlFlow::Continue { progress } => self.progress.update(progress),
+                ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
                     self.unwind(target, Some(bad_block.number)).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
 
+            let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+
             previous_stage = Some(
-                get_stage_checkpoint(&self.db.tx()?, stage_id)?.unwrap_or_default().block_number,
+                factory
+                    .provider()?
+                    .get_stage_checkpoint(stage_id)?
+                    .unwrap_or_default()
+                    .block_number,
             );
         }
 
@@ -247,8 +258,8 @@ where
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -267,7 +278,7 @@ where
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
-                let output = stage.unwind(&mut provider_rw, input).await;
+                let output = stage.unwind(&provider_rw, input).await;
                 match output {
                     Ok(unwind_output) => {
                         checkpoint = unwind_output.checkpoint;
@@ -279,20 +290,22 @@ where
                             done = checkpoint.block_number == to,
                             "Stage unwound"
                         );
-                        self.metrics.stage_checkpoint(
-                            stage_id, checkpoint,
-                            // We assume it was set in the previous execute iteration, so it
-                            // doesn't change when we unwind.
-                            None,
-                        );
+                        if let Some(metrics_tx) = &mut self.metrics_tx {
+                            let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
+                                stage_id,
+                                checkpoint,
+                                // We assume it was set in the previous execute iteration, so it
+                                // doesn't change when we unwind.
+                                max_block_number: None,
+                            });
+                        }
                         provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         provider_rw.commit()?;
-                        provider_rw =
-                            shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -317,8 +330,8 @@ where
         let mut made_progress = false;
         let target = self.max_block.or(previous_stage);
 
-        let shareable_db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
+        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
         loop {
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
@@ -338,7 +351,7 @@ where
 
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress {
-                    stage_progress: prev_checkpoint.map(|progress| progress.block_number),
+                    block_number: prev_checkpoint.map(|progress| progress.block_number),
                 })
             }
 
@@ -350,13 +363,13 @@ where
             });
 
             match stage
-                .execute(&mut provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
+                .execute(&provider_rw, ExecInput { target, checkpoint: prev_checkpoint })
                 .await
             {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
-                    info!(
+                    debug!(
                         target: "sync::pipeline",
                         stage = %stage_id,
                         progress = checkpoint.block_number,
@@ -364,7 +377,13 @@ where
                         %done,
                         "Stage committed progress"
                     );
-                    self.metrics.stage_checkpoint(stage_id, checkpoint, target);
+                    if let Some(metrics_tx) = &mut self.metrics_tx {
+                        let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
+                            stage_id,
+                            checkpoint,
+                            max_block_number: target,
+                        });
+                    }
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran {
@@ -376,14 +395,14 @@ where
 
                     // TODO: Make the commit interval configurable
                     provider_rw.commit()?;
-                    provider_rw = shareable_db.provider_rw().map_err(PipelineError::Interface)?;
+                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
 
                     if done {
-                        let stage_progress = checkpoint.block_number;
+                        let block_number = checkpoint.block_number;
                         return Ok(if made_progress {
-                            ControlFlow::Continue { progress: stage_progress }
+                            ControlFlow::Continue { block_number }
                         } else {
-                            ControlFlow::NoProgress { stage_progress: Some(stage_progress) }
+                            ControlFlow::NoProgress { block_number: Some(block_number) }
                         })
                     }
                 }
@@ -472,9 +491,11 @@ mod tests {
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
-    use reth_db::mdbx::{self, test_utils, EnvKind};
+    use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{
-        consensus, provider::ProviderError, test_utils::generators::random_header,
+        consensus,
+        provider::ProviderError,
+        test_utils::{generators, generators::random_header},
     };
     use reth_primitives::{stage::StageCheckpoint, MAINNET};
     use tokio_stream::StreamExt;
@@ -484,32 +505,32 @@ mod tests {
         let mut progress = PipelineProgress::default();
 
         progress.update(10);
-        assert_eq!(progress.minimum_progress, Some(10));
-        assert_eq!(progress.maximum_progress, Some(10));
+        assert_eq!(progress.minimum_block_number, Some(10));
+        assert_eq!(progress.maximum_block_number, Some(10));
 
         progress.update(20);
-        assert_eq!(progress.minimum_progress, Some(10));
-        assert_eq!(progress.maximum_progress, Some(20));
+        assert_eq!(progress.minimum_block_number, Some(10));
+        assert_eq!(progress.maximum_block_number, Some(20));
 
         progress.update(1);
-        assert_eq!(progress.minimum_progress, Some(1));
-        assert_eq!(progress.maximum_progress, Some(20));
+        assert_eq!(progress.minimum_block_number, Some(1));
+        assert_eq!(progress.maximum_block_number, Some(20));
     }
 
     #[test]
     fn progress_ctrl_flow() {
         let mut progress = PipelineProgress::default();
 
-        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress { stage_progress: None });
+        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress { block_number: None });
 
         progress.update(1);
-        assert_eq!(progress.next_ctrl(), ControlFlow::Continue { progress: 1 });
+        assert_eq!(progress.next_ctrl(), ControlFlow::Continue { block_number: 1 });
     }
 
     /// Runs a simple pipeline.
     #[tokio::test]
     async fn run_pipeline() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -564,7 +585,7 @@ mod tests {
     /// Unwinds a simple pipeline.
     #[tokio::test]
     async fn unwind_pipeline() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -680,7 +701,7 @@ mod tests {
     /// Unwinds a pipeline with intermediate progress.
     #[tokio::test]
     async fn unwind_pipeline_with_intermediate_progress() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -767,7 +788,7 @@ mod tests {
     /// - The pipeline finishes
     #[tokio::test]
     async fn run_pipeline_with_unwind() {
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -779,7 +800,7 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Validation {
-                        block: random_header(5, Default::default()),
+                        block: random_header(&mut generators::rng(), 5, Default::default()),
                         error: consensus::ConsensusError::BaseFeeMissing,
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
@@ -861,7 +882,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_error_handling() {
         // Non-fatal
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
@@ -874,7 +895,7 @@ mod tests {
         assert_matches!(result, Ok(()));
 
         // Fatal
-        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let mut pipeline = Pipeline::builder()
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),

@@ -1,3 +1,9 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+)]
 //! reth's database abstraction layer with concrete implementations.
 //!
 //! The database abstraction assumes that the underlying store is a KV store subdivided into tables.
@@ -68,6 +74,7 @@ pub mod abstraction;
 mod implementation;
 pub mod tables;
 mod utils;
+pub mod version;
 
 #[cfg(feature = "mdbx")]
 /// Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
@@ -79,3 +86,163 @@ pub mod mdbx {
 pub use abstraction::*;
 pub use reth_interfaces::db::DatabaseError;
 pub use tables::*;
+pub use utils::is_database_empty;
+
+#[cfg(feature = "mdbx")]
+use mdbx::{Env, EnvKind, NoWriteMap, WriteMap};
+
+#[cfg(feature = "mdbx")]
+/// Alias type for the database environment in use. Read/Write mode.
+pub type DatabaseEnv = Env<WriteMap>;
+
+#[cfg(feature = "mdbx")]
+/// Alias type for the database engine in use. Read only mode.
+pub type DatabaseEnvRO = Env<NoWriteMap>;
+
+use eyre::WrapErr;
+use reth_interfaces::db::LogLevel;
+use std::path::Path;
+
+/// Opens up an existing database or creates a new one at the specified path. Creates tables if
+/// necessary. Read/Write mode.
+pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
+    use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
+
+    let rpath = path.as_ref();
+    if is_database_empty(rpath) {
+        std::fs::create_dir_all(rpath)
+            .wrap_err_with(|| format!("Could not create database directory {}", rpath.display()))?;
+        create_db_version_file(rpath)?;
+    } else {
+        match check_db_version_file(rpath) {
+            Ok(_) => (),
+            Err(DatabaseVersionError::MissingFile) => create_db_version_file(rpath)?,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    #[cfg(feature = "mdbx")]
+    {
+        let db = DatabaseEnv::open(rpath, EnvKind::RW, log_level)?;
+        db.create_tables()?;
+        Ok(db)
+    }
+    #[cfg(not(feature = "mdbx"))]
+    {
+        unimplemented!();
+    }
+}
+
+/// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
+pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnvRO> {
+    #[cfg(feature = "mdbx")]
+    {
+        Env::<NoWriteMap>::open(path, EnvKind::RO, log_level)
+            .with_context(|| format!("Could not open database at path: {}", path.display()))
+    }
+    #[cfg(not(feature = "mdbx"))]
+    {
+        unimplemented!();
+    }
+}
+
+/// Opens up an existing database. Read/Write mode. It doesn't create it or create tables if
+/// missing.
+pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
+    #[cfg(feature = "mdbx")]
+    {
+        Env::<WriteMap>::open(path, EnvKind::RW, log_level)
+            .with_context(|| format!("Could not open database at path: {}", path.display()))
+    }
+    #[cfg(not(feature = "mdbx"))]
+    {
+        unimplemented!();
+    }
+}
+
+/// Collection of database test utilities
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils {
+    use super::*;
+    use std::sync::Arc;
+
+    /// Error during database open
+    pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
+    /// Error during database creation
+    pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
+    /// Error during table creation
+    pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
+    /// Error during tempdir creation
+    pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
+
+    /// Create read/write database for testing
+    pub fn create_test_rw_db() -> Arc<DatabaseEnv> {
+        Arc::new(
+            init_db(tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(), None)
+                .expect(ERROR_DB_CREATION),
+        )
+    }
+
+    /// Create read/write database for testing
+    pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<DatabaseEnv> {
+        Arc::new(init_db(path.as_ref(), None).expect(ERROR_DB_CREATION))
+    }
+
+    /// Create read only database for testing
+    pub fn create_test_ro_db() -> Arc<DatabaseEnvRO> {
+        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        {
+            init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
+        }
+        Arc::new(open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        init_db,
+        version::{db_version_file_path, DatabaseVersionError},
+    };
+    use assert_matches::assert_matches;
+    use tempfile::tempdir;
+
+    #[test]
+    fn db_version() {
+        let path = tempdir().unwrap();
+
+        // Database is empty
+        {
+            let db = init_db(&path, None);
+            assert_matches!(db, Ok(_));
+        }
+
+        // Database is not empty, current version is the same as in the file
+        {
+            let db = init_db(&path, None);
+            assert_matches!(db, Ok(_));
+        }
+
+        // Database is not empty, version file is malformed
+        {
+            std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
+                .unwrap();
+            let db = init_db(&path, None);
+            assert!(db.is_err());
+            assert_matches!(
+                db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+                Some(DatabaseVersionError::MalformedFile)
+            )
+        }
+
+        // Database is not empty, version file contains not matching version
+        {
+            std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
+            let db = init_db(&path, None);
+            assert!(db.is_err());
+            assert_matches!(
+                db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
+                Some(DatabaseVersionError::VersionMismatch { version: 0 })
+            )
+        }
+    }
+}

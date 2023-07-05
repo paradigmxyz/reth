@@ -1,6 +1,6 @@
 //! Common CLI utility functions.
 
-use eyre::{Result, WrapErr};
+use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
@@ -11,7 +11,7 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, ChainSpec, HeadersDirection, SealedHeader};
+use reth_primitives::{fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedHeader};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
@@ -71,7 +71,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Grabs the contents of the table within a certain index range and places the
     /// entries into a [`HashMap`][std::collections::HashMap].
     pub fn list<T: Table>(
-        &mut self,
+        &self,
         skip: usize,
         len: usize,
         reverse: bool,
@@ -90,7 +90,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     }
 
     /// Grabs the content of the table for the given key
-    pub fn get<T: Table>(&mut self, key: T::Key) -> Result<Option<T::Value>> {
+    pub fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>> {
         self.db.view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
     }
 
@@ -98,7 +98,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     pub fn drop(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         info!(target: "reth::cli", "Dropping database at {:?}", path);
-        std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
+        fs::remove_dir_all(path)?;
         Ok(())
     }
 

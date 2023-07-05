@@ -3,7 +3,7 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_spec_value_parser, hash_or_num_value_parser},
-        DiscoveryArgs,
+        DatabaseArgs, DiscoveryArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
@@ -11,11 +11,11 @@ use crate::{
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_config::Config;
-use reth_db::mdbx::{Env, EnvKind, WriteMap};
+use reth_db::open_db;
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
@@ -74,11 +74,14 @@ pub struct Command {
     #[arg(long, default_value = "5")]
     retries: usize,
 
-    #[clap(subcommand)]
-    command: Subcommands,
-
     #[arg(long, default_value = "any")]
     nat: NatResolver,
+
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
+    #[clap(subcommand)]
+    command: Subcommands,
 }
 
 #[derive(Subcommand, Debug)]
@@ -101,7 +104,7 @@ impl Command {
     /// Execute `p2p` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let tempdir = tempfile::TempDir::new()?;
-        let noop_db = Arc::new(Env::<WriteMap>::open(&tempdir.into_path(), EnvKind::RW)?);
+        let noop_db = Arc::new(open_db(&tempdir.into_path(), self.db.log_level)?);
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -129,7 +132,7 @@ impl Command {
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
         let network = network_config_builder
-            .build(Arc::new(ShareableDatabase::new(noop_db, self.chain.clone())))
+            .build(Arc::new(ProviderFactory::new(noop_db, self.chain.clone())))
             .start_network()
             .await?;
 

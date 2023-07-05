@@ -1,9 +1,9 @@
 //! Various serde utilities
 
-mod storage_key;
+mod storage;
 
 use serde::Serializer;
-pub use storage_key::*;
+pub use storage::*;
 
 mod jsonu256;
 use crate::H256;

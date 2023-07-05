@@ -216,26 +216,34 @@ impl StageCheckpoint {
         self.block_number = block_number;
         self
     }
+
+    /// Get the underlying [`EntitiesCheckpoint`], if any, to determine the number of entities
+    /// processed, and the number of total entities to process.
+    pub fn entities(&self) -> Option<EntitiesCheckpoint> {
+        let Some(stage_checkpoint) = self.stage_checkpoint else { return None };
+
+        match stage_checkpoint {
+            StageUnitCheckpoint::Account(AccountHashingCheckpoint {
+                progress: entities, ..
+            }) |
+            StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+                progress: entities, ..
+            }) |
+            StageUnitCheckpoint::Entities(entities) |
+            StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }) |
+            StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }) |
+            StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
+                progress: entities,
+                ..
+            }) => Some(entities),
+        }
+    }
 }
 
 impl Display for StageCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.stage_checkpoint {
-            Some(
-                StageUnitCheckpoint::Account(AccountHashingCheckpoint {
-                    progress: entities, ..
-                }) |
-                StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
-                    progress: entities, ..
-                }) |
-                StageUnitCheckpoint::Entities(entities) |
-                StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }) |
-                StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }) |
-                StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
-                    progress: entities,
-                    ..
-                }),
-            ) => entities.fmt(f),
+        match self.entities() {
+            Some(entities) => entities.fmt(f),
             None => write!(f, "{}", self.block_number),
         }
     }

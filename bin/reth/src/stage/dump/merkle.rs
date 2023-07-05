@@ -1,9 +1,9 @@
 use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
-use reth_db::{database::Database, table::TableImporter, tables};
+use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec};
-use reth_provider::ShareableDatabase;
+use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
@@ -45,11 +45,11 @@ async fn unwind_and_copy<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
     range: (u64, u64),
     tip_block_number: u64,
-    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
     let (from, to) = range;
-    let shareable_db = ShareableDatabase::new(db_tool.db, db_tool.chain.clone());
-    let mut provider = shareable_db.provider_rw()?;
+    let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
+    let provider = factory.provider_rw()?;
 
     let unwind = UnwindInput {
         unwind_to: from,
@@ -61,10 +61,10 @@ async fn unwind_and_copy<DB: Database>(
 
     // Unwind hashes all the way to FROM
 
-    StorageHashingStage::default().unwind(&mut provider, unwind).await.unwrap();
-    AccountHashingStage::default().unwind(&mut provider, unwind).await.unwrap();
+    StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
+    AccountHashingStage::default().unwind(&provider, unwind).await.unwrap();
 
-    MerkleStage::default_unwind().unwind(&mut provider, unwind).await?;
+    MerkleStage::default_unwind().unwind(&provider, unwind).await?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
@@ -74,7 +74,7 @@ async fn unwind_and_copy<DB: Database>(
 
     exec_stage
         .unwind(
-            &mut provider,
+            &provider,
             UnwindInput {
                 unwind_to: to,
                 checkpoint: StageCheckpoint::new(tip_block_number),
@@ -86,11 +86,11 @@ async fn unwind_and_copy<DB: Database>(
     // Bring hashes to TO
 
     AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&mut provider, execute_input)
+        .execute(&provider, execute_input)
         .await
         .unwrap();
     StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&mut provider, execute_input)
+        .execute(&provider, execute_input)
         .await
         .unwrap();
 
@@ -115,8 +115,8 @@ async fn dry_run<DB: Database>(
     from: u64,
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
-    let shareable_db = ShareableDatabase::new(&output_db, chain);
-    let mut provider = shareable_db.provider_rw()?;
+    let factory = ProviderFactory::new(&output_db, chain);
+    let provider = factory.provider_rw()?;
     let mut exec_output = false;
     while !exec_output {
         exec_output = MerkleStage::Execution {
@@ -125,7 +125,7 @@ async fn dry_run<DB: Database>(
                                         * scratch */
         }
         .execute(
-            &mut provider,
+            &provider,
             reth_stages::ExecInput {
                 target: Some(to),
                 checkpoint: Some(StageCheckpoint::new(from)),

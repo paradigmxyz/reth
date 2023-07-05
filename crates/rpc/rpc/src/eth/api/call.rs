@@ -4,8 +4,8 @@ use crate::{
     eth::{
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
-            build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
-            transact, EvmOverrides,
+            build_call_evm_env, caller_gas_allowance, cap_tx_gas_limit_with_caller_allowance,
+            get_precompiles, inspect, transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -14,7 +14,7 @@ use crate::{
 use ethers_core::utils::get_contract_address;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
-use reth_provider::{BlockProviderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::{
     access_list::AccessListInspector,
     database::{State, SubState},
@@ -31,10 +31,10 @@ use tracing::trace;
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 const MIN_CREATE_GAS: u64 = 53_000u64;
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProviderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].
@@ -122,19 +122,8 @@ where
         }
 
         // check funds of the sender
-        let gas_price = env.tx.gas_price;
-        if gas_price > U256::ZERO {
-            let mut available_funds =
-                db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
-            if env.tx.value > available_funds {
-                return Err(RpcInvalidTransactionError::InsufficientFunds.into())
-            }
-            // subtract transferred value from available funds
-            // SAFETY: value < available_funds, checked above
-            available_funds -= env.tx.value;
-            // amount of gas the sender can afford with the `gas_price`
-            // SAFETY: gas_price not zero
-            let allowance = available_funds.checked_div(gas_price).unwrap_or_default();
+        if env.tx.gas_price > U256::ZERO {
+            let allowance = caller_gas_allowance(&mut db, &env.tx)?;
 
             if highest_gas_limit > allowance {
                 // cap the highest gas limit by max gas caller can afford with given gas price

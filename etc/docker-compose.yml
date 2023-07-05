@@ -1,0 +1,95 @@
+version: '3.9'
+name: 'reth'
+
+services:
+  reth:
+    restart: unless-stopped
+    image: ghcr.io/paradigmxyz/reth
+    ports:
+      - '9001:9001' # metrics
+      - '30303:30303' # eth/66 peering
+      - '8545:8545' # rpc
+    volumes:
+      - rethdata:/root/.local/share/reth/mainnet/db
+      - rethlogs:/root/rethlogs
+      - ./jwttoken:/root/jwt:ro
+    command: >
+      node
+      --metrics 0.0.0.0:9001
+      --log.persistent
+      --log.directory /root/rethlogs
+      --authrpc.addr 0.0.0.0
+      --authrpc.port 8551
+      --authrpc.jwtsecret /root/jwt/jwt.hex
+      --http --http.addr 0.0.0.0 --http.port 8545
+      --http.api "eth,net"
+
+  lighthouse:
+    restart: unless-stopped
+    image: sigp/lighthouse
+    depends_on:
+      - reth
+    ports:
+      - '5052:5052/tcp'
+      - '5053:5053/tcp'
+      - '5054:5054/tcp' # metrics
+      - '9000:9000/tcp'
+      - '9000:9000/udp'
+    volumes:
+      - lighthousedata:/root/.lighthouse
+      - ./jwttoken:/root/jwt:ro
+    command: >
+      lighthouse bn
+      --http --http-address 0.0.0.0
+      --execution-endpoint http://reth:8551
+      --metrics --metrics-address 0.0.0.0
+      --execution-jwt /root/jwt/jwt.hex
+      --checkpoint-sync-url https://mainnet.checkpoint.sigp.io 
+
+  prometheus:
+    restart: unless-stopped
+    image: prom/prometheus
+    depends_on:
+      - reth
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheusdata:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+  grafana:
+    restart: unless-stopped
+    image: grafana/grafana
+    depends_on:
+      - reth
+      - prometheus
+    ports:
+      - 3000:3000
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
+    # 1. Copy dashboards from temp directory to prevent modifying original host files
+    # 2. Replace Prometheus datasource placeholder with the actual name
+    # 3. Run Grafana
+    entrypoint: >
+      sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
+             find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
+             /run.sh"
+    
+volumes:
+  rethdata:
+    driver: local
+  rethlogs:
+    driver: local
+  lighthousedata:
+    driver: local
+  prometheusdata:
+    driver: local
+  grafanadata:
+    driver: local

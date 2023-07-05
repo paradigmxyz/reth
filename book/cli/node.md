@@ -159,14 +159,14 @@ Rpc:
       --gas-price-oracle
           Gas price oracle configuration.
 
-      --block-cache-size
-          Max size for cached block data in megabytes.
+      --block-cache-len
+          Maximum number of block cache entries.
 
-      --receipt-cache-size
-          Max size for cached receipt data in megabytes.
+      --receipt-cache-len
+          Maximum number of receipt cache entries.
 
-      --env-cache-size
-          Max size for cached evm env data in megabytes.
+      --env-cache-len
+          Maximum number of env cache entries.
 
 Builder:
       --builder.extradata

@@ -4,17 +4,13 @@ use serde::{Deserialize, Serialize};
 /// <https://github.com/ethereum/go-ethereum/blob/91cb6f863a965481e51d5d9c0e5ccd54796fd967/eth/tracers/native/call.go#L44>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallFrame {
-    #[serde(rename = "type")]
-    pub typ: String,
     pub from: Address,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to: Option<Address>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub value: Option<U256>,
     #[serde(default, deserialize_with = "from_int_or_hex")]
     pub gas: U256,
     #[serde(default, deserialize_with = "from_int_or_hex", rename = "gasUsed")]
     pub gas_used: U256,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Address>,
     pub input: Bytes,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<Bytes>,
@@ -22,10 +18,14 @@ pub struct CallFrame {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revert_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<CallFrame>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub logs: Vec<CallLogFrame>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub calls: Option<Vec<CallFrame>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logs: Option<Vec<CallLogFrame>>,
+    pub value: Option<U256>,
+    #[serde(rename = "type")]
+    pub typ: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,9 +68,9 @@ mod tests {
         opts.tracing_options.tracer =
             Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::CallTracer));
         opts.tracing_options.tracer_config =
-            Some(GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::CallTracer(
-                CallConfig { only_top_call: Some(true), with_log: Some(true) },
-            )));
+            serde_json::to_value(CallConfig { only_top_call: Some(true), with_log: Some(true) })
+                .unwrap()
+                .into();
 
         assert_eq!(
             serde_json::to_string(&opts).unwrap(),
@@ -83,7 +83,6 @@ mod tests {
         let _trace: CallFrame = serde_json::from_str(DEFAULT).unwrap();
         let _trace: CallFrame = serde_json::from_str(LEGACY).unwrap();
         let _trace: CallFrame = serde_json::from_str(ONLY_TOP_CALL).unwrap();
-        let trace: CallFrame = serde_json::from_str(WITH_LOG).unwrap();
-        let _logs = trace.logs.unwrap();
+        let _trace: CallFrame = serde_json::from_str(WITH_LOG).unwrap();
     }
 }

@@ -18,6 +18,8 @@ pub struct TracingInspectorConfig {
     pub exclude_precompile_calls: bool,
     /// Whether to record individual return data
     pub record_call_return_data: bool,
+    /// Whether to record logs
+    pub record_logs: bool,
 }
 
 impl TracingInspectorConfig {
@@ -30,6 +32,7 @@ impl TracingInspectorConfig {
             record_state_diff: false,
             exclude_precompile_calls: false,
             record_call_return_data: false,
+            record_logs: true,
         }
     }
 
@@ -44,6 +47,7 @@ impl TracingInspectorConfig {
             record_state_diff: false,
             exclude_precompile_calls: true,
             record_call_return_data: false,
+            record_logs: false,
         }
     }
 
@@ -58,6 +62,7 @@ impl TracingInspectorConfig {
             record_state_diff: true,
             exclude_precompile_calls: false,
             record_call_return_data: false,
+            record_logs: false,
         }
     }
 
@@ -100,6 +105,22 @@ impl TracingInspectorConfig {
     /// Configure whether the tracer should record state diffs
     pub fn set_state_diffs(mut self, record_state_diff: bool) -> Self {
         self.record_state_diff = record_state_diff;
+        self
+    }
+
+    /// Configure whether the tracer should record steps and state diffs.
+    ///
+    /// This is a convenience method for setting both [TracingInspectorConfig::set_steps] and
+    /// [TracingInspectorConfig::set_state_diffs] since tracking state diffs requires steps tracing.
+    pub fn set_steps_and_state_diffs(mut self, steps_and_diffs: bool) -> Self {
+        self.record_steps = steps_and_diffs;
+        self.record_state_diff = steps_and_diffs;
+        self
+    }
+
+    /// Configure whether the tracer should record logs
+    pub fn set_record_logs(mut self, record_logs: bool) -> Self {
+        self.record_logs = record_logs;
         self
     }
 }

@@ -1,11 +1,15 @@
 use crate::{
-    BlockIdProvider, BlockNumProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
+    BlockIdReader, BlockNumReader, HeaderProvider, PostState, ReceiptProvider,
+    ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
 };
+use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, Header, SealedBlock, SealedHeader, H256,
+    Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
+    ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, H256,
 };
+use std::ops::RangeInclusive;
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -43,8 +47,14 @@ impl BlockSource {
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from
 /// the database.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockProvider:
-    BlockNumProvider + HeaderProvider + TransactionsProvider + ReceiptProvider + Send + Sync
+pub trait BlockReader:
+    BlockNumReader
+    + HeaderProvider
+    + TransactionsProvider
+    + ReceiptProvider
+    + WithdrawalsProvider
+    + Send
+    + Sync
 {
     /// Tries to find in the given block source.
     ///
@@ -63,6 +73,9 @@ pub trait BlockProvider:
     /// Note: This returns a [SealedBlock] because it's expected that this is sealed by the provider
     /// and the caller does not know the hash.
     fn pending_block(&self) -> Result<Option<SealedBlock>>;
+
+    /// Returns the pending block and receipts if available.
+    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>>;
 
     /// Returns the ommers/uncle headers of the given block from the database.
     ///
@@ -87,20 +100,25 @@ pub trait BlockProvider:
     ///
     /// Returns `None` if block is not found.
     fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>>;
+
+    /// Returns the block with senders with matching number from database.
+    ///
+    /// Returns `None` if block is not found.
+    fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>>;
 }
 
-/// Trait extension for `BlockProvider`, for types that implement `BlockId` conversion.
+/// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.
 ///
-/// The `BlockProvider` trait should be implemented on types that can retrieve a block from either
+/// The `BlockReader` trait should be implemented on types that can retrieve a block from either
 /// a block number or hash. However, it might be desirable to fetch a block from a `BlockId` type,
 /// which can be a number, hash, or tag such as `BlockNumberOrTag::Safe`.
 ///
 /// Resolving tags requires keeping track of block hashes or block numbers associated with the tag,
-/// so this trait can only be implemented for types that implement `BlockIdProvider`. The
-/// `BlockIdProvider` methods should be used to resolve `BlockId`s to block numbers or hashes, and
-/// retrieving the block should be done using the type's `BlockProvider` methods.
+/// so this trait can only be implemented for types that implement `BlockIdReader`. The
+/// `BlockIdReader` methods should be used to resolve `BlockId`s to block numbers or hashes, and
+/// retrieving the block should be done using the type's `BlockReader` methods.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockProviderIdExt: BlockProvider + BlockIdProvider {
+pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     /// Returns the block with matching tag from the database
     ///
     /// Returns `None` if block is not found.
@@ -181,4 +199,56 @@ pub trait BlockProviderIdExt: BlockProvider + BlockIdProvider {
     ///
     /// Returns `None` if block is not found.
     fn ommers_by_id(&self, id: BlockId) -> Result<Option<Vec<Header>>>;
+}
+
+/// BlockExecution Writer
+#[auto_impl(&, Arc, Box)]
+pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
+    /// Get range of blocks and its execution result
+    fn get_block_and_execution_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+        self.get_or_take_block_and_execution_range::<false>(chain_spec, range)
+    }
+
+    /// Take range of blocks and its execution result
+    fn take_block_and_execution_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+        self.get_or_take_block_and_execution_range::<true>(chain_spec, range)
+    }
+
+    /// Return range of blocks and its execution result
+    fn get_or_take_block_and_execution_range<const TAKE: bool>(
+        &self,
+        chain_spec: &ChainSpec,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>>;
+}
+
+/// Block Writer
+#[auto_impl(&, Arc, Box)]
+pub trait BlockWriter: Send + Sync {
+    /// Insert full block and make it canonical. Parent tx num and transition id is taken from
+    /// parent block in database.
+    ///
+    /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
+    /// transition in the block.
+    fn insert_block(
+        &self,
+        block: SealedBlock,
+        senders: Option<Vec<Address>>,
+    ) -> Result<StoredBlockBodyIndices>;
+
+    /// Append blocks and insert its post state.
+    /// This will insert block data to all related tables and will update pipeline progress.
+    fn append_blocks_with_post_state(
+        &self,
+        blocks: Vec<SealedBlockWithSenders>,
+        state: PostState,
+    ) -> Result<()>;
 }
