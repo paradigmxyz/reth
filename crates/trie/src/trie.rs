@@ -1,7 +1,7 @@
 use crate::{
     account::EthAccount,
     hashed_cursor::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor},
-    prefix_set::{PrefixSet, PrefixSetLoader},
+    prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie_cursor::{AccountTrieCursor, StorageTrieCursor},
     updates::{TrieKey, TrieOp, TrieUpdates},
@@ -90,7 +90,7 @@ where
     pub fn new(tx: &'a TX) -> Self {
         Self {
             tx,
-            changed_account_prefixes: PrefixSet::default(),
+            changed_account_prefixes: PrefixSetMut::default().freeze(),
             changed_storage_prefixes: HashMap::default(),
             previous_state: None,
             threshold: 100_000,
@@ -110,8 +110,10 @@ where
     ) -> Result<Self, StateRootError> {
         let (account_prefixes, storage_prefixes) = PrefixSetLoader::new(tx).load(range)?;
         Ok(Self::new(tx)
-            .with_changed_account_prefixes(account_prefixes)
-            .with_changed_storage_prefixes(storage_prefixes))
+            .with_changed_account_prefixes(account_prefixes.freeze())
+            .with_changed_storage_prefixes(
+                storage_prefixes.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
+            ))
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
@@ -371,7 +373,7 @@ where
         Self {
             tx,
             hashed_address,
-            changed_prefixes: PrefixSet::default(),
+            changed_prefixes: PrefixSetMut::default().freeze(),
             hashed_cursor_factory: tx,
         }
     }
@@ -389,7 +391,12 @@ impl<'a, 'b, TX, H> StorageRoot<'a, 'b, TX, H> {
         hashed_cursor_factory: &'b H,
         hashed_address: H256,
     ) -> Self {
-        Self { tx, hashed_address, changed_prefixes: PrefixSet::default(), hashed_cursor_factory }
+        Self {
+            tx,
+            hashed_address,
+            changed_prefixes: PrefixSetMut::default().freeze(),
+            hashed_cursor_factory,
+        }
     }
 
     /// Set the changed prefixes.
@@ -591,10 +598,10 @@ mod tests {
         trie_updates.flush(tx.tx_ref()).unwrap();
 
         // 3. Calculate the incremental root
-        let mut storage_changes = PrefixSet::default();
+        let mut storage_changes = PrefixSetMut::default();
         storage_changes.insert(Nibbles::unpack(modified_key));
         let loader = StorageRoot::new_hashed(tx.tx_ref(), hashed_address)
-            .with_changed_prefixes(storage_changes);
+            .with_changed_prefixes(storage_changes.freeze());
         let incremental_root = loader.root().unwrap();
 
         assert_eq!(modified_root, incremental_root);
@@ -1014,7 +1021,7 @@ mod tests {
             Account { nonce: 0, balance: U256::from(5).mul(ether), bytecode_hash: None };
         hashed_account_cursor.upsert(key4b, account4b).unwrap();
 
-        let mut prefix_set = PrefixSet::default();
+        let mut prefix_set = PrefixSetMut::default();
         prefix_set.insert(Nibbles::unpack(key4b));
 
         let expected_state_root =
@@ -1022,7 +1029,7 @@ mod tests {
                 .unwrap();
 
         let (root, trie_updates) = StateRoot::new(tx.tx_ref())
-            .with_changed_account_prefixes(prefix_set)
+            .with_changed_account_prefixes(prefix_set.freeze())
             .root_with_updates()
             .unwrap();
         assert_eq!(root, expected_state_root);
@@ -1060,7 +1067,7 @@ mod tests {
             let account = hashed_account_cursor.seek_exact(key2).unwrap().unwrap();
             hashed_account_cursor.delete_current().unwrap();
 
-            let mut account_prefix_set = PrefixSet::default();
+            let mut account_prefix_set = PrefixSetMut::default();
             account_prefix_set.insert(Nibbles::unpack(account.0));
 
             let computed_expected_root: H256 = triehash::trie_root::<KeccakHasher, _, _, _>([
@@ -1074,7 +1081,7 @@ mod tests {
             ]);
 
             let (root, trie_updates) = StateRoot::new(tx.tx_ref())
-                .with_changed_account_prefixes(account_prefix_set)
+                .with_changed_account_prefixes(account_prefix_set.freeze())
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
@@ -1116,7 +1123,7 @@ mod tests {
             let account3 = hashed_account_cursor.seek_exact(key3).unwrap().unwrap();
             hashed_account_cursor.delete_current().unwrap();
 
-            let mut account_prefix_set = PrefixSet::default();
+            let mut account_prefix_set = PrefixSetMut::default();
             account_prefix_set.insert(Nibbles::unpack(account2.0));
             account_prefix_set.insert(Nibbles::unpack(account3.0));
 
@@ -1131,7 +1138,7 @@ mod tests {
             ]);
 
             let (root, trie_updates) = StateRoot::new(tx.tx_ref())
-                .with_changed_account_prefixes(account_prefix_set)
+                .with_changed_account_prefixes(account_prefix_set.freeze())
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
@@ -1227,7 +1234,7 @@ mod tests {
                 let mut state = BTreeMap::default();
                 for accounts in account_changes {
                     let should_generate_changeset = !state.is_empty();
-                    let mut changes = PrefixSet::default();
+                    let mut changes = PrefixSetMut::default();
                     for (hashed_address, balance) in accounts.clone() {
                         hashed_account_cursor.upsert(hashed_address, Account { balance,..Default::default() }).unwrap();
                         if should_generate_changeset {
@@ -1236,7 +1243,7 @@ mod tests {
                     }
 
                     let (state_root, trie_updates) = StateRoot::new(tx.tx_ref())
-                        .with_changed_account_prefixes(changes)
+                        .with_changed_account_prefixes(changes.freeze())
                         .root_with_updates()
                         .unwrap();
 
