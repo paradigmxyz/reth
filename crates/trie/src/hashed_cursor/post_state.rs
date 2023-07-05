@@ -251,9 +251,9 @@ where
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [HashedAccountCursor::seek] or [HashedAccountCursor::next] are called.
     fn seek(&mut self, key: H256) -> Result<Option<(H256, Account)>, reth_db::DatabaseError> {
-        // TODO: remove
-        self.last_account = None;
         debug_assert!(self.post_state.sorted, "`HashedPostState` must be pre-sorted");
+
+        self.last_account = None;
 
         // Take the next account from the post state with the key greater than or equal to the
         // sought key.
