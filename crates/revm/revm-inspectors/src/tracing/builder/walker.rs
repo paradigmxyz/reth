@@ -34,7 +34,7 @@ impl<'trace> Iterator for CallTraceNodeWalkerBF<'trace> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.queue.pop_front() {
             Some(idx) => {
-                let curr = self.nodes.get(idx).expect("missing node");
+                let curr = self.nodes.get(idx).expect("there should be a node");
 
                 for child_idx in curr.children.iter() {
                     self.queue.push_back(*child_idx);

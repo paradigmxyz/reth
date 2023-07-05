@@ -266,7 +266,7 @@ impl ParityTraceBuilder {
                     child_idx_stack.push(child_idx + 1);
 
                     child_idx = 0;
-                    current = self.nodes.get(*child).expect("missing child");
+                    current = self.nodes.get(*child).expect("there should be a child");
                 }
                 None => {
                     let mut instructions: Vec<VmInstruction> =
@@ -279,7 +279,9 @@ impl ParityTraceBuilder {
                             | opcode::DELEGATECALL
                             | opcode::STATICCALL
                             | opcode::CREATE
-                            | opcode::CREATE2 => sub_stack.pop_front().expect("missing sub trace"),
+                            | opcode::CREATE2 => {
+                                sub_stack.pop_front().expect("there should be a sub trace")
+                            }
                             _ => None,
                         };
 
@@ -293,9 +295,9 @@ impl ParityTraceBuilder {
                                 ops: instructions,
                             }));
 
-                            child_idx = child_idx_stack.pop().expect("missing child idx");
+                            child_idx = child_idx_stack.pop().expect("there should be a child idx");
 
-                            current = self.nodes.get(parent).expect("missing parent");
+                            current = self.nodes.get(parent).expect("there should be a parent");
                         }
                         None => break instructions,
                     }
@@ -369,7 +371,7 @@ where
                     }
                 }
 
-                let addr = addrs.next().expect("missing address");
+                let addr = addrs.next().expect("there should be an address");
 
                 let db_acc = db.basic(addr)?.unwrap_or_default();
 
