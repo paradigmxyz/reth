@@ -361,11 +361,7 @@ impl Command {
         };
 
         let pruner = config.prune.map(|prune_config| {
-            reth_prune::Pruner::new(
-                blockchain_db.canonical_state_stream(),
-                prune_config.block_interval,
-                tree_config.max_reorg_depth(),
-            )
+            reth_prune::Pruner::new(prune_config.block_interval, tree_config.max_reorg_depth())
         });
 
         // Configure the consensus engine

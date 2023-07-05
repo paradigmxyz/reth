@@ -1,8 +1,7 @@
 //! Prune management for the engine implementation.
 
-use futures::{FutureExt, Stream};
+use futures::FutureExt;
 use reth_primitives::BlockNumber;
-use reth_provider::CanonStateNotification;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -54,40 +53,35 @@ impl EnginePruneController {
     }
 
     /// This will try to spawn the pruner if it is idle:
-    /// 1. Try to acquire the tip block number through [Pruner::check_tip].
+    /// 1. Try to acquire the tip block number through [Pruner::is_pruning_needed].
     /// 2. If tip block number is ready, pass it to the [Pruner::run_as_fut] and spawn in a separate
     /// task. Set pruner state to [PrunerState::Running].
     /// 3. If tip block number is not ready yet, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
-    fn try_spawn_pruner(&mut self, cx: &mut Context<'_>) -> Option<EnginePruneEvent> {
+    fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<EnginePruneEvent> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
-                let mut pruner = pruner.take()?;
+                let pruner = pruner.take()?;
 
                 // Check tip for pruning
-                match pruner.check_tip(cx) {
-                    // If tip is ready, start pruning
-                    Some(tip_block_number) => {
-                        trace!(target: "consensus::engine::prune", %tip_block_number, "Tip block number for pruning is acquired");
+                if pruner.is_pruning_needed(tip_block_number) {
+                    trace!(target: "consensus::engine::prune", %tip_block_number, "Tip block number for pruning is acquired");
 
-                        let (tx, rx) = oneshot::channel();
-                        self.pruner_task_spawner.spawn_critical_blocking(
-                            "pruner task",
-                            Box::pin(async move {
-                                let result = pruner.run_as_fut(tip_block_number).await;
-                                let _ = tx.send(result);
-                            }),
-                        );
-                        self.pruner_state = PrunerState::Running(rx);
+                    let (tx, rx) = oneshot::channel();
+                    self.pruner_task_spawner.spawn_critical_blocking(
+                        "pruner task",
+                        Box::pin(async move {
+                            let result = pruner.run_as_fut(tip_block_number).await;
+                            let _ = tx.send(result);
+                        }),
+                    );
+                    self.pruner_state = PrunerState::Running(rx);
 
-                        Some(EnginePruneEvent::Started(tip_block_number))
-                    }
-                    // If tip is not ready yet, make pruner idle again
-                    None => {
-                        self.pruner_state = PrunerState::Idle(Some(pruner));
-                        Some(EnginePruneEvent::NotReady)
-                    }
+                    Some(EnginePruneEvent::Started(tip_block_number))
+                } else {
+                    self.pruner_state = PrunerState::Idle(Some(pruner));
+                    Some(EnginePruneEvent::NotReady)
                 }
             }
             PrunerState::Running(_) => None,
@@ -95,9 +89,13 @@ impl EnginePruneController {
     }
 
     /// Advances the prune process.
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EnginePruneEvent> {
+    pub(crate) fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+        tip_block_number: BlockNumber,
+    ) -> Poll<EnginePruneEvent> {
         // Try to spawn a pruner
-        if let Some(event) = self.try_spawn_pruner(cx) {
+        if let Some(event) = self.try_spawn_pruner(tip_block_number) {
             return Poll::Ready(event)
         }
 

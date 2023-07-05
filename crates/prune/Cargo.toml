@@ -13,7 +13,6 @@ Pruning implementation
 [dependencies]
 # reth
 reth-primitives = { workspace = true }
-reth-provider = { workspace = true }
 
 # async/futures
 tokio = { workspace = true }
@@ -23,5 +22,3 @@ futures-util = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
-[dev-dependencies]
-reth-provider = { workspace = true, features = ["test-utils"] }

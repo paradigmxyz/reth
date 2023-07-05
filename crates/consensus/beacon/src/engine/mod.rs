@@ -21,8 +21,7 @@ use reth_primitives::{
     SealedHeader, H256, U256,
 };
 use reth_provider::{
-    BlockReader, BlockSource, CanonChainTracker, CanonStateNotification, ProviderError,
-    StageCheckpointReader,
+    BlockReader, BlockSource, CanonChainTracker, ProviderError, StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
@@ -40,7 +39,7 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
-use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod message;
@@ -1454,14 +1453,17 @@ where
 
             // check prune events if pipeline is idle and both engine and sync events are pending
             if this.sync.is_pipeline_idle() && engine_messages_pending & sync_pending {
-                // process prune events if any
-                match this.prune.as_mut().map(|prune| prune.poll(cx)) {
-                    Some(Poll::Ready(prune_event)) => {
-                        if let Some(res) = this.on_prune_event(prune_event) {
-                            return Poll::Ready(res)
+                if let Some(prune) = &mut this.prune {
+                    match prune.poll(cx, this.blockchain.canonical_tip().number) {
+                        Poll::Ready(prune_event) => {
+                            if let Some(res) = this.on_prune_event(prune_event) {
+                                return Poll::Ready(res)
+                            }
                         }
+                        Poll::Pending => return Poll::Pending,
                     }
-                    Some(Poll::Pending) | None => return Poll::Pending,
+                } else {
+                    return Poll::Pending
                 }
             }
         }
@@ -1664,9 +1666,7 @@ mod tests {
             let latest = self.chain_spec.genesis_header().seal_slow();
             let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
 
-            let pruner = self
-                .pruner_canon_state_stream
-                .map(|canon_state_stream| Pruner::new(Box::new(canon_state_stream), 5, 0));
+            let pruner = Pruner::new(5, 0);
 
             let (mut engine, handle) = BeaconConsensusEngine::new(
                 NoopFullBlockClient::default(),
@@ -1679,7 +1679,7 @@ mod tests {
                 payload_builder,
                 None,
                 self.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
-                pruner,
+                Some(pruner),
             )
             .expect("failed to create consensus engine");
 

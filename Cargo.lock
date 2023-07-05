@@ -5595,7 +5595,6 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "futures-util",
  "reth-primitives",
- "reth-provider",
  "thiserror",
  "tokio",
  "tracing",
