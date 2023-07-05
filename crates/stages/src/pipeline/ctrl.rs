@@ -1,6 +1,8 @@
 use reth_primitives::{BlockNumber, SealedHeader};
 
 /// Determines the control flow during pipeline execution.
+///
+/// See [Pipeline::run_loop](crate::Pipeline::run_loop) for more information.
 #[derive(Debug, Eq, PartialEq)]
 pub enum ControlFlow {
     /// An unwind was requested and must be performed before continuing.
@@ -10,14 +12,20 @@ pub enum ControlFlow {
         /// The block that caused the unwind.
         bad_block: SealedHeader,
     },
-    /// The pipeline is allowed to continue executing stages.
+    /// The pipeline made progress.
     Continue {
-        /// Block number reached by the stage.
+        /// Block number reached by the last stage in the pipeline.
+        ///
+        /// For example, if the last stage is the `Finish` stage, this will be the block number the
+        /// `Finish` stage reached.
         block_number: BlockNumber,
     },
     /// Pipeline made no progress
     NoProgress {
-        /// Block number reached by the stage.
+        /// Block number reached by the last stage in the pipeline.
+        ///
+        /// For example, if the last stage is the `Finish` stage, this will be the block number the
+        /// `Finish` stage reached.
         block_number: Option<BlockNumber>,
     },
 }
@@ -33,8 +41,8 @@ impl ControlFlow {
         matches!(self, ControlFlow::Unwind { .. })
     }
 
-    /// Returns the pipeline progress, if the state is not `Unwind`.
-    pub fn progress(&self) -> Option<BlockNumber> {
+    /// Returns the pipeline block number the stage reached, if the state is not `Unwind`.
+    pub fn block_number(&self) -> Option<BlockNumber> {
         match self {
             ControlFlow::Unwind { .. } => None,
             ControlFlow::Continue { block_number } => Some(*block_number),

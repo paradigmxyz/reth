@@ -1274,7 +1274,7 @@ where
 
                 // update the canon chain if continuous is enabled
                 if self.sync.run_pipeline_continuously() {
-                    let max_block = ctrl.progress().unwrap_or_default();
+                    let max_block = ctrl.block_number().unwrap_or_default();
                     let max_header = match self.blockchain.sealed_header(max_block) {
                         Ok(header) => match header {
                             Some(header) => header,
