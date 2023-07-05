@@ -113,8 +113,7 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Try to update the book cli documentation
-        run: |
-          BUILD_PATH=/home/runner/work/reth/target && make update-book-cli
+        run: BUILD_PATH=reth/target && make update-book-cli
 
       - name: Check if the book cli documentation is up to date
         run: |
