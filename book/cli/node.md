@@ -1,24 +1,22 @@
 # `reth node`
 
-The main node operator command.
+Start the node
 
 ```bash
 $ reth node --help
-
-Start the node
 
 Usage: reth node [OPTIONS]
 
 Options:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
-
+          
           Defaults to the OS-specific data directory:
-
+          
           - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
           - Windows: `{FOLDERID_RoamingAppData}/reth/`
           - macOS: `$HOME/Library/Application Support/reth/`
-
+          
           [default: default]
 
       --config <FILE>
@@ -26,18 +24,15 @@ Options:
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-
+          
           Possible values are either a built-in chain or the path to a chain specification file.
-
+          
           Built-in chains:
           - mainnet
           - goerli
           - sepolia
-
+          
           [default: mainnet]
-
-      --auto-mine
-          Automatically mine blocks for new transactions
 
   -h, --help
           Print help (see a summary with '-h')
@@ -45,7 +40,7 @@ Options:
 Metrics:
       --metrics <SOCKET>
           Enable Prometheus metrics.
-
+          
           The metrics will be served at the given interface and port.
 
 Networking:
@@ -69,7 +64,7 @@ Networking:
 
       --bootnodes <BOOTNODES>
           Bootnodes to connect to initially.
-
+          
           Will fall back to a network-specific default if not specified.
 
       --peers-file <FILE>
@@ -78,24 +73,26 @@ Networking:
 
       --identity <IDENTITY>
           Custom node identity
+          
+          [default: reth/v0.1.0-alpha.1/aarch64-apple-darwin]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
-
+          
           This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
 
       --no-persist-peers
           Do not persist peers.
 
       --nat <NAT>
-          NAT resolution method
-
+          NAT resolution method (any|none|upnp|publicip|extip:<IP>)
+          
           [default: any]
 
       --port <PORT>
           Network listening port. default: 30303
 
-Rpc:
+RPC:
       --http
           Enable the HTTP-RPC server
 
@@ -106,7 +103,9 @@ Rpc:
           Http server port to listen on
 
       --http.api <HTTP_API>
-          Rpc Modules to be configured for http server
+          Rpc Modules to be configured for the HTTP server
+          
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -124,7 +123,9 @@ Rpc:
           Origins from which to accept WebSocket requests
 
       --ws.api <WS_API>
-          Rpc Modules to be configured for Ws server
+          Rpc Modules to be configured for the WS server
+          
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc]
 
       --ipcdisable
           Disable the IPC-RPC  server
@@ -141,53 +142,102 @@ Rpc:
       --authrpc.jwtsecret <PATH>
           Path to a JWT secret to use for authenticated RPC endpoints
 
-      --rpc-max-request-size
-          Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+      --rpc-max-request-size <RPC_MAX_REQUEST_SIZE>
+          Set the maximum RPC request payload size for both HTTP and WS in megabytes
+          
+          [default: 15]
 
-      --rpc-max-response-size
-          Set the maximum RPC response payload size for both HTTP and WS in megabytes.
+      --rpc-max-response-size <RPC_MAX_RESPONSE_SIZE>
+          Set the maximum RPC response payload size for both HTTP and WS in megabytes
+          
+          [default: 100]
 
-      --rpc-max-subscriptions-per-connection
-          Set the the maximum concurrent subscriptions per connection.
+      --rpc-max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
+          Set the the maximum concurrent subscriptions per connection
+          
+          [default: 1024]
 
-      --rpc-max-connections
-          Maximum number of RPC server connections.
+      --rpc-max-connections <COUNT>
+          Maximum number of RPC server connections
+          
+          [default: 100]
 
-      --rpc-max-tracing-requests
-          Maximum number of concurrent tracing requests.
+      --rpc-max-tracing-requests <COUNT>
+          Maximum number of concurrent tracing requests
+          
+          [default: 25]
 
-      --gas-price-oracle
-          Gas price oracle configuration.
+      --rpc.gascap <GAS_CAP>
+          Maximum gas limit for `eth_call` and call tracing RPC methods
+          
+          [default: 30000000]
 
-      --block-cache-len
-          Maximum number of block cache entries.
+GAS PRICE ORACLE:
+      --gpo.blocks <BLOCKS>
+          Number of recent blocks to check for gas price
+          
+          [default: 20]
 
-      --receipt-cache-len
-          Maximum number of receipt cache entries.
+      --gpo.ignoreprice <IGNORE_PRICE>
+          Gas Price below which gpo will ignore transactions
+          
+          [default: 2]
 
-      --env-cache-len
-          Maximum number of env cache entries.
+      --gpo.maxprice <MAX_PRICE>
+          Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
+          
+          [default: 500000000000]
+
+      --gpo.percentile <PERCENTILE>
+          The percentile of gas prices to use for the estimate
+          
+          [default: 60]
+
+      --block-cache-size <BLOCK_CACHE_SIZE>
+          Max size for cached block data in megabytes
+          
+          [default: 500]
+
+      --receipt-cache-size <RECEIPT_CACHE_SIZE>
+          Max size for cached receipt data in megabytes
+          
+          [default: 500]
+
+      --env-cache-size <ENV_CACHE_SIZE>
+          Max size for cached evm env data in megabytes
+          
+          [default: 1]
 
 Builder:
-      --builder.extradata
-          Block extra data set by the payload builder.
+      --builder.extradata <EXTRADATA>
+          Block extra data set by the payload builder
+          
+          [default: reth/v0.1.0-alpha.1/macos]
 
-      --builder.gaslimit
-          Target gas ceiling for built blocks.
+      --builder.gaslimit <GAS_LIMIT>
+          Target gas ceiling for built blocks
+          
+          [default: 30000000]
 
-      --builder.interval
-          The interval at which the job should build a new payload after the last (in seconds).
+      --builder.interval <SECONDS>
+          The interval at which the job should build a new payload after the last (in seconds)
+          
+          [default: 1]
 
-      --builder.deadline
-          The deadline for when the payload builder job should resolve.
+      --builder.deadline <SECONDS>
+          The deadline for when the payload builder job should resolve
+          
+          [default: 12]
 
-      --builder.max-tasks
-          Maximum number of tasks to spawn for building a payload.
+      --builder.max-tasks <MAX_PAYLOAD_TASKS>
+          Maximum number of tasks to spawn for building a payload
+          
+          [default: 3]
 
 Debug:
       --debug.continuous
           Prompt the downloader to download blocks one at a time.
-
+          
           NOTE: This is for testing purposes only.
 
       --debug.terminate
@@ -195,7 +245,7 @@ Debug:
 
       --debug.tip <TIP>
           Set the chain tip manually for testing purposes.
-
+          
           NOTE: This is a temporary flag
 
       --debug.max-block <MAX_BLOCK>
@@ -213,27 +263,31 @@ Debug:
       --debug.hook-all
           Hook on every transaction in a block
 
+Rpc:
+      --auto-mine
+          Automatically mine blocks for new transactions
+
 Logging:
       --log.persistent
           The flag to enable persistent logs
 
       --log.directory <PATH>
           The path to put log files in
-
-          [default: /Users/georgios/Library/Caches/reth/logs]
+          
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
 
       --log.filter <FILTER>
           The filter to use for logs written to the log file
-
-          [default: debug]
+          
+          [default: error]
 
 Display:
   -v, --verbosity...
           Set the minimum log level.
-
+          
           -v      Errors
           -vv     Warnings
           -vvv    Info

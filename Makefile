@@ -196,3 +196,9 @@ db-tools: ## Compile MDBX debugging tools.
 	@$(MAKE) -C $(MDBX_PATH) IOARENA=1 clean > /dev/null
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_stat\" for the info about MDBX db file."
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
+
+.PHONY: update-book-cli
+update-book-cli: ## Update book cli documentation.
+	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+	@echo "Updating book cli doc..."
+	@./book/cli/update.sh $(BUILD_PATH)

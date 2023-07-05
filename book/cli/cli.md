@@ -39,7 +39,7 @@ Commands:
   db
           Database debugging utilities
   stage
-          Manipulate individual stages.
+          Manipulate individual stages
   p2p
           P2P Debugging utilities
   test-vectors
@@ -64,21 +64,21 @@ Logging:
 
       --log.directory <PATH>
           The path to put log files in
-
-          [default: /Users/georgios/Library/Caches/reth/logs]
+          
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
 
       --log.filter <FILTER>
           The filter to use for logs written to the log file
-
-          [default: debug]
+          
+          [default: error]
 
 Display:
   -v, --verbosity...
           Set the minimum log level.
-
+          
           -v      Errors
           -vv     Warnings
           -vvv    Info
