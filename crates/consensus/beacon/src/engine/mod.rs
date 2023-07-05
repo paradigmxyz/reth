@@ -1132,17 +1132,18 @@ where
                 // skip the pipeline run
                 match self.blockchain.header_by_hash_or_number(state.finalized_block_hash.into()) {
                     Err(err) => {
-                        warn!(target: "consensus::engine", ?err, "Failed to get safe block header");
+                        warn!(target: "consensus::engine", ?err, "Failed to get finalized block header");
                     }
                     Ok(None) => {
-                        // we don't have the safe block yet and the distance exceeds the allowed
+                        // we don't have the block yet and the distance exceeds the allowed
                         // threshold
                         self.sync.set_pipeline_sync_target(state.safe_block_hash);
                         // we can exit early here because the pipeline will take care of this
                         return
                     }
                     Ok(Some(_)) => {
-                        // we're fully synced to the safe block
+                        // we're fully synced to the finalized block
+                        // but we want to continue downloading the missing parent
                     }
                 }
             }
