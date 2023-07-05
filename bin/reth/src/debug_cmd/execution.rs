@@ -138,6 +138,7 @@ impl Command {
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
+                    pruning: config.prune.map(|p| p.into_targets(None)).unwrap_or_default(),
                 })
                 .set(ExecutionStage::new(
                     factory,

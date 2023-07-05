@@ -192,7 +192,13 @@ impl Command {
 
                     (Box::new(stage), None)
                 }
-                StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
+                StageEnum::Senders => (
+                    Box::new(SenderRecoveryStage::new(
+                        batch_size,
+                        config.prune.map(|p| p.into_targets(None)).unwrap_or_default(),
+                    )),
+                    None,
+                ),
                 StageEnum::Execution => {
                     let factory = reth_revm::Factory::new(self.chain.clone());
                     (

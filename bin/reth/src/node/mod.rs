@@ -709,9 +709,10 @@ impl Command {
                     TotalDifficultyStage::new(consensus)
                         .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
                 )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_config.sender_recovery.commit_threshold,
-                })
+                .set(SenderRecoveryStage::new(
+                    stage_config.sender_recovery.commit_threshold,
+                    config.prune.map(|p| p.into_targets(None)).unwrap_or_default(),
+                ))
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds {

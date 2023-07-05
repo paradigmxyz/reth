@@ -11,7 +11,7 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    TransactionSignedNoHash, TxNumber, H160,
+    PruneTarget, PruneTargets, TransactionSignedNoHash, TxNumber, H160,
 };
 use reth_provider::{BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError};
 use std::fmt::Debug;
@@ -27,18 +27,20 @@ pub struct SenderRecoveryStage {
     /// The size of inserted items after which the control
     /// flow will be returned to the pipeline for commit
     pub commit_threshold: u64,
+    /// Pruning configuration.
+    pub pruning: PruneTargets,
 }
 
 impl SenderRecoveryStage {
     /// Create new instance of [SenderRecoveryStage].
-    pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold }
+    pub fn new(commit_threshold: u64, pruning: PruneTargets) -> Self {
+        Self { commit_threshold, pruning }
     }
 }
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000 }
+        Self { commit_threshold: 5_000_000, pruning: PruneTargets::none() }
     }
 }
 
@@ -57,14 +59,36 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     async fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
-        input: ExecInput,
+        mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
+        // Check pruning configuration
+        if let Some(prune) = self.pruning.sender_recovery {
+            match prune {
+                PruneTarget::All => {
+                    return Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true })
+                }
+                PruneTarget::Block(n) => {
+                    if n >= input.target() {
+                        return Ok(ExecOutput {
+                            checkpoint: StageCheckpoint::new(input.target()),
+                            done: true,
+                        })
+                    }
+
+                    if n > input.checkpoint().block_number {
+                        input.checkpoint = Some(StageCheckpoint::new(n + 1))
+                    }
+                }
+            }
+        }
+
         let (tx_range, block_range, is_final_range) =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
+
         let end_block = *block_range.end();
 
         // No transactions to walk over
@@ -415,7 +439,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            SenderRecoveryStage { commit_threshold: self.threshold }
+            SenderRecoveryStage::new(self.threshold, PruneTargets::none())
         }
     }
 

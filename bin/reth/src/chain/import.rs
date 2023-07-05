@@ -176,9 +176,10 @@ impl ImportCommand {
                     TotalDifficultyStage::new(consensus.clone())
                         .with_commit_threshold(config.stages.total_difficulty.commit_threshold),
                 )
-                .set(SenderRecoveryStage {
-                    commit_threshold: config.stages.sender_recovery.commit_threshold,
-                })
+                .set(SenderRecoveryStage::new(
+                    config.stages.sender_recovery.commit_threshold,
+                    config.prune.map(|p| p.into_targets(Some(max_block))).unwrap_or_default(),
+                ))
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds {

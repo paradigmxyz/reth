@@ -51,7 +51,7 @@ fn senders(c: &mut Criterion) {
     group.sample_size(10);
 
     for batch in [1000usize, 10_000, 100_000, 250_000] {
-        let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS };
+        let stage = SenderRecoveryStage::new(DEFAULT_NUM_BLOCKS, PruneTargets::none());
         let label = format!("SendersRecovery-batch-{batch}");
 
         measure_stage(&mut group, setup::stage_unwind, stage, 0..DEFAULT_NUM_BLOCKS, label);
