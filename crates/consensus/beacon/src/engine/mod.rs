@@ -1616,7 +1616,6 @@ mod tests {
         executor_results: Vec<PostState>,
         pipeline_run_threshold: Option<u64>,
         max_block: Option<BlockNumber>,
-        pruner_canon_state_stream: Option<CanonStateNotificationStream>,
     }
 
     impl TestConsensusEngineBuilder {
@@ -1628,7 +1627,6 @@ mod tests {
                 executor_results: Vec::new(),
                 pipeline_run_threshold: None,
                 max_block: None,
-                pruner_canon_state_stream: None,
             }
         }
 
@@ -1657,16 +1655,6 @@ mod tests {
         /// threshold to 0.
         fn disable_blockchain_tree_sync(mut self) -> Self {
             self.pipeline_run_threshold = Some(0);
-            self
-        }
-
-        /// Sets the pruner canonical state stream.
-        #[allow(dead_code)]
-        fn with_pruner_canon_state_stream(
-            mut self,
-            canon_state_stream: CanonStateNotificationStream,
-        ) -> Self {
-            self.pruner_canon_state_stream = Some(canon_state_stream);
             self
         }
 
