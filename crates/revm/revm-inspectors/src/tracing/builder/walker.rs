@@ -1,21 +1,23 @@
-use std::collections::VecDeque;
 use crate::tracing::{types::CallTraceStep, TracingInspectorConfig};
 use reth_primitives::Address;
 use reth_rpc_types::trace::parity::{
     MemoryDelta, StorageDelta, VmExecutedOperation, VmInstruction, VmTrace,
 };
 use revm::interpreter::opcode;
+use std::collections::VecDeque;
 
 use crate::tracing::types::CallTraceNode;
 // use reth_rpc_types::trace::parity::VmTrace;
 
-/// lazy eval iterator over an arena depth first
+/// Traverses Reths internal tracing structure depth-first
+///
+/// This is a lazy iterator, so it will only traverse the tree as you call next()
 #[derive(Debug, Clone)]
 pub(crate) struct CallTraceNodeWalkerDF<'trace> {
-    /// the entire arena
+    /// the entire callgraph or arena
     nodes: &'trace Vec<CallTraceNode>,
-    curr_idx: usize,
 
+    curr_idx: usize,
     stack: Vec<usize>,
     visited: Vec<bool>,
 }
@@ -65,7 +67,9 @@ impl<'trace> Iterator for CallTraceNodeWalkerDF<'trace> {
     }
 }
 
-/// lazt eval iterator over an arena breadth first
+/// Traverses Reths internal tracing structure breadth-first
+///
+/// This is a lazy iterator
 pub(crate) struct CallTraceNodeWalkerBF<'trace> {
     /// the entire arena
     nodes: &'trace Vec<CallTraceNode>,
@@ -100,41 +104,6 @@ impl<'trace> Iterator for CallTraceNodeWalkerBF<'trace> {
         }
     }
 }
-
-/// lazy iterator over a vm trace breadth first
-// pub(crate) struct VmTraceWalkerBF<'trace> {
-//     queue: VecDeque<&'trace mut VmTrace>,
-// }
-
-// impl<'trace> VmTraceWalkerBF<'trace> {
-//     pub(crate) fn new(trace: &'trace mut VmTrace) -> Self {
-//         let mut queue = VecDeque::new();
-//         queue.push_back(trace);
-
-//         Self { queue }
-//     }
-// }
-
-// impl<'trace> Iterator for VmTraceWalkerBF<'trace> {
-//     type Item = &'trace mut VmTrace;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if let Some(trace) = self.queue.pop_front() {
-//             let ops = &mut trace.ops;
-
-//             for child in ops.iter_mut() {
-//                 match child.sub {
-//                     Some(ref mut sub) => self.queue.push_back(sub),
-//                     None => {}
-//                 }
-//             }
-
-//             return Some(trace);
-//         } else {
-//             return None;
-//         }
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

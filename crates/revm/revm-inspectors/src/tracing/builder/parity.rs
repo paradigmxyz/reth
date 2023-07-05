@@ -240,6 +240,8 @@ impl ParityTraceBuilder {
     }
 
     /// Creates a VM trace by walking over [CallTraceNode]s
+    ///
+    /// does not have the code fields filled in
     pub fn vm_trace(&self) -> VmTrace {
         match self.nodes.get(0) {
             Some(current) => self.make_vm_trace(current),
@@ -248,6 +250,8 @@ impl ParityTraceBuilder {
     }
 
     /// returns a VM trace without the code filled in
+    ///
+    /// iteratively creaters a VM trace by traversing an arena
     fn make_vm_trace(&self, start: &CallTraceNode) -> VmTrace {
         let mut child_idx_stack: Vec<usize> = Vec::with_capacity(self.nodes.len());
         let mut sub_stack: VecDeque<Option<VmTrace>> = VecDeque::with_capacity(self.nodes.len());
@@ -255,6 +259,7 @@ impl ParityTraceBuilder {
         let mut current = start;
         let mut child_idx: usize = 0;
 
+        // finds the deepest nested calls of each call frame and fills them up bottom to top
         let instructions = loop {
             match current.children.get(child_idx) {
                 Some(child) => {
@@ -338,12 +343,12 @@ impl ParityTraceBuilder {
     }
 }
 
-/// addresses are presorted via DF walk thru [CallTraceNode]s
+/// addresses are presorted via breadth first walk thru [CallTraceNode]s, this  can be done by a walker in [crate::tracing::builder::walker]
 ///
-/// use recursion to fill the [VmTrace] code fields
+/// iteratively fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
     db: &DB,
-    mut breadth_first_addresses: I,
+    breadth_first_addresses: I,
     trace: &mut VmTrace,
 ) -> Result<(), DB::Error>
 where
