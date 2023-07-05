@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-
 use crate::tracing::{types::CallTraceStep, TracingInspectorConfig};
 use reth_primitives::Address;
 use reth_rpc_types::trace::parity::{
