@@ -253,6 +253,7 @@ impl ParityTraceBuilder {
 
         let mut current = start;
         let mut child_idx: usize = 0;
+
         let instructions = loop {
             match current.children.get(child_idx) {
                 Some(child) => {

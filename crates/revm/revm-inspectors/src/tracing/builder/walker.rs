@@ -10,9 +10,7 @@ use revm::interpreter::opcode;
 use crate::tracing::types::CallTraceNode;
 // use reth_rpc_types::trace::parity::VmTrace;
 
-/// lazy eval iterator over an arena
-///
-/// this type has an iterator which does a depth first walk
+/// lazy eval iterator over an arena depth first
 #[derive(Debug, Clone)]
 pub(crate) struct CallTraceNodeWalkerDF<'trace> {
     /// the entire arena
@@ -28,6 +26,7 @@ impl<'trace> CallTraceNodeWalkerDF<'trace> {
         Self {
             nodes,
             curr_idx: 0,
+            /// can never be deeper than len of arena
             stack: Vec::with_capacity(nodes.len()),
             visited: vec![false; nodes.len()],
         }
@@ -67,6 +66,7 @@ impl<'trace> Iterator for CallTraceNodeWalkerDF<'trace> {
     }
 }
 
+/// lazt eval iterator over an arena breadth first
 pub(crate) struct CallTraceNodeWalkerBF<'trace> {
     /// the entire arena
     nodes: &'trace Vec<CallTraceNode>,
@@ -102,9 +102,40 @@ impl<'trace> Iterator for CallTraceNodeWalkerBF<'trace> {
     }
 }
 
-pub(crate) struct VmTraceWalkerBF<'trace> {
-    queue: VecDeque<&'trace VmTrace>,
-}
+/// lazy iterator over a vm trace breadth first
+// pub(crate) struct VmTraceWalkerBF<'trace> {
+//     queue: VecDeque<&'trace mut VmTrace>,
+// }
+
+// impl<'trace> VmTraceWalkerBF<'trace> {
+//     pub(crate) fn new(trace: &'trace mut VmTrace) -> Self {
+//         let mut queue = VecDeque::new();
+//         queue.push_back(trace);
+
+//         Self { queue }
+//     }
+// }
+
+// impl<'trace> Iterator for VmTraceWalkerBF<'trace> {
+//     type Item = &'trace mut VmTrace;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if let Some(trace) = self.queue.pop_front() {
+//             let ops = &mut trace.ops;
+
+//             for child in ops.iter_mut() {
+//                 match child.sub {
+//                     Some(ref mut sub) => self.queue.push_back(sub),
+//                     None => {}
+//                 }
+//             }
+
+//             return Some(trace);
+//         } else {
+//             return None;
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
