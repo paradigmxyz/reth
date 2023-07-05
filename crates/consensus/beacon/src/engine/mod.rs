@@ -70,8 +70,9 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
 /// for more information.
 ///
-/// This is the default threshold
-pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS / 4; // 8 blocks
+/// This is the default threshold, the distance to the head that the tree will be used for sync.
+/// If the distance exceeds this threshold, the pipeline will be used for sync.
+pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
 /// engine.
@@ -1112,17 +1113,17 @@ where
 
         // check if the downloaded block is the tracked safe block
         if let Some(ref state) = sync_target_state {
-            if downloaded_block.hash == state.safe_block_hash {
-                // we downloaded the safe block
+            if downloaded_block.hash == state.finalized_block_hash {
+                // we downloaded the finalized block
                 exceeds_pipeline_run_threshold =
                     self.exceeds_pipeline_run_threshold(canonical_tip_num, downloaded_block.number);
-            } else if let Some(buffered_safe) =
-                self.blockchain.buffered_header_by_hash(state.safe_block_hash)
+            } else if let Some(buffered_finalized) =
+                self.blockchain.buffered_header_by_hash(state.finalized_block_hash)
             {
-                // if we have buffered the safe block, we should check how far
+                // if we have buffered the finalized block, we should check how far
                 // we're off
-                exceeds_pipeline_run_threshold =
-                    self.exceeds_pipeline_run_threshold(canonical_tip_num, buffered_safe.number);
+                exceeds_pipeline_run_threshold = self
+                    .exceeds_pipeline_run_threshold(canonical_tip_num, buffered_finalized.number);
             }
         }
 
@@ -1130,9 +1131,9 @@ where
         // pipeline
         if exceeds_pipeline_run_threshold {
             if let Some(state) = sync_target_state {
-                // if we have already canonicalized the safe block, we should
+                // if we have already canonicalized the finalized block, we should
                 // skip the pipeline run
-                match self.blockchain.header_by_hash_or_number(state.safe_block_hash.into()) {
+                match self.blockchain.header_by_hash_or_number(state.finalized_block_hash.into()) {
                     Err(err) => {
                         warn!(target: "consensus::engine", ?err, "Failed to get safe block header");
                     }
