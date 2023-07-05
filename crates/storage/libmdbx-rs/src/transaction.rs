@@ -193,7 +193,7 @@ where
                 ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut())
             }))?;
         }
-        Ok(DatabaseFlags::from_bits_truncate(flags))
+        Ok(DatabaseFlags::from_bits_truncate(flags.try_into().unwrap()))
     }
 
     /// Retrieves database statistics.
