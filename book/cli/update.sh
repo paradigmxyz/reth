@@ -118,8 +118,8 @@ main() {
     update_cli_cmd "$cmd" "${subcmds[@]}"
   done
 
-  # Replace `/Users/**` path by `/Users/reth`.
-  sed -i -e 's/\/Users\/[^/]*\//\/Users\/reth\//g' ./book/cli/*.md
+  # Update default paths on both Linux and macOS to avoid triggering the CI.
+  sed -i -e 's/default: \/.*\/reth\//default: \/reth\//g' ./book/cli/*.md
   rm ./book/cli/*.md-e
 
   echo "Book updated successfully."

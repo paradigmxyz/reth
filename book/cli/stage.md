@@ -30,7 +30,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -101,7 +101,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -180,7 +180,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -236,7 +236,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -292,7 +292,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -348,7 +348,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -404,7 +404,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -555,7 +555,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -630,7 +630,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -701,7 +701,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
@@ -772,7 +772,7 @@ Logging:
       --log.directory <PATH>
           The path to put log files in
           
-          [default: /Users/reth/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
