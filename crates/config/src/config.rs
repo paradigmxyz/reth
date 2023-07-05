@@ -295,7 +295,7 @@ impl Default for PruneConfig {
 }
 
 impl PruneConfig {
-    /// Converts a [`PruneConfig`] into an usuable [`PruneTargets`].
+    /// Converts a [`PruneConfig`] into an usable [`PruneTargets`].
     pub fn into_targets(&self, head: Option<u64>) -> PruneTargets {
         PruneTargets {
             sender_recovery: self
