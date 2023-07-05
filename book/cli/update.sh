@@ -6,7 +6,7 @@ if [ -z "$build_path" ]; then
   echo "Build path variable is not defined. Exiting..."
   exit 1
 fi
-reth_path=./$build_path/debug/reth
+reth_path=./$build_path/reth
 echo "Using reth path: $reth_path (build path: $build_path)"
 
 # Define the path to the JSON configuration file.
