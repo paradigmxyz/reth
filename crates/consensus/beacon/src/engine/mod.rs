@@ -822,7 +822,6 @@ where
         } else {
             // trigger a full block download for missing hash, or the parent of its lowest buffered
             // ancestor
-            // TODO: use a range request
             self.sync.download_full_block(target);
         }
 
@@ -1200,7 +1199,15 @@ where
         //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
         //    less than the pipeline threshold
         //    * this case represents a potentially long range of blocks to download and execute
-        self.sync.download_full_block(missing_parent.hash);
+        if let Some(distance) =
+            self.distance_from_local_tip(canonical_tip_num, missing_parent.number)
+        {
+            self.sync.download_block_range(missing_parent.hash, distance)
+        } else {
+            // This happens when the missing parent is on an outdated
+            // sidechain
+            self.sync.download_full_block(missing_parent.hash);
+        }
     }
 
     /// Attempt to form a new canonical chain based on the current sync target.
