@@ -2,15 +2,13 @@
 
 use crate::PrunerError;
 use reth_primitives::BlockNumber;
-use std::{future::Future, pin::Pin};
 use tracing::debug;
 
-/// The future that returns the owned pipeline and the result of the pipeline run. See
-/// [Pruner::run_as_fut].
-pub type PrunerFut = Pin<Box<dyn Future<Output = PrunerWithResult> + Send>>;
+/// Result of [Pruner::run] execution
+pub type PrunerResult = Result<(), PrunerError>;
 
-/// The pipeline type itself with the result of [Pruner::run_as_fut]
-pub type PrunerWithResult = (Pruner, Result<(), PrunerError>);
+/// The pipeline type itself with the result of [Pruner::run]
+pub type PrunerWithResult = (Pruner, PrunerResult);
 
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
 pub struct Pruner {
@@ -32,18 +30,8 @@ impl Pruner {
         Self { min_block_interval, max_prune_depth, last_pruned_block_number: None }
     }
 
-    /// Consume the pruner and run it until it finishes.
-    /// Return the pruner and its result as a future.
-    #[track_caller]
-    pub fn run_as_fut(mut self, tip_block_number: BlockNumber) -> PrunerFut {
-        Box::pin(async move {
-            let result = self.run(tip_block_number).await;
-            (self, result)
-        })
-    }
-
     /// Run the pruner
-    pub async fn run(&mut self, tip_block_number: BlockNumber) -> Result<(), PrunerError> {
+    pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         // Pruning logic
 
         self.last_pruned_block_number = Some(tip_block_number);

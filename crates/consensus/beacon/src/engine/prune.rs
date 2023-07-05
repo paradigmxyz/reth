@@ -62,7 +62,7 @@ impl EnginePruneController {
     fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<EnginePruneEvent> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
-                let pruner = pruner.take()?;
+                let mut pruner = pruner.take()?;
 
                 // Check tip for pruning
                 if pruner.is_pruning_needed(tip_block_number) {
@@ -72,8 +72,8 @@ impl EnginePruneController {
                     self.pruner_task_spawner.spawn_critical_blocking(
                         "pruner task",
                         Box::pin(async move {
-                            let result = pruner.run_as_fut(tip_block_number).await;
-                            let _ = tx.send(result);
+                            let result = pruner.run(tip_block_number);
+                            let _ = tx.send((pruner, result));
                         }),
                     );
                     self.pruner_state = PrunerState::Running(rx);
