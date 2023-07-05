@@ -70,7 +70,7 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// Pruning configuration.
-    pruning: PruneTargets,
+    prune_targets: PruneTargets,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
@@ -78,9 +78,14 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     pub fn new(
         executor_factory: EF,
         thresholds: ExecutionStageThresholds,
-        pruning: PruneTargets,
+        prune_targets: PruneTargets,
     ) -> Self {
-        Self { metrics: ExecutionStageMetrics::default(), executor_factory, thresholds, pruning }
+        Self {
+            metrics: ExecutionStageMetrics::default(),
+            executor_factory,
+            thresholds,
+            prune_targets,
+        }
     }
 
     /// Create an execution stage with the provided  executor factory.
@@ -114,7 +119,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
-        state.add_pruning(self.pruning);
+        state.add_pruning(self.prune_targets);
 
         for block_number in start_block..=max_block {
             let td = provider
@@ -946,14 +951,14 @@ mod tests {
         provider.commit().unwrap();
 
         let check_pruning = |factory: Arc<ProviderFactory<_>>,
-                             pruning: PruneTargets,
+                             prune_targets: PruneTargets,
                              expect_num_receipts: usize| async move {
             let provider = factory.provider_rw().unwrap();
 
             let mut execution_stage = ExecutionStage::new(
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
                 ExecutionStageThresholds { max_blocks: Some(100), max_changes: None },
-                pruning,
+                prune_targets,
             );
 
             execution_stage.execute(&provider, input).await.unwrap();
