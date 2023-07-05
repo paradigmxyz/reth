@@ -1,4 +1,4 @@
-use super::walker::CallTraceNodeWalkerDF;
+use super::walker::{CallTraceNodeWalkerBF, CallTraceNodeWalkerDF};
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
     TracingInspectorConfig,
@@ -161,10 +161,13 @@ impl ParityTraceBuilder {
     {
         let ResultAndState { result, state } = res;
 
-        let mut depth_first_call_addresses = CallTraceNodeWalkerDF::new(&self.nodes)
-            .map(|node| node.trace.caller)
-            .collect::<Vec<_>>()
-            .into_iter();
+        let breadth_first_addresses = if trace_types.contains(&TraceType::VmTrace) {
+            CallTraceNodeWalkerBF::new(&self.nodes)
+                .map(|node| node.trace.address)
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
 
         let mut trace_res = self.into_trace_results(result, trace_types);
 
@@ -179,7 +182,7 @@ impl ParityTraceBuilder {
 
         // check the vm trace case
         if let Some(ref mut vm_trace) = trace_res.vm_trace {
-            populate_vm_trace_bytecodes(&db, &mut depth_first_call_addresses, vm_trace)?;
+            populate_vm_trace_bytecodes(&db, breadth_first_addresses, vm_trace)?;
         }
 
         Ok(trace_res)
@@ -340,25 +343,37 @@ impl ParityTraceBuilder {
 /// use recursion to fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
     db: &DB,
-    depth_first_call_addresses: &mut I,
+    mut breadth_first_addresses: I,
     trace: &mut VmTrace,
 ) -> Result<(), DB::Error>
 where
     DB: DatabaseRef,
-    I: Iterator<Item = Address>,
+    I: IntoIterator<Item = Address>,
 {
-    let addr = depth_first_call_addresses.next().expect("missing address");
+    let mut stack: VecDeque<&mut VmTrace> = VecDeque::new();
+    stack.push_back(trace);
 
-    let db_acc = db.basic(addr)?.unwrap_or_default();
+    let mut addrs = breadth_first_addresses.into_iter();
 
-    trace.code = match db_acc.code {
-        Some(code) => code.bytecode.into(),
-        None => Default::default(),
-    };
+    loop {
+        match stack.pop_front() {
+            Some(curr_ref) => {
+                for op in curr_ref.ops.iter_mut() {
+                    if let Some(sub) = op.sub.as_mut() {
+                        stack.push_back(sub);
+                    }
+                }
 
-    for op in trace.ops.iter_mut() {
-        if let Some(sub) = op.sub.as_mut() {
-            populate_vm_trace_bytecodes(db, depth_first_call_addresses, sub)?;
+                let addr = addrs.next().expect("missing address");
+
+                let db_acc = db.basic(addr)?.unwrap_or_default();
+
+                curr_ref.code = match db_acc.code {
+                    Some(code) => code.bytecode.into(),
+                    None => Default::default(),
+                };
+            }
+            None => break,
         }
     }
 
