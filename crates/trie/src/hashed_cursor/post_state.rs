@@ -1,5 +1,5 @@
 use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::prefix_set::PrefixSet;
+use crate::prefix_set::{PrefixSet, PrefixSetMut};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
@@ -27,13 +27,13 @@ pub struct HashedPostState {
 }
 
 impl HashedPostState {
-    /// Construct (PrefixSets)[PrefixSet] from hashed post state.
+    /// Construct (PrefixSet)[PrefixSet] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
     pub fn construct_prefix_sets(&self) -> (PrefixSet, HashMap<H256, PrefixSet>) {
         // Initialize prefix sets.
-        let mut account_prefix_set = PrefixSet::default();
-        let mut storage_prefix_set: HashMap<H256, PrefixSet> = HashMap::default();
+        let mut account_prefix_set = PrefixSetMut::default();
+        let mut storage_prefix_set: HashMap<H256, PrefixSetMut> = HashMap::default();
 
         for hashed_address in self.accounts.keys() {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
@@ -49,7 +49,10 @@ impl HashedPostState {
             }
         }
 
-        (account_prefix_set, storage_prefix_set)
+        (
+            account_prefix_set.freeze(),
+            storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
+        )
     }
 }
 
