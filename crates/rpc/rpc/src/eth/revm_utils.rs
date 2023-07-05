@@ -526,7 +526,7 @@ where
 
 /// Helper to get the output data from a result
 ///
-/// Can be phased out when <https://github.com/bluealloy/revm/pull/509> is released
+/// TODO: Can be phased out when <https://github.com/bluealloy/revm/pull/509> is released
 #[inline]
 pub(crate) fn result_output(res: &ExecutionResult) -> Option<bytes::Bytes> {
     match res {
