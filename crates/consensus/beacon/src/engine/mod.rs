@@ -69,6 +69,9 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
 /// for more information.
+///
+/// This is the default threshold, the distance to the head that the tree will be used for sync.
+/// If the distance exceeds this threshold, the pipeline will be used for sync.
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
@@ -1065,62 +1068,9 @@ where
                         self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected { missing_parent }) => {
-                        // compare the missing parent with the canonical tip
-                        let canonical_tip_num = self.blockchain.canonical_tip().number;
-                        let sync_target_state = self.forkchoice_state_tracker.sync_target_state();
-
-                        let mut requires_pipeline = self.exceeds_pipeline_run_threshold(
-                            canonical_tip_num,
-                            missing_parent.number,
-                        );
-
-                        // check if the downloaded block is the tracked finalized block
-                        if let Some(ref state) = sync_target_state {
-                            if downloaded_num_hash.hash == state.finalized_block_hash {
-                                // we downloaded the finalized block
-                                requires_pipeline = self.exceeds_pipeline_run_threshold(
-                                    canonical_tip_num,
-                                    downloaded_num_hash.number,
-                                );
-                            } else if let Some(buffered_finalized) =
-                                self.blockchain.buffered_header_by_hash(state.finalized_block_hash)
-                            {
-                                // if we have buffered the finalized block, we should check how far
-                                // we're off
-                                requires_pipeline = self.exceeds_pipeline_run_threshold(
-                                    canonical_tip_num,
-                                    buffered_finalized.number,
-                                );
-                            }
-                        }
-
-                        // if the number of missing blocks is greater than the max, run the
-                        // pipeline
-                        if requires_pipeline {
-                            if let Some(state) = sync_target_state {
-                                // if we have already canonicalized the finalized block, we should
-                                // skip the pipeline run
-                                if Ok(None) ==
-                                    self.blockchain.header_by_hash_or_number(
-                                        state.finalized_block_hash.into(),
-                                    )
-                                {
-                                    self.sync.set_pipeline_sync_target(state.finalized_block_hash)
-                                }
-                            }
-                        } else {
-                            // continue downloading the missing parent
-                            //
-                            // this happens if either:
-                            //  * the missing parent block num < canonical tip num
-                            //    * this case represents a missing block on a fork that is shorter
-                            //      than the canonical chain
-                            //  * the missing parent block num >= canonical tip num, but the number
-                            //    of missing blocks is less than the pipeline threshold
-                            //    * this case represents a potentially long range of blocks to
-                            //      download and execute
-                            self.sync.download_full_block(missing_parent.hash);
-                        }
+                        // block is not connected to the canonical head, we need to download its
+                        // missing branch first
+                        self.on_disconnected_block(downloaded_num_hash, missing_parent);
                     }
                     _ => (),
                 }
@@ -1132,6 +1082,83 @@ where
                 }
             }
         }
+    }
+
+    /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
+    ///
+    /// This mainly compares the missing parent of the downloaded block with the current canonical
+    /// tip, and decides whether or not the pipeline should be run.
+    ///
+    /// The canonical tip is compared to the missing parent using `exceeds_pipeline_run_threshold`,
+    /// which returns true if the missing parent is sufficiently ahead of the canonical tip. If so,
+    /// the pipeline is run. Otherwise, we need to insert blocks using the blockchain tree, and
+    /// must download blocks outside of the pipeline. In this case, the distance is used to
+    /// determine how many blocks we should download at once.
+    fn on_disconnected_block(
+        &mut self,
+        downloaded_block: BlockNumHash,
+        missing_parent: BlockNumHash,
+    ) {
+        // compare the missing parent with the canonical tip
+        let canonical_tip_num = self.blockchain.canonical_tip().number;
+        let sync_target_state = self.forkchoice_state_tracker.sync_target_state();
+
+        trace!(target: "consensus::engine", ?downloaded_block, ?missing_parent, tip=?canonical_tip_num, "Handling disconnected block");
+
+        let mut exceeds_pipeline_run_threshold =
+            self.exceeds_pipeline_run_threshold(canonical_tip_num, missing_parent.number);
+
+        // check if the downloaded block is the tracked safe block
+        if let Some(ref state) = sync_target_state {
+            if downloaded_block.hash == state.finalized_block_hash {
+                // we downloaded the finalized block
+                exceeds_pipeline_run_threshold =
+                    self.exceeds_pipeline_run_threshold(canonical_tip_num, downloaded_block.number);
+            } else if let Some(buffered_finalized) =
+                self.blockchain.buffered_header_by_hash(state.finalized_block_hash)
+            {
+                // if we have buffered the finalized block, we should check how far
+                // we're off
+                exceeds_pipeline_run_threshold = self
+                    .exceeds_pipeline_run_threshold(canonical_tip_num, buffered_finalized.number);
+            }
+        }
+
+        // if the number of missing blocks is greater than the max, run the
+        // pipeline
+        if exceeds_pipeline_run_threshold {
+            if let Some(state) = sync_target_state {
+                // if we have already canonicalized the finalized block, we should
+                // skip the pipeline run
+                match self.blockchain.header_by_hash_or_number(state.finalized_block_hash.into()) {
+                    Err(err) => {
+                        warn!(target: "consensus::engine", ?err, "Failed to get finalized block header");
+                    }
+                    Ok(None) => {
+                        // we don't have the block yet and the distance exceeds the allowed
+                        // threshold
+                        self.sync.set_pipeline_sync_target(state.safe_block_hash);
+                        // we can exit early here because the pipeline will take care of this
+                        return
+                    }
+                    Ok(Some(_)) => {
+                        // we're fully synced to the finalized block
+                        // but we want to continue downloading the missing parent
+                    }
+                }
+            }
+        }
+
+        // continue downloading the missing parent
+        //
+        // this happens if either:
+        //  * the missing parent block num < canonical tip num
+        //    * this case represents a missing block on a fork that is shorter than the canonical
+        //      chain
+        //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
+        //    less than the pipeline threshold
+        //    * this case represents a potentially long range of blocks to download and execute
+        self.sync.download_full_block(missing_parent.hash);
     }
 
     /// Attempt to form a new canonical chain based on the current sync target.
