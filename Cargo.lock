@@ -5593,10 +5593,8 @@ dependencies = [
 name = "reth-prune"
 version = "0.1.0-alpha.1"
 dependencies = [
- "futures-util",
  "reth-primitives",
  "thiserror",
- "tokio",
  "tracing",
 ]
 

@@ -14,10 +14,6 @@ Pruning implementation
 # reth
 reth-primitives = { workspace = true }
 
-# async/futures
-tokio = { workspace = true }
-futures-util = { workspace = true }
-
 # misc
 tracing = { workspace = true }
 thiserror = { workspace = true }
