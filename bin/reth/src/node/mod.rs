@@ -361,6 +361,7 @@ impl Command {
         };
 
         let pruner = config.prune.map(|prune_config| {
+            info!(target: "reth::cli", "Pruner initialized");
             reth_prune::Pruner::new(prune_config.block_interval, tree_config.max_reorg_depth())
         });
 
