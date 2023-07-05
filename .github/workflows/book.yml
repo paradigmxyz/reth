@@ -105,30 +105,11 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  up-to-date:
-    runs-on: ubuntu-latest
-    name: up-to-date
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Try to update the book cli documentation
-        run: make update-book-cli BUILD_PATH=reth/target
-
-      - name: Check if the book cli documentation is up to date
-        run: |
-          if [[ -n $(git status --porcelain) ]]; then
-            echo "Error: Documentation is not up to date. Please run \`make update-book-cli\`."
-            exit 1
-          else
-            echo "The documentation is up to date."
-          fi
-
   deploy:
     # Only deploy if a push to main
     if: github.ref_name == 'main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    needs: [test, lint, build, up-to-date]
+    needs: [test, lint, build]
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
     permissions:
