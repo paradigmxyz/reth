@@ -59,7 +59,7 @@ If you don't intend on running validators on your node you can add:
   --disable-deposit-contract-sync
 ```
 
-The `--checkpoint-sync-url` argument value can be replaced with any checkpoint sync endpoint from this list: https://eth-clients.github.io/checkpoint-sync-endpoints/#mainnet. 
+The `--checkpoint-sync-url` argument value can be replaced with any checkpoint sync endpoint from a [community maintained list](https://eth-clients.github.io/checkpoint-sync-endpoints/#mainnet). 
 
 Your Reth node should start receiving "fork choice updated" messages, and begin syncing the chain.
 
