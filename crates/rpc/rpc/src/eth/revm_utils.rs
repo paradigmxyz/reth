@@ -18,7 +18,7 @@ use revm::{
 };
 use revm_primitives::{
     db::{DatabaseCommit, DatabaseRef},
-    Bytecode,
+    Bytecode, ExecutionResult,
 };
 use tracing::trace;
 
@@ -459,7 +459,9 @@ where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
 {
-    let mut account_info = db.basic(account)?.unwrap_or_default();
+    // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
+    // which is modified via `Database::basic`
+    let mut account_info = DatabaseRef::basic(db, account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
         account_info.nonce = nonce.as_u64();
@@ -519,6 +521,18 @@ where
         logs: db.logs.clone(),
         block_hashes: db.block_hashes.clone(),
         db: Default::default(),
+    }
+}
+
+/// Helper to get the output data from a result
+///
+/// TODO: Can be phased out when <https://github.com/bluealloy/revm/pull/509> is released
+#[inline]
+pub(crate) fn result_output(res: &ExecutionResult) -> Option<bytes::Bytes> {
+    match res {
+        ExecutionResult::Success { output, .. } => Some(output.clone().into_data()),
+        ExecutionResult::Revert { output, .. } => Some(output.clone()),
+        _ => None,
     }
 }
 

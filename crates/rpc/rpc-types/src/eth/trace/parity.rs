@@ -238,12 +238,12 @@ pub enum TraceOutput {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionTrace {
-    pub trace_address: Vec<usize>,
-    pub subtraces: usize,
     #[serde(flatten)]
     pub action: Action,
     #[serde(flatten)]
     pub result: Option<TraceResult>,
+    pub subtraces: usize,
+    pub trace_address: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

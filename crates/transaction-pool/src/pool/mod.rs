@@ -81,7 +81,6 @@ use crate::{
     CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
-pub use events::TransactionEvent;
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{Address, TxHash, H256};
 use std::{
@@ -93,16 +92,19 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::debug;
 
-mod best;
 mod events;
+pub use events::{PoolTransactionEvent, TransactionEvent};
+
 mod listener;
+pub use listener::{AllTransactionsEvents, TransactionEvents};
+
+mod best;
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
 pub(crate) mod state;
 pub mod txpool;
 mod update;
-pub use listener::TransactionEvents;
 
 /// Transaction pool internals.
 pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
@@ -197,7 +199,9 @@ where
     }
 
     /// Adds a new transaction listener to the pool that gets notified about every new transaction
-    pub fn add_transaction_listener(&self) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
+    pub fn add_new_transaction_listener(
+        &self,
+    ) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
         const TX_LISTENER_BUFFER_SIZE: usize = 1024;
         let (tx, rx) = mpsc::channel(TX_LISTENER_BUFFER_SIZE);
         self.transaction_listener.lock().push(tx);
@@ -216,6 +220,11 @@ where
         } else {
             None
         }
+    }
+
+    /// Adds a listener for all transaction events.
+    pub(crate) fn add_all_transactions_event_listener(&self) -> AllTransactionsEvents {
+        self.event_listener.write().subscribe_all()
     }
 
     /// Returns hashes of _all_ transactions in the pool.

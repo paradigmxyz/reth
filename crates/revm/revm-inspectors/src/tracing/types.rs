@@ -142,8 +142,6 @@ pub(crate) struct CallTrace {
     /// The return data of the call if this was not a contract creation, otherwise it is the
     /// runtime bytecode of the created contract
     pub(crate) output: Bytes,
-    /// The return data of the last call, if any
-    pub(crate) last_call_return_value: Option<Bytes>,
     /// The gas cost of the call
     pub(crate) gas_used: u64,
     /// The gas limit of the call
@@ -181,7 +179,6 @@ impl Default for CallTrace {
             data: Default::default(),
             maybe_precompile: None,
             output: Default::default(),
-            last_call_return_value: None,
             gas_used: Default::default(),
             gas_limit: Default::default(),
             status: InstructionResult::Continue,
