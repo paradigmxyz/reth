@@ -80,7 +80,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                     }
 
                     if n > input.checkpoint().block_number {
-                        input.checkpoint = Some(StageCheckpoint::new(n + 1))
+                        input.checkpoint = Some(StageCheckpoint::new(n))
                     }
                 }
             }
@@ -257,15 +257,18 @@ struct FailedSenderRecoveryError {
 
 #[cfg(test)]
 mod tests {
+    use crate::Stage;
     use assert_matches::assert_matches;
+    use reth_db::DatabaseEnv;
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{
-        stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, H256,
+        stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, H256, MAINNET,
     };
-    use reth_provider::TransactionsProvider;
+    use reth_provider::{ProviderFactory, TransactionsProvider};
+    use std::sync::Arc;
 
     use super::*;
     use crate::test_utils::{
@@ -388,6 +391,54 @@ mod tests {
         );
 
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
+    }
+
+    /// Tests pruning during stage
+    #[tokio::test]
+    async fn test_prune() {
+        let (previous_stage, stage_progress) = (500, 100);
+        let mut rng = generators::rng();
+
+        // Set up the runner
+        let runner = SenderRecoveryTestRunner::default();
+        let input = ExecInput {
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
+        };
+
+        // Insert blocks with 1 tx each
+        let blocks = (stage_progress + 1..=input.target())
+            .map(|number| random_block(&mut rng, number, None, Some(1), None))
+            .collect::<Vec<_>>();
+        runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
+
+        let factory = Arc::new(ProviderFactory::new(runner.tx.tx.as_ref(), MAINNET.clone()));
+        let check_pruning = |factory: Arc<ProviderFactory<_>>,
+                             pruning: PruneTargets,
+                             expected_num: usize| async move {
+            let provider = factory.provider_rw().unwrap();
+
+            let mut stage = SenderRecoveryStage::new(10000, pruning);
+            Stage::<DatabaseEnv>::execute(&mut stage, &provider, input).await.unwrap();
+
+            assert_eq!(provider.senders_by_tx_range(0..=400).unwrap().len(), expected_num);
+        };
+
+        let mut prune = PruneTargets::none();
+
+        check_pruning(factory.clone(), prune, blocks.len()).await;
+
+        prune = PruneTargets::all();
+        check_pruning(factory.clone(), prune, 0).await;
+
+        prune.sender_recovery = Some(PruneTarget::Block(10));
+        check_pruning(factory.clone(), prune, blocks.len()).await;
+
+        prune.sender_recovery = Some(PruneTarget::Block(stage_progress + 10));
+        check_pruning(factory.clone(), prune, blocks.len() - 10).await;
+
+        prune.sender_recovery = Some(PruneTarget::Block(input.target()));
+        check_pruning(factory.clone(), prune, 0).await;
     }
 
     struct SenderRecoveryTestRunner {
