@@ -177,7 +177,6 @@ impl TracingInspector {
                 value,
                 status: InstructionResult::Continue,
                 caller,
-                last_call_return_value: self.last_call_return_data.clone(),
                 maybe_precompile,
                 gas_limit,
                 ..Default::default()
@@ -214,6 +213,7 @@ impl TracingInspector {
         trace.status = status;
         trace.success = matches!(status, return_ok!());
         trace.output = output.clone();
+
         self.last_call_return_data = Some(output);
 
         if let Some(address) = created_address {
