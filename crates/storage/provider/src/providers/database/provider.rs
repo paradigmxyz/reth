@@ -901,6 +901,7 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
             .block_body_indices(block_number)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
         let tx_range = body.tx_num_range();
+        let tx_start = tx_range.start;
 
         let (transactions, senders) = if tx_range.is_empty() {
             (vec![], vec![])
@@ -908,18 +909,44 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
             (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
         };
 
-        let body = transactions
-            .into_iter()
-            .map(|tx| {
-                TransactionSigned {
-                    // TODO: This is the fastest way right now to make everything just work with
-                    // a dummy transaction hash.
-                    hash: Default::default(),
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                }
-            })
-            .collect();
+        // Happens when there's pruning of `TxSenders`
+        let (body, senders) = if transactions.len() != senders.len() {
+            // TODO: can this be improved?
+            use rayon::prelude::*;
+            transactions
+                .into_par_iter()
+                .enumerate()
+                .map(|(num, tx)| {
+                    let tx = TransactionSigned {
+                        // TODO: This is the fastest way right now to make everything just work with
+                        // a dummy transaction hash.
+                        hash: Default::default(),
+                        signature: tx.signature,
+                        transaction: tx.transaction,
+                    };
+                    let sender = tx
+                        .recover_signer()
+                        .ok_or(ProviderError::SenderRecoveryFailure(tx_start + num as u64))?;
+                    Ok((tx, sender))
+                })
+                .collect::<Result<(Vec<_>, Vec<_>)>>()?
+        } else {
+            (
+                transactions
+                    .into_iter()
+                    .map(|tx| {
+                        TransactionSigned {
+                            // TODO: This is the fastest way right now to make everything just work
+                            // with a dummy transaction hash.
+                            hash: Default::default(),
+                            signature: tx.signature,
+                            transaction: tx.transaction,
+                        }
+                    })
+                    .collect(),
+                senders,
+            )
+        };
 
         Ok(Some(Block { header, body, ommers, withdrawals }.with_senders(senders)))
     }

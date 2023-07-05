@@ -94,4 +94,7 @@ pub enum ProviderError {
         /// Block hash
         block_hash: BlockHash,
     },
+    /// Failed to recover signer from transaction. Relevant when pruning is involved.
+    #[error("Failed to recover signer from transaction.")]
+    SenderRecoveryFailure(TxNumber),
 }

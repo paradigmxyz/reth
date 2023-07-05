@@ -29,6 +29,7 @@ itertools = "0.10"
 pin-project = { workspace = true }
 derive_more = "0.99"
 parking_lot = "0.12"
+rayon = "1.6.0"
 
 # test-utils
 reth-rlp = { workspace = true, optional = true }
