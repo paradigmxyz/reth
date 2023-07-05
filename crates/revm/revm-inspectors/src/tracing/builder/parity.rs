@@ -238,8 +238,6 @@ impl ParityTraceBuilder {
 
     /// Creates a VM trace by walking over [CallTraceNode]s
     pub fn vm_trace(&self) -> VmTrace {
-        let mut walker = CallTraceNodeWalkerDF::new(&self.nodes);
-
         match self.nodes.get(0) {
             Some(current) => self.make_vm_trace(current),
             None => VmTrace { code: Default::default(), ops: Vec::new() },
