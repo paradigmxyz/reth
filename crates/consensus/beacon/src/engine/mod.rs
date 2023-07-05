@@ -219,7 +219,7 @@ impl BeaconConsensusEngineHandle {
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, BT, Client, St>
+pub struct BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
@@ -259,14 +259,13 @@ where
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
     /// Controls pruning triggered by engine updates.
-    prune: Option<EnginePruneController<St>>,
+    prune: Option<EnginePruneController>,
 }
 
-impl<DB, BT, Client, St> BeaconConsensusEngine<DB, BT, Client, St>
+impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
     BT: BlockchainTreeEngine + BlockReader + CanonChainTracker + StageCheckpointReader + 'static,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
@@ -282,7 +281,7 @@ where
         payload_builder: PayloadBuilderHandle,
         target: Option<H256>,
         pipeline_run_threshold: u64,
-        pruner: Option<Pruner<St>>,
+        pruner: Option<Pruner>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
@@ -328,7 +327,7 @@ where
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
         rx: UnboundedReceiver<BeaconEngineMessage>,
-        pruner: Option<Pruner<St>>,
+        pruner: Option<Pruner>,
     ) -> Result<(Self, BeaconConsensusEngineHandle), reth_interfaces::Error> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
@@ -1389,7 +1388,7 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, BT, Client, St> Future for BeaconConsensusEngine<DB, BT, Client, St>
+impl<DB, BT, Client> Future for BeaconConsensusEngine<DB, BT, Client>
 where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
@@ -1399,7 +1398,6 @@ where
         + StageCheckpointReader
         + Unpin
         + 'static,
-    St: Stream<Item = CanonStateNotification> + Unpin + Send + 'static,
 {
     type Output = Result<(), BeaconConsensusEngineError>;
 
@@ -1505,7 +1503,6 @@ mod tests {
             ShareableBlockchainTree<Arc<DatabaseEnv>, TestConsensus, TestExecutorFactory>,
         >,
         NoopFullBlockClient,
-        CanonStateNotificationStream,
     >;
 
     struct TestEnv<DB> {
@@ -1669,7 +1666,7 @@ mod tests {
 
             let pruner = self
                 .pruner_canon_state_stream
-                .map(|canon_state_stream| Pruner::new(canon_state_stream, 5, 0));
+                .map(|canon_state_stream| Pruner::new(Box::new(canon_state_stream), 5, 0));
 
             let (mut engine, handle) = BeaconConsensusEngine::new(
                 NoopFullBlockClient::default(),

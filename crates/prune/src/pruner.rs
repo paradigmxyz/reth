@@ -13,16 +13,16 @@ use tracing::debug;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [Pruner::run_as_fut].
-pub type PrunerFut<St> = Pin<Box<dyn Future<Output = PrunerWithResult<St>> + Send>>;
+pub type PrunerFut = Pin<Box<dyn Future<Output = PrunerWithResult> + Send>>;
 
 /// The pipeline type itself with the result of [Pruner::run_as_fut]
-pub type PrunerWithResult<St> = (Pruner<St>, Result<(), PrunerError>);
+pub type PrunerWithResult = (Pruner, Result<(), PrunerError>);
 
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
-pub struct Pruner<St> {
+pub struct Pruner {
     /// Stream of canonical state notifications. Pruning is triggered by new incoming
     /// notifications.
-    canon_state_stream: St,
+    canon_state_stream: Box<dyn Stream<Item = CanonStateNotification> + Send + Unpin>,
     /// Minimum pruning interval measured in blocks. All prune parts are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: u64,
@@ -35,12 +35,13 @@ pub struct Pruner<St> {
     last_pruned_block_number: Option<BlockNumber>,
 }
 
-impl<St> Pruner<St>
-where
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-{
+impl Pruner {
     /// Creates a new [Pruner].
-    pub fn new(canon_state_stream: St, min_block_interval: u64, max_prune_depth: u64) -> Self {
+    pub fn new(
+        canon_state_stream: Box<dyn Stream<Item = CanonStateNotification> + Send + Unpin>,
+        min_block_interval: u64,
+        max_prune_depth: u64,
+    ) -> Self {
         Self {
             canon_state_stream,
             min_block_interval,
@@ -52,7 +53,7 @@ where
     /// Consume the pruner and run it until it finishes.
     /// Return the pruner and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, tip_block_number: BlockNumber) -> PrunerFut<St> {
+    pub fn run_as_fut(mut self, tip_block_number: BlockNumber) -> PrunerFut {
         Box::pin(async move {
             let result = self.run(tip_block_number).await;
             (self, result)
@@ -115,7 +116,7 @@ mod tests {
     #[tokio::test]
     async fn pruner_check_tip() {
         let mut canon_state_stream = TestCanonStateSubscriptions::default();
-        let mut pruner = Pruner::new(canon_state_stream.canonical_state_stream(), 5, 0);
+        let mut pruner = Pruner::new(Box::new(canon_state_stream.canonical_state_stream()), 5, 0);
 
         // Canonical state stream is empty
         poll_fn(|cx| {

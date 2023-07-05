@@ -12,19 +12,16 @@ use tracing::trace;
 /// Manages pruning under the control of the engine.
 ///
 /// This type controls the [Pruner].
-pub(crate) struct EnginePruneController<St> {
+pub(crate) struct EnginePruneController {
     /// The current state of the pruner.
-    pruner_state: PrunerState<St>,
+    pruner_state: PrunerState,
     /// The type that can spawn the pruner task.
     pruner_task_spawner: Box<dyn TaskSpawner>,
 }
 
-impl<St> EnginePruneController<St>
-where
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-{
+impl EnginePruneController {
     /// Create a new instance
-    pub(crate) fn new(pruner: Pruner<St>, pruner_task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub(crate) fn new(pruner: Pruner, pruner_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self { pruner_state: PrunerState::Idle(Some(pruner)), pruner_task_spawner }
     }
 
@@ -145,14 +142,14 @@ pub(crate) enum EnginePruneEvent {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PrunerState<St> {
+enum PrunerState {
     /// Pruner is idle.
-    Idle(Option<Pruner<St>>),
+    Idle(Option<Pruner>),
     /// Pruner is running and waiting for a response
-    Running(oneshot::Receiver<PrunerWithResult<St>>),
+    Running(oneshot::Receiver<PrunerWithResult>),
 }
 
-impl<St> PrunerState<St> {
+impl PrunerState {
     /// Returns `true` if the state matches idle.
     fn is_idle(&self) -> bool {
         matches!(self, PrunerState::Idle(_))
