@@ -1094,9 +1094,6 @@ where
     /// the pipeline is run. Otherwise, we need to insert blocks using the blockchain tree, and
     /// must download blocks outside of the pipeline. In this case, the distance is used to
     /// determine how many blocks we should download at once.
-    ///
-    /// To download a range of blocks, a `FetchFullBlockRangeFuture` will be created and polled
-    /// until the branch is downloaded.
     fn on_disconnected_block(
         &mut self,
         downloaded_block: BlockNumHash,
