@@ -38,3 +38,7 @@ services:
     command:
       - --config=/root/config.yaml
       - --metrics-port=9091
+
+volumes:
+  lighthousedata:
+    driver: local
