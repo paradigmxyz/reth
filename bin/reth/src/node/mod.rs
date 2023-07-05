@@ -718,7 +718,7 @@ impl Command {
                         max_blocks: stage_config.execution.max_blocks,
                         max_changes: stage_config.execution.max_changes,
                     },
-                    config.prune.map(|p| p.into_targets(None)).unwrap_or_default(),
+                    config.prune.map(|p| p.into_targets(max_block)).unwrap_or_default(),
                 ))
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,

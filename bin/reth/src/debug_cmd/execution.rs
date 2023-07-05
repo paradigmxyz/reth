@@ -102,6 +102,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
+        max_block: u64,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -142,7 +143,7 @@ impl Command {
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds { max_blocks: None, max_changes: None },
-                    config.prune.map(|p| p.into_targets(None)).unwrap_or_default(),
+                    config.prune.map(|p| p.into_targets(Some(max_block))).unwrap_or_default(),
                 )),
             )
             .build(db, self.chain.clone());
@@ -233,6 +234,7 @@ impl Command {
             Arc::clone(&consensus),
             db.clone(),
             &ctx.task_executor,
+            self.to,
         )?;
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
