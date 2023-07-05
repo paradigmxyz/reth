@@ -52,10 +52,10 @@ impl EnginePruneController {
     }
 
     /// This will try to spawn the pruner if it is idle:
-    /// 1. Try to acquire the tip block number through [Pruner::is_pruning_needed].
-    /// 2. If tip block number is ready, pass it to the [Pruner::run_as_fut] and spawn in a separate
-    /// task. Set pruner state to [PrunerState::Running].
-    /// 3. If tip block number is not ready yet, set pruner state back to [PrunerState::Idle].
+    /// 1. Check if pruning is needed through [Pruner::is_pruning_needed].
+    /// 2a. If pruning is needed, pass tip block number to the [Pruner::run] and spawn it in a
+    /// separate task. Set pruner state to [PrunerState::Running].
+    /// 2b. If pruning is not needed, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
     fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<EnginePruneEvent> {
@@ -85,7 +85,7 @@ impl EnginePruneController {
         }
     }
 
-    /// Advances the prune process.
+    /// Advances the prune process with the tip block number.
     pub(crate) fn poll(
         &mut self,
         cx: &mut Context<'_>,
