@@ -323,7 +323,7 @@ where
         // sought key.
         let mut post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
         while let Some((k, _)) = post_state_entry {
-            if k > &last_account {
+            if k > last_account {
                 // Found the next entry in the post state.
                 break
             }
@@ -540,7 +540,7 @@ where
             post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
 
             while let Some((k, _)) = post_state_entry {
-                if k > &last_slot {
+                if k > last_slot {
                     // Found the next entry.
                     break
                 }
