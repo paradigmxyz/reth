@@ -17,8 +17,13 @@ pub(crate) struct CallTraceNodeWalkerDF<'trace> {
     /// the entire callgraph or arena
     nodes: &'trace Vec<CallTraceNode>,
 
+    /// the next idx to check if visited or return
     curr_idx: usize,
-    stack: Vec<usize>,
+
+    /// holds the offset into the children array of the nodes parents
+    child_idx_stack: Vec<usize>,
+
+    /// keeps track of which nodes we've visited
     visited: Vec<bool>,
 }
 
@@ -28,7 +33,7 @@ impl<'trace> CallTraceNodeWalkerDF<'trace> {
             nodes,
             curr_idx: 0,
             /// can never be deeper than len of arena
-            stack: Vec::with_capacity(nodes.len()),
+            child_idx_stack: Vec::with_capacity(nodes.len()),
             visited: vec![false; nodes.len()],
         }
     }
@@ -49,13 +54,13 @@ impl<'trace> Iterator for CallTraceNodeWalkerDF<'trace> {
 
             match curr.children.get(next_child) {
                 Some(child_idx) => {
-                    self.stack.push(next_child + 1);
+                    self.child_idx_stack.push(next_child + 1);
 
                     self.curr_idx = *child_idx;
                 }
                 None => match curr.parent {
                     Some(parent_idx) => {
-                        next_child = self.stack.pop().expect("missing stack");
+                        next_child = self.child_idx_stack.pop().expect("missing stack");
                         self.curr_idx = parent_idx;
                     }
                     None => {
@@ -74,6 +79,7 @@ pub(crate) struct CallTraceNodeWalkerBF<'trace> {
     /// the entire arena
     nodes: &'trace Vec<CallTraceNode>,
 
+    /// holds indexes of nodes to visit as we traverse
     queue: VecDeque<usize>,
 }
 
