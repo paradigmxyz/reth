@@ -101,7 +101,7 @@
 //!         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
 //!         Default::default(),
 //!     );
-//!   let mut transactions = pool.transactions_listener();
+//!   let mut transactions = pool.pending_transactions_listener();
 //!   tokio::task::spawn( async move {
 //!      while let Some(tx) = transactions.recv().await {
 //!          println!("New transaction: {:?}", tx);
