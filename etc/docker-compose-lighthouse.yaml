@@ -1,0 +1,30 @@
+version: '3.9'
+name: 'reth'
+
+services:
+
+  lighthouse:
+    restart: unless-stopped
+    image: sigp/lighthouse
+    depends_on:
+      - reth
+    ports:
+      - '5052:5052/tcp' # http rpc
+      - '5053:5053/tcp'
+      - '5054:5054/tcp' # metrics
+      - '9000:9000/tcp' # p2p (tcp)
+      - '9000:9000/udp' # p2p (udp)
+    volumes:
+      - lighthousedata:/root/.lighthouse
+      - ./jwttoken:/root/jwt:ro
+    command: >
+      lighthouse bn
+      --http --http-address 0.0.0.0
+      --execution-endpoint http://reth:8551
+      --metrics --metrics-address 0.0.0.0
+      --execution-jwt /root/jwt/jwt.hex
+      --checkpoint-sync-url https://mainnet.checkpoint.sigp.io
+
+volumes:
+  lighthousedata:
+    driver: local

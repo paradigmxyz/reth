@@ -9,6 +9,7 @@ services:
       - '9001:9001' # metrics
       - '30303:30303' # eth/66 peering
       - '8545:8545' # rpc
+      - '8551:8551' # engine
     volumes:
       - rethdata:/root/.local/share/reth/mainnet/db
       - rethlogs:/root/rethlogs
@@ -64,8 +65,6 @@ volumes:
   rethdata:
     driver: local
   rethlogs:
-    driver: local
-  lighthousedata:
     driver: local
   prometheusdata:
     driver: local
