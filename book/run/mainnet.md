@@ -35,7 +35,7 @@ So one might do:
 RUST_LOG=info reth node \
     --authrpc.jwtsecret /path/to/secret \
     --authrpc.addr 127.0.0.1 \
-    --authrpc.port 9999
+    --authrpc.port 8551
 ```
 
 At this point, our Reth node has started discovery, and even discovered some new peers. But it will not start syncing until you spin up the consensus layer!
