@@ -1,8 +1,9 @@
 # `reth p2p`
 
+P2P Debugging utilities
+
 ```bash
 $ reth p2p --help
-P2P Debugging utilities
 
 Usage: reth p2p [OPTIONS] <COMMAND>
 
@@ -20,30 +21,30 @@ Options:
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-
+          
           Possible values are either a built-in chain or the path to a chain specification file.
-
+          
           Built-in chains:
           - mainnet
           - goerli
           - sepolia
-
+          
           [default: mainnet]
 
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
-
+          
           Defaults to the OS-specific data directory:
-
+          
           - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
           - Windows: `{FOLDERID_RoamingAppData}/reth/`
           - macOS: `$HOME/Library/Application Support/reth/`
-
+          
           [default: default]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
-
+          
           This also will deterministically set the peer ID.
 
   -d, --disable-discovery
@@ -66,7 +67,7 @@ Options:
 
       --retries <RETRIES>
           The number of retries per request
-
+          
           [default: 5]
 
       --nat <NAT>
@@ -81,21 +82,69 @@ Logging:
 
       --log.directory <PATH>
           The path to put log files in
-
-          [default: /Users/georgios/Library/Caches/reth/logs]
+          
+          [default: /reth/logs]
 
       --log.journald
           Log events to journald
 
       --log.filter <FILTER>
           The filter to use for logs written to the log file
-
-          [default: debug]
+          
+          [default: error]
 
 Display:
   -v, --verbosity...
           Set the minimum log level.
+          
+          -v      Errors
+          -vv     Warnings
+          -vvv    Info
+          -vvvv   Debug
+          -vvvvv  Traces (warning: very verbose!)
 
+  -q, --quiet
+          Silence all log output
+```
+
+## `reth p2p body`
+
+Download block body
+
+```bash
+$ reth p2p body --help
+
+Usage: reth p2p body [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          The block number or hash
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+Logging:
+      --log.persistent
+          The flag to enable persistent logs
+
+      --log.directory <PATH>
+          The path to put log files in
+          
+          [default: /reth/logs]
+
+      --log.journald
+          Log events to journald
+
+      --log.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: error]
+
+Display:
+  -v, --verbosity...
+          Set the minimum log level.
+          
           -v      Errors
           -vv     Warnings
           -vvv    Info
@@ -108,28 +157,48 @@ Display:
 
 ## `reth p2p header`
 
-```bash
-$ reth p2p header --help
 Download block header
 
-Usage: reth p2p header <ID>
+```bash
+$ reth p2p header --help
+
+Usage: reth p2p header [OPTIONS] <ID>
 
 Arguments:
   <ID>
           The header number or hash
-```
 
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
-## `reth p2p body`
+Logging:
+      --log.persistent
+          The flag to enable persistent logs
 
+      --log.directory <PATH>
+          The path to put log files in
+          
+          [default: /reth/logs]
 
-```bash
-$ reth p2p body --help
-Download block body
+      --log.journald
+          Log events to journald
 
-Usage: reth p2p body <ID>
+      --log.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: error]
 
-Arguments:
-  <ID>
-          The block number or hash
+Display:
+  -v, --verbosity...
+          Set the minimum log level.
+          
+          -v      Errors
+          -vv     Warnings
+          -vvv    Info
+          -vvvv   Debug
+          -vvvvv  Traces (warning: very verbose!)
+
+  -q, --quiet
+          Silence all log output
 ```
