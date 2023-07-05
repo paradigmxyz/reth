@@ -8,7 +8,7 @@ MDBX_PATH = "crates/storage/libmdbx-rs/mdbx-sys/libmdbx"
 DB_TOOLS_DIR = "db-tools"
 FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
-BUILD_PATH = "target"
+BUILD_PATH ?= "target"
 
 # List of features to use when building. Can be overriden via the environment.
 # No jemalloc on Windows
@@ -202,4 +202,3 @@ update-book-cli: ## Update book cli documentation.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 	@echo "Updating book cli doc..."
 	@./book/cli/update.sh $(BUILD_PATH)
-
