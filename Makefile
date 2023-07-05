@@ -199,6 +199,6 @@ db-tools: ## Compile MDBX debugging tools.
 
 .PHONY: update-book-cli
 update-book-cli: ## Update book cli documentation.
-	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)" --target-dir $(BUILD_PATH)
+	cargo build --bin reth --features "$(FEATURES)" --release --target-dir $(BUILD_PATH)
 	@echo "Updating book cli doc..."
-	@./book/cli/update.sh $(BUILD_PATH)
+	@./book/cli/update.sh release $(BUILD_PATH)

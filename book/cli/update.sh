@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # Define the build path.
-build_path=$1
+profile=${1:-"debug"}
+build_path=$2
 if [ -z "$build_path" ]; then
   echo "Build path variable is not defined. Exiting..."
   exit 1
 fi
-reth_path=./$build_path/debug/reth
+reth_path=./$build_path/$profile/reth
 echo "Using reth path: $reth_path (build path: $build_path)"
 
 # Define the path to the JSON configuration file.
