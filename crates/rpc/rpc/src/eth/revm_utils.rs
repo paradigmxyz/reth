@@ -460,7 +460,7 @@ where
     EthApiError: From<<DB as DatabaseRef>::Error>,
 {
     // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
-    // which is modified via `Database::base`
+    // which is modified via `Database::basic`
     let mut account_info = DatabaseRef::basic(db, account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
