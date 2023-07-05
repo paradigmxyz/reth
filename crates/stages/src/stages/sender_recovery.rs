@@ -82,6 +82,17 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
+        // Acquire the cursor over the transactions
+        let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
+        // Walk the transactions from start to end index (inclusive)
+        let raw_tx_range = RawKey::new(*tx_range.start())..=RawKey::new(*tx_range.end());
+        let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
+
+        // Iterate over transactions in chunks
+        info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
+
+        let recoveries: Vec<_> = tx_walker.collect();
+
         // Spawn recovery jobs onto the default rayon threadpool and send the result through the
         // channel.
         //
@@ -92,47 +103,26 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // prevents an edge case
         // where the chunk size is either 0 or too small
         // to gain anything from using more than 1 thread
-        let chunk_size = chunk_size.max(16) as u64;
+        let chunk_size = chunk_size.max(16);
 
-        // Split up the `tx_range` into separate ranges
-        let mut ranges = Vec::new();
-        let mut cursor = 0;
-
-        while &cursor < tx_range.end() {
-            let end = (cursor + chunk_size).min(*tx_range.end());
-            let raw_tx_range = RawKey::new(cursor)..=RawKey::new(end);
-
-            ranges.push(raw_tx_range);
-
-            cursor = end + 1;
-        }
-
-        // Iterate over transactions in chunks
-        info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
-
-        // Process the sub-ranges in parallel
-        let recoveries = ranges
-            .into_par_iter()
-            .map(|raw_tx_range| {
-                // Acquire the cursor over the transactions
-                let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
-                // Walk the transactions from start to end index (inclusive)
-                let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
-
-                let mut results = Vec::with_capacity(chunk_size as usize);
+        let recoveries = recoveries
+            .par_chunks(chunk_size)
+            .map(|chunk| {
+                let mut results = Vec::with_capacity(chunk.len());
                 let mut rlp_buf = Vec::with_capacity(128);
 
-                for entry in tx_walker {
+                for entry in chunk {
                     rlp_buf.clear();
                     let recovery_result = recover_sender(entry, &mut rlp_buf);
                     results.push(recovery_result);
                 }
 
-                Ok(results)
+                results
             })
-            .collect::<Result<Vec<_>, StageError>>()?;
+            .flatten()
+            .collect::<Vec<_>>();
 
-        for recovered in recoveries.into_iter().flatten() {
+        for recovered in recoveries {
             let (tx_id, sender) = match recovered {
                 Ok(result) => result,
                 Err(error) => {
@@ -191,11 +181,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 }
 
 fn recover_sender(
-    entry: Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
+    entry: &Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, H160), Box<SenderRecoveryStageError>> {
     let (tx_id, transaction) =
-        entry.map_err(|e| Box::new(SenderRecoveryStageError::StageError(e.into())))?;
+        entry.as_ref().map_err(|e| Box::new(SenderRecoveryStageError::StageError(e.clone().into())))?;
     let tx_id = tx_id.key().expect("key to be formated");
 
     let tx = transaction.value().expect("value to be formated");
