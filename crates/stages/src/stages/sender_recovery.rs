@@ -1,5 +1,4 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -16,7 +15,6 @@ use reth_primitives::{
 use reth_provider::{BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError};
 use std::fmt::Debug;
 use thiserror::Error;
-use tokio::sync::mpsc;
 use tracing::*;
 
 /// The sender recovery stage iterates over existing transactions,
@@ -59,6 +57,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        use rayon::prelude::*;
+
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -82,18 +82,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
-        // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
-        // Walk the transactions from start to end index (inclusive)
-        let raw_tx_range = RawKey::new(*tx_range.start())..=RawKey::new(*tx_range.end());
-        let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
-
-        // Iterate over transactions in chunks
-        info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
-
-        // channels used to return result of sender recovery.
-        let mut channels = Vec::new();
-
         // Spawn recovery jobs onto the default rayon threadpool and send the result through the
         // channel.
         //
@@ -104,57 +92,73 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // prevents an edge case
         // where the chunk size is either 0 or too small
         // to gain anything from using more than 1 thread
-        let chunk_size = chunk_size.max(16);
+        let chunk_size = chunk_size.max(16) as u64;
 
-        for chunk in &tx_walker.chunks(chunk_size) {
-            // An _unordered_ channel to receive results from a rayon job
-            let (recovered_senders_tx, recovered_senders_rx) = mpsc::unbounded_channel();
-            channels.push(recovered_senders_rx);
-            // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
-            let chunk: Vec<_> = chunk.collect();
+        // Split up the `tx_range` into separate ranges
+        let mut ranges = Vec::new();
+        let mut cursor = 0;
 
-            // Spawn the sender recovery task onto the global rayon pool
-            // This task will send the results through the channel after it recovered the senders.
-            rayon::spawn(move || {
-                let mut rlp_buf = Vec::with_capacity(128);
-                for entry in chunk {
-                    rlp_buf.clear();
-                    let recovery_result = recover_sender(entry, &mut rlp_buf);
-                    let _ = recovered_senders_tx.send(recovery_result);
-                }
-            });
+        while &cursor < tx_range.end() {
+            let end = (cursor + chunk_size).min(*tx_range.end());
+            let raw_tx_range = RawKey::new(cursor)..=RawKey::new(end);
+
+            ranges.push(raw_tx_range);
+
+            cursor = end + 1;
         }
 
-        // Iterate over channels and append the sender in the order that they are received.
-        for mut channel in channels {
-            while let Some(recovered) = channel.recv().await {
-                let (tx_id, sender) = match recovered {
-                    Ok(result) => result,
-                    Err(error) => {
-                        match *error {
-                            SenderRecoveryStageError::FailedRecovery(err) => {
-                                // get the block number for the bad transaction
-                                let block_number = tx
-                                    .get::<tables::TransactionBlock>(err.tx)?
-                                    .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
+        // Iterate over transactions in chunks
+        info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
-                                // fetch the sealed header so we can use it in the sender recovery
-                                // unwind
-                                let sealed_header = provider
-                                    .sealed_header(block_number)?
-                                    .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
-                                return Err(StageError::Validation {
-                                    block: sealed_header,
-                                    error:
-                                        consensus::ConsensusError::TransactionSignerRecoveryError,
-                                })
-                            }
-                            SenderRecoveryStageError::StageError(err) => return Err(err),
+        // Process the sub-ranges in parallel
+        let recoveries = ranges
+            .into_par_iter()
+            .map(|raw_tx_range| {
+                // Acquire the cursor over the transactions
+                let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
+                // Walk the transactions from start to end index (inclusive)
+                let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
+
+                let mut results = Vec::with_capacity(chunk_size as usize);
+                let mut rlp_buf = Vec::with_capacity(128);
+
+                for entry in tx_walker {
+                    rlp_buf.clear();
+                    let recovery_result = recover_sender(entry, &mut rlp_buf);
+                    results.push(recovery_result);
+                }
+
+                Ok(results)
+            })
+            .collect::<Result<Vec<_>, StageError>>()?;
+
+        for recovered in recoveries.into_iter().flatten() {
+            let (tx_id, sender) = match recovered {
+                Ok(result) => result,
+                Err(error) => {
+                    match *error {
+                        SenderRecoveryStageError::FailedRecovery(err) => {
+                            // get the block number for the bad transaction
+                            let block_number = tx
+                                .get::<tables::TransactionBlock>(err.tx)?
+                                .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
+
+                            // fetch the sealed header so we can use it in the sender recovery
+                            // unwind
+                            let sealed_header = provider
+                                .sealed_header(block_number)?
+                                .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
+                            return Err(StageError::Validation {
+                                block: sealed_header,
+                                error:
+                                    consensus::ConsensusError::TransactionSignerRecoveryError,
+                            })
                         }
+                        SenderRecoveryStageError::StageError(err) => return Err(err),
                     }
-                };
-                senders_cursor.append(tx_id, sender)?;
-            }
+                }
+            };
+            senders_cursor.append(tx_id, sender)?;
         }
 
         Ok(ExecOutput {
