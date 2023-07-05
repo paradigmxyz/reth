@@ -86,6 +86,57 @@
 //! [`Pool`](crate::Pool) type is just an `Arc` wrapper around `PoolInner`. This is the usable type
 //! that provides the `TransactionPool` interface.
 //!
+//!
+//! ## Examples
+//!
+//! Listen for new transactions and print them:
+//!
+//! ```
+//! use reth_primitives::MAINNET;
+//! use reth_provider::StateProviderFactory;
+//! use reth_tasks::TokioTaskExecutor;
+//! use reth_transaction_pool::{EthTransactionValidator, Pool, TransactionPool};
+//!  async fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+//!     let pool = Pool::eth_pool(
+//!         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+//!         Default::default(),
+//!     );
+//!   let mut transactions = pool.pending_transactions_listener();
+//!   tokio::task::spawn( async move {
+//!      while let Some(tx) = transactions.recv().await {
+//!          println!("New transaction: {:?}", tx);
+//!      }
+//!   });
+//!
+//!   // do something useful with the pool, like RPC integration
+//!
+//! # }
+//! ```
+//!
+//! Spawn maintenance task to keep the pool updated
+//!
+//! ```
+//! use futures_util::Stream;
+//! use reth_primitives::MAINNET;
+//! use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
+//! use reth_tasks::TokioTaskExecutor;
+//! use reth_transaction_pool::{EthTransactionValidator, Pool};
+//! use reth_transaction_pool::maintain::maintain_transaction_pool_future;
+//!  async fn t<C, St>(client: C, stream: St)
+//!    where C: StateProviderFactory + BlockReaderIdExt + Clone + 'static,
+//!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+//!     {
+//!     let pool = Pool::eth_pool(
+//!         EthTransactionValidator::new(client.clone(), MAINNET.clone(), TokioTaskExecutor::default()),
+//!         Default::default(),
+//!     );
+//!
+//!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
+//!   tokio::task::spawn(  maintain_transaction_pool_future(client, pool, stream));
+//!
+//! # }
+//! ```
+//!
 //! ## Feature Flags
 //!
 //! - `serde` (default): Enable serde support
@@ -230,6 +281,21 @@ where
 {
     /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
     /// [PooledTransaction]s and ords via [GasCostOrdering]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use reth_provider::StateProviderFactory;
+    /// use reth_primitives::MAINNET;
+    /// use reth_tasks::TokioTaskExecutor;
+    /// use reth_transaction_pool::{EthTransactionValidator, Pool};
+    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+    ///     let pool = Pool::eth_pool(
+    ///         EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default()),
+    ///         Default::default(),
+    ///     );
+    /// # }
+    /// ```
     pub fn eth_pool(
         validator: EthTransactionValidator<Client, PooledTransaction>,
         config: PoolConfig,
