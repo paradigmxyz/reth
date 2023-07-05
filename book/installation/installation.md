@@ -14,20 +14,22 @@ The hardware requirements for running Reth depend on the node configuration and 
 
 The most important requirement is by far the disk, whereas CPU and RAM requirements are relatively flexible.
 
-|           | Archive Node                       | Full Node                           |
-|-----------|------------------------------------|-------------------------------------|
-| Disk      | At least 2TB (NVMe recommended)    | TBD                                 |
-| Memory    | 8GB+                               | 8GB+                                |
-| CPU       | Higher clock speed over core count | Higher clock speeds over core count |
-| Bandwidth | Stable 24Mbps+                     | Stable 24Mbps+                      |
+|           | Archive Node                           | Full Node                           |
+|-----------|----------------------------------------|-------------------------------------|
+| Disk      | At least 2TB (TLC NVMe recommended)    | TBD                                 |
+| Memory    | 8GB+                                   | 8GB+                                |
+| CPU       | Higher clock speed over core count     | Higher clock speeds over core count |
+| Bandwidth | Stable 24Mbps+                         | Stable 24Mbps+                      |
 
-It is then crucial to understand the difference between QLC and TLC NVMe drives when considering the disk requirement.
+#### QLC and TLC
+
+It is crucial to understand the difference between QLC and TLC NVMe drives when considering the disk requirement.
 
 QLC (Quad-Level Cell) NVMe drives utilize four bits of data per cell, allowing for higher storage density and lower manufacturing costs. However, this increased density comes at the expense of performance. QLC drives have slower read and write speeds compared to TLC drives. They also have a lower endurance, meaning they may have a shorter lifespan and be less suitable for heavy workloads or constant data rewriting.
 
 TLC (Triple-Level Cell) NVMe drives, on the other hand, use three bits of data per cell. While they have a slightly lower storage density compared to QLC drives, TLC drives offer faster performance. They typically have higher read and write speeds, making them more suitable for demanding tasks such as data-intensive applications, gaming, and multimedia editing. TLC drives also tend to have a higher endurance, making them more durable and longer-lasting.
 
-Prior to purchasing an NVMe drive, it is advisable to research and determine whether the disk will be based on QLC or TLC technology. An overview of recommended and not-so-recommended NVMe boards can be found at the following link: https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038
+Prior to purchasing an NVMe drive, it is advisable to research and determine whether the disk will be based on QLC or TLC technology. An overview of recommended and not-so-recommended NVMe boards can be found at [here]( https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038).
 
 ### Disk
 
@@ -39,6 +41,10 @@ There are multiple types of disks to sync Reth, with varying size requirements, 
 NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
 
 At the time of writing, syncing an Ethereum mainnet node to block 17.4M on NVMe drives takes about 50 hours, while on a GCP "Persistent SSD" it takes around 5 days.
+
+> **Note**
+>
+> It is highly recommended to choose a TLC drive when using NVMe, and not a QLC drive. See [the note](#qlc-and-tlc) above. A list of recommended drives can be found [here]( https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038).
 
 ### CPU
 
