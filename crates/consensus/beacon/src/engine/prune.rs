@@ -6,7 +6,6 @@ use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
-use tracing::trace;
 
 /// Manages pruning under the control of the engine.
 ///
@@ -66,8 +65,6 @@ impl EnginePruneController {
 
                 // Check tip for pruning
                 if pruner.is_pruning_needed(tip_block_number) {
-                    trace!(target: "consensus::engine::prune", %tip_block_number, "Tip block number for pruning is acquired");
-
                     let (tx, rx) = oneshot::channel();
                     self.pruner_task_spawner.spawn_critical_blocking(
                         "pruner task",
