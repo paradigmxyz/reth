@@ -8,7 +8,8 @@ use reth_db::{
 };
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, PruneTargets, Receipt, StorageEntry, H256, U256,
+    BlockNumber, Bloom, Bytecode, Log, PruneTarget, PruneTargets, Receipt, StorageEntry, H256,
+    U256,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
@@ -79,7 +80,7 @@ pub struct PostState {
     /// The receipt(s) of the executed transaction(s).
     receipts: BTreeMap<BlockNumber, Vec<Receipt>>,
     /// Pruning configuration.
-    pruning: PruneTargets,
+    prune_targets: PruneTargets,
 }
 
 impl PostState {
@@ -94,8 +95,8 @@ impl PostState {
     }
 
     /// Add a pruning configuration.
-    pub fn add_pruning(&mut self, pruning: PruneTargets) {
-        self.pruning = pruning;
+    pub fn add_prune_targets(&mut self, prune_targets: PruneTargets) {
+        self.prune_targets = prune_targets;
     }
 
     /// Return the current size of the poststate.
@@ -628,13 +629,13 @@ impl PostState {
             bytecodes_cursor.upsert(hash, bytecode)?;
         }
 
-        // Write the receipts of the transactions
+        // Write the receipts of the transactions if not pruned
         tracing::trace!(target: "provider::post_state", len = self.receipts.len(), "Writing receipts");
-        if !self.receipts.is_empty() {
+        if !self.receipts.is_empty() && self.prune_targets.receipts != Some(PruneTarget::All) {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
             for (block, receipts) in self.receipts {
-                if !self.pruning.should_prune_receipts(block) {
+                if !self.prune_targets.should_prune_receipts(block) {
                     let (_, body_indices) =
                         bodies_cursor.seek_exact(block)?.expect("body indices exist");
                     let tx_range = body_indices.tx_num_range();
