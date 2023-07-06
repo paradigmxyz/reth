@@ -163,7 +163,7 @@ impl CallTrace {
     pub(crate) fn as_error(&self) -> Option<String> {
         self.is_error().then(|| match self.status {
             InstructionResult::Revert => format!("Reverted"),
-            status => format!("{:?}", status)
+            status => format!("{:?}", status),
         })
     }
 }
