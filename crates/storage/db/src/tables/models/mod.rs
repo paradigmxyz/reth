@@ -3,7 +3,6 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use bytes::BytesMut;
 use reth_codecs::Compact;
 use reth_primitives::{
     trie::{StoredNibbles, StoredNibblesSubKey},
@@ -141,9 +140,9 @@ impl Encode for PrunePart {
     type Encoded = [u8; 1];
 
     fn encode(self) -> Self::Encoded {
-        let mut bytes = BytesMut::with_capacity(1);
-        self.to_compact(&mut bytes);
-        bytes.as_ref().try_into().expect("incorrect length")
+        let mut buf = [0u8];
+        self.to_compact(&mut buf.as_mut());
+        buf
     }
 }
 
