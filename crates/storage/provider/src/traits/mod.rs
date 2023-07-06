@@ -27,6 +27,9 @@ pub use header::HeaderProvider;
 mod receipts;
 pub use receipts::{ReceiptProvider, ReceiptProviderIdExt};
 
+mod logs;
+pub use logs::LogIndexProvider;
+
 mod state;
 pub use state::{
     BlockchainTreePendingStateProvider, PostStateDataProvider, StateProvider, StateProviderBox,

@@ -1,18 +1,23 @@
 use super::cache::EthStateCache;
 use crate::{
     eth::{
-        error::{EthApiError, EthResult},
+        error::{EthApiError},
         logs_utils,
     },
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
 use async_trait::async_trait;
+use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock};
-use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
+use reth_primitives::{
+    Address,  BlockNumber, IntegerList,H256,
+};
+use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, LogIndexProvider};
 use reth_rpc_api::EthFilterApiServer;
-use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
+use reth_rpc_types::{
+    Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log, ValueOrArray,
+};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -66,7 +71,7 @@ impl<Provider, Pool> EthFilter<Provider, Pool> {
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + LogIndexProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Executes the given filter on a new task.
@@ -178,7 +183,7 @@ where
 #[async_trait]
 impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + LogIndexProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
@@ -274,7 +279,7 @@ struct EthFilterInner<Provider, Pool> {
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + LogIndexProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
@@ -334,18 +339,19 @@ where
         Ok(id)
     }
 
-    /// Fetches both receipts and block for the given block number.
-    async fn block_and_receipts_by_number(
-        &self,
-        hash_or_number: BlockHashOrNumber,
-    ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
-            Some(hash) => hash,
-            None => return Ok(None),
-        };
+    // TODO:
+    // /// Fetches both receipts and block for the given block number.
+    // async fn block_and_receipts_by_number(
+    //     &self,
+    //     hash_or_number: BlockHashOrNumber,
+    // ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    //     let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
+    //         Some(hash) => hash,
+    //         None => return Ok(None),
+    //     };
 
-        Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
-    }
+    //     Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
+    // }
 
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
@@ -365,57 +371,160 @@ where
 
         let topics = filter.has_topics().then(|| filter_params.flat_topics.clone());
 
-        // derive bloom filters from filter input
-        let address_filter = FilteredParams::address_filter(&filter.address);
-        let topics_filter = FilteredParams::topics_filter(&topics);
+        // Create log index filter
+        let mut log_index_filter =
+            LogIndexFilter::new(from_block..=to_block, self.max_headers_range);
+        if let Some(filter_address) = filter.address.as_ref() {
+            log_index_filter.install_address_filter(&self.provider, filter_address)?;
+        }
+        if let Some(topics) = topics.as_ref() {
+            log_index_filter.install_topic_filter(&self.provider, topics)?;
+        }
 
         let is_multi_block_range = from_block != to_block;
 
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
-        for (from, to) in
-            BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
-        {
-            let headers = self.provider.headers_range(from..=to)?;
+        for block_numbers in log_index_filter.iter() {
+            let blocks =
+                self.provider.blocks(block_numbers.into_iter().map(Into::into).collect())?;
 
-            for (idx, header) in headers.iter().enumerate() {
-                // these are consecutive headers, so we can use the parent hash of the next block to
-                // get the current header's hash
-                let num_hash: BlockHashOrNumber = headers
-                    .get(idx + 1)
-                    .map(|h| h.parent_hash.into())
-                    .unwrap_or_else(|| header.number.into());
+            for block in blocks {
+                let block = match block {
+                    Some(block) => block,
+                    None => continue,
+                };
 
-                // only if filter matches
-                if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
-                    FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
-                {
-                    if let Some((block, receipts)) =
-                        self.block_and_receipts_by_number(num_hash).await?
-                    {
-                        let block_hash = block.hash;
+                let block_hash = block.hash_slow();
+                let receipts =
+                    self.provider.receipts_by_block(block.number.into())?.unwrap_or_default();
 
-                        logs_utils::append_matching_block_logs(
-                            &mut all_logs,
-                            &filter_params,
-                            (block.number, block_hash).into(),
-                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
-                            false,
-                        );
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &filter_params,
+                    (block.number, block_hash).into(),
+                    block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
+                    false,
+                );
 
-                        // size check but only if range is multiple blocks, so we always return all
-                        // logs of a single block
-                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
-                            return Err(FilterError::QueryExceedsMaxResults(
-                                self.max_logs_per_response,
-                            ))
-                        }
-                    }
-                }
+
+                // size check but only if range is multiple blocks, so we always return all
+                // logs of a single block
+                if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
+                    return Err(FilterError::QueryExceedsMaxResults(
+                        self.max_logs_per_response,
+                    ))
+                }       
             }
         }
 
         Ok(all_logs)
+    }
+}
+
+#[derive(Debug)]
+struct LogIndexFilter {
+    /// Full block range.
+    block_range: RangeInclusive<BlockNumber>,
+    /// The maximum number of headers to read at once for range filter.
+    max_headers_range: u64,
+    /// Represents the union of all block indices that match installed filters.
+    ///
+    /// Since [IntegerList] cannot be empty, `Some(None)` represents an active filter with no
+    /// matching block numbers.
+    indices: Option<Option<IntegerList>>,
+}
+
+impl LogIndexFilter {
+    fn new(block_range: RangeInclusive<BlockNumber>, max_headers_range: u64) -> Self {
+        Self { block_range, max_headers_range, indices: None }
+    }
+
+    fn iter(&self) -> Vec<Vec<BlockNumber>> {
+        match self.indices {
+            Some(Some(ref indices)) => indices
+                .iter(0)
+                .chunks(self.max_headers_range as usize)
+                .into_iter()
+                .map(|chunk| chunk.map(|num| num as u64).collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            Some(None) => Vec::new(),
+            None => BlockRangeInclusiveIter::new(self.block_range.clone(), self.max_headers_range)
+                .collect(),
+        }
+    }
+
+    /// Returns `true` if the filter is active but has no matching block numbers.
+    fn is_empty(&self) -> bool {
+        matches!(self.indices, Some(None))
+    }
+
+    /// Change the inner indices to be the union of itself and incoming.
+    fn intersection_indices(&mut self, new_indices: Option<IntegerList>) {
+        match (&mut self.indices, new_indices) {
+            // Existing filter is already empty, no need to update.
+            (Some(None), _) => (),
+            // Incoming filter matched no block numbers, reset existing indices.
+            (_, None) => {
+                self.indices = Some(None);
+            }
+            // Existing filter has not been yet activated, so set it to the incoming indices.
+            (None, Some(new_indices)) => {
+                self.indices = Some(Some(new_indices));
+            }
+            // Both filters contain at least one block number, union them.
+            (Some(Some(existing)), Some(new_indices)) => {
+                self.indices = Some(existing.intersection(&new_indices));
+            }
+        }
+    }
+
+    fn install_address_filter(
+        &mut self,
+        provider: &impl LogIndexProvider,
+        address_filter: &ValueOrArray<Address>,
+    ) -> Result<(), FilterError> {
+        let addresses = match address_filter {
+            ValueOrArray::Value(address) => Vec::from([*address]),
+            ValueOrArray::Array(addresses) => addresses.clone(),
+        };
+        for address in addresses {
+            // Check if previous filter conditions already matched no blocks.
+            // Do this on each iteration to avoid unnecessary queries.
+            if self.is_empty() {
+                return Ok(())
+            }
+
+            let address_indices =
+                provider.log_address_indices(address, self.block_range.clone())?;
+            self.intersection_indices(address_indices);
+        }
+        Ok(())
+    }
+
+    fn install_topic_filter(
+        &mut self,
+        provider: &impl LogIndexProvider,
+        topic_filters: &[ValueOrArray<Option<H256>>],
+    ) -> Result<(), FilterError> {
+        let topics = topic_filters
+            .iter()
+            .flat_map(|topic| match topic {
+                ValueOrArray::Value(topic) => topic.map(|t| Vec::from([t])).unwrap_or_default(),
+                ValueOrArray::Array(topics) => topics.iter().flatten().copied().collect(),
+            })
+            .collect::<Vec<H256>>();
+        for topic in topics {
+            // Check if previous filter conditions already matched no blocks.
+            // Do this on each iteration to avoid unnecessary queries.
+            if self.is_empty() {
+                return Ok(())
+            }
+
+            let topic_indices = provider.log_topic_indices(topic, self.block_range.clone())?;
+            self.intersection_indices(topic_indices);
+        }
+        Ok(())
     }
 }
 
@@ -497,7 +606,7 @@ impl BlockRangeInclusiveIter {
 }
 
 impl Iterator for BlockRangeInclusiveIter {
-    type Item = (u64, u64);
+    type Item = Vec<BlockNumber>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.iter.next()?;
@@ -505,7 +614,7 @@ impl Iterator for BlockRangeInclusiveIter {
         if start > end {
             return None
         }
-        Some((start, end))
+        Some((start..=end).collect())
     }
 }
 
@@ -523,14 +632,16 @@ mod tests {
             let step = rng.gen::<u16>() as u64;
             let range = start..=end;
             let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
-            let (from, mut end) = iter.next().unwrap();
+            let block_range = iter.next().unwrap();
+            let from = *block_range.first().unwrap();
+            let mut end = *block_range.last().unwrap();
             assert_eq!(from, start);
             assert_eq!(end, (from + step).min(*range.end()));
 
-            for (next_from, next_end) in iter {
+            for next_range in iter {
                 // ensure range starts with previous end + 1
-                assert_eq!(next_from, end + 1);
-                end = next_end;
+                assert_eq!(next_range.first().cloned(), Some(end + 1));
+                end = *next_range.last().unwrap();
             }
 
             assert_eq!(end, *range.end());

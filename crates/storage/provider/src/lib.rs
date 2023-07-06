@@ -25,7 +25,7 @@ pub use traits::{
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
     BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, EvmEnvProvider, ExecutorFactory, HashingWriter, HeaderProvider,
+    ChainSpecProvider, EvmEnvProvider, ExecutorFactory, HashingWriter, HeaderProvider,LogIndexProvider,
     HistoryWriter, PostStateDataProvider, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StageCheckpointWriter, StateProvider, StateProviderBox,
     StateProviderFactory, StateRootProvider, StorageReader, TransactionsProvider,

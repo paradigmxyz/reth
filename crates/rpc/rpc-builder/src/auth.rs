@@ -11,7 +11,8 @@ use jsonrpsee::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
+    BlockReaderIdExt, EvmEnvProvider, HeaderProvider, LogIndexProvider, ReceiptProviderIdExt,
+    StateProviderFactory,
 };
 use reth_rpc::{
     eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
@@ -43,6 +44,7 @@ where
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
+        + LogIndexProvider
         + Clone
         + Unpin
         + 'static,
@@ -86,6 +88,7 @@ where
         + HeaderProvider
         + StateProviderFactory
         + EvmEnvProvider
+        + LogIndexProvider
         + Clone
         + Unpin
         + 'static,

@@ -147,6 +147,17 @@ impl HeaderProvider for MockEthProvider {
         Ok(headers)
     }
 
+    fn headers(&self, numbers: &[BlockNumber]) -> Result<Vec<Option<Header>>> {
+        let lock = self.headers.lock();
+
+        let mut headers = Vec::with_capacity(numbers.len());
+        for number in numbers {
+            headers.push(lock.values().find(|header| header.number == *number).cloned());
+        }
+
+        Ok(headers)
+    }
+
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -318,6 +329,10 @@ impl BlockReader for MockEthProvider {
             BlockHashOrNumber::Hash(hash) => Ok(lock.get(&hash).cloned()),
             BlockHashOrNumber::Number(num) => Ok(lock.values().find(|b| b.number == num).cloned()),
         }
+    }
+
+    fn blocks(&self, ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>> {
+        ids.into_iter().map(|id| self.block(id)).collect::<Result<Vec<_>>>()
     }
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {

@@ -149,6 +149,10 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         self.provider()?.headers_range(range)
     }
 
+    fn headers(&self, numbers: &[BlockNumber]) -> Result<Vec<Option<Header>>> {
+        self.provider()?.headers(numbers)
+    }
+
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -196,6 +200,10 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
 
     fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>> {
         self.provider()?.block(id)
+    }
+
+    fn blocks(&self, ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>> {
+        self.provider()?.blocks(ids)
     }
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {

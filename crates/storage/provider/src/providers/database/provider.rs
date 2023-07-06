@@ -2,8 +2,8 @@ use crate::{
     post_state::StorageChangeset,
     traits::{AccountExtReader, BlockSource, ReceiptProvider, StageCheckpointWriter},
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, PostState, ProviderError,
-    StageCheckpointReader, StorageReader, TransactionsProvider, WithdrawalsProvider,
+    EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, LogIndexProvider, PostState,
+    ProviderError, StageCheckpointReader, StorageReader, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -24,8 +24,8 @@ use reth_primitives::{
     keccak256,
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, LogAddressIndices, LogTopicIndices, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, IntegerList, LogAddressIndices, LogTopicIndices,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, H256, U256,
 };
@@ -225,6 +225,45 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
         }
 
         Ok((log_addresses, log_topics, num_of_receipts))
+    }
+
+    /// Get history indices in block range
+    pub fn history_indices_in_block_range<K, T>(
+        &self,
+        key: K,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> Result<Option<IntegerList>>
+    where
+        K: PartialEq + Copy,
+        T: Table<Key = ShardedKey<K>, Value = BlockNumberList>,
+    {
+        if block_range.is_empty() {
+            return Ok(None)
+        }
+
+        // Acquire the cursor and position it the list entry that might contain the first block.
+        let mut cursor = self.tx.cursor_read::<T>()?;
+        let mut item = cursor.seek(ShardedKey::new(key, *block_range.start()))?;
+
+        let mut result = Vec::new();
+        'outer: while let Some((_, list)) = item.filter(|(sharded_key, _)| sharded_key.key == key) {
+            for block_number in list.0.iter(0) {
+                // If a block number is higher than the end of the block range, terminate.
+                if block_number as u64 > *block_range.end() {
+                    break 'outer
+                }
+
+                result.push(block_number);
+            }
+
+            item = cursor.next()?;
+        }
+
+        if result.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(IntegerList::new_pre_sorted(result)))
+        }
     }
 }
 
@@ -903,6 +942,18 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
             .collect::<Result<Vec<_>>>()
     }
 
+    fn headers(&self, block_numbers: &[BlockNumber]) -> Result<Vec<Option<Header>>> {
+        let mut cursor = self.tx.cursor_read::<tables::Headers>()?;
+
+        let mut headers = vec![];
+        for block_number in block_numbers {
+            let header = cursor.seek_exact(*block_number)?;
+            headers.push(header.map(|(_, header)| header));
+        }
+
+        Ok(headers)
+    }
+
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -991,6 +1042,73 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         }
 
         Ok(None)
+    }
+
+    fn blocks(&self, ids: Vec<BlockHashOrNumber>) -> Result<Vec<Option<Block>>> {
+        let mut block_number_cursor = self.tx.cursor_read::<tables::HeaderNumbers>()?;
+        let mut headers_cursor = self.tx.cursor_read::<tables::Headers>()?;
+        let mut block_indices_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
+
+        let mut result = Vec::with_capacity(ids.len());
+
+        for id in ids {
+            let maybe_number = match id {
+                BlockHashOrNumber::Number(num) => Some(num),
+                BlockHashOrNumber::Hash(hash) => {
+                    block_number_cursor.seek_exact(hash)?.map(|entry| entry.1)
+                }
+            };
+
+            if let Some(number) = maybe_number {
+                if let Some((_, header)) = headers_cursor.seek_exact(number)? {
+                    if let Some((_, body_indices)) = block_indices_cursor.seek_exact(number)? {
+                        let withdrawals = if self
+                            .chain_spec
+                            .is_shanghai_activated_at_timestamp(header.timestamp)
+                        {
+                            withdrawals_cursor.seek_exact(number)?.map(|entry| entry.1.withdrawals)
+                        } else {
+                            None
+                        };
+
+                        let ommers =
+                            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
+                                Vec::new()
+                            } else {
+                                ommers_cursor
+                                    .seek_exact(number)?
+                                    .map(|o| o.1.ommers)
+                                    .unwrap_or_default()
+                            };
+
+                        let transactions = {
+                            let mut txs = Vec::with_capacity(body_indices.tx_count as usize);
+                            for tx_id in body_indices.tx_num_range() {
+                                // TODO: fix error
+                                let (_, transaction) = tx_cursor.seek_exact(tx_id)?.unwrap();
+                                txs.push(transaction.into());
+                            }
+                            txs
+                        };
+
+                        result.push(Some(Block {
+                            header,
+                            body: transactions,
+                            ommers,
+                            withdrawals,
+                        }));
+                    }
+                }
+            }
+
+            // Some data was missing
+            result.push(None);
+        }
+
+        Ok(result)
     }
 
     fn pending_block(&self) -> Result<Option<SealedBlock>> {
@@ -1225,6 +1343,24 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
             }
         }
         Ok(None)
+    }
+}
+
+impl<'this, TX: DbTx<'this>> LogIndexProvider for DatabaseProvider<'this, TX> {
+    fn log_address_indices(
+        &self,
+        address: Address,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> Result<Option<IntegerList>> {
+        self.history_indices_in_block_range::<_, tables::LogAddressHistory>(address, block_range)
+    }
+
+    fn log_topic_indices(
+        &self,
+        topic: H256,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> Result<Option<IntegerList>> {
+        self.history_indices_in_block_range::<_, tables::LogTopicHistory>(topic, block_range)
     }
 }
 
