@@ -1215,6 +1215,7 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::SyncStage>()?;
         for stage_id in StageId::ALL {
+            let (_, checkpoint) = cursor.seek_exact(stage_id.to_string())?.unwrap_or_default();
             cursor.upsert(
                 stage_id.to_string(),
                 StageCheckpoint {
