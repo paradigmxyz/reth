@@ -719,7 +719,10 @@ impl Command {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
                         },
-                        config.prune.map(|p| p.into_targets(max_block)).unwrap_or_default(),
+                        config
+                            .prune
+                            .map(|prune| prune.parts.with_tip(max_block))
+                            .unwrap_or_default(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )

@@ -143,7 +143,10 @@ impl Command {
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds { max_blocks: None, max_changes: None },
-                    config.prune.map(|p| p.into_targets(Some(max_block))).unwrap_or_default(),
+                    config
+                        .prune
+                        .map(|prune| prune.parts.with_tip(Some(max_block)))
+                        .unwrap_or_default(),
                 )),
             )
             .build(db, self.chain.clone());

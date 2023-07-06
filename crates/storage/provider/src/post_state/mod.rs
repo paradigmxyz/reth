@@ -8,8 +8,7 @@ use reth_db::{
 };
 use reth_primitives::{
     bloom::logs_bloom, keccak256, proofs::calculate_receipt_root_ref, Account, Address,
-    BlockNumber, Bloom, Bytecode, Log, PruneTarget, PruneTargets, Receipt, StorageEntry, H256,
-    U256,
+    BlockNumber, Bloom, Bytecode, Log, PruneMode, PruneTargets, Receipt, StorageEntry, H256, U256,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
@@ -641,7 +640,7 @@ impl PostState {
 
         // Write the receipts of the transactions if not pruned
         tracing::trace!(target: "provider::post_state", len = self.receipts.len(), "Writing receipts");
-        if !self.receipts.is_empty() && self.prune_targets.receipts != Some(PruneTarget::All) {
+        if !self.receipts.is_empty() && self.prune_targets.receipts != Some(PruneMode::Full) {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
             for (block, receipts) in self.receipts {

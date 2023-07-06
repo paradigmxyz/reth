@@ -1,47 +1,29 @@
 use crate::{BlockNumber, PruneMode};
 use paste::paste;
-
-/// Prune target.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum PruneTarget {
-    /// Prune all blocks, i.e. not save any data.
-    All,
-    /// Prune blocks up to the specified block number, inclusive.
-    Block(BlockNumber),
-}
-
-impl PruneTarget {
-    /// Returns new target to prune towards, according to stage prune mode [PruneMode]
-    /// and current head [BlockNumber].
-    pub fn new(prune_mode: PruneMode, head: BlockNumber) -> Self {
-        match prune_mode {
-            PruneMode::Full => PruneTarget::All,
-            PruneMode::Distance(distance) => {
-                Self::Block(head.saturating_sub(distance).saturating_sub(1))
-            }
-            PruneMode::Before(before_block) => Self::Block(before_block.saturating_sub(1)),
-        }
-    }
-
-    /// Returns true if the target is [PruneTarget::All], i.e. prune all blocks.
-    pub fn is_all(&self) -> bool {
-        matches!(self, Self::All)
-    }
-}
+use serde::{Deserialize, Serialize};
 
 /// Pruning configuration for every part of the data that can be pruned.
-#[derive(Debug, Clone, Default, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Default, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
 pub struct PruneTargets {
     /// Sender Recovery pruning configuration.
-    pub sender_recovery: Option<PruneTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_recovery: Option<PruneMode>,
     /// Transaction Lookup pruning configuration.
-    pub transaction_lookup: Option<PruneTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_lookup: Option<PruneMode>,
     /// Receipts pruning configuration.
-    pub receipts: Option<PruneTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
-    pub account_history: Option<PruneTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_history: Option<PruneMode>,
     /// Storage History pruning configuration.
-    pub storage_history: Option<PruneTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_history: Option<PruneMode>,
+    /// Current known tip to calculate pruning distances.
+    #[serde(skip_serializing)]
+    pub tip: Option<BlockNumber>,
 }
 
 macro_rules! should_prune_method {
@@ -59,10 +41,11 @@ macro_rules! should_prune_method {
         )+
 
         /// Sets pruning to all targets.
-        pub fn all() -> PruneTargets {
+        pub fn all() -> Self {
             PruneTargets {
+                tip: None,
                 $(
-                    $config: Some(PruneTarget::All),
+                    $config: Some(PruneMode::Full),
                 )+
             }
         }
@@ -72,15 +55,35 @@ macro_rules! should_prune_method {
 
 impl PruneTargets {
     /// Sets pruning to no target.
-    pub fn none() -> PruneTargets {
+    pub fn none() -> Self {
         PruneTargets::default()
     }
 
+    /// Creates a `PruneTargets` with a specific tip.
+    pub fn with_tip(mut self, tip: Option<BlockNumber>) -> Self {
+        self.tip = tip;
+        self
+    }
+
+    /// Updates the tip if it is of higher value.
+    pub fn update_tip(&mut self, tip: BlockNumber) {
+        if self.tip.is_none() || self.tip.is_some_and(|inner| inner < tip) {
+            self.tip = Some(tip);
+        }
+    }
+
     /// Check if target block should be pruned
-    pub fn should_prune(&self, target: &PruneTarget, block: BlockNumber) -> bool {
+    pub fn should_prune(&self, target: &PruneMode, block: BlockNumber) -> bool {
         match target {
-            PruneTarget::All => true,
-            PruneTarget::Block(n) => *n >= block,
+            PruneMode::Full => true,
+            PruneMode::Distance(distance) => {
+                let tip = self.tip.expect("tip should be set on PruneTargets.");
+                if *distance > tip {
+                    return false
+                }
+                block < tip - *distance
+            }
+            PruneMode::Before(n) => *n > block,
         }
     }
 

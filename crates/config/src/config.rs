@@ -5,7 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_primitives::{BlockNumber, PruneMode, PruneTarget, PruneTargets};
+use reth_primitives::PruneTargets;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -285,59 +285,13 @@ pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.
     pub block_interval: u64,
     /// Pruning configuration for every part of the data that can be pruned.
-    pub parts: PruneParts,
+    pub parts: PruneTargets,
 }
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 10, parts: PruneParts::default() }
+        Self { block_interval: 10, parts: PruneTargets::default() }
     }
-}
-
-impl PruneConfig {
-    /// Converts a [`PruneConfig`] into an usable [`PruneTargets`].
-    pub fn into_targets(&self, head: Option<BlockNumber>) -> PruneTargets {
-        PruneTargets {
-            sender_recovery: self
-                .parts
-                .sender_recovery
-                .map(|p| PruneTarget::new(p, head.unwrap_or_default())),
-            transaction_lookup: self
-                .parts
-                .transaction_lookup
-                .map(|p| PruneTarget::new(p, head.unwrap_or_default())),
-            receipts: self.parts.receipts.map(|p| PruneTarget::new(p, head.unwrap_or_default())),
-            account_history: self
-                .parts
-                .account_history
-                .map(|p| PruneTarget::new(p, head.unwrap_or_default())),
-            storage_history: self
-                .parts
-                .storage_history
-                .map(|p| PruneTarget::new(p, head.unwrap_or_default())),
-        }
-    }
-}
-
-/// Pruning configuration for every part of the data that can be pruned.
-#[derive(Debug, Clone, Default, Copy, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct PruneParts {
-    /// Sender Recovery pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sender_recovery: Option<PruneMode>,
-    /// Transaction Lookup pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transaction_lookup: Option<PruneMode>,
-    /// Receipts pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub receipts: Option<PruneMode>,
-    /// Account History pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub account_history: Option<PruneMode>,
-    /// Storage History pruning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub storage_history: Option<PruneMode>,
 }
 
 #[cfg(test)]

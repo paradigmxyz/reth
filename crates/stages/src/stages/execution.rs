@@ -17,8 +17,8 @@ use reth_primitives::{
     BlockNumber, Header, PruneTargets, U256,
 };
 use reth_provider::{
-    post_state::PostState, BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, ProviderError,
+    post_state::PostState, BlockExecutor, BlockNumReader, BlockReader, DatabaseProviderRW,
+    ExecutorFactory, HeaderProvider, LatestStateProviderRef, ProviderError,
 };
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
@@ -110,6 +110,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut state = PostState::default();
+        self.prune_targets.update_tip(provider.last_block_number()?);
         state.add_prune_targets(self.prune_targets);
 
         for block_number in start_block..=max_block {
@@ -425,8 +426,8 @@ mod tests {
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_primitives::{
         hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
-        ChainSpecBuilder, PruneTarget, PruneTargets, SealedBlock, StorageEntry, H160, H256,
-        MAINNET, U256,
+        ChainSpecBuilder, PruneMode, PruneTargets, SealedBlock, StorageEntry, H160, H256, MAINNET,
+        U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
@@ -964,13 +965,33 @@ mod tests {
 
         check_pruning(factory.clone(), prune, 1).await;
 
-        prune.receipts = Some(PruneTarget::All);
+        prune.receipts = Some(PruneMode::Full);
         check_pruning(factory.clone(), prune, 0).await;
 
-        prune.receipts = Some(PruneTarget::Block(0));
+        prune.receipts = Some(PruneMode::Before(1));
         check_pruning(factory.clone(), prune, 1).await;
 
-        prune.receipts = Some(PruneTarget::Block(1));
+        prune.receipts = Some(PruneMode::Before(2));
         check_pruning(factory.clone(), prune, 0).await;
+
+        prune.receipts = Some(PruneMode::Distance(0));
+        prune.tip = Some(1);
+        check_pruning(factory.clone(), prune, 1).await;
+
+        prune.receipts = Some(PruneMode::Distance(0));
+        prune.tip = Some(2);
+        check_pruning(factory.clone(), prune, 0).await;
+
+        prune.receipts = Some(PruneMode::Distance(1));
+        prune.tip = Some(3);
+        check_pruning(factory.clone(), prune, 0).await;
+
+        prune.receipts = Some(PruneMode::Distance(4));
+        prune.tip = Some(4);
+        check_pruning(factory.clone(), prune, 1).await;
+
+        prune.receipts = Some(PruneMode::Distance(40));
+        prune.tip = Some(4);
+        check_pruning(factory.clone(), prune, 1).await;
     }
 }
