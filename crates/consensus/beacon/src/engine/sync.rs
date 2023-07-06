@@ -304,6 +304,10 @@ where
 
         // drain an element of the block buffer if there are any
         if let Some(block) = self.range_buffered_blocks.pop() {
+            // peek ahead and pop duplicates
+            while self.range_buffered_blocks.peek() == Some(&block) {
+                _ = self.range_buffered_blocks.pop();
+            }
             return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
         }
 
