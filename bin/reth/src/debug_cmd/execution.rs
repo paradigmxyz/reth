@@ -102,7 +102,6 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
-        max_block: u64,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -234,7 +233,6 @@ impl Command {
             Arc::clone(&consensus),
             db.clone(),
             &ctx.task_executor,
-            self.to,
         )?;
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
