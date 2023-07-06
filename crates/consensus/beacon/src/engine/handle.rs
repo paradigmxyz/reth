@@ -11,10 +11,10 @@ use reth_rpc_types::engine::{
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// A _shareable_ beacon consensus frontend. Used to interact with the spawned beacon consensus
-/// engine.
+/// A _shareable_ beacon consensus frontend type. Used to interact with the spawned beacon consensus
+/// engine task.
 ///
-/// See also [`BeaconConsensusEngine`].
+/// See also [`BeaconConsensusEngine`](crate::engine::BeaconConsensusEngine).
 #[derive(Clone, Debug)]
 pub struct BeaconConsensusEngineHandle {
     pub(crate) to_engine: UnboundedSender<BeaconEngineMessage>,
