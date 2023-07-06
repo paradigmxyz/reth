@@ -1774,7 +1774,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref())?;
+        state.write_to_db(self.tx_ref(), new_tip_number)?;
 
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
 

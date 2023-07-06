@@ -587,7 +587,11 @@ impl PostState {
     }
 
     /// Write the post state to the database.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(mut self, tx: &TX) -> Result<(), DbError> {
+    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+        mut self,
+        tx: &TX,
+        tip: BlockNumber,
+    ) -> Result<(), DbError> {
         self.write_history_to_db(tx)?;
 
         // Write new storage state
@@ -643,7 +647,6 @@ impl PostState {
         if !self.receipts.is_empty() && self.prune_targets.receipts != Some(PruneMode::Full) {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-            let tip = tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0;
 
             for (block, receipts) in self.receipts {
                 if self.prune_targets.should_prune_receipts(block, tip) {
@@ -1108,7 +1111,7 @@ mod tests {
         post_state.create_account(1, address_a, account_a);
         // 0x11.. is changed (balance + 1, nonce + 1)
         post_state.change_account(1, address_b, account_b, account_b_changed);
-        post_state.write_to_db(provider.tx_ref()).expect("Could not write post state to DB");
+        post_state.write_to_db(provider.tx_ref(), 0).expect("Could not write post state to DB");
 
         // Check plain state
         assert_eq!(
@@ -1141,7 +1144,9 @@ mod tests {
         let mut post_state = PostState::new();
         // 0x11.. is destroyed
         post_state.destroy_account(2, address_b, account_b_changed);
-        post_state.write_to_db(provider.tx_ref()).expect("Could not write second post state to DB");
+        post_state
+            .write_to_db(provider.tx_ref(), 0)
+            .expect("Could not write second post state to DB");
 
         // Check new plain state for account B
         assert_eq!(
@@ -1180,7 +1185,7 @@ mod tests {
 
         post_state.change_storage(1, address_a, storage_a_changeset);
         post_state.change_storage(1, address_b, storage_b_changeset);
-        post_state.write_to_db(&tx).expect("Could not write post state to DB");
+        post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         // Check plain storage state
         let mut storage_cursor = tx
@@ -1263,7 +1268,7 @@ mod tests {
         // Delete account A
         let mut post_state = PostState::new();
         post_state.destroy_account(2, address_a, Account::default());
-        post_state.write_to_db(&tx).expect("Could not write post state to DB");
+        post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         assert_eq!(
             storage_cursor.seek_exact(address_a).unwrap(),
@@ -1313,7 +1318,7 @@ mod tests {
                 (U256::from(1), (U256::ZERO, U256::from(2))),
             ]),
         );
-        init_state.write_to_db(&tx).expect("Could not write init state to DB");
+        init_state.write_to_db(&tx, 0).expect("Could not write init state to DB");
 
         let mut post_state = PostState::new();
         post_state.change_storage(
@@ -1356,7 +1361,7 @@ mod tests {
             BTreeMap::from([(U256::from(0), (U256::ZERO, U256::from(9)))]),
         );
 
-        post_state.write_to_db(&tx).expect("Could not write post state to DB");
+        post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         let mut storage_changeset_cursor = tx
             .cursor_dup_read::<tables::StorageChangeSet>()
