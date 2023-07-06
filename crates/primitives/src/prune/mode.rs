@@ -4,21 +4,19 @@ use reth_codecs::{main_codec, Compact};
 /// Prune mode.
 #[main_codec]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(test, derive(Default))]
 #[serde(rename_all = "lowercase")]
 pub enum PruneMode {
+    /// Default prune mode available only during the tests.
+    #[cfg_attr(test, default)]
+    #[cfg(test)]
+    Default,
     /// Prune all blocks.
     Full,
     /// Prune blocks before the `head-N` block number. In other words, keep last N blocks.
     Distance(u64),
     /// Prune blocks before the specified block number. The specified block number is not pruned.
     Before(BlockNumber),
-}
-
-#[cfg(test)]
-impl Default for PruneMode {
-    fn default() -> Self {
-        Self::Distance(0)
-    }
 }
 
 #[cfg(test)]
