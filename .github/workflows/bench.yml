@@ -62,7 +62,14 @@ jobs:
     name: check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout sources
+        uses: actions/checkout@v3
+        with:
+          # git-restore-mtime-bare uses the ref log to find the correct timestamp
+          # for each file. This requires a full git history. The default value (1)
+          # creates a shallow checkout.
+          fetch-depth: 0
+      - uses: chetan/git-restore-mtime-action@v2
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
