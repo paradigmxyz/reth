@@ -4,7 +4,7 @@ use crate::{
     transaction::{txn_execute, TransactionKind},
     Transaction,
 };
-use libc::c_uint;
+use ffi::MDBX_db_flags_t;
 use std::{ffi::CString, marker::PhantomData, ptr};
 
 /// A handle to an individual database in an environment.
@@ -24,7 +24,7 @@ impl<'txn> Database<'txn> {
     pub(crate) fn new<'env, K: TransactionKind, E: EnvironmentKind>(
         txn: &'txn Transaction<'env, K, E>,
         name: Option<&str>,
-        flags: c_uint,
+        flags: MDBX_db_flags_t,
     ) -> Result<Self> {
         let c_name = name.map(|n| CString::new(n).unwrap());
         let name_ptr = if let Some(c_name) = &c_name { c_name.as_ptr() } else { ptr::null() };
