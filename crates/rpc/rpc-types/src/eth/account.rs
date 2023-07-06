@@ -82,5 +82,5 @@ fn test_EIP_1186_Account_without_storage_proof() {
        "storageProof":[]
     }"#;
     let val = serde_json::from_str::<EIP1186AccountProofResponse>(response).unwrap();
-        serde_json::to_value(val).unwrap();
+    serde_json::to_value(val).unwrap();
 }
