@@ -64,14 +64,10 @@ impl Stream for CanonStateNotificationStream {
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub enum CanonStateNotification {
-    /// Chain reorgs and both old and new chain are returned.
-    Reorg { old: Arc<Chain>, new: Arc<Chain> },
-    /// Chain got reverted without reorg and only old chain is returned.
-    ///
-    /// This reverts the chain's tip to the first block of the chain.
-    Revert { old: Arc<Chain> },
     /// Chain got extended without reorg and only new chain is returned.
     Commit { new: Arc<Chain> },
+    /// Chain reorgs and both old and new chain are returned.
+    Reorg { old: Arc<Chain>, new: Arc<Chain> },
 }
 
 // For one reason or another, the compiler can't derive PartialEq for CanonStateNotification.
@@ -82,7 +78,6 @@ impl PartialEq for CanonStateNotification {
             (Self::Reorg { old: old1, new: new1 }, Self::Reorg { old: old2, new: new2 }) => {
                 old1 == old2 && new1 == new2
             }
-            (Self::Revert { old: old1 }, Self::Revert { old: old2 }) => old1 == old2,
             (Self::Commit { new: new1 }, Self::Commit { new: new2 }) => new1 == new2,
             _ => false,
         }
@@ -94,7 +89,6 @@ impl CanonStateNotification {
     pub fn reverted(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Reorg { old, .. } => Some(old.clone()),
-            Self::Revert { old } => Some(old.clone()),
             Self::Commit { .. } => None,
         }
     }
@@ -107,7 +101,6 @@ impl CanonStateNotification {
     pub fn committed(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Reorg { new, .. } => Some(new.clone()),
-            Self::Revert { .. } => None,
             Self::Commit { new } => Some(new.clone()),
         }
     }
@@ -120,7 +113,6 @@ impl CanonStateNotification {
     pub fn tip(&self) -> &SealedBlockWithSenders {
         match self {
             Self::Reorg { new, .. } => new.tip(),
-            Self::Revert { old } => old.first(),
             Self::Commit { new } => new.tip(),
         }
     }
