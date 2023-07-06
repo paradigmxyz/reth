@@ -14,18 +14,12 @@ pub enum ControlFlow {
     },
     /// The pipeline made progress.
     Continue {
-        /// Block number reached by the last stage in the pipeline.
-        ///
-        /// For example, if the last stage is the `Finish` stage, this will be the block number the
-        /// `Finish` stage reached.
+        /// Block number reached by the stage.
         block_number: BlockNumber,
     },
     /// Pipeline made no progress
     NoProgress {
-        /// Block number reached by the last stage in the pipeline.
-        ///
-        /// For example, if the last stage is the `Finish` stage, this will be the block number the
-        /// `Finish` stage reached.
+        /// Block number reached by the stage.
         block_number: Option<BlockNumber>,
     },
 }
