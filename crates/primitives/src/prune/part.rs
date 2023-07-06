@@ -17,6 +17,6 @@ pub enum PrunePart {
     Receipts,
     /// Prune part responsible for the `AccountChangeSet` and `AccountHistory` tables.
     AccountHistory,
-    /// Prune part responsible for the `AccountChangeSet` and `AccountHistory` tables.
+    /// Prune part responsible for the `StorageChangeSet` and `StorageHistory` tables.
     StorageHistory,
 }
