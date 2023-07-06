@@ -8,7 +8,7 @@ use reth_codecs::{main_codec, Compact};
 pub enum PruneMode {
     /// Prune all blocks.
     Full,
-    /// Prune blocks before the `head-N` block number. In other words, keep last N blocks.
+    /// Prune blocks before the `head-N` block number. In other words, keep last N + 1 blocks.
     Distance(u64),
     /// Prune blocks before the specified block number. The specified block number is not pruned.
     Before(BlockNumber),
