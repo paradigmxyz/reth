@@ -472,6 +472,17 @@ where
         None
     }
 
+    /// Returns how far the local tip is from the given block. If the local tip is at the same
+    /// height or its block number is greater than the given block, this returns None.
+    #[inline]
+    fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
+        if block > local_tip {
+            Some(block - local_tip)
+        } else {
+            None
+        }
+    }
+
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
@@ -602,9 +613,10 @@ where
         // Terminate the sync early if it's reached the maximum user
         // configured block.
         if is_valid_response {
-            // node's fully synced, clear pending requests
-            self.sync.clear_full_block_requests();
+            // node's fully synced, clear active download requests
+            self.sync.clear_block_download_requests();
 
+            // check if we reached the maximum configured block
             let tip_number = self.blockchain.canonical_tip().number;
             if self.sync.has_reached_max_block(tip_number) {
                 return true
@@ -1189,7 +1201,15 @@ where
         //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
         //    less than the pipeline threshold
         //    * this case represents a potentially long range of blocks to download and execute
-        self.sync.download_full_block(missing_parent.hash);
+        if let Some(distance) =
+            self.distance_from_local_tip(canonical_tip_num, missing_parent.number)
+        {
+            self.sync.download_block_range(missing_parent.hash, distance)
+        } else {
+            // This happens when the missing parent is on an outdated
+            // sidechain
+            self.sync.download_full_block(missing_parent.hash);
+        }
     }
 
     /// Attempt to form a new canonical chain based on the current sync target.
@@ -1217,7 +1237,7 @@ where
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
 
                     // clear any active block requests
-                    self.sync.clear_full_block_requests();
+                    self.sync.clear_block_download_requests();
                 }
                 Err(err) => {
                     // if we failed to make the FCU's head canonical, because we don't have that
