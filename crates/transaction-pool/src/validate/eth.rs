@@ -31,9 +31,19 @@ pub struct EthTransactionValidator<Client, T> {
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Creates a new instance for the given [ChainSpec]
     ///
-    /// This will always spawn a validation tasks that perform the actual validation. A will spawn
+    ///  This will spawn a single validation tasks that performs the actual validation.
+    pub fn new<T>(client: Client, chain_spec: Arc<ChainSpec>, tasks: T) -> Self
+    where
+        T: TaskSpawner,
+    {
+        Self::with_additional_tasks(client, chain_spec, tasks, 0)
+    }
+
+    /// Creates a new instance for the given [ChainSpec]
+    ///
+    /// This will always spawn a validation task that performs the actual validation. It will spawn
     /// `num_additional_tasks` additional tasks.
-    pub fn new<T>(
+    pub fn with_additional_tasks<T>(
         client: Client,
         chain_spec: Arc<ChainSpec>,
         tasks: T,

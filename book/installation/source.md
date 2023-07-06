@@ -1,6 +1,10 @@
 # Build from Source
 
-You can build Reth on Linux, macOS, and Windows WSL. 
+You can build Reth on Linux, macOS, and Windows WSL2.
+
+> **Note**
+>
+> Reth does **not** work on Windows WSL1.
 
 ## Dependencies
 
