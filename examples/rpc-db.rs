@@ -17,7 +17,7 @@ use reth_blockchain_tree::{
 };
 use reth_revm::Factory as ExecutionFactory;
 // Configuring the network parts, ideally also wouldn't ned to think about this.
-use reth_network_api::test_utils::NoopNetwork;
+use reth_network_api::noop::NoopNetwork;
 use reth_provider::test_utils::TestCanonStateSubscriptions;
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::test_utils::testing_pool;

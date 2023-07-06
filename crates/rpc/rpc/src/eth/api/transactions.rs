@@ -892,7 +892,7 @@ mod tests {
         eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
         EthApi,
     };
-    use reth_network_api::test_utils::NoopNetwork;
+    use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};

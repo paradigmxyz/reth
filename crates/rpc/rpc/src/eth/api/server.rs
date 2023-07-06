@@ -396,7 +396,7 @@ mod tests {
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_interfaces::test_utils::{generators, generators::Rng};
-    use reth_network_api::test_utils::NoopNetwork;
+    use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
         basefee::calculate_next_block_base_fee, Block, BlockNumberOrTag, Header, TransactionSigned,
         H256, U256,
