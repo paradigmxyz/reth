@@ -4,10 +4,10 @@
 //! to be generic over it.
 
 use crate::{
-    error::PoolError, AllPoolTransactions, BestTransactions, BlockInfo, NewTransactionEvent,
-    PoolResult, PoolSize, PoolTransaction, PooledTransaction, PropagatedTransactions,
-    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
-    TransactionValidator, ValidPoolTransaction,
+    error::PoolError, AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PooledTransaction,
+    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
 use reth_primitives::{Address, TxHash};
 use std::{marker::PhantomData, sync::Arc};
@@ -73,11 +73,15 @@ impl TransactionPool for NoopTransactionPool {
         None
     }
 
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
+        AllTransactionsEvents { events: mpsc::channel(1).1 }
+    }
+
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
         mpsc::channel(1).1
     }
 
-    fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
         mpsc::channel(1).1
     }
 

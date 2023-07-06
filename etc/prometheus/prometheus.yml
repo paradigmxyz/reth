@@ -4,3 +4,8 @@ scrape_configs:
     scrape_interval: 5s
     static_configs:
       - targets: ['reth:9001']
+  - job_name: ethereum-metrics-exporter
+    metrics_path: "/metrics"
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['metrics-exporter:9091']
