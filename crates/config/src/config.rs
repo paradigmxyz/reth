@@ -5,7 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_primitives::{PruneMode, PruneTarget, PruneTargets};
+use reth_primitives::{BlockNumber, PruneMode, PruneTarget, PruneTargets};
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -296,7 +296,7 @@ impl Default for PruneConfig {
 
 impl PruneConfig {
     /// Converts a [`PruneConfig`] into an usable [`PruneTargets`].
-    pub fn into_targets(&self, head: Option<u64>) -> PruneTargets {
+    pub fn into_targets(&self, head: Option<BlockNumber>) -> PruneTargets {
         PruneTargets {
             sender_recovery: self
                 .parts
