@@ -3,7 +3,7 @@ use crate::eth::logs_utils;
 use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
-use reth_primitives::TxHash;
+use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::FilteredParams;
@@ -14,10 +14,10 @@ use reth_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    Header, Log,
+    Header, Log, Transaction,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
@@ -120,11 +120,21 @@ where
                 pubsub.log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
             pipe_from_stream(accepted_sink, stream).await
         }
-        SubscriptionKind::NewPendingTransactions => {
-            let stream =
-                pubsub.pending_transaction_stream().map(EthSubscriptionResult::TransactionHash);
-            pipe_from_stream(accepted_sink, stream).await
-        }
+        SubscriptionKind::NewPendingTransactions => match params {
+            Some(Params::NewPendingTransactions(true)) => {
+                let stream = pubsub.full_pending_transaction_stream().map(|tx| {
+                    EthSubscriptionResult::FullTransaction(Transaction::from_recovered(
+                        tx.transaction.to_recovered_transaction(),
+                    ))
+                });
+                pipe_from_stream(accepted_sink, stream).await
+            }
+            _ => {
+                let stream =
+                    pubsub.pending_transaction_stream().map(EthSubscriptionResult::TransactionHash);
+                pipe_from_stream(accepted_sink, stream).await
+            }
+        },
         SubscriptionKind::Syncing => {
             // get new block subscription
             let mut canon_state =
@@ -243,6 +253,13 @@ where
     /// Returns a stream that yields all transactions emitted by the txpool.
     fn pending_transaction_stream(&self) -> impl Stream<Item = TxHash> {
         ReceiverStream::new(self.pool.pending_transactions_listener())
+    }
+
+    /// Returns a stream that yields all transactions emitted by the txpool.
+    fn full_pending_transaction_stream(
+        &self,
+    ) -> impl Stream<Item = NewTransactionEvent<<Pool as TransactionPool>::Transaction>> {
+        ReceiverStream::new(self.pool.new_transactions_listener())
     }
 }
 
