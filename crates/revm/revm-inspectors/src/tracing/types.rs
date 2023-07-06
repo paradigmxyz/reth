@@ -161,7 +161,14 @@ impl CallTrace {
 
     /// Returns the error message if it is an erroneous result.
     pub(crate) fn as_error(&self) -> Option<String> {
-        self.is_error().then(|| format!("{:?}", self.status))
+        if self.is_error() {
+            match self.status {
+                InstructionResult::Revert => Some("Reverted".to_string()),
+                _ => Some(format!("{:?}", self.status)),
+            }
+        } else {
+            None
+        }
     }
 }
 
