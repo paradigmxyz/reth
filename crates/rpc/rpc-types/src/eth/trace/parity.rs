@@ -10,23 +10,6 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-/// Result type for parity style transaction trace
-pub type TraceResult = crate::trace::common::TraceResult<TraceOutput, String>;
-
-// === impl TraceResult ===
-
-impl TraceResult {
-    /// Wraps the result type in a [TraceResult::Success] variant
-    pub fn parity_success(result: TraceOutput) -> Self {
-        TraceResult::Success { result }
-    }
-
-    /// Wraps the result type in a [TraceResult::Error] variant
-    pub fn parity_error(error: String) -> Self {
-        TraceResult::Error { error }
-    }
-}
-
 /// Different Trace diagnostic targets.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -241,7 +224,9 @@ pub struct TransactionTrace {
     #[serde(flatten)]
     pub action: Action,
     #[serde(flatten)]
-    pub result: Option<TraceResult>,
+    pub error: Option<String>,
+    #[serde(flatten)]
+    pub result: Option<TraceOutput>,
     pub subtraces: usize,
     pub trace_address: Vec<usize>,
 }
