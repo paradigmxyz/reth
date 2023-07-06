@@ -42,7 +42,7 @@ pub(crate) const LONG_VERSION: &str = concat!(
     env!("VERGEN_CARGO_FEATURES")
 );
 
-/// The version information for reth formatted for P2P.
+/// The version information for reth formatted for P2P (devp2p).
 ///
 /// - The latest version from Cargo.toml
 /// - The target triple
@@ -50,10 +50,17 @@ pub(crate) const LONG_VERSION: &str = concat!(
 /// # Example
 ///
 /// ```text
-/// reth/v{major}.{minor}.{patch}/{target}
+/// reth/v{major}.{minor}.{patch}-{sha1}/{target}
 /// ```
-pub(crate) const P2P_CLIENT_VERSION: &str =
-    concat!("reth/v", env!("CARGO_PKG_VERSION"), "/", env!("VERGEN_CARGO_TARGET_TRIPLE"));
+/// e.g.: `reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin`
+pub(crate) const P2P_CLIENT_VERSION: &str = concat!(
+    "reth/v",
+    env!("CARGO_PKG_VERSION"),
+    "-",
+    env!("VERGEN_GIT_SHA"),
+    "/",
+    env!("VERGEN_CARGO_TARGET_TRIPLE")
+);
 
 /// The default extradata used for payload building.
 ///
