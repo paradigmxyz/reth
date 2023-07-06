@@ -321,9 +321,10 @@ impl CallTraceNode {
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
         let output = self.parity_trace_output();
+        let error = self.trace.as_error();
         TransactionTrace {
             action,
-            error: None,
+            error,
             result: Some(output),
             trace_address,
             subtraces: self.children.len(),
