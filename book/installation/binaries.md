@@ -20,8 +20,8 @@ As an example, you could install the Linux x86_64 version like so:
    For example, to obtain the binary file for v0.0.1-alpha, you can run the following commands in a Linux terminal:
    ```bash
    cd ~
-   curl -LO https://github.com/paradigmxyz/reth/releases/download/v0.0.1-alpha/reth-v0.0.1-alpha-x86_64-unknown-linux-gnu.tar.gz
-   tar -xvf reth-v0.0.1-alpha-x86_64-unknown-linux-gnu.tar.gz
+   curl -LO https://github.com/paradigmxyz/reth/releases/download/v0.1.0-alpha.1/reth-v0.1.0-alpha.1-x86_64-unknown-linux-gnu.tar.gz
+   tar -xvf reth-v0.1.0-alpha.1-x86_64-unknown-linux-gnu.tar.gz
    ```
 1. Test the binary with `./reth --version` (it should print the version).
 2. (Optional) Move the `reth` binary to a location in your `PATH`, so the `reth` command can be called from anywhere.  

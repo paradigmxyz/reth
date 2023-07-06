@@ -8,7 +8,7 @@ use crate::{
     DatabaseError,
 };
 use parking_lot::RwLock;
-use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, DBI, RW};
+use reth_libmdbx::{ffi::DBI, EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use reth_metrics::metrics::{self, histogram};
 use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
 

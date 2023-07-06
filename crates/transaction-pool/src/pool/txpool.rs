@@ -1,6 +1,6 @@
 //! The internal transaction pool implementation.
 use crate::{
-    config::MAX_ACCOUNT_SLOTS_PER_SENDER,
+    config::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     error::{InvalidPoolTransactionError, PoolError},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
@@ -120,6 +120,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_size: self.basefee_pool.size(),
             queued: self.queued_pool.len(),
             queued_size: self.queued_pool.size(),
+            total: self.all_transactions.len(),
         }
     }
 
@@ -272,6 +273,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.basefee_pool_size_bytes.set(stats.basefee_size as f64);
         self.metrics.queued_pool_transactions.set(stats.queued as f64);
         self.metrics.queued_pool_size_bytes.set(stats.queued_size as f64);
+        self.metrics.total_transactions.set(stats.total as f64);
     }
 
     /// Adds the transaction into the pool.
@@ -1189,7 +1191,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
-            max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
+            max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             by_hash: Default::default(),

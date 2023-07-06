@@ -4,7 +4,7 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, H256};
+use reth_primitives::{Address, Bytes, H256};
 use reth_rpc_types::trace::geth::*;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
@@ -58,7 +58,7 @@ impl GethTraceBuilder {
             }
 
             if opts.is_return_data_enabled() {
-                log.return_data = trace_node.trace.last_call_return_value.clone().map(Into::into);
+                log.return_data = Some(trace_node.trace.output.clone().into());
             }
 
             // Add step to geth trace
@@ -74,10 +74,13 @@ impl GethTraceBuilder {
     }
 
     /// Generate a geth-style trace e.g. for `debug_traceTransaction`
+    ///
+    /// This expects the gas used and return value for the
+    /// [ExecutionResult](revm::primitives::ExecutionResult) of the executed transaction.
     pub fn geth_traces(
         &self,
-        // TODO(mattsse): This should be the total gas used, or gas used by last CallTrace?
         receipt_gas_used: u64,
+        return_value: Bytes,
         opts: GethDefaultTracingOptions,
     ) -> DefaultFrame {
         if self.nodes.is_empty() {
@@ -95,7 +98,7 @@ impl GethTraceBuilder {
             // If the top-level trace succeeded, then it was a success
             failed: !main_trace.success,
             gas: receipt_gas_used,
-            return_value: main_trace.output.clone().into(),
+            return_value,
             struct_logs,
         }
     }
@@ -137,7 +140,7 @@ impl GethTraceBuilder {
                 // we need to ensure that calls are in order they are called: the last child node is
                 // the last call, but since we walk up the tree, we need to always
                 // insert at position 0
-                parent_frame.1.calls.get_or_insert_with(Vec::new).insert(0, call);
+                parent_frame.1.calls.insert(0, call);
             } else {
                 debug_assert!(call_frames.is_empty(), "only one root node has no parent");
                 return call

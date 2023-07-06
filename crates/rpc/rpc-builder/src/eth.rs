@@ -8,7 +8,7 @@ use reth_rpc::{
 use serde::{Deserialize, Serialize};
 
 /// The default maximum of logs in a single response.
-pub(crate) const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 10_000;
+pub(crate) const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
 /// The default maximum number of concurrently executed tracing calls
 pub(crate) const DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
@@ -45,7 +45,7 @@ impl Default for EthConfig {
             cache: EthStateCacheConfig::default(),
             gas_oracle: GasPriceOracleConfig::default(),
             max_tracing_requests: DEFAULT_MAX_TRACING_REQUESTS,
-            max_logs_per_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
+            max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
         }
     }
 }

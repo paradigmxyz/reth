@@ -18,7 +18,8 @@ pub(crate) struct ForkchoiceStateTracker {
 impl ForkchoiceStateTracker {
     /// Sets the latest forkchoice state that we received.
     ///
-    /// If the status is valid, we also update the last valid forkchoice state.
+    /// If the status is `VALID`, we also update the last valid forkchoice state and set the
+    /// `sync_target` to `None`, since we're now fully synced.
     pub(crate) fn set_latest(&mut self, state: ForkchoiceState, status: ForkchoiceStatus) {
         if status.is_valid() {
             self.set_valid(state);

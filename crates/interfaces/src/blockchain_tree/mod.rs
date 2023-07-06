@@ -172,8 +172,23 @@ pub trait BlockchainTreeViewer: Send + Sync {
 
     /// Returns the block with matching hash from the tree, if it exists.
     ///
-    /// Caution: This will not return blocks from the canonical chain.
+    /// Caution: This will not return blocks from the canonical chain or buffered blocks that are
+    /// disconnected from the canonical chain.
     fn block_by_hash(&self, hash: BlockHash) -> Option<SealedBlock>;
+
+    /// Returns the _buffered_ (disconnected) block with matching hash from the internal buffer if
+    /// it exists.
+    ///
+    /// Caution: Unlike [Self::block_by_hash] this will only return blocks that are currently
+    /// disconnected from the canonical chain.
+    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock>;
+
+    /// Returns the _buffered_ (disconnected) header with matching hash from the internal buffer if
+    /// it exists.
+    ///
+    /// Caution: Unlike [Self::block_by_hash] this will only return headers that are currently
+    /// disconnected from the canonical chain.
+    fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader>;
 
     /// Returns true if the tree contains the block with matching hash.
     fn contains(&self, hash: BlockHash) -> bool {

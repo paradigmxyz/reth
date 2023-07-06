@@ -36,3 +36,6 @@ db-tools/
 
 # VSCode
 .vscode
+
+# Coverage report
+lcov.info

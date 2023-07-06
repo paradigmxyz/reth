@@ -146,7 +146,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
-            return Ok(());
+            return Ok(())
         };
 
         // Overwrite the root node's first nibble
@@ -178,9 +178,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         &mut self,
         allow_root_to_child_nibble: bool,
     ) -> Result<(), DatabaseError> {
-        let Some(subnode) = self.stack.last_mut() else {
-            return Ok(());
-        };
+        let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
@@ -258,9 +256,12 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 mod tests {
 
     use super::*;
-    use crate::trie_cursor::{AccountTrieCursor, StorageTrieCursor};
+    use crate::{
+        prefix_set::PrefixSetMut,
+        trie_cursor::{AccountTrieCursor, StorageTrieCursor},
+    };
     use reth_db::{
-        cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
+        cursor::DbCursorRW, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
     };
     use reth_primitives::{trie::StorageTrieEntry, MAINNET};
     use reth_provider::ProviderFactory;
@@ -380,9 +381,9 @@ mod tests {
         assert_eq!(cursor.key(), None);
 
         // We insert something that's not part of the existing trie/prefix.
-        let mut changed = PrefixSet::default();
+        let mut changed = PrefixSetMut::default();
         changed.insert(&[0xF, 0x1]);
-        let mut cursor = TrieWalker::new(&mut trie, changed);
+        let mut cursor = TrieWalker::new(&mut trie, changed.freeze());
 
         // Root node
         assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![])));

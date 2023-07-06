@@ -35,6 +35,11 @@ impl CallKind {
     pub fn is_any_create(&self) -> bool {
         matches!(self, CallKind::Create | CallKind::Create2)
     }
+
+    /// Returns true if the call is a delegate of some sorts
+    pub fn is_delegate(&self) -> bool {
+        matches!(self, CallKind::DelegateCall | CallKind::CallCode)
+    }
 }
 
 impl std::fmt::Display for CallKind {
@@ -137,8 +142,6 @@ pub(crate) struct CallTrace {
     /// The return data of the call if this was not a contract creation, otherwise it is the
     /// runtime bytecode of the created contract
     pub(crate) output: Bytes,
-    /// The return data of the last call, if any
-    pub(crate) last_call_return_value: Option<Bytes>,
     /// The gas cost of the call
     pub(crate) gas_used: u64,
     /// The gas limit of the call
@@ -176,7 +179,6 @@ impl Default for CallTrace {
             data: Default::default(),
             maybe_precompile: None,
             output: Default::default(),
-            last_call_return_value: None,
             gas_used: Default::default(),
             gas_limit: Default::default(),
             status: InstructionResult::Continue,
@@ -204,6 +206,17 @@ pub(crate) struct CallTraceNode {
 }
 
 impl CallTraceNode {
+    /// Returns the call context's execution address
+    ///
+    /// See `Inspector::call` impl of [TracingInspector](crate::tracing::TracingInspector)
+    pub(crate) fn execution_address(&self) -> Address {
+        if self.trace.kind.is_delegate() {
+            self.trace.caller
+        } else {
+            self.trace.address
+        }
+    }
+
     /// Pushes all steps onto the stack in reverse order
     /// so that the first step is on top of the stack
     pub(crate) fn push_steps_on_stack<'a>(
@@ -378,8 +391,8 @@ impl CallTraceNode {
             output: Some(self.trace.output.clone().into()),
             error: None,
             revert_reason: None,
-            calls: None,
-            logs: None,
+            calls: Default::default(),
+            logs: Default::default(),
         };
 
         // we need to populate error and revert reason
@@ -388,17 +401,16 @@ impl CallTraceNode {
             call_frame.error = self.trace.as_error();
         }
 
-        if include_logs {
-            call_frame.logs = Some(
-                self.logs
-                    .iter()
-                    .map(|log| CallLogFrame {
-                        address: Some(self.trace.address),
-                        topics: Some(log.topics.clone()),
-                        data: Some(log.data.clone().into()),
-                    })
-                    .collect(),
-            );
+        if include_logs && !self.logs.is_empty() {
+            call_frame.logs = self
+                .logs
+                .iter()
+                .map(|log| CallLogFrame {
+                    address: Some(self.execution_address()),
+                    topics: Some(log.topics.clone()),
+                    data: Some(log.data.clone().into()),
+                })
+                .collect();
         }
 
         call_frame

@@ -3,6 +3,7 @@ use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+    DatabaseEnv,
 };
 use reth_primitives::{stage::StageCheckpoint, ChainSpec};
 use reth_provider::ProviderFactory;
@@ -33,7 +34,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
 
 /// Imports all the tables that can be copied over a range.
 fn import_tables_with_range<DB: Database>(
-    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    output_db: &DatabaseEnv,
     db_tool: &mut DbTool<'_, DB>,
     from: u64,
     to: u64,
@@ -92,7 +93,7 @@ async fn unwind_and_copy<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
     from: u64,
     tip_block_number: u64,
-    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
     let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
     let provider = factory.provider_rw()?;

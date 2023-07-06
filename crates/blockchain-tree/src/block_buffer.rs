@@ -86,7 +86,7 @@ impl BlockBuffer {
             taken.push(block);
         }
 
-        taken.extend(self.remove_children(vec![parent]).into_iter());
+        taken.extend(self.remove_children(vec![parent]));
         self.metrics.blocks.set(self.len() as f64);
         taken
     }
@@ -206,7 +206,7 @@ impl BlockBuffer {
                         removed_blocks.push(block);
                     }
                 }
-                remove_parent_children.extend(parent_childrens.into_iter());
+                remove_parent_children.extend(parent_childrens);
             }
         }
         removed_blocks

@@ -193,40 +193,50 @@ impl PostState {
     ///
     /// The hashed post state.
     pub fn hash_state_slow(&self) -> HashedPostState {
-        let mut accounts = BTreeMap::default();
+        let mut hashed_post_state = HashedPostState::default();
+
+        // Insert accounts with hashed keys from account changes.
         for (address, account) in self.accounts() {
-            accounts.insert(keccak256(address), *account);
-        }
-
-        let mut storages = BTreeMap::default();
-        for (address, storage) in self.storage() {
-            let mut hashed_storage = BTreeMap::default();
-            for (slot, value) in &storage.storage {
-                hashed_storage.insert(keccak256(H256(slot.to_be_bytes())), *value);
+            let hashed_address = keccak256(address);
+            if let Some(account) = account {
+                hashed_post_state.insert_account(hashed_address, *account);
+            } else {
+                hashed_post_state.insert_cleared_account(hashed_address);
             }
-            storages.insert(
-                keccak256(address),
-                HashedStorage { wiped: storage.wiped(), storage: hashed_storage },
-            );
         }
 
-        HashedPostState { accounts, storages }
+        // Insert accounts and storages with hashed keys from storage changes.
+        for (address, storage) in self.storage() {
+            let mut hashed_storage = HashedStorage::new(storage.wiped());
+            for (slot, value) in &storage.storage {
+                let hashed_slot = keccak256(H256(slot.to_be_bytes()));
+                if *value == U256::ZERO {
+                    hashed_storage.insert_zero_valued_slot(hashed_slot);
+                } else {
+                    hashed_storage.insert_non_zero_valued_storage(hashed_slot, *value);
+                }
+            }
+
+            hashed_post_state.insert_hashed_storage(keccak256(address), hashed_storage);
+        }
+
+        hashed_post_state
     }
 
     /// Calculate the state root for this [PostState].
     /// Internally, function calls [Self::hash_state_slow] to obtain the [HashedPostState].
-    /// Afterwards, it retrieves the prefixsets from the [HashedPostState] and uses them to
-    /// calculate the incremental state root.
+    /// Afterwards, it retrieves the [PrefixSets](reth_trie::prefix_set::PrefixSet) of changed keys
+    /// from the [HashedPostState] and uses them to calculate the incremental state root.
     ///
     /// # Example
     ///
     /// ```
     /// use reth_primitives::{Address, Account};
     /// use reth_provider::PostState;
-    /// use reth_db::{mdbx::{EnvKind, WriteMap, test_utils::create_test_db}, database::Database};
+    /// use reth_db::{test_utils::create_test_rw_db, database::Database};
     ///
     /// // Initialize the database
-    /// let db = create_test_db::<WriteMap>(EnvKind::RW);
+    /// let db = create_test_rw_db();
     ///
     /// // Initialize the post state
     /// let mut post_state = PostState::new();
@@ -248,7 +258,7 @@ impl PostState {
         &self,
         tx: &'a TX,
     ) -> Result<H256, StateRootError> {
-        let hashed_post_state = self.hash_state_slow();
+        let hashed_post_state = self.hash_state_slow().sorted();
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
         StateRoot::new(tx)
@@ -642,10 +652,7 @@ mod tests {
     use super::*;
     use crate::{AccountReader, ProviderFactory};
     use reth_db::{
-        database::Database,
-        mdbx::{test_utils, EnvKind},
-        transaction::DbTx,
-        DatabaseEnv,
+        database::Database, test_utils::create_test_rw_db, transaction::DbTx, DatabaseEnv,
     };
     use reth_primitives::{proofs::EMPTY_ROOT, MAINNET};
     use reth_trie::test_utils::state_root;
@@ -1067,7 +1074,7 @@ mod tests {
 
     #[test]
     fn write_to_db_account_info() {
-        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -1136,7 +1143,7 @@ mod tests {
 
     #[test]
     fn write_to_db_storage() {
-        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
         let tx = db.tx_mut().expect("Could not get database tx");
 
         let mut post_state = PostState::new();
@@ -1272,7 +1279,7 @@ mod tests {
 
     #[test]
     fn write_to_db_multiple_selfdestructs() {
-        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
         let tx = db.tx_mut().expect("Could not get database tx");
 
         let address1 = Address::random();
@@ -1821,7 +1828,7 @@ mod tests {
 
     #[test]
     fn empty_post_state_state_root() {
-        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
         let tx = db.tx().unwrap();
 
         let post_state = PostState::new();
@@ -1835,12 +1842,12 @@ mod tests {
             .map(|key| {
                 let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
                 let storage =
-                    (0..10).map(|key| (H256::from_low_u64_be(key), U256::from(key))).collect();
+                    (1..11).map(|key| (H256::from_low_u64_be(key), U256::from(key))).collect();
                 (Address::from_low_u64_be(key), (account, storage))
             })
             .collect();
 
-        let db: Arc<DatabaseEnv> = test_utils::create_test_db(EnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_rw_db();
 
         // insert initial state to the database
         db.update(|tx| {

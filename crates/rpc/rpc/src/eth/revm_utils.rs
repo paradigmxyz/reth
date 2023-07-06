@@ -18,7 +18,7 @@ use revm::{
 };
 use revm_primitives::{
     db::{DatabaseCommit, DatabaseRef},
-    Bytecode,
+    Bytecode, ExecutionResult,
 };
 use tracing::trace;
 
@@ -374,8 +374,8 @@ pub(crate) struct CallFees {
 impl CallFees {
     /// Ensures the fields of a [CallRequest] are not conflicting.
     ///
-    /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the response will
-    /// fallback to the given `basefee`.
+    /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the returned `gas_price`
+    /// will be `0`. See: <https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/internal/ethapi/transaction_args.go#L242-L255>
     fn ensure_fees(
         call_gas_price: Option<U256>,
         call_max_fee: Option<U256>,
@@ -383,14 +383,10 @@ impl CallFees {
         base_fee: U256,
     ) -> EthResult<CallFees> {
         match (call_gas_price, call_max_fee, call_priority_fee) {
-            (None, None, None) => {
-                // when none are specified, they are all set to zero
-                Ok(CallFees { gas_price: U256::ZERO, max_priority_fee_per_gas: None })
-            }
             (gas_price, None, None) => {
-                // request for a legacy transaction
-                // set everything to zero
-                let gas_price = gas_price.unwrap_or(base_fee);
+                // either legacy transaction or no fee fields are specified
+                // when no fields are specified, set gas price to zero
+                let gas_price = gas_price.unwrap_or(U256::ZERO);
                 Ok(CallFees { gas_price, max_priority_fee_per_gas: None })
             }
             (None, max_fee_per_gas, max_priority_fee_per_gas) => {
@@ -463,7 +459,9 @@ where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
 {
-    let mut account_info = db.basic(account)?.unwrap_or_default();
+    // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
+    // which is modified via `Database::basic`
+    let mut account_info = DatabaseRef::basic(db, account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
         account_info.nonce = nonce.as_u64();
@@ -523,5 +521,29 @@ where
         logs: db.logs.clone(),
         block_hashes: db.block_hashes.clone(),
         db: Default::default(),
+    }
+}
+
+/// Helper to get the output data from a result
+///
+/// TODO: Can be phased out when <https://github.com/bluealloy/revm/pull/509> is released
+#[inline]
+pub(crate) fn result_output(res: &ExecutionResult) -> Option<bytes::Bytes> {
+    match res {
+        ExecutionResult::Success { output, .. } => Some(output.clone().into_data()),
+        ExecutionResult::Revert { output, .. } => Some(output.clone()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ensure_0_fallback() {
+        let CallFees { gas_price, .. } =
+            CallFees::ensure_fees(None, None, None, U256::from(99)).unwrap();
+        assert_eq!(gas_price, U256::ZERO);
     }
 }

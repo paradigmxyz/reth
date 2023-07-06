@@ -258,7 +258,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::SinkExt;
     use futures_util::stream::StreamExt;
-    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{
         p2p::{
             bodies::downloader::BodyDownloader,
@@ -278,7 +278,7 @@ mod tests {
     #[tokio::test]
     async fn streams_bodies_from_buffer() {
         // Generate some random blocks
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(&db, &headers);
@@ -336,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn test_download_headers_from_file() {
         // Generate some random blocks
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
@@ -361,7 +361,7 @@ mod tests {
     #[tokio::test]
     async fn test_download_bodies_from_file() {
         // Generate some random blocks
-        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let db = create_test_rw_db();
         let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back

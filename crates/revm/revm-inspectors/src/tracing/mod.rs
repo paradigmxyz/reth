@@ -24,6 +24,7 @@ mod utils;
 use crate::tracing::{
     arena::PushTraceKind,
     types::{CallTraceNode, StorageChange},
+    utils::gas_used,
 };
 pub use builder::{
     geth::{self, GethTraceBuilder},
@@ -83,6 +84,29 @@ impl TracingInspector {
     /// Consumes the Inspector and returns a [GethTraceBuilder].
     pub fn into_geth_builder(self) -> GethTraceBuilder {
         GethTraceBuilder::new(self.traces.arena, self.config)
+    }
+
+    /// Returns true if we're no longer in the context of the root call.
+    fn is_deep(&self) -> bool {
+        // the root call will always be the first entry in the trace stack
+        !self.trace_stack.is_empty()
+    }
+
+    /// Returns true if this a call to a precompile contract.
+    ///
+    /// Returns true if the `to` address is a precompile contract and the value is zero.
+    #[inline]
+    fn is_precompile_call<DB: Database>(
+        &self,
+        data: &EVMData<'_, DB>,
+        to: &Address,
+        value: U256,
+    ) -> bool {
+        if data.precompiles.contains(to) {
+            // only if this is _not_ the root call
+            return self.is_deep() && value == U256::ZERO
+        }
+        false
     }
 
     /// Returns the currently active call trace.
@@ -153,7 +177,6 @@ impl TracingInspector {
                 value,
                 status: InstructionResult::Continue,
                 caller,
-                last_call_return_value: self.last_call_return_data.clone(),
                 maybe_precompile,
                 gas_limit,
                 ..Default::default()
@@ -170,7 +193,7 @@ impl TracingInspector {
     /// This expects an existing trace [Self::start_trace_on_call]
     fn fill_trace_on_call_end<DB: Database>(
         &mut self,
-        _data: &EVMData<'_, DB>,
+        data: &EVMData<'_, DB>,
         status: InstructionResult,
         gas: &Gas,
         output: Bytes,
@@ -179,10 +202,18 @@ impl TracingInspector {
         let trace_idx = self.pop_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
 
-        trace.gas_used = gas.spend();
+        if trace_idx == 0 {
+            // this is the root call which should get the gas used of the transaction
+            // refunds are applied after execution, which is when the root call ends
+            trace.gas_used = gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64);
+        } else {
+            trace.gas_used = gas.spend();
+        }
+
         trace.status = status;
         trace.success = matches!(status, return_ok!());
         trace.output = output.clone();
+
         self.last_call_return_data = Some(output);
 
         if let Some(address) = created_address {
@@ -387,7 +418,7 @@ where
 
         // if calls to precompiles should be excluded, check whether this is a call to a precompile
         let maybe_precompile =
-            self.config.exclude_precompile_calls.then(|| is_precompile_call(data, &to, value));
+            self.config.exclude_precompile_calls.then(|| self.is_precompile_call(data, &to, value));
 
         self.start_trace_on_call(
             data.journaled_state.depth() as usize,
@@ -485,13 +516,4 @@ where
 struct StackStep {
     trace_idx: usize,
     step_idx: usize,
-}
-
-/// Returns true if this a call to a precompile contract with `depth > 0 && value == 0`.
-#[inline]
-fn is_precompile_call<DB: Database>(data: &EVMData<'_, DB>, to: &Address, value: U256) -> bool {
-    if data.precompiles.contains(to) {
-        return data.journaled_state.depth() > 0 && value == U256::ZERO
-    }
-    false
 }

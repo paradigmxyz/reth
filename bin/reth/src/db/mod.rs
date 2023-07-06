@@ -1,6 +1,6 @@
 //! Database debugging tool
 use crate::{
-    args::utils::genesis_value_parser,
+    args::{utils::genesis_value_parser, DatabaseArgs},
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
@@ -10,12 +10,12 @@ use eyre::WrapErr;
 use human_bytes::human_bytes;
 use reth_db::{
     database::Database,
-    mdbx::{Env, NoWriteMap, WriteMap},
+    open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
-    DatabaseEnv, Tables,
+    Tables,
 };
 use reth_primitives::ChainSpec;
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 mod get;
 mod list;
@@ -53,6 +53,9 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
+    #[clap(flatten)]
+    db: DatabaseArgs,
+
     #[clap(subcommand)]
     command: Subcommands,
 }
@@ -84,7 +87,7 @@ impl Command {
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
-                let db = read_only_db(&db_path)?;
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 let mut stats_table = ComfyTable::new();
                 stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
@@ -135,17 +138,17 @@ impl Command {
                 println!("{stats_table}");
             }
             Subcommands::List(command) => {
-                let db = read_only_db(&db_path)?;
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
-                let db = read_only_db(&db_path)?;
+                let db = open_db_read_only(&db_path, self.db.log_level)?;
                 let tool = DbTool::new(&db, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Drop => {
-                let db = read_write_db(&db_path)?;
+                let db = open_db(&db_path, self.db.log_level)?;
                 let mut tool = DbTool::new(&db, self.chain.clone())?;
                 tool.drop(db_path)?;
             }
@@ -171,16 +174,6 @@ impl Command {
 
         Ok(())
     }
-}
-
-fn read_only_db(path: &Path) -> eyre::Result<Env<NoWriteMap>> {
-    Env::<NoWriteMap>::open(path, reth_db::mdbx::EnvKind::RO)
-        .with_context(|| format!("Could not open database at path: {}", path.display()))
-}
-
-fn read_write_db(path: &Path) -> eyre::Result<DatabaseEnv> {
-    Env::<WriteMap>::open(path, reth_db::mdbx::EnvKind::RW)
-        .with_context(|| format!("Could not open database at path: {}", path.display()))
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use crate::{
     models::{BlockchainTest, ForkSpec, RootOrState},
     Case, Error, Suite,
 };
-use reth_db::mdbx::test_utils::create_test_rw_db;
+use reth_db::test_utils::create_test_rw_db;
 use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::{BlockWriter, ProviderFactory};
 use reth_rlp::Decodable;

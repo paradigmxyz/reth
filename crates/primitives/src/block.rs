@@ -1,7 +1,6 @@
 use crate::{
-    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256,
+    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64,
 };
-use ethers_core::types::{BlockNumber as EthersBlockNumber, U64};
 use fixed_hash::rustc_hex::FromHexError;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
@@ -564,19 +563,6 @@ impl From<u64> for BlockNumberOrTag {
     }
 }
 
-impl From<EthersBlockNumber> for BlockNumberOrTag {
-    fn from(value: EthersBlockNumber) -> Self {
-        match value {
-            EthersBlockNumber::Latest => BlockNumberOrTag::Latest,
-            EthersBlockNumber::Finalized => BlockNumberOrTag::Finalized,
-            EthersBlockNumber::Safe => BlockNumberOrTag::Safe,
-            EthersBlockNumber::Earliest => BlockNumberOrTag::Earliest,
-            EthersBlockNumber::Pending => BlockNumberOrTag::Pending,
-            EthersBlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
-        }
-    }
-}
-
 impl From<U64> for BlockNumberOrTag {
     fn from(num: U64) -> Self {
         num.as_u64().into()
@@ -753,10 +739,28 @@ impl From<(BlockHash, BlockNumber)> for BlockNumHash {
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
+        )
+    )]
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Header>(), 0..=2)"
+        )
+    )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::option::of(proptest::collection::vec(proptest::arbitrary::any::<Withdrawal>(), 0..=16))"
+        )
+    )]
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 

@@ -11,14 +11,4 @@ The files in this directory may undergo a lot of changes while reth is unstable,
 
 ### Docker Compose
 
-To run Grafana dashboard with example dashboard and pre-configured Prometheus data source pointing at
-the locally running Reth instance with metrics exposed on `localhost:9001`:
-```sh
-docker compose -p reth -f ./etc/docker-monitoring.yml up
-```
-
-After that, Grafana will be exposed on `localhost:3000` and accessible via default credentials:
-```
-username: admin
-password: admin
-```
+To run Reth, Grafana and Prometheus with Docker Compose, refer to the [docker docs](/book/installation/docker.md#using-docker-compose)

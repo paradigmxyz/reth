@@ -19,7 +19,9 @@ pub use crate::{
     flags::*,
     transaction::{Transaction, TransactionKind, RO, RW},
 };
-pub use ffi::MDBX_dbi as DBI;
+pub mod ffi {
+    pub use ffi::{MDBX_dbi as DBI, MDBX_log_level_t as LogLevel};
+}
 
 mod codec;
 mod cursor;
