@@ -223,8 +223,8 @@ pub enum TraceOutput {
 pub struct TransactionTrace {
     #[serde(flatten)]
     pub action: Action,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub result: Option<TraceOutput>,
     pub subtraces: usize,
     pub trace_address: Vec<usize>,
@@ -331,6 +331,7 @@ mod tests {
             "transactionPosition": 0,
             "type": "call"
         }"#;
-        let _val = serde_json::from_str::<TransactionTrace>(s).unwrap();
+        let val = serde_json::from_str::<TransactionTrace>(s).unwrap();
+        serde_json::to_value(val).unwrap();
     }
 }
