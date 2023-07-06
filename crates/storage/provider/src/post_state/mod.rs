@@ -643,8 +643,10 @@ impl PostState {
         if !self.receipts.is_empty() && self.prune_targets.receipts != Some(PruneMode::Full) {
             let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+            let tip = tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0;
+
             for (block, receipts) in self.receipts {
-                if self.prune_targets.should_prune_receipts(block) {
+                if self.prune_targets.should_prune_receipts(block, tip) {
                     continue
                 }
 
