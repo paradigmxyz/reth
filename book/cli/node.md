@@ -167,12 +167,7 @@ RPC:
           
           [default: 25]
 
-      --rpc.gascap <GAS_CAP>
-          Maximum gas limit for `eth_call` and call tracing RPC methods
-          
-          [default: 30000000]
-
-GAS PRICE ORACLE:
+Gas Price Oracle:
       --gpo.blocks <BLOCKS>
           Number of recent blocks to check for gas price
           
@@ -193,20 +188,56 @@ GAS PRICE ORACLE:
           
           [default: 60]
 
-      --block-cache-size <BLOCK_CACHE_SIZE>
-          Max size for cached block data in megabytes
+      --block-cache-len <BLOCK_CACHE_LEN>
+          Maximum number of block cache entries
           
-          [default: 500]
+          [default: 5000]
 
-      --receipt-cache-size <RECEIPT_CACHE_SIZE>
-          Max size for cached receipt data in megabytes
+      --receipt-cache-len <RECEIPT_CACHE_LEN>
+          Maximum number of receipt cache entries
           
-          [default: 500]
+          [default: 2000]
 
-      --env-cache-size <ENV_CACHE_SIZE>
-          Max size for cached evm env data in megabytes
+      --env-cache-len <ENV_CACHE_LEN>
+          Maximum number of env cache entries
           
-          [default: 1]
+          [default: 1000]
+
+TxPool:
+      --txpool.pending_max_count <PENDING_MAX_COUNT>
+          Max number of transaction in the pending sub-pool
+          
+          [default: 10000]
+
+      --txpool.pending_max_size <PENDING_MAX_SIZE>
+          Max size of the pending sub-pool in megabytes
+          
+          [default: 20]
+
+      --txpool.basefee_max_count <BASEFEE_MAX_COUNT>
+          Max number of transaction in the basefee sub-pool
+          
+          [default: 10000]
+
+      --txpool.basefee_max_size <BASEFEE_MAX_SIZE>
+          Max size of the basefee sub-pool in megabytes
+          
+          [default: 20]
+
+      --txpool.queued_max_count <QUEUED_MAX_COUNT>
+          Max number of transaction in the queued sub-pool
+          
+          [default: 10000]
+
+      --txpool.queued_max_size <QUEUED_MAX_SIZE>
+          Max size of the queued sub-pool in megabytes
+          
+          [default: 20]
+
+      --txpool.max_account_slots <MAX_ACCOUNT_SLOTS>
+          Max number of executable transaction slots guaranteed per account
+          
+          [default: 16]
 
 Builder:
       --builder.extradata <EXTRADATA>
@@ -263,7 +294,20 @@ Debug:
       --debug.hook-all
           Hook on every transaction in a block
 
-Rpc:
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
       --auto-mine
           Automatically mine blocks for new transactions
 
