@@ -41,7 +41,7 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TransactionEvents> {
+    ) -> PoolResult<TransactionEvents<Self::Transaction>> {
         let hash = *transaction.hash();
         Err(PoolError::Other(hash, Box::new(NoopInsertError::new(transaction))))
     }
@@ -69,11 +69,14 @@ impl TransactionPool for NoopTransactionPool {
             .collect())
     }
 
-    fn transaction_event_listener(&self, _tx_hash: TxHash) -> Option<TransactionEvents> {
+    fn transaction_event_listener(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Option<TransactionEvents<Self::Transaction>> {
         None
     }
 
-    fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction> {
         AllTransactionsEvents { events: mpsc::channel(1).1 }
     }
 

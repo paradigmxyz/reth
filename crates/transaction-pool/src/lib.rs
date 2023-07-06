@@ -325,7 +325,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TransactionEvents> {
+    ) -> PoolResult<TransactionEvents<Self::Transaction>> {
         let (_, tx) = self.validate(origin, transaction).await;
         self.pool.add_transaction_and_subscribe(origin, tx)
     }
@@ -350,11 +350,14 @@ where
         Ok(transactions)
     }
 
-    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
+    fn transaction_event_listener(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<TransactionEvents<Self::Transaction>> {
         self.pool.add_transaction_event_listener(tx_hash)
     }
 
-    fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction> {
         self.pool.add_all_transactions_event_listener()
     }
 

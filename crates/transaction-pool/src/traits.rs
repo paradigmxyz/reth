@@ -68,7 +68,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TransactionEvents>;
+    ) -> PoolResult<TransactionEvents<Self::Transaction>>;
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
@@ -93,10 +93,13 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new transaction change event stream for the given transaction.
     ///
     /// Returns `None` if the transaction is not in the pool.
-    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
+    fn transaction_event_listener(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<TransactionEvents<Self::Transaction>>;
 
     /// Returns a new transaction change event stream for _all_ transactions in the pool.
-    fn all_transactions_event_listener(&self) -> AllTransactionsEvents;
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction>;
 
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
@@ -393,6 +396,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 }
 
 /// Trait for transaction types used inside the pool
+#[auto_impl::auto_impl(Box)]
 pub trait PoolTransaction:
     fmt::Debug + Send + Sync + FromRecoveredTransaction + IntoRecoveredTransaction
 {

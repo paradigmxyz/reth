@@ -117,7 +117,7 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
-    event_listener: RwLock<PoolEventBroadcast>,
+    event_listener: RwLock<PoolEventBroadcast<T::Transaction>>,
     /// Listeners for new ready transactions.
     pending_transaction_listener: Mutex<Vec<mpsc::Sender<TxHash>>>,
     /// Listeners for new transactions added to the pool.
@@ -213,7 +213,7 @@ where
     pub(crate) fn add_transaction_event_listener(
         &self,
         tx_hash: TxHash,
-    ) -> Option<TransactionEvents> {
+    ) -> Option<TransactionEvents<T::Transaction>> {
         let pool = self.pool.read();
         if pool.contains(&tx_hash) {
             Some(self.event_listener.write().subscribe(tx_hash))
@@ -223,7 +223,9 @@ where
     }
 
     /// Adds a listener for all transaction events.
-    pub(crate) fn add_all_transactions_event_listener(&self) -> AllTransactionsEvents {
+    pub(crate) fn add_all_transactions_event_listener(
+        &self,
+    ) -> AllTransactionsEvents<T::Transaction> {
         self.event_listener.write().subscribe_all()
     }
 
@@ -319,7 +321,7 @@ where
         &self,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> PoolResult<TransactionEvents> {
+    ) -> PoolResult<TransactionEvents<T::Transaction>> {
         let listener = {
             let mut listener = self.event_listener.write();
             listener.subscribe(tx.tx_hash())
@@ -415,14 +417,15 @@ where
 
         match tx {
             AddedTransaction::Pending(tx) => {
-                let AddedPendingTransaction { transaction, promoted, discarded, .. } = tx;
+                let AddedPendingTransaction { transaction, promoted, discarded, replaced } = tx;
 
-                listener.pending(transaction.hash(), None);
+                listener.pending(transaction.hash(), replaced.clone());
                 promoted.iter().for_each(|tx| listener.pending(tx, None));
                 discarded.iter().for_each(|tx| listener.discarded(tx));
             }
-            AddedTransaction::Parked { transaction, .. } => {
+            AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
+                listener.replaced(replaced.clone(), transaction.hash());
             }
         }
     }
@@ -532,6 +535,8 @@ impl<V: TransactionValidator, T: TransactionOrdering> fmt::Debug for PoolInner<V
 pub struct AddedPendingTransaction<T: PoolTransaction> {
     /// Inserted transaction.
     transaction: Arc<ValidPoolTransaction<T>>,
+    /// Replaced transaction.
+    replaced: Option<Arc<ValidPoolTransaction<T>>>,
     /// transactions promoted to the ready queue
     promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
@@ -550,6 +555,8 @@ pub enum AddedTransaction<T: PoolTransaction> {
         transaction: Arc<ValidPoolTransaction<T>>,
         /// The subpool it was moved to.
         subpool: SubPool,
+        /// Replaced transaction.
+        replaced: Option<Arc<ValidPoolTransaction<T>>>,
     },
 }
 
@@ -577,7 +584,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
             AddedTransaction::Pending(tx) => {
                 NewTransactionEvent { subpool: SubPool::Pending, transaction: tx.transaction }
             }
-            AddedTransaction::Parked { transaction, subpool } => {
+            AddedTransaction::Parked { transaction, subpool, .. } => {
                 NewTransactionEvent { transaction, subpool }
             }
         }

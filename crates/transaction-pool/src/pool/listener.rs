@@ -3,6 +3,7 @@
 use crate::{
     pool::events::{PoolTransactionEvent, TransactionEvent},
     traits::PropagateKind,
+    PoolTransaction, ValidPoolTransaction,
 };
 use futures_util::Stream;
 use reth_primitives::{TxHash, H256};
@@ -22,20 +23,20 @@ const TX_POOL_EVENT_CHANNEL_SIZE: usize = 1024;
 /// A Stream that receives [TransactionEvent] only for the transaction with the given hash.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
-pub struct TransactionEvents {
+pub struct TransactionEvents<T: PoolTransaction> {
     hash: TxHash,
-    events: UnboundedReceiver<PoolTransactionEvent>,
+    events: UnboundedReceiver<PoolTransactionEvent<T>>,
 }
 
-impl TransactionEvents {
+impl<T: PoolTransaction> TransactionEvents<T> {
     /// The hash for this transaction
     pub fn hash(&self) -> TxHash {
         self.hash
     }
 }
 
-impl Stream for TransactionEvents {
-    type Item = PoolTransactionEvent;
+impl<T: PoolTransaction> Stream for TransactionEvents<T> {
+    type Item = PoolTransactionEvent<T>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
@@ -48,12 +49,12 @@ impl Stream for TransactionEvents {
 /// A Stream that receives [PoolTransactionEvent] for _all_ transaction.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
-pub struct AllTransactionsEvents {
-    pub(crate) events: Receiver<PoolTransactionEvent>,
+pub struct AllTransactionsEvents<T: PoolTransaction> {
+    pub(crate) events: Receiver<PoolTransactionEvent<T>>,
 }
 
-impl Stream for AllTransactionsEvents {
-    type Item = PoolTransactionEvent;
+impl<T: PoolTransaction> Stream for AllTransactionsEvents<T> {
+    type Item = PoolTransactionEvent<T>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().events.poll_recv(cx)
@@ -64,17 +65,26 @@ impl Stream for AllTransactionsEvents {
 ///
 /// This is essentially a multi-producer, multi-consumer channel where each event is broadcast to
 /// all active receivers.
-#[derive(Default, Debug)]
-pub(crate) struct PoolEventBroadcast {
+#[derive(Debug)]
+pub(crate) struct PoolEventBroadcast<T: PoolTransaction> {
     /// All listeners for all transaction events.
-    all_events_broadcaster: AllPoolEventsBroadcaster,
+    all_events_broadcaster: AllPoolEventsBroadcaster<T>,
     /// All listeners for events for a certain transaction hash.
-    broadcasters_by_hash: HashMap<TxHash, PoolEventBroadcaster>,
+    broadcasters_by_hash: HashMap<TxHash, PoolEventBroadcaster<T>>,
 }
 
-impl PoolEventBroadcast {
+impl<T: PoolTransaction> Default for PoolEventBroadcast<T> {
+    fn default() -> Self {
+        Self {
+            all_events_broadcaster: AllPoolEventsBroadcaster::default(),
+            broadcasters_by_hash: HashMap::default(),
+        }
+    }
+}
+
+impl<T: PoolTransaction> PoolEventBroadcast<T> {
     /// Calls the broadcast callback with the `PoolEventBroadcaster` that belongs to the hash.
-    fn broadcast_event(&mut self, hash: &TxHash, event: TransactionEvent) {
+    fn broadcast_event(&mut self, hash: &TxHash, event: TransactionEvent<T>) {
         // Broadcast to all listeners for the transaction hash.
         if let Entry::Occupied(mut sink) = self.broadcasters_by_hash.entry(*hash) {
             sink.get_mut().broadcast(*hash, event.clone());
@@ -89,7 +99,7 @@ impl PoolEventBroadcast {
     }
 
     /// Create a new subscription for the given transaction hash.
-    pub(crate) fn subscribe(&mut self, tx_hash: TxHash) -> TransactionEvents {
+    pub(crate) fn subscribe(&mut self, tx_hash: TxHash) -> TransactionEvents<T> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         match self.broadcasters_by_hash.entry(tx_hash) {
@@ -104,20 +114,32 @@ impl PoolEventBroadcast {
     }
 
     /// Create a new subscription for all transactions.
-    pub(crate) fn subscribe_all(&mut self) -> AllTransactionsEvents {
+    pub(crate) fn subscribe_all(&mut self) -> AllTransactionsEvents<T> {
         let (tx, rx) = tokio::sync::mpsc::channel(TX_POOL_EVENT_CHANNEL_SIZE);
         self.all_events_broadcaster.senders.push(tx);
         AllTransactionsEvents { events: rx }
     }
 
     /// Notify listeners about a transaction that was added to the pending queue.
-    pub(crate) fn pending(&mut self, tx: &TxHash, replaced: Option<&TxHash>) {
+    pub(crate) fn pending(
+        &mut self,
+        tx: &TxHash,
+        replaced_tx: Option<Arc<ValidPoolTransaction<T>>>,
+    ) {
         self.broadcast_event(tx, TransactionEvent::Pending);
 
-        if let Some(replaced) = replaced {
+        if let Some(replaced) = replaced_tx {
             // notify listeners that this transaction was replaced
-            self.broadcast_event(replaced, TransactionEvent::Replaced(*tx));
+            self.replaced(replaced, tx);
         }
+    }
+
+    /// Notify listeners about a transaction that was replaced.
+    pub(crate) fn replaced(&mut self, tx: Arc<ValidPoolTransaction<T>>, replaced_by: &TxHash) {
+        self.broadcast_event(
+            tx.hash(),
+            TransactionEvent::Replaced { transaction: tx, replaced_by: *replaced_by },
+        )
     }
 
     /// Notify listeners about a transaction that was added to the queued pool.
@@ -144,15 +166,21 @@ impl PoolEventBroadcast {
 /// All Sender half(s) of the event channels for all transactions.
 ///
 /// This mimics [tokio::sync::broadcast] but uses separate channels.
-#[derive(Default, Debug)]
-struct AllPoolEventsBroadcaster {
+#[derive(Debug)]
+struct AllPoolEventsBroadcaster<T: PoolTransaction> {
     /// Corresponding sender half(s) for event listener channel
-    senders: Vec<Sender<PoolTransactionEvent>>,
+    senders: Vec<Sender<PoolTransactionEvent<T>>>,
 }
 
-impl AllPoolEventsBroadcaster {
+impl<T: PoolTransaction> Default for AllPoolEventsBroadcaster<T> {
+    fn default() -> Self {
+        Self { senders: Vec::new() }
+    }
+}
+
+impl<T: PoolTransaction> AllPoolEventsBroadcaster<T> {
     // Broadcast an event to all listeners. Dropped listeners are silently evicted.
-    fn broadcast(&mut self, tx_hash: TxHash, event: TransactionEvent) {
+    fn broadcast(&mut self, tx_hash: TxHash, event: TransactionEvent<T>) {
         self.senders.retain(|sender| {
             match sender.try_send(PoolTransactionEvent::new(tx_hash, event.clone())) {
                 Ok(_) | Err(TrySendError::Full(_)) => true,
@@ -166,19 +194,19 @@ impl AllPoolEventsBroadcaster {
 ///
 /// This mimics [tokio::sync::broadcast] but uses separate channels and is unbounded.
 #[derive(Default, Debug)]
-struct PoolEventBroadcaster {
+struct PoolEventBroadcaster<T: PoolTransaction> {
     /// Corresponding sender half(s) for event listener channel
-    senders: Vec<UnboundedSender<PoolTransactionEvent>>,
+    senders: Vec<UnboundedSender<PoolTransactionEvent<T>>>,
 }
 
-impl PoolEventBroadcaster {
+impl<T: PoolTransaction> PoolEventBroadcaster<T> {
     /// Returns `true` if there are no more listeners remaining.
     fn is_empty(&self) -> bool {
         self.senders.is_empty()
     }
 
     // Broadcast an event to all listeners. Dropped listeners are silently evicted.
-    fn broadcast(&mut self, tx_hash: TxHash, event: TransactionEvent) {
+    fn broadcast(&mut self, tx_hash: TxHash, event: TransactionEvent<T>) {
         self.senders
             .retain(|sender| sender.send(PoolTransactionEvent::new(tx_hash, event.clone())).is_ok())
     }
