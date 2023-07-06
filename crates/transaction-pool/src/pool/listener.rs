@@ -116,8 +116,13 @@ impl PoolEventBroadcast {
 
         if let Some(replaced) = replaced {
             // notify listeners that this transaction was replaced
-            self.broadcast_event(replaced, TransactionEvent::Replaced(*tx));
+            self.replaced(replaced, tx);
         }
+    }
+
+    /// Notify listeners about a transaction that was replaced.
+    pub(crate) fn replaced(&mut self, tx: &TxHash, replaced_by: &TxHash) {
+        self.broadcast_event(tx, TransactionEvent::Replaced(*replaced_by));
     }
 
     /// Notify listeners about a transaction that was added to the queued pool.

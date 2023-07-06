@@ -16,6 +16,8 @@ pub struct TracingInspectorConfig {
     pub record_state_diff: bool,
     /// Whether to ignore precompile calls.
     pub exclude_precompile_calls: bool,
+    /// Whether to record individual return data
+    pub record_call_return_data: bool,
     /// Whether to record logs
     pub record_logs: bool,
 }
@@ -29,6 +31,7 @@ impl TracingInspectorConfig {
             record_stack_snapshots: true,
             record_state_diff: false,
             exclude_precompile_calls: false,
+            record_call_return_data: false,
             record_logs: true,
         }
     }
@@ -43,6 +46,7 @@ impl TracingInspectorConfig {
             record_stack_snapshots: false,
             record_state_diff: false,
             exclude_precompile_calls: true,
+            record_call_return_data: false,
             record_logs: false,
         }
     }
@@ -57,6 +61,7 @@ impl TracingInspectorConfig {
             record_stack_snapshots: true,
             record_state_diff: true,
             exclude_precompile_calls: false,
+            record_call_return_data: false,
             record_logs: false,
         }
     }

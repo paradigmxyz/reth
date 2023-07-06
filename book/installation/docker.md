@@ -80,8 +80,15 @@ To run Reth with Docker Compose, run the following command from a shell inside t
 
 ```bash
 ./etc/generate-jwt.sh
-docker compose -f etc/docker-compose.yml up -d
+docker compose -f etc/docker-compose.yml -f etc/lighthouse.yml up -d
 ```
+
+> **Note**
+>
+> If you want to run Reth with a CL that is not Lighthouse:
+>
+> - The JWT for the consensus client can be found at `etc/jwttoken/jwt.hex` in this repository, after the `etc/generate-jwt.sh` script is run
+> - The Reth Engine API is accessible on `localhost:8551`
 
 To check if Reth is running correctly, run:
 
@@ -89,14 +96,20 @@ To check if Reth is running correctly, run:
 docker compose logs -f reth
 ```
 
-The default `docker-compose.yml` file will create four containers:
+The default `docker-compose.yml` file will create three containers:
 
 - Reth
 - Prometheus
 - Grafana
-- Lighthouse
 
-Grafana will be exposed on `localhost:3000` and accessible via default credentials (username and password is `admin`)
+The optional `lighthouse.yml` file will create two containers:
+
+- Lighthouse
+- [`ethereum-metrics-exporter`](https://github.com/ethpandaops/ethereum-metrics-exporter)
+
+Grafana will be exposed on `localhost:3000` and accessible via default credentials (username and password is `admin`), with two available dashboards:
+- reth
+- Ethereum Metrics Exporter (works only if Lighthouse is also running)
 
 ## Interacting with Reth inside Docker
 

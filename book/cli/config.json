@@ -1,0 +1,33 @@
+{
+  "commands": {
+    "config": [],
+    "db": {
+      "stats": [],
+      "list": [],
+      "get": [],
+      "drop": [],
+      "version": [],
+      "path": []
+    },
+    "debug": {
+      "execution": [],
+      "merkle": []
+    },
+    "import": [],
+    "init": [],
+    "node": [],
+    "p2p": {
+      "header": [],
+      "body": []
+    },
+    "stage": {
+      "run": [],
+      "drop": [],
+      "dump": ["execution", "storage-hashing", "account-hashing", "merkle"],
+      "unwind": ["to-block", "num-blocks"]
+    },
+    "test-vectors": {
+      "tables": []
+    }
+  }
+}

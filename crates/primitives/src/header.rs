@@ -2,7 +2,7 @@ use crate::{
     basefee::calculate_next_block_base_fee,
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256, H64, U256,
+    BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, H160, H256, H64, U256,
 };
 use bytes::{Buf, BufMut, BytesMut};
 
@@ -149,6 +149,15 @@ impl Header {
     /// Check if the transaction root equals to empty root.
     pub fn transaction_root_is_empty(&self) -> bool {
         self.transactions_root == EMPTY_ROOT
+    }
+
+    /// Converts all roots in the header to a [BlockBodyRoots] struct.
+    pub fn body_roots(&self) -> BlockBodyRoots {
+        BlockBodyRoots {
+            tx_root: self.transactions_root,
+            ommers_hash: self.ommers_hash,
+            withdrawals_root: self.withdrawals_root,
+        }
     }
 
     /// Calculate base fee for next block according to the EIP-1559 spec.

@@ -635,6 +635,7 @@ fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransac
             trace_address: vec![],
             subtraces: 0,
             action: Action::Reward(reward),
+            error: None,
             result: None,
         },
     }
