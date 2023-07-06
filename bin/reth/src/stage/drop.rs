@@ -155,6 +155,14 @@ impl Command {
                     )?;
                     insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
                 }
+                StageEnum::LogHistory => {
+                    tx.clear::<tables::LogAddressHistory>()?;
+                    tx.clear::<tables::LogTopicHistory>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::IndexLogHistory.to_string(),
+                        Default::default(),
+                    )?;
+                }
                 _ => {
                     info!("Nothing to do for stage {:?}", self.stage);
                     return Ok(())
