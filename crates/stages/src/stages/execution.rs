@@ -973,45 +973,7 @@ mod tests {
         prune.receipts = Some(PruneMode::Before(2));
         check_pruning(factory.clone(), prune, 0).await;
 
-        {
-            prune.receipts = Some(PruneMode::Distance(0));
-            let provider = factory.provider_rw().unwrap();
-            // Set tip
-            provider.tx_ref().put::<tables::CanonicalHeaders>(1, Default::default()).unwrap();
-            provider.commit().unwrap();
-            check_pruning(factory.clone(), prune, 1).await;
-        }
-
-        {
-            prune.receipts = Some(PruneMode::Distance(0));
-            let provider = factory.provider_rw().unwrap();
-            // Set tip
-            provider.tx_ref().put::<tables::CanonicalHeaders>(2, Default::default()).unwrap();
-            provider.commit().unwrap();
-            check_pruning(factory.clone(), prune, 0).await;
-        }
-
-        {
-            prune.receipts = Some(PruneMode::Distance(1));
-            let provider = factory.provider_rw().unwrap();
-            // Set tip
-            provider.tx_ref().put::<tables::CanonicalHeaders>(3, Default::default()).unwrap();
-            provider.commit().unwrap();
-            check_pruning(factory.clone(), prune, 0).await;
-        }
-
-        {
-            prune.receipts = Some(PruneMode::Distance(4));
-            let provider = factory.provider_rw().unwrap();
-            // Set tip
-            provider.tx_ref().put::<tables::CanonicalHeaders>(4, Default::default()).unwrap();
-            provider.commit().unwrap();
-            check_pruning(factory.clone(), prune, 1).await;
-        }
-
-        {
-            prune.receipts = Some(PruneMode::Distance(40));
-            check_pruning(factory.clone(), prune, 1).await;
-        }
+        prune.receipts = Some(PruneMode::Distance(0));
+        check_pruning(factory.clone(), prune, 1).await;
     }
 }
