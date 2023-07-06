@@ -21,9 +21,6 @@ pub struct PruneTargets {
     /// Storage History pruning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_history: Option<PruneMode>,
-    /// Current known tip to calculate pruning distances.
-    #[serde(skip_serializing)]
-    pub tip: Option<BlockNumber>,
 }
 
 macro_rules! should_prune_method {
@@ -31,9 +28,9 @@ macro_rules! should_prune_method {
         $(
             paste! {
                 #[allow(missing_docs)]
-                pub fn [<should_prune_ $config>](&self, block: BlockNumber) -> bool {
+                pub fn [<should_prune_ $config>](&self, block: BlockNumber, tip: BlockNumber) -> bool {
                     if let Some(config) = &self.$config {
-                        return self.should_prune(config, block)
+                        return self.should_prune(config, block, tip)
                     }
                     false
                 }
@@ -43,7 +40,6 @@ macro_rules! should_prune_method {
         /// Sets pruning to all targets.
         pub fn all() -> Self {
             PruneTargets {
-                tip: None,
                 $(
                     $config: Some(PruneMode::Full),
                 )+
@@ -59,25 +55,11 @@ impl PruneTargets {
         PruneTargets::default()
     }
 
-    /// Creates a `PruneTargets` with a specific tip.
-    pub fn with_tip(mut self, tip: Option<BlockNumber>) -> Self {
-        self.tip = tip;
-        self
-    }
-
-    /// Updates the tip if it is of higher value.
-    pub fn update_tip(&mut self, tip: BlockNumber) {
-        if self.tip.is_none() || self.tip.is_some_and(|inner| inner < tip) {
-            self.tip = Some(tip);
-        }
-    }
-
     /// Check if target block should be pruned
-    pub fn should_prune(&self, target: &PruneMode, block: BlockNumber) -> bool {
+    pub fn should_prune(&self, target: &PruneMode, block: BlockNumber, tip: BlockNumber) -> bool {
         match target {
             PruneMode::Full => true,
             PruneMode::Distance(distance) => {
-                let tip = self.tip.expect("tip should be set on PruneTargets.");
                 if *distance > tip {
                     return false
                 }

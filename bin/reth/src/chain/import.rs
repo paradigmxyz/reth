@@ -185,10 +185,7 @@ impl ImportCommand {
                         max_blocks: config.stages.execution.max_blocks,
                         max_changes: config.stages.execution.max_changes,
                     },
-                    config
-                        .prune
-                        .map(|prune| prune.parts.with_tip(Some(max_block)))
-                        .unwrap_or_default(),
+                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
                 )),
             )
             .build(db, self.chain.clone());

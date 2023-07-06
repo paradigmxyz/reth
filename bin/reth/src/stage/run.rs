@@ -202,10 +202,7 @@ impl Command {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,
                             },
-                            config
-                                .prune
-                                .map(|prune| prune.parts.with_tip(Some(self.to)))
-                                .unwrap_or_default(),
+                            config.prune.map(|prune| prune.parts).unwrap_or_default(),
                         )),
                         None,
                     )

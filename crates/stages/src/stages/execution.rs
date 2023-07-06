@@ -944,9 +944,15 @@ mod tests {
         provider.commit().unwrap();
 
         let check_pruning = |factory: Arc<ProviderFactory<_>>,
+                             tip: Option<BlockNumber>,
                              prune_targets: PruneTargets,
                              expect_num_receipts: usize| async move {
             let provider = factory.provider_rw().unwrap();
+
+            // Sets fake tip
+            provider
+                .tx_ref()
+                .put::<tables::CanonicalHeaders>(tip.unwrap_or_default(), Default::default());
 
             let mut execution_stage = ExecutionStage::new(
                 Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
@@ -962,36 +968,37 @@ mod tests {
         };
 
         let mut prune = PruneTargets::none();
+        let mut tip = None;
 
-        check_pruning(factory.clone(), prune, 1).await;
+        check_pruning(factory.clone(), prune, tip, 1).await;
 
         prune.receipts = Some(PruneMode::Full);
-        check_pruning(factory.clone(), prune, 0).await;
+        check_pruning(factory.clone(), prune, tip, 0).await;
 
         prune.receipts = Some(PruneMode::Before(1));
-        check_pruning(factory.clone(), prune, 1).await;
+        check_pruning(factory.clone(), prune, tip, 1).await;
 
         prune.receipts = Some(PruneMode::Before(2));
-        check_pruning(factory.clone(), prune, 0).await;
+        check_pruning(factory.clone(), prune, tip, 0).await;
 
         prune.receipts = Some(PruneMode::Distance(0));
-        prune.tip = Some(1);
-        check_pruning(factory.clone(), prune, 1).await;
+        tip = Some(1);
+        check_pruning(factory.clone(), prune, tip, 1).await;
 
-        prune.receipts = Some(PruneMode::Distance(0));
-        prune.tip = Some(2);
-        check_pruning(factory.clone(), prune, 0).await;
+        receipts = Some(PruneMode::Distance(0));
+        tip = Some(2);
+        check_pruning(factory.clone(), prune, tip, 0).await;
 
-        prune.receipts = Some(PruneMode::Distance(1));
-        prune.tip = Some(3);
-        check_pruning(factory.clone(), prune, 0).await;
+        receipts = Some(PruneMode::Distance(1));
+        tip = Some(3);
+        check_pruning(factory.clone(), prune, tip, 0).await;
 
-        prune.receipts = Some(PruneMode::Distance(4));
-        prune.tip = Some(4);
-        check_pruning(factory.clone(), prune, 1).await;
+        receipts = Some(PruneMode::Distance(4));
+        tip = Some(4);
+        check_pruning(factory.clone(), prune, tip, 1).await;
 
-        prune.receipts = Some(PruneMode::Distance(40));
-        prune.tip = Some(4);
-        check_pruning(factory.clone(), prune, 1).await;
+        receipts = Some(PruneMode::Distance(40));
+        tip = Some(4);
+        check_pruning(factory.clone(), prune, tip, 1).await;
     }
 }
