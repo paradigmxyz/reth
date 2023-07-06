@@ -424,7 +424,7 @@ mod tests {
         EthApi::new(
             provider.clone(),
             testing_pool(),
-            NoopNetwork,
+            NoopNetwork::default(),
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
         )

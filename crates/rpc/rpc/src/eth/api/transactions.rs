@@ -900,7 +900,7 @@ mod tests {
     #[tokio::test]
     async fn send_raw_transaction() {
         let noop_provider = NoopProvider::default();
-        let noop_network_provider = NoopNetwork;
+        let noop_network_provider = NoopNetwork::default();
 
         let pool = testing_pool();
 
