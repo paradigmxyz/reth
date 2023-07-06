@@ -95,9 +95,10 @@ where
         self.max_block = Some(block);
     }
 
-    /// Cancels all full block requests that are in progress.
-    pub(crate) fn clear_full_block_requests(&mut self) {
+    /// Cancels all download requests that are in progress.
+    pub(crate) fn clear_block_download_requests(&mut self) {
         self.inflight_full_block_requests.clear();
+        self.inflight_block_range_requests.clear();
         self.update_block_download_metrics();
     }
 
@@ -251,7 +252,7 @@ where
 
                 // we also clear any pending full block requests because we expect them to be
                 // outdated (included in the range the pipeline is syncing anyway)
-                self.clear_full_block_requests();
+                self.clear_block_download_requests();
 
                 Some(EngineSyncEvent::PipelineStarted(target))
             }

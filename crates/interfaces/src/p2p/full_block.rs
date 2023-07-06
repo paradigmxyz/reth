@@ -343,17 +343,22 @@ fn ensure_valid_body_response(
 ///
 /// The full block range will be returned with falling block numbers, i.e. in descending order.
 ///
-/// NOTE: this assumes that bodies responses are returned in the same order as the hash array used
-/// to request them.
+/// NOTE: this assumes that bodies responses are returned by the client in the same order as the
+/// hash array used to request them.
 #[must_use = "futures do nothing unless polled"]
 pub struct FetchFullBlockRangeFuture<Client>
 where
     Client: BodiesClient + HeadersClient,
 {
+    /// The client used to fetch headers and bodies.
     client: Client,
+    /// The block hash to start fetching from (inclusive).
     start_hash: H256,
+    /// How many blocks to fetch: `len([start_hash, ..]) == count`
     count: u64,
+    /// Requests for headers and bodies that are in progress.
     request: FullBlockRangeRequest<Client>,
+    /// Fetched headers.
     headers: Option<Vec<SealedHeader>>,
     /// The next headers to request bodies for. This is drained as responses are received.
     pending_headers: VecDeque<SealedHeader>,
@@ -403,13 +408,15 @@ where
     /// These are returned in falling order starting with the requested `hash`, i.e. with
     /// descending block numbers.
     fn take_blocks(&mut self) -> Option<Vec<SealedBlock>> {
-        if self.headers.is_none() || !self.is_bodies_complete() {
+        if !self.is_bodies_complete() {
+            // not done with bodies yet
             return None
         }
 
-        let headers = self.headers.take().unwrap();
+        let headers = self.headers.take()?;
         let mut needs_retry = false;
         let mut response = Vec::new();
+
         for header in &headers {
             if let Some(body_resp) = self.bodies.remove(header) {
                 // validate body w.r.t. the hashes in the header, only inserting into the response

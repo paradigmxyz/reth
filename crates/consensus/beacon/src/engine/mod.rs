@@ -474,6 +474,7 @@ where
 
     /// Returns how far the local tip is from the given block. If the local tip is at the same
     /// height or its block number is greater than the given block, this returns None.
+    #[inline]
     fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
         if block > local_tip {
             Some(block - local_tip)
@@ -612,9 +613,10 @@ where
         // Terminate the sync early if it's reached the maximum user
         // configured block.
         if is_valid_response {
-            // node's fully synced, clear pending requests
-            self.sync.clear_full_block_requests();
+            // node's fully synced, clear active download requests
+            self.sync.clear_block_download_requests();
 
+            // check if we reached the maximum configured block
             let tip_number = self.blockchain.canonical_tip().number;
             if self.sync.has_reached_max_block(tip_number) {
                 return true
@@ -1235,7 +1237,7 @@ where
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
 
                     // clear any active block requests
-                    self.sync.clear_full_block_requests();
+                    self.sync.clear_block_download_requests();
                 }
                 Err(err) => {
                     // if we failed to make the FCU's head canonical, because we don't have that
