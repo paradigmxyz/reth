@@ -696,7 +696,7 @@ impl Command {
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
             .with_tip_sender(tip_tx)
-            .with_metrics_tx(metrics_tx)
+            .with_metrics_tx(metrics_tx.clone())
             .add_stages(
                 DefaultStages::new(
                     header_mode,
@@ -712,13 +712,16 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(
-                    factory,
-                    ExecutionStageThresholds {
-                        max_blocks: stage_config.execution.max_blocks,
-                        max_changes: stage_config.execution.max_changes,
-                    },
-                ))
+                .set(
+                    ExecutionStage::new(
+                        factory,
+                        ExecutionStageThresholds {
+                            max_blocks: stage_config.execution.max_blocks,
+                            max_changes: stage_config.execution.max_changes,
+                        },
+                    )
+                    .with_metrics_tx(metrics_tx),
+                )
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,
