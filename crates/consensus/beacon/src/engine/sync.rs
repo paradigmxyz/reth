@@ -306,7 +306,7 @@ where
         if let Some(block) = self.range_buffered_blocks.pop() {
             // peek ahead and pop duplicates
             while let Some(peek) = self.range_buffered_blocks.peek() {
-                if peek.0.0.hash() == block.0.0.hash() {
+                if peek.0 .0.hash() == block.0 .0.hash() {
                     self.range_buffered_blocks.pop();
                 } else {
                     break;
