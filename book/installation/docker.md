@@ -63,11 +63,11 @@ To run Reth with Docker, run:
 docker run \
     -v rethdata:/root/.local/share/reth/db \
     -d \
-    -p 9000:9000 \
+    -p 9001:9001 \
     --name reth \
     reth:local \
     node \
-    --metrics 0.0.0.0:9000
+    --metrics 0.0.0.0:9001
 ```
 
 The above command will create a container named `reth` and a named volume called `rethdata` for data persistence.
