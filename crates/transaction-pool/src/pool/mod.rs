@@ -276,7 +276,7 @@ where
                 balance, 
                 state_nonce, 
                 transaction, 
-                propagate: _,
+                propagate,
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
@@ -285,7 +285,7 @@ where
                 let tx = ValidPoolTransaction {
                     transaction,
                     transaction_id,
-                    propagate: false,
+                    propagate,
                     timestamp: Instant::now(),
                     origin,
                     encoded_length,
@@ -307,7 +307,7 @@ where
 
                 Ok(hash)
             }
-            TransactionValidationOutcome::Invalid(tx, err, _) => {
+            TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
                 listener.discarded(tx.hash());
                 Err(PoolError::InvalidTransaction(*tx.hash(), err))

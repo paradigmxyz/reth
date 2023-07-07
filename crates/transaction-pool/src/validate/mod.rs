@@ -35,7 +35,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
-    Invalid(T, InvalidPoolTransactionError, bool),
+    Invalid(T, InvalidPoolTransactionError),
     /// An error occurred while trying to validate the transaction
     Error(TxHash, Box<dyn std::error::Error + Send + Sync>),
 }

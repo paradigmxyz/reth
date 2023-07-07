@@ -188,7 +188,6 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                        false,
                     )
                 }
             }
@@ -199,7 +198,6 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                        false,
                     )
                 }
             }
@@ -208,7 +206,6 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
-                    false,
                 )
             }
         };
@@ -219,14 +216,13 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
-                false,
             )
         }
 
         // Check whether the init code size has been exceeded.
         if self.shanghai {
             if let Err(err) = self.ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
-                return TransactionValidationOutcome::Invalid(transaction, err, false)
+                return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
 
@@ -236,7 +232,6 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.block_gas_limit),
-                false,
             )
         }
 
@@ -245,7 +240,6 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
-                false,
             )
         }
 
@@ -258,7 +252,6 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::Underpriced,
-                false,
             )
         }
 
@@ -268,7 +261,6 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::ChainIdMismatch.into(),
-                    false,
                 )
             }
         }
@@ -290,7 +282,6 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::SignerAccountHasBytecode.into(),
-                false,
             )
         }
 
@@ -299,7 +290,6 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::NonceNotConsistent.into(),
-                false,
             )
         }
 
@@ -313,7 +303,6 @@ where
                     available_funds: account.balance,
                 }
                 .into(),
-                false,
             )
         }
 
