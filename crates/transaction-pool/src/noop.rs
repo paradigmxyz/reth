@@ -73,7 +73,7 @@ impl TransactionPool for NoopTransactionPool {
         None
     }
 
-    fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction> {
         AllTransactionsEvents { events: mpsc::channel(1).1 }
     }
 

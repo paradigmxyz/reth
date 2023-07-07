@@ -156,7 +156,7 @@ pub use crate::{
     },
     error::PoolResult,
     ordering::{GasCostOrdering, TransactionOrdering},
-    pool::{AllTransactionsEvents, PoolTransactionEvent, TransactionEvent, TransactionEvents},
+    pool::{AllTransactionsEvents, FullTransactionEvent, TransactionEvent, TransactionEvents},
     traits::{
         AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
         NewTransactionEvent, PoolSize, PoolTransaction, PooledTransaction, PropagateKind,
@@ -354,7 +354,7 @@ where
         self.pool.add_transaction_event_listener(tx_hash)
     }
 
-    fn all_transactions_event_listener(&self) -> AllTransactionsEvents {
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction> {
         self.pool.add_all_transactions_event_listener()
     }
 
