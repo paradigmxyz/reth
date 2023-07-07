@@ -223,8 +223,8 @@ pub enum TraceOutput {
 pub struct TransactionTrace {
     #[serde(flatten)]
     pub action: Action,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub result: Option<TraceOutput>,
     pub subtraces: usize,
     pub trace_address: Vec<usize>,
