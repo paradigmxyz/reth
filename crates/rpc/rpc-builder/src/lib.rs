@@ -563,9 +563,12 @@ impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let modules = s.split(',');
-
-        RpcModuleSelection::try_from_selection(modules)
+        let mut modules = s.split(',').peekable();
+        let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
+        match first {
+            "all" | "All" => Ok(RpcModuleSelection::All),
+            _ => RpcModuleSelection::try_from_selection(modules),
+        }
     }
 }
 
@@ -1666,6 +1669,12 @@ impl fmt::Debug for RpcServerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_rpc_module_selection() {
+        let selection = "all".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(selection, RpcModuleSelection::All);
+    }
 
     #[test]
     fn identical_selection() {
