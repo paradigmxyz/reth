@@ -93,7 +93,7 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 mod events;
-pub use events::{PoolTransactionEvent, TransactionEvent};
+pub use events::{FullTransactionEvent, TransactionEvent};
 
 mod listener;
 pub use listener::{AllTransactionsEvents, TransactionEvents};
@@ -117,7 +117,7 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Pool settings.
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
-    event_listener: RwLock<PoolEventBroadcast>,
+    event_listener: RwLock<PoolEventBroadcast<T::Transaction>>,
     /// Listeners for new ready transactions.
     pending_transaction_listener: Mutex<Vec<mpsc::Sender<TxHash>>>,
     /// Listeners for new transactions added to the pool.
@@ -223,7 +223,9 @@ where
     }
 
     /// Adds a listener for all transaction events.
-    pub(crate) fn add_all_transactions_event_listener(&self) -> AllTransactionsEvents {
+    pub(crate) fn add_all_transactions_event_listener(
+        &self,
+    ) -> AllTransactionsEvents<T::Transaction> {
         self.event_listener.write().subscribe_all()
     }
 
@@ -417,14 +419,14 @@ where
             AddedTransaction::Pending(tx) => {
                 let AddedPendingTransaction { transaction, promoted, discarded, replaced } = tx;
 
-                listener.pending(transaction.hash(), replaced.as_ref().map(|tx| tx.hash()));
+                listener.pending(transaction.hash(), replaced.clone());
                 promoted.iter().for_each(|tx| listener.pending(tx, None));
                 discarded.iter().for_each(|tx| listener.discarded(tx));
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
                 if let Some(replaced) = replaced {
-                    listener.replaced(replaced.hash(), transaction.hash());
+                    listener.replaced(replaced.clone(), *transaction.hash());
                 }
             }
         }
