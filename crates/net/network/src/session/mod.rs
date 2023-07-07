@@ -706,7 +706,7 @@ pub enum Direction {
 
 impl Direction {
     /// Returns `true` if this an incoming connection.
-    pub(crate) fn is_incoming(&self) -> bool {
+    pub fn is_incoming(&self) -> bool {
         matches!(self, Direction::Incoming)
     }
 
