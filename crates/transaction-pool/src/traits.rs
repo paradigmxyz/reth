@@ -96,7 +96,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
 
     /// Returns a new transaction change event stream for _all_ transactions in the pool.
-    fn all_transactions_event_listener(&self) -> AllTransactionsEvents;
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction>;
 
     /// Returns a new Stream that yields transactions hashes for new ready transactions.
     ///
