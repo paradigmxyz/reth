@@ -68,7 +68,7 @@ pub trait TransactionValidator: Send + Sync {
     ///
     ///    * chain id
     ///    * gas limit
-    ///    * max cost   
+    ///    * max cost
     ///    * nonce >= next nonce of the sender
     ///    * ...
     ///
