@@ -1311,6 +1311,12 @@ where
                     )
                     .is_none()
                 {
+                    // Determines whether or not we should run the pipeline again, in case the
+                    // new gap is large enough to warrant running the pipeline.
+                    if let Some(target) = self.can_pipeline_sync_to_finalized(canonical_tip_num, sync_target_state, None) {
+                        self.sync.set_pipeline_sync_target(target);
+                    }
+
                     // Update the state and hashes of the blockchain tree if possible.
                     match self
                         .update_tree_on_finished_pipeline(sync_target_state.finalized_block_hash)
