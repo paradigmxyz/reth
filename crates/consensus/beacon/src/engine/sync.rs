@@ -305,14 +305,12 @@ where
         // drain an element of the block buffer if there are any
         if let Some(block) = self.range_buffered_blocks.pop() {
             // peek ahead and pop duplicates
-            while self
-                .range_buffered_blocks
-                .peek()
-                .unwrap_or(&Reverse(OrderedSealedBlock(SealedBlock::default()))).0.0
-                .hash()
-                == block.0 .0.hash()
-            {
-                _ = self.range_buffered_blocks.pop();
+            while let Some(peek) = self.range_buffered_blocks.peek() {
+                if peek.0.0.hash() == block.0.0.hash() {
+                    self.range_buffered_blocks.pop();
+                } else {
+                    break;
+                }
             }
             return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0));
         }
