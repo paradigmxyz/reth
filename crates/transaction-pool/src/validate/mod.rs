@@ -30,12 +30,14 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         state_nonce: u64,
         /// Validated transaction.
         transaction: T,
+        /// Whether to propagate the transaction to the network.
+        propagate: bool,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
-    Invalid(T, InvalidPoolTransactionError),
+    Invalid(T, InvalidPoolTransactionError, bool),
     /// An error occurred while trying to validate the transaction
-    Error(TxHash, Box<dyn std::error::Error + Send + Sync>),
+    Error(TxHash, Box<dyn std::error::Error + Send + Sync>, bool),
 }
 
 impl<T: PoolTransaction> TransactionValidationOutcome<T> {
@@ -66,7 +68,7 @@ pub trait TransactionValidator: Send + Sync {
     ///
     ///    * chain id
     ///    * gas limit
-    ///    * max cost
+    ///    * max cost   
     ///    * nonce >= next nonce of the sender
     ///    * ...
     ///
