@@ -37,7 +37,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     /// this transaction from ever becoming valid.
     Invalid(T, InvalidPoolTransactionError, bool),
     /// An error occurred while trying to validate the transaction
-    Error(TxHash, Box<dyn std::error::Error + Send + Sync>, bool),
+    Error(TxHash, Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl<T: PoolTransaction> TransactionValidationOutcome<T> {
