@@ -152,8 +152,9 @@ pub use message::PeerRequest;
 pub use network::NetworkHandle;
 pub use peers::PeersConfig;
 pub use session::{
-    ActiveSessionHandle, ActiveSessionMessage, PeerInfo, PendingSessionEvent, PendingSessionHandle,
-    PendingSessionHandshakeError, SessionCommand, SessionManager, SessionsConfig,
+    ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
+    PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
+    SessionLimits, SessionManager, SessionsConfig,
 };
 
 pub use reth_eth_wire::{DisconnectReason, HelloBuilder, HelloMessage};

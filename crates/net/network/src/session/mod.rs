@@ -47,7 +47,7 @@ use tracing::{instrument, trace};
 mod active;
 mod config;
 mod handle;
-pub use config::SessionsConfig;
+pub use config::{SessionLimits, SessionsConfig};
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
@@ -603,30 +603,45 @@ pub enum SessionEvent {
     ///
     /// This session is now able to exchange data.
     SessionEstablished {
+        /// The remote node's public key
         peer_id: PeerId,
+        /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The user agent of the remote node, usually containing the client name and version
         client_version: Arc<String>,
+        /// The capabilities the remote node has announced
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
+        /// The Status message the peer sent during the `eth` handshake
         status: Status,
+        /// The channel for sending messages to the peer with the session
         messages: PeerRequestSender,
+        /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
+        /// The maximum time that the session waits for a response from the peer before timing out
+        /// the connection
         timeout: Arc<AtomicU64>,
     },
+    /// The peer was already connected with another session.
     AlreadyConnected {
+        /// The remote node's public key
         peer_id: PeerId,
+        /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
     },
     /// A session received a valid message via RLPx.
     ValidMessage {
+        /// The remote node's public key
         peer_id: PeerId,
         /// Message received from the peer.
         message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
     InvalidMessage {
+        /// The remote node's public key
         peer_id: PeerId,
         /// Announced capabilities of the remote peer.
         capabilities: Arc<Capabilities>,
@@ -645,19 +660,27 @@ pub enum SessionEvent {
     },
     /// Closed an incoming pending session during handshaking.
     IncomingPendingSessionClosed {
+        /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The pending handshake session error that caused the session to close
         error: Option<PendingSessionHandshakeError>,
     },
     /// Closed an outgoing pending session during handshaking.
     OutgoingPendingSessionClosed {
+        /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The remote node's public key
         peer_id: PeerId,
+        /// The pending handshake session error that caused the session to close
         error: Option<PendingSessionHandshakeError>,
     },
     /// Failed to establish a tcp stream
     OutgoingConnectionError {
+        /// The remote node's socket address
         remote_addr: SocketAddr,
+        /// The remote node's public key
         peer_id: PeerId,
+        /// The error that caused the outgoing connection to fail
         error: io::Error,
     },
     /// Session was closed due to an error
@@ -671,7 +694,9 @@ pub enum SessionEvent {
     },
     /// Active session was gracefully disconnected.
     Disconnected {
+        /// The remote node's public key
         peer_id: PeerId,
+        /// The remote node's socket address that we were connected to
         remote_addr: SocketAddr,
     },
 }
