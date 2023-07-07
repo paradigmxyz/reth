@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// An event that happened to a transaction and contains its full body where possible.
 #[derive(Debug)]
-pub enum PoolTransactionEvent<T: PoolTransaction> {
+pub enum FullTransactionEvent<T: PoolTransaction> {
     /// Transaction has been added to the pending pool.
     Pending(TxHash),
     /// Transaction has been added to the queued pool.
@@ -36,11 +36,11 @@ pub enum PoolTransactionEvent<T: PoolTransaction> {
     Propagated(Arc<Vec<PropagateKind>>),
 }
 
-impl<T: PoolTransaction> Clone for PoolTransactionEvent<T> {
+impl<T: PoolTransaction> Clone for FullTransactionEvent<T> {
     fn clone(&self) -> Self {
         match self {
             Self::Replaced { transaction, replaced_by } => {
-                Self::Replaced { transaction: Arc::clone(&transaction), replaced_by: *replaced_by }
+                Self::Replaced { transaction: Arc::clone(transaction), replaced_by: *replaced_by }
             }
             other => other.clone(),
         }
