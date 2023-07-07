@@ -125,7 +125,7 @@ use reth_rpc::{
     NetApi, RPCApi, TraceApi, TracingCallGuard, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
-use reth_tasks::TaskSpawner;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
@@ -158,6 +158,8 @@ pub mod constants;
 pub use crate::eth::{EthConfig, EthHandlers};
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use reth_network_api::noop::NoopNetwork;
+use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Provider, Pool, Network, Tasks, Events>(
@@ -192,7 +194,7 @@ where
 
 /// A builder type to configure the RPC module: See [RpcModule]
 ///
-/// This is the main entrypoint for up RPC servers.
+/// This is the main entrypoint and the easiest way to configure an RPC server.
 #[derive(Debug, Clone)]
 pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, Events> {
     /// The Provider type to when creating all rpc handlers
@@ -241,6 +243,24 @@ impl<Provider, Pool, Network, Tasks, Events>
         RpcModuleBuilder { provider, network, pool, executor, events }
     }
 
+    /// Configure a [NoopTransactionPool] instance.
+    ///
+    /// Caution: This will configure a pool API that does abosultely nothing.
+    /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
+    /// requires a [TransactionPool] implementation.
+    pub fn with_noop_pool(
+        self,
+    ) -> RpcModuleBuilder<Provider, NoopTransactionPool, Network, Tasks, Events> {
+        let Self { provider, executor, events, network, .. } = self;
+        RpcModuleBuilder {
+            provider,
+            executor,
+            events,
+            network,
+            pool: NoopTransactionPool::default(),
+        }
+    }
+
     /// Configure the network instance.
     pub fn with_network<N>(self, network: N) -> RpcModuleBuilder<Provider, Pool, N, Tasks, Events>
     where
@@ -248,6 +268,16 @@ impl<Provider, Pool, Network, Tasks, Events>
     {
         let Self { provider, pool, executor, events, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, events }
+    }
+
+    /// Configure a [NoopNetwork] instance.
+    ///
+    /// Caution: This will configure a network API that does abosultely nothing.
+    /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
+    /// requires a [NetworkInfo] implementation.
+    pub fn with_noop_network(self) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, Events> {
+        let Self { provider, pool, executor, events, .. } = self;
+        RpcModuleBuilder { provider, pool, executor, events, network: NoopNetwork::default() }
     }
 
     /// Configure the task executor to use for additional tasks.
@@ -260,6 +290,17 @@ impl<Provider, Pool, Network, Tasks, Events>
     {
         let Self { pool, network, provider, events, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, events }
+    }
+
+    /// Configure [TokioTaskExecutor] as the task executor to use for additional tasks.
+    ///
+    /// This will spawn additional tasks directly via `tokio::task::spawn`, See
+    /// [TokioTaskExecutor].
+    pub fn with_tokio_executor(
+        self,
+    ) -> RpcModuleBuilder<Provider, Pool, Network, TokioTaskExecutor, Events> {
+        let Self { pool, network, provider, events, .. } = self;
+        RpcModuleBuilder { provider, network, pool, events, executor: TokioTaskExecutor::default() }
     }
 
     /// Configure the event subscriber instance
