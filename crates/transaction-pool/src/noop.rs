@@ -170,6 +170,7 @@ impl<T: PoolTransaction> TransactionValidator for NoopTransactionValidator<T> {
             balance: Default::default(),
             state_nonce: 0,
             transaction,
+            propagate: true,
         }
     }
 }

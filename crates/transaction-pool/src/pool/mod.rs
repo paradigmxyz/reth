@@ -274,7 +274,12 @@ where
         tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TxHash> {
         match tx {
-            TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
+            TransactionValidationOutcome::Valid {
+                balance,
+                state_nonce,
+                transaction,
+                propagate,
+            } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
                 let encoded_length = transaction.encoded_length();
@@ -282,7 +287,7 @@ where
                 let tx = ValidPoolTransaction {
                     transaction,
                     transaction_id,
-                    propagate: false,
+                    propagate,
                     timestamp: Instant::now(),
                     origin,
                     encoded_length,
