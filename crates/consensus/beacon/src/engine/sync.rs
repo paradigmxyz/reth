@@ -14,6 +14,7 @@ use reth_tasks::TaskSpawner;
 use std::{
     cmp::{Ordering, Reverse},
     collections::BinaryHeap,
+    collections::binary_heap::PeekMut,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -305,9 +306,9 @@ where
         // drain an element of the block buffer if there are any
         if let Some(block) = self.range_buffered_blocks.pop() {
             // peek ahead and pop duplicates
-            while let Some(peek) = self.range_buffered_blocks.peek() {
+            while let Some(peek) = self.range_buffered_blocks.peek_mut() {
                 if peek.0 .0.hash() == block.0 .0.hash() {
-                    self.range_buffered_blocks.pop();
+                    PeekMut::pop(peek);
                 } else {
                     break;
                 }
