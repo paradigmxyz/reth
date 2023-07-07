@@ -14,7 +14,7 @@ name: ci
 jobs:
   lint:
     name: code lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -40,7 +40,7 @@ jobs:
 
   doc-lint:
     name: doc lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -51,7 +51,7 @@ jobs:
 
   grafana-lint:
     name: grafana lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: Check dashboard JSON with jq
@@ -62,7 +62,7 @@ jobs:
   lint-success:
     if: always()
     name: lint success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [lint, doc-lint, grafana-lint]
     steps:
       - name: Decide whether the needed jobs succeeded or failed

@@ -16,7 +16,7 @@ env:
 jobs:
   extract-version:
     name: extract version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Extract version
         run: echo "VERSION=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
@@ -34,10 +34,10 @@ jobs:
                x86_64-pc-windows-gnu]
         include:
           -   arch: aarch64-unknown-linux-gnu
-              platform: ubuntu-latest
+              platform: ubuntu-20.04
               profile: maxperf
           -   arch: x86_64-unknown-linux-gnu
-              platform: ubuntu-latest
+              platform: ubuntu-20.04
               profile: maxperf
           -   arch: x86_64-apple-darwin
               platform: macos-latest
@@ -46,7 +46,7 @@ jobs:
               platform: macos-latest
               profile: maxperf
           -   arch: x86_64-pc-windows-gnu
-              platform: ubuntu-latest
+              platform: ubuntu-20.04
               profile: maxperf
 
     runs-on: ${{ matrix.platform }}
@@ -129,7 +129,7 @@ jobs:
   draft-release:
     name: draft release
     needs:  [build, extract-version]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     env:
       VERSION:  ${{ needs.extract-version.outputs.VERSION }}
     permissions:
