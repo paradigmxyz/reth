@@ -272,10 +272,10 @@ where
         tx: TransactionValidationOutcome<T::Transaction>,
     ) -> PoolResult<TxHash> {
         match tx {
-            TransactionValidationOutcome::Valid { 
-                balance, 
-                state_nonce, 
-                transaction, 
+            TransactionValidationOutcome::Valid {
+                balance,
+                state_nonce,
+                transaction,
                 propagate,
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
