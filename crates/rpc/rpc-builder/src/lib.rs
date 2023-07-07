@@ -294,7 +294,7 @@ impl<Provider, Pool, Network, Tasks, Events>
 
     /// Configure [TokioTaskExecutor] as the task executor to use for additional tasks.
     ///
-    /// This will spawn additional tasks directly via [tokio::task::spawn](tokio::task::spawn), See
+    /// This will spawn additional tasks directly via `tokio::task::spawn`, See
     /// [TokioTaskExecutor].
     pub fn with_tokio_executor(
         self,
