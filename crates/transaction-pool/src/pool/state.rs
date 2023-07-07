@@ -55,11 +55,11 @@ pub enum SubPool {
     /// The queued sub-pool contains transactions that are not ready to be included in the next
     /// block because they have missing or queued ancestors.
     Queued = 0,
-    /// The pending sub-pool contains transactions that are ready to be included in the next block.
-    Pending,
     /// The base-fee sub-pool contains transactions that are not ready to be included in the next
     /// block because they don't meet the base fee requirement.
     BaseFee,
+    /// The pending sub-pool contains transactions that are ready to be included in the next block.
+    Pending,
 }
 
 // === impl SubPool ===
@@ -105,6 +105,15 @@ impl From<TxState> for SubPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_promoted() {
+        assert!(SubPool::BaseFee.is_promoted(SubPool::Queued));
+        assert!(SubPool::Pending.is_promoted(SubPool::BaseFee));
+        assert!(SubPool::Pending.is_promoted(SubPool::Queued));
+        assert!(!SubPool::BaseFee.is_promoted(SubPool::Pending));
+        assert!(!SubPool::Queued.is_promoted(SubPool::BaseFee));
+    }
 
     #[test]
     fn test_tx_state() {
