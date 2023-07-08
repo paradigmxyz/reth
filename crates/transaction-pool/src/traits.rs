@@ -639,7 +639,7 @@ impl PoolTransaction for PooledTransaction {
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             Transaction::Eip4844(tx) => tx.max_fee_per_gas,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
+            Transaction::Deposit(_) => 0,
         }
     }
 
@@ -770,7 +770,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             match ready!(self.st.poll_recv(cx)) {
                 Some(event) => {
                     if event.subpool == self.subpool {
-                        return Poll::Ready(Some(event))
+                        return Poll::Ready(Some(event));
                     }
                 }
                 None => return Poll::Ready(None),

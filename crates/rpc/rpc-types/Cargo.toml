@@ -25,11 +25,9 @@ jsonrpsee-types = { workspace = true, optional = true }
 
 [features]
 default = ["jsonrpsee-types"]
+optimism = ["reth-primitives/optimism"]
 
 [dev-dependencies]
 # misc
 rand.workspace = true
 similar-asserts = "1.4"
-
-[features]
-optimism = ["reth-primitives/optimism"]

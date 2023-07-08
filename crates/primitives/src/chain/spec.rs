@@ -111,7 +111,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ..Default::default()
     }
     .into()
-});
+})
 
 /// The Sepolia spec
 pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -222,27 +222,33 @@ impl BaseFeeParams {
 
 /// The Optimism Goerli spec
 #[cfg(feature = "optimism")]
-pub static OP_GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
-    chain: Chain::optimism_goerli(),
-    genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
-        .expect("Can't deserialize Optimism Goerli genesis json"),
-    genesis_hash: Some(H256(hex!(
-        "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
-    ))),
-    hardforks: BTreeMap::from([
-        (Hardfork::Byzantium, ForkCondition::Block(0)),
-        (Hardfork::Constantinople, ForkCondition::Block(0)),
-        (Hardfork::Petersburg, ForkCondition::Block(0)),
-        (Hardfork::Istanbul, ForkCondition::Block(0)),
-        (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-        (Hardfork::Berlin, ForkCondition::Block(0)),
-        (Hardfork::London, ForkCondition::Block(4061224)),
-        (Hardfork::ArrowGlacier, ForkCondition::Block(4061224)),
-        (Hardfork::GrayGlacier, ForkCondition::Block(4061224)),
-        (Hardfork::Bedrock, ForkCondition::Block(4061224)),
-        (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
-    ]),
-    optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
+pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::optimism_goerli(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
+            .expect("Can't deserialize Optimism Goerli genesis json"),
+        genesis_hash: Some(H256(hex!(
+            "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
+        ))),
+        fork_timestamps: ForkTimestamps::default(), // TODO(clabby): update this
+        paris_block_and_final_difficulty: None,     // TODO(clabby): update this
+        hardforks: BTreeMap::from([
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+        ]),
+        optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
+    }
+    .into()
 });
 
 /// An Ethereum chain specification.

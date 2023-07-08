@@ -135,11 +135,11 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
 
     fn try_from(payload: ExecutionPayload) -> Result<Self, Self::Error> {
         if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-            return Err(PayloadError::ExtraData(payload.extra_data))
+            return Err(PayloadError::ExtraData(payload.extra_data));
         }
 
         if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
-            return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
+            return Err(PayloadError::BaseFee(payload.base_fee_per_gas));
         }
 
         let transactions = payload
@@ -187,7 +187,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             return Err(PayloadError::BlockHash {
                 execution: header.hash(),
                 consensus: payload.block_hash,
-            })
+            });
         }
 
         Ok(SealedBlock {
@@ -286,6 +286,20 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<H256>,
+
+    /// Transactions is a field for rollups: the transactions list is forced into the block
+    #[cfg(feature = "optimism")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transactions: Option<Vec<Bytes>>,
+    /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
+    /// Transactions list will be included.
+    #[cfg(feature = "optimism")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_tx_pool: Option<bool>,
+    /// If set, this sets the exact gas limit the block produced with.
+    #[cfg(feature = "optimism")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_limit: Option<u64>,
 }
 
 /// This structure contains the result of processing a payload or fork choice update.

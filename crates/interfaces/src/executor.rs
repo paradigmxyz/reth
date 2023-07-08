@@ -7,10 +7,6 @@ use thiserror::Error;
 pub enum BlockValidationError {
     #[error("EVM reported invalid transaction ({hash:?}): {message}")]
     EVM { hash: H256, message: String },
-    #[error("Verification failed")]
-    VerificationFailed,
-    #[error("Fatal internal error")]
-    ExecutionFatalError,
     #[error("Failed to recover sender for transaction")]
     SenderRecoveryError,
     #[error("Receipt root {got:?} is different than expected {expected:?}.")]
@@ -46,8 +42,20 @@ pub enum BlockExecutionError {
     CanonicalRevert { inner: String },
     #[error("Transaction error on commit: {inner:?}")]
     CanonicalCommit { inner: String },
-    #[error("Transaction error on pipeline status update: {inner:?}")]
-    PipelineStatusUpdate { inner: String },
+    // === tree errors ===
+    // TODO(mattsse): move this to tree error
+    #[error("Block hash {block_hash} not found in blockchain tree chain")]
+    BlockHashNotFoundInChain { block_hash: BlockHash },
+    #[error(
+        "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
+    )]
+    AppendChainDoesntConnect { chain_tip: BlockNumHash, other_chain_fork: BlockNumHash },
+
+    /// Only used for TestExecutor
+    ///
+    /// Note: this is not feature gated for convenience.
+    #[error("Execution unavailable for tests")]
+    UnavailableForTest,
 
     #[cfg(feature = "optimism")]
     #[error("Could not get L1 block info from L2 block: {message:?}")]
@@ -55,4 +63,11 @@ pub enum BlockExecutionError {
     #[cfg(feature = "optimism")]
     #[error("Insufficient funds to cover transaction L1 cost: want {want}, have {have}")]
     InsufficientFundsForL1Cost { want: u64, have: u64 },
+}
+
+impl BlockExecutionError {
+    /// Returns `true` if the error is fatal.
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
+    }
 }
