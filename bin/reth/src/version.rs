@@ -81,7 +81,8 @@ pub fn default_extradata() -> String {
 
 const fn build_profile_name() -> &'static str {
     // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
-    // We split on the path separator of the *host* machine, which may be different from `std::path::MAIN_SEPARATOR_STR`.
+    // We split on the path separator of the *host* machine, which may be different from
+    // `std::path::MAIN_SEPARATOR_STR`.
     const OUT_DIR: &str = env!("OUT_DIR");
     const SEP: char = if const_str::contains!(OUT_DIR, "/") { '/' } else { '\\' };
     let parts = const_str::split!(OUT_DIR, SEP);
