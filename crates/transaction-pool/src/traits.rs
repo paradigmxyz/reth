@@ -116,7 +116,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new Stream that yields new transactions added to the basefee-pool.
     ///
     /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
-    /// [SubPool::Pending].
+    /// [SubPool::Pending](crate::pool::SubPool).
     fn new_pending_pool_transactions_listener(
         &self,
     ) -> NewSubpoolTransactionStream<Self::Transaction> {
@@ -126,7 +126,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new Stream that yields new transactions added to the basefee sub-pool.
     ///
     /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
-    /// [SubPool::BaseFee].
+    /// [SubPool::BaseFee](crate::pool::SubPool).
     fn new_basefee_pool_transactions_listener(
         &self,
     ) -> NewSubpoolTransactionStream<Self::Transaction> {
@@ -136,7 +136,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new Stream that yields new transactions added to the queued-pool.
     ///
     /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
-    /// [SubPool::Queued].
+    /// [SubPool::Queued](crate::pool::SubPool).
     fn new_queued_transactions_listener(&self) -> NewSubpoolTransactionStream<Self::Transaction> {
         NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Queued)
     }
