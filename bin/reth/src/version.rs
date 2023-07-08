@@ -28,7 +28,7 @@ pub(crate) const SHORT_VERSION: &str =
 /// Build Timestamp: 2023-05-19T01:47:19.815651705Z
 /// Build Features: jemalloc
 /// ```
-pub(crate) const LONG_VERSION: &str = concat!(
+pub(crate) const LONG_VERSION: &str = const_str::concat!(
     "Version: ",
     env!("CARGO_PKG_VERSION"),
     "\n",
@@ -39,7 +39,10 @@ pub(crate) const LONG_VERSION: &str = concat!(
     env!("VERGEN_BUILD_TIMESTAMP"),
     "\n",
     "Build Features: ",
-    env!("VERGEN_CARGO_FEATURES")
+    env!("VERGEN_CARGO_FEATURES"),
+    "\n",
+    "Build Profile: ",
+    build_profile_name()
 );
 
 /// The version information for reth formatted for P2P (devp2p).
@@ -74,6 +77,16 @@ pub(crate) const P2P_CLIENT_VERSION: &str = concat!(
 /// ```
 pub fn default_extradata() -> String {
     format!("reth/v{}/{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS)
+}
+
+const fn build_profile_name() -> &'static str {
+    // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
+    // We split on the path separator of the *host* machine, which may be different from
+    // `std::path::MAIN_SEPARATOR_STR`.
+    const OUT_DIR: &str = env!("OUT_DIR");
+    const SEP: char = if const_str::contains!(OUT_DIR, "/") { '/' } else { '\\' };
+    let parts = const_str::split!(OUT_DIR, SEP);
+    parts[parts.len() - 4]
 }
 
 #[cfg(test)]
