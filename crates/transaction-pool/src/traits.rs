@@ -582,11 +582,11 @@ impl PoolTransaction for PooledTransaction {
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128 {
         match &self.transaction.transaction {
-            Transaction::Legacy(_) => None,
-            Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(tx) => Some(tx.max_fee_per_gas),
+            Transaction::Legacy(tx) => tx.gas_price,
+            Transaction::Eip2930(tx) => tx.gas_price,
+            Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
+            Transaction::Deposit(_) => 0,
         }
     }
 
@@ -632,29 +632,16 @@ impl PoolTransaction for PooledTransaction {
 
 impl FromRecoveredTransaction for PooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        let (cost, effective_gas_price) = match &tx.transaction {
-            Transaction::Legacy(t) => {
-                let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = t.gas_price;
-                (cost, effective_gas_price)
-            }
-            Transaction::Eip2930(t) => {
-                let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = t.gas_price;
-                (cost, effective_gas_price)
-            }
-            Transaction::Eip1559(t) => {
-                let cost =
-                    U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = t.max_priority_fee_per_gas;
-                (cost, effective_gas_price)
-            }
+        let gas_cost = match &tx.transaction {
+            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
+            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
             #[cfg(feature = "optimism")]
             Transaction::Deposit(t) => {
                 // Gas price is always set to 0 for deposits in order to zero out ETH refunds,
                 // because they already pay for their gas on L1.
                 let gas_price = U256::from(0);
-                let cost = U256::from(gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
+                let cost = U256::from(t.value);
                 let effective_gas_price = 0u128;
                 (cost, effective_gas_price)
             }

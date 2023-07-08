@@ -91,6 +91,10 @@ struct Cli {
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
+    /// The flag to enable persistent logs.
+    #[arg(long = "log.persistent", global = true, conflicts_with = "journald")]
+    persistent: bool,
+
     /// The path to put log files in.
     #[arg(
         long = "log.directory",
@@ -112,7 +116,7 @@ pub struct Logs {
 
 impl Logs {
     /// Builds a tracing layer from the current log options.
-    pub fn layer<S>(&self) -> (BoxedLayer<S>, Option<FileWorkerGuard>)
+    pub fn layer<S>(&self) -> eyre::Result<Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>>
     where
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,

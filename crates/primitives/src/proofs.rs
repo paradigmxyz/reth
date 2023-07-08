@@ -171,11 +171,10 @@ mod tests {
                 success: true,
                 cumulative_gas_used: 102068,
                 logs,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
             },
             bloom,
-            logs,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
         };
         let receipt = vec![receipt];
         let root = calculate_receipt_root(&receipt);

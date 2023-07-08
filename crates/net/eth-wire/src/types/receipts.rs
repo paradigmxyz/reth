@@ -49,11 +49,10 @@ mod test {
                 success: false,
                 cumulative_gas_used: 0,
                 logs: vec![],
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
             },
             bloom: Default::default(),
-            logs: vec![],
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
         }]]);
 
         let mut out = vec![];
@@ -105,10 +104,10 @@ mod test {
         let mut data = vec![];
         let request = RequestPair::<Receipts> {
             request_id: 1111,
-            message: Receipts(vec![
-                vec![
-                    ReceiptWithBloom {
-                        receipt: Receipt {tx_type: TxType::Legacy,
+            message: Receipts(vec![vec![
+                ReceiptWithBloom {
+                    receipt: Receipt {
+                        tx_type: TxType::Legacy,
                         cumulative_gas_used: 0x1u64,
                         logs: vec![
                             Log {
@@ -120,12 +119,13 @@ mod test {
                                 data: hex!("0100ff")[..].into(),
                             },
                         ],
-                        success: false,
-                        #[cfg(feature = "optimism")]
-                        deposit_nonce: None,
-                    },
-                ],
-            ]),
+                        bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
+                    }
+                    success: false,
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce: None,
+                },
+            ]]),
         };
         request.encode(&mut data);
         assert_eq!(data, expected);
@@ -157,22 +157,10 @@ mod test {
                                     },
                                 ],
                                 success: false,
+                                #[cfg(feature = "optimism")]
+                                deposit_nonce: None,
                             },
                             bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                            cumulative_gas_used: 0x1u64,
-                            logs: vec![
-                                Log {
-                                    address: hex!("0000000000000000000000000000000000000011").into(),
-                                    topics: vec![
-                                        hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
-                                        hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
-                                    ],
-                                    data: hex!("0100ff")[..].into(),
-                                },
-                            ],
-                            success: false,
-                            #[cfg(feature = "optimism")]
-                            deposit_nonce: None,
                         },
                     ],
                 ]),

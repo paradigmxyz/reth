@@ -15,6 +15,7 @@ use reth_rlp::{
 };
 #[cfg(feature = "optimism")]
 use revm_primitives::U256;
+use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
@@ -1249,58 +1250,7 @@ impl TransactionSigned {
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2718 does not require rlp header
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
-        match self.transaction {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => {
-                // do nothing w/ with_header
-                let payload_length = self.transaction.fields_len() +
-                    self.signature.payload_len_with_eip155_chain_id(chain_id);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                self.signature.encode_with_eip155_chain_id(out, chain_id);
-            }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.transaction.tx_type() as u8);
-                out.put_u8(DEPOSIT_VERSION);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                // Deposit transactions do not have a signature. If the signature's values are not
-                // zero, then the transaction is invalid.
-                if self.signature().v(self.chain_id()) != 0 ||
-                    self.signature().r != U256::ZERO ||
-                    self.signature().s != U256::ZERO
-                {
-                    // TODO: Ensure that this transaction may never have a non-zero signature
-                    // higher up - we shouldn't be panicking here.
-                    panic!("Deposit transactions must have a zero signature");
-                }
-            }
-            _ => {
-                let payload_length = self.transaction.fields_len() + self.signature.payload_len();
-                if with_header {
-                    Header {
-                        list: false,
-                        payload_length: 1 + length_of_length(payload_length) + payload_length,
-                    }
-                    .encode(out);
-                }
-                out.put_u8(self.transaction.tx_type() as u8);
-                let header = Header { list: true, payload_length };
-                header.encode(out);
-                self.transaction.encode_fields(out);
-                self.signature.encode(out);
-            }
-        }
+        self.transaction.encode_with_signature(&self.signature, out, with_header);
     }
 
     /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only

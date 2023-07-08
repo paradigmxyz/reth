@@ -34,36 +34,40 @@ pub struct Receipt {
 }
 
 impl Receipt {
-    /// Returns the rlp header for the receipt payload.
-    fn receipt_rlp_header(&self) -> reth_rlp::Header {
-        let mut rlp_head = reth_rlp::Header { list: true, payload_length: 0 };
-
-        rlp_head.payload_length += self.success.length();
-        rlp_head.payload_length += self.cumulative_gas_used.length();
-        rlp_head.payload_length += self.bloom.length();
-        rlp_head.payload_length += self.logs.length();
-        #[cfg(feature = "optimism")]
-        if self.tx_type == TxType::DEPOSIT {
-            // Transactions pre-Regolith don't have a deposit nonce
-            if let Some(nonce) = self.deposit_nonce {
-                rlp_head.payload_length += nonce.length();
-            }
-        }
-
-        rlp_head
+    /// Calculates [`Log`]'s bloom filter. this is slow operation and [ReceiptWithBloom] can
+    /// be used to cache this value.
+    pub fn bloom_slow(&self) -> Bloom {
+        logs_bloom(self.logs.iter())
     }
 
-    /// Encodes the receipt data.
-    fn encode_fields(&self, out: &mut dyn BufMut) {
-        self.receipt_rlp_header().encode(out);
-        self.success.encode(out);
-        self.cumulative_gas_used.encode(out);
-        self.bloom.encode(out);
-        self.logs.encode(out);
-        #[cfg(feature = "optimism")]
-        if let Some(nonce) = self.deposit_nonce {
-            nonce.encode(out);
-        }
+    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloom] container
+    /// type.
+    pub fn with_bloom(self) -> ReceiptWithBloom {
+        self.into()
+    }
+}
+
+impl From<Receipt> for ReceiptWithBloom {
+    fn from(receipt: Receipt) -> Self {
+        let bloom = receipt.bloom_slow();
+        ReceiptWithBloom { receipt, bloom }
+    }
+}
+
+/// [`Receipt`] with calculated bloom filter.
+#[main_codec]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ReceiptWithBloom {
+    /// Bloom filter build from logs.
+    pub bloom: Bloom,
+    /// Main receipt body
+    pub receipt: Receipt,
+}
+
+impl ReceiptWithBloom {
+    /// Create new [ReceiptWithBloom]
+    pub fn new(receipt: Receipt, bloom: Bloom) -> Self {
+        Self { receipt, bloom }
     }
 
     /// Consume the structure, returning only the receipt
@@ -85,35 +89,7 @@ impl Receipt {
 impl ReceiptWithBloom {
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
-        if matches!(self.tx_type, TxType::Legacy) {
-            self.encode_fields(out);
-            return
-        }
-
-        let mut payload = BytesMut::new();
-        self.encode_fields(&mut payload);
-
-        if with_header {
-            let payload_length = payload.len() + 1;
-            let header = reth_rlp::Header { list: false, payload_length };
-            header.encode(out);
-        }
-
-        match self.tx_type {
-            TxType::EIP2930 => out.put_u8(0x01),
-            TxType::EIP1559 => out.put_u8(0x02),
-            TxType::Legacy => unreachable!("legacy handled; qed."),
-
-            #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => out.put_u8(0x7E),
-        }
-        out.put_slice(payload.as_ref());
-    }
-
-    /// Returns the length of the receipt data.
-    fn receipt_length(&self) -> usize {
-        let rlp_head = self.receipt_rlp_header();
-        length_of_length(rlp_head.payload_length) + rlp_head.payload_length
+        self.as_encoder().encode_inner(out, with_header)
     }
 
     /// Decodes the receipt payload
@@ -125,27 +101,35 @@ impl ReceiptWithBloom {
         }
         let started_len = b.len();
 
-        let this = match tx_type {
+        let success = reth_rlp::Decodable::decode(b)?;
+        let cumulative_gas_used = reth_rlp::Decodable::decode(b)?;
+        let bloom = Decodable::decode(b)?;
+        let logs = reth_rlp::Decodable::decode(b)?;
+
+        let receipt = match tx_type {
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => Self {
+            TxType::DEPOSIT => {
+                let deposit_nonce = reth_rlp::Decodable::decode(b)?;
+                Receipt {
+                    tx_type,
+                    success,
+                    cumulative_gas_used,
+                    logs,
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce: Some(deposit_nonce),
+                }
+            }
+            _ => Receipt {
                 tx_type,
-                success: reth_rlp::Decodable::decode(b)?,
-                cumulative_gas_used: reth_rlp::Decodable::decode(b)?,
-                bloom: reth_rlp::Decodable::decode(b)?,
-                logs: reth_rlp::Decodable::decode(b)?,
-                deposit_nonce: Some(reth_rlp::Decodable::decode(b)?),
-            },
-            _ => Self {
-                tx_type,
-                success: reth_rlp::Decodable::decode(b)?,
-                cumulative_gas_used: reth_rlp::Decodable::decode(b)?,
-                bloom: reth_rlp::Decodable::decode(b)?,
-                logs: reth_rlp::Decodable::decode(b)?,
+                success,
+                cumulative_gas_used,
+                logs,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
             },
         };
 
+        let this = Self { receipt, bloom };
         let consumed = started_len - b.len();
         if consumed != rlp_head.payload_length {
             return Err(reth_rlp::DecodeError::ListLengthMismatch {
@@ -183,7 +167,6 @@ impl Decodable for ReceiptWithBloom {
                 let receipt_type = *buf.first().ok_or(reth_rlp::DecodeError::Custom(
                     "typed receipt cannot be decoded from an empty slice",
                 ))?;
-
                 match receipt_type {
                     0x01 => {
                         buf.advance(1);
@@ -363,26 +346,10 @@ mod tests {
                     data: Bytes::from_str("0100ff").unwrap().0.into(),
                 }],
                 success: false,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
             },
             bloom: [0; 256].into(),
-            cumulative_gas_used: 0x1u64,
-            logs: vec![Log {
-                address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
-                topics: vec![
-                    H256::from_str(
-                        "000000000000000000000000000000000000000000000000000000000000dead",
-                    )
-                    .unwrap(),
-                    H256::from_str(
-                        "000000000000000000000000000000000000000000000000000000000000beef",
-                    )
-                    .unwrap(),
-                ],
-                data: Bytes::from_str("0100ff").unwrap().0.into(),
-            }],
-            success: false,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
         };
 
         receipt.encode(&mut data);
@@ -417,26 +384,10 @@ mod tests {
                     data: Bytes::from_str("0100ff").unwrap().0.into(),
                 }],
                 success: false,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
             },
             bloom: [0; 256].into(),
-            cumulative_gas_used: 0x1u64,
-            logs: vec![Log {
-                address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
-                topics: vec![
-                    H256::from_str(
-                        "000000000000000000000000000000000000000000000000000000000000dead",
-                    )
-                    .unwrap(),
-                    H256::from_str(
-                        "000000000000000000000000000000000000000000000000000000000000beef",
-                    )
-                    .unwrap(),
-                ],
-                data: Bytes::from_str("0100ff").unwrap().0.into(),
-            }],
-            success: false,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
         };
 
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
@@ -469,6 +420,8 @@ mod tests {
                     data: crate::Bytes::from(vec![1; 0xffffff]),
                 },
             ],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
         };
 
         let mut data = vec![];

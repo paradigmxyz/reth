@@ -378,6 +378,8 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip1559 { max_fee_per_gas, gas_limit, .. } => {
                 U256::from(*gas_limit) * U256::from(*max_fee_per_gas)
             }
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => U256::ZERO,
         }
     }
 
@@ -387,10 +389,10 @@ impl PoolTransaction for MockTransaction {
 
     fn max_fee_per_gas(&self) -> u128 {
         match self {
+            MockTransaction::Legacy { gas_price, .. } => *gas_price,
+            MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
             #[cfg(feature = "optimism")]
-            MockTransaction::DepositTx { .. } => None,
-            MockTransaction::Legacy { .. } => None,
-            MockTransaction::Eip1559 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
+            MockTransaction::DepositTx { .. } => 0,
         }
     }
 
@@ -421,7 +423,7 @@ impl PoolTransaction for MockTransaction {
     fn tx_type(&self) -> u8 {
         match self {
             #[cfg(feature = "optimism")]
-            MockTransaction::DepositTx { .. } => DEPOSIT_TX_TYPE,
+            MockTransaction::DepositTx { .. } => TxType::DEPOSIT.into(),
             MockTransaction::Legacy { .. } => TxType::Legacy.into(),
             MockTransaction::Eip1559 { .. } => TxType::EIP1559.into(),
         }

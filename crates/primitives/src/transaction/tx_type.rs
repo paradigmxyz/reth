@@ -69,10 +69,9 @@ impl Compact for TxType {
             match identifier {
                 0 => TxType::Legacy,
                 1 => TxType::EIP2930,
-                2 => TxType::EIP1559,
                 #[cfg(feature = "optimism")]
                 126 => TxType::DEPOSIT,
-                _ => panic!("unknown transaction type {identifier}"),
+                _ => TxType::EIP1559,
             },
             buf,
         )

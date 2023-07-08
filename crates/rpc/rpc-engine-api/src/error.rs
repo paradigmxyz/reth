@@ -68,10 +68,55 @@ pub enum EngineApiError {
     ForkChoiceUpdate(#[from] BeaconForkChoiceUpdateError),
     /// An error occurred while processing a new payload in the beacon consensus engine.
     #[error(transparent)]
-    Internal(#[from] reth_interfaces::Error),
+    NewPayload(#[from] BeaconOnNewPayloadError),
+    /// Encountered an internal error.
+    #[error(transparent)]
+    Internal(Box<dyn std::error::Error + Send + Sync>),
+    /// Fetching the payload failed
+    #[error(transparent)]
+    GetPayloadError(#[from] PayloadBuilderError),
     /// If the optimism feature flag is enabled, the payload attributes must have a present
     /// gas limit for the forkchoice updated method.
     #[cfg(feature = "optimism")]
     #[error("Missing gas limit in payload attributes")]
     MissingGasLimitInPayloadAttributes,
+}
+
+impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(error: EngineApiError) -> Self {
+        let code = match error {
+            EngineApiError::InvalidBodiesRange { .. } |
+            EngineApiError::WithdrawalsNotSupportedInV1 |
+            EngineApiError::NoWithdrawalsPostShanghai |
+            EngineApiError::HasWithdrawalsPreShanghai => INVALID_PARAMS_CODE,
+            EngineApiError::UnknownPayload => UNKNOWN_PAYLOAD_CODE,
+            EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
+
+            // Error responses from the consensus engine
+            EngineApiError::ForkChoiceUpdate(ref err) => match err {
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => return (*err).into(),
+                BeaconForkChoiceUpdateError::EngineUnavailable |
+                BeaconForkChoiceUpdateError::Internal(_) => INTERNAL_ERROR_CODE,
+            },
+            EngineApiError::NewPayload(ref err) => match err {
+                BeaconOnNewPayloadError::Internal(_) |
+                BeaconOnNewPayloadError::EngineUnavailable => INTERNAL_ERROR_CODE,
+            },
+            // Any other server error
+            EngineApiError::TerminalTD { .. } |
+            EngineApiError::TerminalBlockHash { .. } |
+            EngineApiError::Internal(_) |
+            EngineApiError::GetPayloadError(_) => INTERNAL_ERROR_CODE,
+            // Optimism errors
+            #[cfg(feature = "optimism")]
+            EngineApiError::MissingGasLimitInPayloadAttributes => INVALID_PARAMS_CODE,
+        };
+        jsonrpsee_types::error::ErrorObject::owned(code, error.to_string(), None::<()>)
+    }
+}
+
+impl From<EngineApiError> for jsonrpsee_core::error::Error {
+    fn from(error: EngineApiError) -> Self {
+        jsonrpsee_core::error::Error::Call(error.into())
+    }
 }

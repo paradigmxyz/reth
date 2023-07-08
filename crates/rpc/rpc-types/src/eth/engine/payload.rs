@@ -255,6 +255,22 @@ pub struct PayloadAttributes {
     /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
+
+    /// Transactions is a field for rollups: the transactions list is forced into the block
+    #[cfg(feature = "optimism")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transactions: Option<Vec<Bytes>>,
+
+    /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
+    /// Transactions list will be included.
+    #[cfg(feature = "optimism")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_tx_pool: Option<bool>,
+
+    /// If set, this sets the exact gas limit the block produced with.
+    #[cfg(feature = "optimism")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_limit: Option<u64>,
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
