@@ -194,6 +194,9 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::BlockHashNotFoundInChain { .. } |
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
                     BlockExecutionError::UnavailableForTest => false,
+                    #[cfg(feature = "optimism")]
+                    BlockExecutionError::L1BlockInfoError { .. } |
+                    BlockExecutionError::InsufficientFundsForL1Cost { .. } => false,
                 }
             }
             InsertBlockErrorKind::Tree(err) => {

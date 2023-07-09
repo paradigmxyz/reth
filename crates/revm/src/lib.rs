@@ -33,3 +33,7 @@ pub use revm;
 
 /// Etereum DAO hardfork state change data.
 pub mod eth_dao_fork;
+
+/// Optimism-specific utilities for the executor
+#[cfg(feature = "optimism")]
+mod optimism;

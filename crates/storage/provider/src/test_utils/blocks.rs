@@ -125,6 +125,8 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, PostState) {
                 topics: vec![H256::from_low_u64_be(1), H256::from_low_u64_be(2)],
                 data: Bytes::default(),
             }],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
         },
     );
 
@@ -168,6 +170,8 @@ fn block2(number: BlockNumber, parent_hash: H256) -> (SealedBlockWithSenders, Po
                 topics: vec![H256::from_low_u64_be(3), H256::from_low_u64_be(4)],
                 data: Bytes::default(),
             }],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
         },
     );
 

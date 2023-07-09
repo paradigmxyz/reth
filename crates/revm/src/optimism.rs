@@ -27,20 +27,21 @@ pub struct L1BlockInfo {
     l1_fee_scalar: U256,
 }
 
-impl L1BlockInfo {
-    /// Create a new L1 block info struct from a L2 block
-    pub fn new(block: &Block) -> Result<Self, executor::Error> {
+impl TryFrom<&Block> for L1BlockInfo {
+    type Error = executor::BlockExecutionError;
+
+    fn try_from(block: &Block) -> Result<Self, Self::Error> {
         let l1_block_contract = Address::from_str(L1_BLOCK_CONTRACT).unwrap();
 
         let l1_info_tx_data = block
             .body
             .iter()
             .find(|tx| matches!(tx.kind(), TransactionKind::Call(to) if to == &l1_block_contract))
-            .ok_or(executor::Error::L1BlockInfoError {
+            .ok_or(executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not find l1 block info tx in the L2 block".to_string(),
             })
             .and_then(|tx| {
-                tx.input().get(4..).ok_or(executor::Error::L1BlockInfoError {
+                tx.input().get(4..).ok_or(executor::BlockExecutionError::L1BlockInfoError {
                     message: "could not get l1 block info tx calldata bytes".to_string(),
                 })
             })?;
@@ -56,30 +57,32 @@ impl L1BlockInfo {
         // + 32 bytes for the fee overhead
         // + 32 bytes for the fee scalar
         if l1_info_tx_data.len() != 184 {
-            return Err(executor::Error::L1BlockInfoError {
+            return Err(executor::BlockExecutionError::L1BlockInfoError {
                 message: "unexpected l1 block info tx calldata length found".to_string(),
             })
         }
 
         let l1_base_fee = U256::try_from_le_slice(&l1_info_tx_data[16..48]).ok_or(
-            executor::Error::L1BlockInfoError {
+            executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 base fee".to_string(),
             },
         )?;
         let l1_fee_overhead = U256::try_from_le_slice(&l1_info_tx_data[120..152]).ok_or(
-            executor::Error::L1BlockInfoError {
+            executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 fee overhead".to_string(),
             },
         )?;
         let l1_fee_scalar = U256::try_from_le_slice(&l1_info_tx_data[152..184]).ok_or(
-            executor::Error::L1BlockInfoError {
+            executor::BlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 fee scalar".to_string(),
             },
         )?;
 
         Ok(Self { l1_base_fee, l1_fee_overhead, l1_fee_scalar })
     }
+}
 
+impl L1BlockInfo {
     /// Calculate the gas cost of a transaction based on L1 block data posted on L2
     pub fn calculate_tx_l1_cost(&mut self, tx: &TransactionSigned) -> U256 {
         let rollup_data_gas_cost = U256::from(tx.input().iter().fold(0, |acc, byte| {
