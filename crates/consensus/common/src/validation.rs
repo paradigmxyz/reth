@@ -90,10 +90,7 @@ pub fn validate_transaction_regarding_header(
             Some(*chain_id)
         }
         #[cfg(feature = "optimism")]
-        Transaction::Deposit(TxDeposit { .. }) => {
-            // TODO: I believe the chain id should be None here, but have to confirm.
-            None
-        }
+        Transaction::Deposit(TxDeposit { .. }) => None,
     };
     if let Some(chain_id) = chain_id {
         if chain_id != chain_spec.chain().id() {

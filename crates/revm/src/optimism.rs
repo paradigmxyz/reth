@@ -86,7 +86,7 @@ impl L1BlockInfo {
     /// Calculate the gas cost of a transaction based on L1 block data posted on L2
     pub fn calculate_tx_l1_cost(&mut self, tx: &TransactionSigned) -> U256 {
         let rollup_data_gas_cost = U256::from(tx.input().iter().fold(0, |acc, byte| {
-            acc + if byte == &0x00 { ZERO_BYTE_COST } else { NON_ZERO_BYTE_COST }
+            acc + if *byte == 0x00 { ZERO_BYTE_COST } else { NON_ZERO_BYTE_COST }
         }));
 
         if tx.is_deposit() || rollup_data_gas_cost == U256::ZERO {

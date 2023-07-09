@@ -115,7 +115,6 @@ impl ReceiptWithBloom {
                     success,
                     cumulative_gas_used,
                     logs,
-                    #[cfg(feature = "optimism")]
                     deposit_nonce: Some(deposit_nonce),
                 }
             }
