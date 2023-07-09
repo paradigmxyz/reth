@@ -234,22 +234,17 @@ where
         let pool = self.pool.read();
         pool.all()
             .hashes_iter()
-            .filter(|hash| {
-                match pool.get(hash) {
-                    Some(tx) => tx.propagate,
-                    None => false,
-                }
-            }) 
+            .filter(|hash| match pool.get(hash) {
+                Some(tx) => tx.propagate,
+                None => false,
+            })
             .collect()
     }
 
     /// Returns _all_ transactions in the pool.
     pub(crate) fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let pool = self.pool.read();
-        pool.all()
-            .transactions_iter()
-            .filter(|tx| tx.propagate)
-            .collect()
+        pool.all().transactions_iter().filter(|tx| tx.propagate).collect()
     }
 
     /// Updates the entire pool after a new block was executed.
