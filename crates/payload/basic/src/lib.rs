@@ -659,6 +659,8 @@ fn build_payload<Pool, Client>(
                     success: result.is_success(),
                     cumulative_gas_used,
                     logs: result.logs().into_iter().map(into_reth_log).collect(),
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce: None,
                 },
             );
 

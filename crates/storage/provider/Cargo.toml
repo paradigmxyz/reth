@@ -43,3 +43,8 @@ tempfile = "3.3"
 
 [features]
 test-utils = ["reth-rlp"]
+optimism = [
+  "reth-primitives/optimism",
+  "reth-interfaces/optimism",
+  "reth-revm-primitives/optimism"
+]

@@ -358,6 +358,8 @@ pub fn random_receipt<R: Rng>(
         } else {
             vec![]
         },
+        #[cfg(feature = "optimism")]
+        deposit_nonce: None,
     }
 }
 

@@ -231,7 +231,7 @@ where
         self.init_env(&block.header, total_difficulty);
 
         #[cfg(feature = "optimism")]
-        let mut l1_block_info = optimism::L1BlockInfo::new(block)?;
+        let mut l1_block_info = optimism::L1BlockInfo::try_from(block)?;
 
         let mut cumulative_gas_used = 0;
         let mut post_state = PostState::with_tx_capacity(block.number, block.body.len());
@@ -246,147 +246,35 @@ where
                 }
                 .into())
             }
+            // Execute transaction.
+            let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
-            #[cfg(feature = "optimism")]
-            {
-                let db = self.db();
-                let l1_cost = l1_block_info.calculate_tx_l1_cost(transaction);
+            // commit changes
+            self.commit_changes(
+                block.number,
+                state,
+                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
+                &mut post_state,
+            );
 
-                let sender_account = db.load_account(sender).map_err(|_| Error::ProviderError)?;
-                let old_sender_info = to_reth_acc(&sender_account.info);
-                if let Some(m) = transaction.mint() {
-                    // Add balance to the caller account equal to the minted amount.
-                    // Note: this is unconditional, and will not be reverted if the tx fails
-                    // (unless the block can't be built at all due to gas limit constraints)
-                    sender_account.info.balance += U256::from(m);
-                }
+            // append gas used
+            cumulative_gas_used += result.gas_used();
 
-                // Check if the sender balance can cover the L1 cost.
-                // Deposits pay for their gas directly on L1 so they are exempt from this
-                if !transaction.is_deposit() {
-                    if sender_account.info.balance.cmp(&l1_cost) == std::cmp::Ordering::Less {
-                        return Err(Error::InsufficientFundsForL1Cost {
-                            have: sender_account.info.balance.to::<u64>(),
-                            want: l1_cost.to::<u64>(),
-                        })
-                    }
-
-                    // Safely take l1_cost from sender (the rest will be deducted by the
-                    // internal EVM execution and included in result.gas_used())
-                    // TODO: need to handle calls with `disable_balance_check` flag set?
-                    sender_account.info.balance -= l1_cost;
-                }
-
-                let new_sender_info = to_reth_acc(&sender_account.info);
-                post_state.change_account(sender, old_sender_info, new_sender_info);
-
-                // Execute transaction.
-                let ResultAndState { result, state } = self.transact(transaction, sender)?;
-
-                if transaction.is_deposit() && !result.is_success() {
-                    // If the Deposited transaction failed, the deposit must still be included.
-                    // In this case, we need to increment the sender nonce and disregard the
-                    // state changes. The transaction is also recorded as using all gas.
-                    let db = self.db();
-                    let sender_account =
-                        db.load_account(sender).map_err(|_| Error::ProviderError)?;
-                    let old_sender_info = to_reth_acc(&sender_account.info);
-                    sender_account.info.nonce += 1;
-                    let new_sender_info = to_reth_acc(&sender_account.info);
-
-                    post_state.change_account(sender, old_sender_info, new_sender_info);
-                    if !transaction.is_system_transaction() {
-                        cumulative_gas_used += transaction.gas_limit();
-                    }
-
-                    post_state.add_receipt(Receipt {
-                        tx_type: transaction.tx_type(),
-                        success: false,
-                        cumulative_gas_used,
-                        bloom: Bloom::zero(),
-                        logs: vec![],
-                        deposit_nonce: Some(transaction.nonce()),
-                    });
-                    post_state.finish_transition();
-                    continue
-                }
-
-                // commit changes
-                self.commit_changes(
-                    state,
-                    self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
-                    &mut post_state,
-                );
-
-                if !transaction.is_system_transaction() {
-                    // After Regolith, deposits are reported as using the actual gas used instead of
-                    // all the gas. System transactions are not reported as using any gas.
-                    cumulative_gas_used += result.gas_used()
-                }
-
-                // Route the l1 cost and base fee to the appropriate optimism vaults
-                self.increment_account_balance(
-                    optimism::l1_cost_recipient(),
-                    l1_cost,
-                    &mut post_state,
-                )?;
-                self.increment_account_balance(
-                    optimism::base_fee_recipient(),
-                    U256::from(
-                        block
-                            .base_fee_per_gas
-                            .unwrap_or_default()
-                            .saturating_mul(result.gas_used()),
-                    ),
-                    &mut post_state,
-                )?;
-
-                // cast revm logs to reth logs
-                let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
-
-                // Push transaction changeset and calculate header bloom filter for receipt.
-                post_state.add_receipt(Receipt {
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            post_state.add_receipt(
+                block.number,
+                Receipt {
                     tx_type: transaction.tx_type(),
                     // Success flag was added in `EIP-658: Embedding transaction status code in
                     // receipts`.
                     success: result.is_success(),
                     cumulative_gas_used,
-                    bloom: logs_bloom(logs.iter()),
-                    logs,
-                    deposit_nonce: Some(transaction.nonce()),
-                });
-                post_state.finish_transition();
-            }
-
-            #[cfg(not(feature = "optimism"))]
-            {
-                // Execute transaction.
-                let ResultAndState { result, state } = self.transact(transaction, sender)?;
-
-                // commit changes
-                self.commit_changes(
-                    state,
-                    self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
-                    &mut post_state,
-                );
-
-                cumulative_gas_used += result.gas_used();
-
-                // cast revm logs to reth logs
-                let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
-
-                // Push transaction changeset and calculate header bloom filter for receipt.
-                post_state.add_receipt(Receipt {
-                    tx_type: transaction.tx_type(),
-                    // Success flag was added in `EIP-658: Embedding transaction status code in
-                    // receipts`.
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    bloom: logs_bloom(logs.iter()),
-                    logs,
-                });
-                post_state.finish_transition();
-            }
+                    // convert to reth log
+                    logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce: None,
+                },
+            );
         }
 
         Ok((post_state, cumulative_gas_used))
