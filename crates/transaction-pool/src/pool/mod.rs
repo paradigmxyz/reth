@@ -232,11 +232,7 @@ where
     /// Returns hashes of _all_ transactions in the pool.
     pub(crate) fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
         let pool = self.pool.read();
-        pool.all()
-            .transactions_iter()
-            .filter(|tx| tx.propagate)
-            .map(|tx| *tx.hash())
-            .collect()
+        pool.all().transactions_iter().filter(|tx| tx.propagate).map(|tx| *tx.hash()).collect()
     }
 
     /// Returns _all_ transactions in the pool.
