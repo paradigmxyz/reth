@@ -174,7 +174,7 @@ where
     fn check_peers(&mut self) {
         // only run check process if more than 5 minutes have passed
         if self.peers_last_checked.elapsed().as_secs() < 1 * 60 {
-            return;
+            return
         }
 
         self.peers_last_checked = Instant::now();
