@@ -10,6 +10,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::trace;
 
 /// Alias type for metric producers to use.
 pub type MetricEventsSender = UnboundedSender<MetricEvent>;
@@ -54,6 +55,7 @@ impl MetricsListener {
     }
 
     fn handle_event(&mut self, event: MetricEvent) {
+        trace!(target: "sync::metrics", ?event, "Metric event received");
         match event {
             MetricEvent::SyncHeight { height } => {
                 for stage_id in StageId::ALL {
