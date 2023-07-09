@@ -233,11 +233,9 @@ where
     pub(crate) fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
         let pool = self.pool.read();
         pool.all()
-            .hashes_iter()
-            .filter(|hash| match pool.get(hash) {
-                Some(tx) => tx.propagate,
-                None => false,
-            })
+            .transactions_iter()
+            .filter(|tx| tx.propagate)
+            .map(|tx| *tx.hash())
             .collect()
     }
 
