@@ -11,6 +11,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ExecutionPayloadEnvelope, ForkchoiceUpdated,
     PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
+use reth_tasks::TaskSpawner;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::trace;
@@ -25,13 +26,15 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 /// functions in the Execution layer that are crucial for the consensus process.
 pub struct EngineApi<Provider> {
     /// The provider to interact with the chain.
-    provider: Provider,
+    provider: Arc<Provider>,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
     beacon_consensus: BeaconConsensusEngineHandle,
     /// The type that can communicate with the payload service to retrieve payloads.
     payload_store: PayloadStore,
+    /// For spawning and executing async tasks
+    task_spawner: Box<dyn TaskSpawner>,
 }
 
 impl<Provider> EngineApi<Provider>
@@ -44,8 +47,15 @@ where
         chain_spec: Arc<ChainSpec>,
         beacon_consensus: BeaconConsensusEngineHandle,
         payload_store: PayloadStore,
+        task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
-        Self { provider, chain_spec, beacon_consensus, payload_store }
+        Self {
+            provider: Arc::new(provider),
+            chain_spec,
+            beacon_consensus,
+            payload_store,
+            task_spawner,
+        }
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -162,31 +172,44 @@ where
     /// Implementors should take care when acting on the input to this method, specifically
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
-    pub fn get_payload_bodies_by_range(
+    pub async fn get_payload_bodies_by_range(
         &self,
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodies> {
-        if count > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len: count })
-        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let provider = self.provider.clone();
 
-        if start == 0 || count == 0 {
-            return Err(EngineApiError::InvalidBodiesRange { start, count })
-        }
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            if count > MAX_PAYLOAD_BODIES_LIMIT {
+                tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
+                return
+            }
 
-        let mut result = Vec::with_capacity(count as usize);
+            if start == 0 || count == 0 {
+                tx.send(Err(EngineApiError::InvalidBodiesRange { start, count })).ok();
+                return
+            }
 
-        let end = start.saturating_add(count);
-        for num in start..end {
-            let block = self
-                .provider
-                .block(BlockHashOrNumber::Number(num))
-                .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-            result.push(block.map(Into::into));
-        }
+            let mut result = Vec::with_capacity(count as usize);
 
-        Ok(result)
+            let end = start.saturating_add(count);
+            for num in start..end {
+                let block_result = provider.block(BlockHashOrNumber::Number(num));
+                match block_result {
+                    Ok(block) => {
+                        result.push(block.map(Into::into));
+                    }
+                    Err(err) => {
+                        tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
+                        return
+                    }
+                };
+            }
+            tx.send(Ok(result)).ok();
+        }));
+
+        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
 
     /// Called to retrieve execution payload bodies by hashes.
@@ -404,7 +427,7 @@ where
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodies> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
-        Ok(EngineApi::get_payload_bodies_by_range(self, start.as_u64(), count.as_u64())?)
+        Ok(EngineApi::get_payload_bodies_by_range(self, start.as_u64(), count.as_u64()).await?)
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
@@ -439,6 +462,7 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, H256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
+    use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
@@ -447,11 +471,13 @@ mod tests {
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
+        let task_executor = Box::new(TokioTaskExecutor::default());
         let api = EngineApi::new(
             provider.clone(),
             chain_spec.clone(),
             BeaconConsensusEngineHandle::new(to_engine),
             payload_store.into(),
+            task_executor,
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
@@ -491,7 +517,7 @@ mod tests {
 
             // test [EngineApiMessage::GetPayloadBodiesByRange]
             for (start, count) in by_range_tests {
-                let res = api.get_payload_bodies_by_range(start, count);
+                let res = api.get_payload_bodies_by_range(start, count).await;
                 assert_matches!(res, Err(EngineApiError::InvalidBodiesRange { .. }));
             }
         }
@@ -501,7 +527,7 @@ mod tests {
             let (_, api) = setup_engine_api();
 
             let request_count = MAX_PAYLOAD_BODIES_LIMIT + 1;
-            let res = api.get_payload_bodies_by_range(0, request_count);
+            let res = api.get_payload_bodies_by_range(0, request_count).await;
             assert_matches!(res, Err(EngineApiError::PayloadRequestTooLarge { .. }));
         }
 
@@ -518,7 +544,7 @@ mod tests {
             let expected =
                 blocks.iter().cloned().map(|b| Some(b.unseal().into())).collect::<Vec<_>>();
 
-            let res = api.get_payload_bodies_by_range(start, count).unwrap();
+            let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
             assert_eq!(res, expected);
         }
 
@@ -558,7 +584,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let res = api.get_payload_bodies_by_range(start, count).unwrap();
+            let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
             assert_eq!(res, expected);
 
             let hashes = blocks.iter().map(|b| b.hash()).collect();
