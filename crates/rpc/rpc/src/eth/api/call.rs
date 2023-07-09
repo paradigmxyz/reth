@@ -38,11 +38,7 @@ where
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].
-    pub async fn estimate_gas_at(
-        &self,
-        request: CallRequest,
-        at: BlockId,
-    ) -> EthResult<U256> {
+    pub async fn estimate_gas_at(&self, request: CallRequest, at: BlockId) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
         self.estimate_gas_with(cfg, block_env, request, state)
