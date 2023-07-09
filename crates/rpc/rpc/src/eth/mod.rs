@@ -8,7 +8,7 @@ pub mod gas_oracle;
 mod id_provider;
 mod logs_utils;
 mod pubsub;
-pub(crate) mod revm_utils;
+pub mod revm_utils;
 mod signer;
 pub(crate) mod utils;
 
