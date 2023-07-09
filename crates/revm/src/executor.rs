@@ -28,8 +28,6 @@ use std::{
 
 #[cfg(feature = "optimism")]
 use crate::optimism;
-#[cfg(feature = "optimism")]
-use reth_primitives::Log;
 
 /// Main block executor
 pub struct Executor<DB>
@@ -344,7 +342,7 @@ where
                 )?;
 
                 // cast revm logs to reth logs
-                let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
+                let logs = result.logs().into_iter().map(into_reth_log).collect();
 
                 // Push transaction changeset and calculate header bloom filter for receipt.
                 post_state.add_receipt(
