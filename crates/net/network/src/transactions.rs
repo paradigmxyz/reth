@@ -30,6 +30,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
@@ -113,6 +114,8 @@ pub struct TransactionsManager<Pool> {
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
+    /// Tracks last time peers were checked for checking at intervals
+    peers_last_checked: Instant,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -146,6 +149,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics: Default::default(),
+            peers_last_checked: Instant::now(),
         }
     }
 }
@@ -164,6 +168,33 @@ where
 
     fn update_import_metrics(&self) {
         self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
+    }
+
+    /// periodically checks peers for received pending transactions and hashes
+    fn check_peers(&mut self) {
+        // only run check process if more than 5 minutes have passed
+        if self.peers_last_checked.elapsed().as_secs() < 1 * 60 {
+            return;
+        }
+
+        self.peers_last_checked = Instant::now();
+
+        for (peer_id, Peer { received_transactions_count, received_hashes_count, added_on, .. }) in
+            self.peers.iter()
+        {
+            let elapsed = added_on.elapsed().as_secs() as usize;
+            // 1 minute grace period
+            if elapsed < 60 {
+                continue
+            }
+            // at least 10 txs per minute... very achievable
+            let min_received: usize = (elapsed / 60) * 10;
+            let rtc = *received_transactions_count;
+            let rhc = *received_hashes_count;
+            if rtc < min_received || rhc < min_received {
+                self.report_low_pending_txs(*peer_id);
+            }
+        }
     }
 
     /// Request handler for an incoming request for transactions
@@ -302,6 +333,7 @@ where
                 }
             }
 
+            peer.received_hashes_count += hashes.len();
             self.pool.retain_unknown(&mut hashes);
 
             if hashes.is_empty() {
@@ -375,6 +407,9 @@ where
                         request_tx: messages,
                         version,
                         client_version,
+                        received_transactions_count: 0,
+                        received_hashes_count: 0,
+                        added_on: Instant::now(),
                     },
                 );
 
@@ -438,6 +473,8 @@ where
                 // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`]
                 if source.is_broadcast() && !peer.transactions.insert(tx.hash()) {
                     num_already_seen += 1;
+                } else {
+                    peer.received_transactions_count += 1;
                 }
 
                 match self.transactions_by_peers.entry(tx.hash()) {
@@ -481,6 +518,12 @@ where
     fn report_already_seen(&self, peer_id: PeerId) {
         trace!(target: "net::tx", ?peer_id, "Penalizing peer for already seen transaction");
         self.network.reputation_change(peer_id, ReputationChangeKind::AlreadySeenTransaction);
+    }
+
+    fn report_low_pending_txs(&self, peer_id: PeerId) {
+        trace!(target: "net::tx", ?peer_id, "Penalizing peer very few pending transactions");
+        self.metrics.reported_low_pending_transactions.increment(1);
+        self.network.reputation_change(peer_id, ReputationChangeKind::LowPendingTransactions);
     }
 
     /// Clear the transaction
@@ -580,6 +623,8 @@ where
         if !new_txs.is_empty() {
             this.on_new_transactions(new_txs);
         }
+
+        this.check_peers();
 
         // all channels are fully drained and import futures pending
 
@@ -720,6 +765,12 @@ struct Peer {
     /// The peer's client version.
     #[allow(unused)]
     client_version: Arc<String>,
+    /// Keeps track of the number of transactions received by peer.
+    received_transactions_count: usize,
+    /// Keeps track of the number of transaction hashes received by peer.
+    received_hashes_count: usize,
+    /// Allows for a grace period before checking pending transaction activity.
+    added_on: Instant,
 }
 
 /// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)

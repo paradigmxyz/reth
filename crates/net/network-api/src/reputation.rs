@@ -22,6 +22,8 @@ pub enum ReputationChangeKind {
     /// > originally). This is usually achieved by remembering a set of transaction hashes recently
     /// > relayed by the peer.
     AlreadySeenTransaction,
+    /// Peer sent very few pending transactions and/or hashes after a given grace period.
+    LowPendingTransactions,
     /// Peer failed to respond in time.
     Timeout,
     /// Peer does not adhere to network protocol rules.

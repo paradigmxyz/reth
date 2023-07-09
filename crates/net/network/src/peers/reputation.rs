@@ -30,6 +30,10 @@ const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 16 * REPUTATION_UNIT;
 /// apply any changes to the peer's reputation, effectively ignoring it.
 const ALREADY_SEEN_TRANSACTION_REPUTATION_CHANGE: i32 = 0;
 
+/// The reputation change to apply to a peer that failed to send a resonable number of pending txs
+/// consistently over time after a grace period.
+const LOW_PENDING_TRANSACTIONS_CHANGE: i32 = 5 * REPUTATION_UNIT;
+
 /// The reputation change to apply to a peer which violates protocol rules: minimal reputation
 const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;
 
@@ -51,6 +55,8 @@ pub struct ReputationChangeWeights {
     pub bad_transactions: Reputation,
     /// Weight for [`ReputationChangeKind::AlreadySeenTransaction`]
     pub already_seen_transactions: Reputation,
+    /// Weight for [`ReputationChangeKind::LowPendingTransactions`]
+    pub low_pending_transactions: Reputation,
     /// Weight for [`ReputationChangeKind::Timeout`]
     pub timeout: Reputation,
     /// Weight for [`ReputationChangeKind::BadProtocol`]
@@ -72,6 +78,7 @@ impl ReputationChangeWeights {
             ReputationChangeKind::BadBlock => self.bad_block.into(),
             ReputationChangeKind::BadTransactions => self.bad_transactions.into(),
             ReputationChangeKind::AlreadySeenTransaction => self.already_seen_transactions.into(),
+            ReputationChangeKind::LowPendingTransactions => self.low_pending_transactions.into(),
             ReputationChangeKind::Timeout => self.timeout.into(),
             ReputationChangeKind::BadProtocol => self.bad_protocol.into(),
             ReputationChangeKind::FailedToConnect => self.failed_to_connect.into(),
@@ -88,6 +95,7 @@ impl Default for ReputationChangeWeights {
             bad_block: BAD_MESSAGE_REPUTATION_CHANGE,
             bad_transactions: BAD_MESSAGE_REPUTATION_CHANGE,
             already_seen_transactions: ALREADY_SEEN_TRANSACTION_REPUTATION_CHANGE,
+            low_pending_transactions: LOW_PENDING_TRANSACTIONS_CHANGE,
             bad_message: BAD_MESSAGE_REPUTATION_CHANGE,
             timeout: TIMEOUT_REPUTATION_CHANGE,
             bad_protocol: BAD_PROTOCOL_REPUTATION_CHANGE,
