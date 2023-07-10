@@ -15,7 +15,7 @@ name: unit
 jobs:
   test:
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         partition: [1, 2, 3, 4]
@@ -51,7 +51,7 @@ jobs:
 
   eth-blockchain:
     name: ethereum / state tests (stable)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     env:
       RUST_LOG: info,sync=error
     steps:
@@ -83,7 +83,7 @@ jobs:
 
   doc-test:
     name: rustdoc
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -95,7 +95,7 @@ jobs:
   unit-success:
     if: always()
     name: unit success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [test, eth-blockchain, doc-test]
     steps:
       - name: Decide whether the needed jobs succeeded or failed
