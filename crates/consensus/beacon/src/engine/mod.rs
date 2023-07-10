@@ -1959,6 +1959,9 @@ mod tests {
         provider.commit().unwrap();
     }
 
+    /// This inserts blocks _and_ their PostState into the database, makes the inserted blocks
+    /// canonical, and updates the pipeline progress based on the new blocks.
+    ///
     /// Use this instead of [insert_blocks] when inserting hashes and calculating history indices
     /// for each block is needed
     fn append_blocks<'a, DB: Database>(
