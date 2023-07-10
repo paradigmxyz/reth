@@ -3,10 +3,7 @@
 use crate::PrunerError;
 use reth_db::{database::Database, tables};
 use reth_primitives::{BlockNumber, ChainSpec};
-use reth_provider::{
-    BlockReader, DatabaseProvider, DatabaseProviderRW, ProviderError, ProviderFactory,
-    TransactionsProvider,
-};
+use reth_provider::{BlockReader, DatabaseProviderRW, ProviderError, ProviderFactory};
 use std::sync::Arc;
 use tracing::debug;
 
@@ -102,10 +99,13 @@ impl<DB: Database> Pruner<DB> {
 #[cfg(test)]
 mod tests {
     use crate::Pruner;
+    use reth_db::test_utils::create_test_rw_db;
+    use reth_primitives::MAINNET;
 
     #[test]
     fn pruner_is_pruning_needed() {
-        let pruner = Pruner::new(5, 0);
+        let db = create_test_rw_db();
+        let pruner = Pruner::new(db, MAINNET.clone(), 5, 0);
 
         // No last pruned block number was set before
         let first_block_number = 1;

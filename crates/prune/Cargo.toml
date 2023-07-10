@@ -21,3 +21,5 @@ reth-interfaces = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+reth-db = { workspace = true, features = ["test-utils"] }
